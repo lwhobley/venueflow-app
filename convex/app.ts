@@ -1,0 +1,979 @@
+import { mutation, query } from './_generated/server';
+import { v } from 'convex/values';
+import type { Doc, Id } from './_generated/dataModel';
+import { requireActiveSubscription } from './billing/shared';
+
+type Identity = {
+  tokenIdentifier: string;
+  email?: string | null;
+  name?: string | null;
+};
+
+type AnyCtx = {
+  auth: {
+    getUserIdentity: () => Promise<Identity | null>;
+  };
+  db: {
+    query: (table: 'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions') => any;
+    get: (id: Id<'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions'>) => Promise<any>;
+    insert: (table: 'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions', value: any) => Promise<Id<'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions'>>;
+    patch: (id: Id<'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions'>, value: any) => Promise<void>;
+  };
+};
+
+const subscriptionStatusValue = v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'));
+const subscriptionPlatformValue = v.union(v.literal('stripe'), v.literal('apple'), v.null());
+
+const role = v.union(v.literal('admin'), v.literal('owner'), v.literal('manager'), v.literal('server'), v.literal('staff'));
+const requestKind = v.union(v.literal('add_shift'), v.literal('drop_shift'), v.literal('time_off'), v.literal('availability'));
+const requestStatus = v.union(v.literal('pending'), v.literal('approved'), v.literal('denied'), v.literal('cancelled'));
+
+const profileValue = v.object({
+  _id: v.id('profiles'),
+  _creationTime: v.number(),
+  tokenIdentifier: v.string(),
+  email: v.string(),
+  fullName: v.string(),
+  role,
+  jobTitle: v.string(),
+  venueId: v.union(v.string(), v.null()),
+});
+
+const venueValue = v.object({
+  _id: v.id('venues'),
+  _creationTime: v.number(),
+  name: v.string(),
+  latitude: v.number(),
+  longitude: v.number(),
+  geofenceRadiusM: v.number(),
+  subscriptionStatus: v.union(subscriptionStatusValue, v.null()),
+  subscriptionPlatform: subscriptionPlatformValue,
+});
+
+const scheduleShiftValue = v.object({
+  _id: v.id('scheduleShifts'),
+  _creationTime: v.number(),
+  venueId: v.string(),
+  profileId: v.union(v.id('profiles'), v.null()),
+  dayIndex: v.number(),
+  startMinutes: v.number(),
+  endMinutes: v.number(),
+  jobTitle: v.string(),
+  station: v.string(),
+  notes: v.union(v.string(), v.null()),
+  status: v.union(v.literal('scheduled'), v.literal('open'), v.literal('covered')),
+  dayLabel: v.string(),
+  memberName: v.string(),
+  startTime: v.string(),
+  endTime: v.string(),
+});
+
+const clockEntryValue = v.object({
+  _id: v.id('timeEntries'),
+  _creationTime: v.number(),
+  memberId: v.id('profiles'),
+  memberName: v.string(),
+  role,
+  jobTitle: v.string(),
+  venueId: v.id('venues'),
+  venueName: v.string(),
+  clockInAt: v.number(),
+  clockOutAt: v.union(v.number(), v.null()),
+  clockInLat: v.number(),
+  clockInLng: v.number(),
+  clockInAccuracyM: v.number(),
+  clockInMocked: v.boolean(),
+  clockOutLat: v.union(v.number(), v.null()),
+  clockOutLng: v.union(v.number(), v.null()),
+  clockOutAccuracyM: v.union(v.number(), v.null()),
+  clockOutMocked: v.union(v.boolean(), v.null()),
+  isOpen: v.boolean(),
+});
+
+const staffRequestValue = v.object({
+  _id: v.id('staffRequests'),
+  _creationTime: v.number(),
+  venueId: v.string(),
+  profileId: v.id('profiles'),
+  kind: requestKind,
+  status: requestStatus,
+  title: v.string(),
+  details: v.string(),
+  requestedForDate: v.union(v.string(), v.null()),
+  requestedShiftId: v.union(v.id('scheduleShifts'), v.null()),
+  requestedRangeStart: v.union(v.string(), v.null()),
+  requestedRangeEnd: v.union(v.string(), v.null()),
+  availability: v.union(
+    v.array(
+      v.object({
+        dayIndex: v.number(),
+        startMinutes: v.number(),
+        endMinutes: v.number(),
+        available: v.boolean(),
+      }),
+    ),
+    v.null(),
+  ),
+  reviewerId: v.union(v.id('profiles'), v.null()),
+  reviewedAt: v.union(v.number(), v.null()),
+  responseNotes: v.union(v.string(), v.null()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+function displayName(identity: Identity) {
+  return identity.name?.trim() || identity.email?.split('@')[0] || 'Team member';
+}
+
+function defaultJobTitle(roleName: string) {
+  switch (roleName) {
+    case 'admin':
+      return 'Operations Admin';
+    case 'owner':
+      return 'Owner';
+    case 'manager':
+      return 'Shift Manager';
+    case 'server':
+      return 'Server';
+    default:
+      return 'Team Member';
+  }
+}
+
+function dayLabel(index: number) {
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index] ?? 'Day';
+}
+
+function minutesToTime(minutes: number) {
+  const hours = Math.floor(minutes / 60) % 24;
+  const mins = minutes % 60;
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+  return `${displayHour}:${mins.toString().padStart(2, '0')} ${suffix}`;
+}
+
+async function requireIdentity(ctx: AnyCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error('Unauthenticated');
+  return identity;
+}
+
+async function getProfile(ctx: AnyCtx, tokenIdentifier: string) {
+  return await ctx.db.query('profiles').withIndex('by_tokenIdentifier', (q: any) => q.eq('tokenIdentifier', tokenIdentifier)).unique();
+}
+
+async function getOrCreateVenue(ctx: AnyCtx) {
+  const existing = await ctx.db.query('venues').take(1);
+  if (existing.length > 0) return existing[0];
+  const now = Date.now();
+  const venueId = await ctx.db.insert('venues', {
+    name: 'Main Venue',
+    latitude: 37.7749,
+    longitude: -122.4194,
+    geofenceRadiusM: 120,
+    subscriptionStatus: 'trialing',
+    subscriptionPlatform: null,
+  });
+  await ctx.db.insert('subscriptions', {
+    venueId,
+    status: 'trialing',
+    platform: null,
+    planId: 'enishvenueflow_pro_monthly',
+    priceCents: 4900,
+    currency: 'USD',
+    trialStartedAt: now,
+    trialEndsAt: now + 14 * 24 * 60 * 60 * 1000,
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+    cancelledAt: null,
+    externalSubscriptionId: null,
+    externalCustomerId: null,
+    createdAt: now,
+    updatedAt: now,
+    dataRetentionWarnedAt: undefined,
+  });
+  const venue = await ctx.db.get(venueId);
+  if (!venue) throw new Error('Unable to create venue');
+  return venue;
+}
+
+async function ensureDemoData(ctx: AnyCtx, venueId: Id<'venues'>) {
+  const existingTeams = await ctx.db.query('teams').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).take(1);
+  if (existingTeams.length > 0) return;
+
+  const teams = [
+    { name: 'Front of House', memberCount: 6 },
+    { name: 'Bar', memberCount: 4 },
+    { name: 'Kitchen', memberCount: 5 },
+    { name: 'Management', memberCount: 2 },
+  ];
+
+  for (const team of teams) {
+    await ctx.db.insert('teams', { venueId, ...team });
+  }
+
+  const profiles = [
+    { email: 'admin@venueflow.test', fullName: 'Alex Admin', role: 'admin' as const, jobTitle: 'Operations Admin' },
+    { email: 'manager@venueflow.test', fullName: 'Mia Manager', role: 'manager' as const, jobTitle: 'Shift Manager' },
+    { email: 'server@venueflow.test', fullName: 'Sam Server', role: 'server' as const, jobTitle: 'Server' },
+    { email: 'staff@venueflow.test', fullName: 'Taylor Team', role: 'staff' as const, jobTitle: 'Support Staff' },
+  ];
+
+  const profileIds: Id<'profiles'>[] = [];
+  for (const profile of profiles) {
+    const profileId = await ctx.db.insert('profiles', {
+      tokenIdentifier: `${profile.email}:demo`,
+      email: profile.email,
+      fullName: profile.fullName,
+      role: profile.role,
+      jobTitle: profile.jobTitle,
+      venueId,
+    });
+    profileIds.push(profileId);
+  }
+
+  const baseDay = new Date().getDay();
+  const shifts = [
+    { dayOffset: 0, start: 8 * 60, end: 16 * 60, jobTitle: 'Server', station: 'Patio', memberIndex: 2, status: 'scheduled' as const },
+    { dayOffset: 0, start: 10 * 60, end: 18 * 60, jobTitle: 'Shift Manager', station: 'Floor', memberIndex: 1, status: 'scheduled' as const },
+    { dayOffset: 1, start: 9 * 60, end: 17 * 60, jobTitle: 'Support Staff', station: 'Host', memberIndex: 3, status: 'open' as const },
+    { dayOffset: 2, start: 14 * 60, end: 22 * 60, jobTitle: 'Server', station: 'Dining Room', memberIndex: 2, status: 'covered' as const },
+    { dayOffset: 3, start: 11 * 60, end: 19 * 60, jobTitle: 'Shift Manager', station: 'Floor', memberIndex: 1, status: 'scheduled' as const },
+    { dayOffset: 4, start: 8 * 60, end: 14 * 60, jobTitle: 'Support Staff', station: 'Bar', memberIndex: 3, status: 'scheduled' as const },
+  ];
+
+  for (const shift of shifts) {
+    const dayIndex = (baseDay + shift.dayOffset) % 7;
+    await ctx.db.insert('scheduleShifts', {
+      venueId,
+      profileId: shift.status === 'open' ? undefined : profileIds[shift.memberIndex],
+      dayIndex,
+      startMinutes: shift.start,
+      endMinutes: shift.end,
+      jobTitle: shift.jobTitle,
+      station: shift.station,
+      notes: shift.status === 'open' ? 'Needs coverage' : undefined,
+      status: shift.status,
+    });
+  }
+
+  await ctx.db.insert('timeEntries', {
+    profileId: profileIds[1],
+    venueId,
+    clockInAt: Date.now() - 1000 * 60 * 45,
+    clockInLat: 37.7748,
+    clockInLng: -122.4195,
+    clockInAccuracyM: 8,
+    clockInMocked: false,
+    isOpen: true,
+  });
+}
+
+function mapProfile(profile: Doc<'profiles'>) {
+  return {
+    _id: profile._id,
+    _creationTime: profile._creationTime,
+    tokenIdentifier: profile.tokenIdentifier,
+    email: profile.email,
+    fullName: profile.fullName,
+    role: profile.role,
+    jobTitle: profile.jobTitle,
+    venueId: profile.venueId ?? null,
+  };
+}
+
+function mapVenue(venue: Doc<'venues'>) {
+  return {
+    _id: venue._id,
+    _creationTime: venue._creationTime,
+    name: venue.name,
+    latitude: venue.latitude,
+    longitude: venue.longitude,
+    geofenceRadiusM: venue.geofenceRadiusM,
+    subscriptionStatus: (venue as Doc<'venues'> & { subscriptionStatus?: string | null }).subscriptionStatus ?? null,
+    subscriptionPlatform: (venue as Doc<'venues'> & { subscriptionPlatform?: string | null }).subscriptionPlatform ?? null,
+  };
+}
+
+function mapShift(shift: Doc<'scheduleShifts'>, profileName: string | null) {
+  return {
+    _id: shift._id,
+    _creationTime: shift._creationTime,
+    venueId: shift.venueId,
+    profileId: shift.profileId ?? null,
+    dayIndex: shift.dayIndex,
+    startMinutes: shift.startMinutes,
+    endMinutes: shift.endMinutes,
+    jobTitle: shift.jobTitle,
+    station: shift.station,
+    notes: shift.notes ?? null,
+    status: shift.status,
+    dayLabel: dayLabel(shift.dayIndex),
+    memberName: profileName ?? (shift.status === 'open' ? 'Open shift' : 'Unassigned'),
+    startTime: minutesToTime(shift.startMinutes),
+    endTime: minutesToTime(shift.endMinutes),
+  };
+}
+
+function mapClockEntry(entry: Doc<'timeEntries'>, profile: Doc<'profiles'>, venue: Doc<'venues'>) {
+  return {
+    _id: entry._id,
+    _creationTime: entry._creationTime,
+    memberId: profile._id,
+    memberName: profile.fullName,
+    role: profile.role,
+    jobTitle: profile.jobTitle,
+    venueId: venue._id,
+    venueName: venue.name,
+    clockInAt: entry.clockInAt,
+    clockOutAt: entry.clockOutAt ?? null,
+    clockInLat: entry.clockInLat,
+    clockInLng: entry.clockInLng,
+    clockInAccuracyM: entry.clockInAccuracyM,
+    clockInMocked: entry.clockInMocked,
+    clockOutLat: entry.clockOutLat ?? null,
+    clockOutLng: entry.clockOutLng ?? null,
+    clockOutAccuracyM: entry.clockOutAccuracyM ?? null,
+    clockOutMocked: entry.clockOutMocked ?? null,
+    isOpen: entry.isOpen,
+  };
+}
+
+function isAdminRole(roleName: string) {
+  return roleName === 'admin' || roleName === 'owner' || roleName === 'manager';
+}
+
+function assertWithinGeofence(lat: number, lng: number, accuracy: number, mocked: boolean, venue: Doc<'venues'>) {
+  if (mocked) throw new Error('Mocked locations are not allowed.');
+  if (accuracy > 50) throw new Error('Location accuracy must be 50m or better.');
+  const earthRadius = 6371000;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const deltaLat = toRadians(lat - venue.latitude);
+  const deltaLng = toRadians(lng - venue.longitude);
+  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(toRadians(venue.latitude)) * Math.cos(toRadians(lat)) * Math.sin(deltaLng / 2) ** 2;
+  const distance = 2 * earthRadius * Math.asin(Math.min(1, Math.sqrt(a)));
+  if (distance > venue.geofenceRadiusM) {
+    throw new Error('You are outside the venue geofence.');
+  }
+}
+
+export const bootstrapProfile = mutation({
+  args: { fullName: v.optional(v.string()) },
+  returns: v.object({ profile: profileValue, venue: venueValue }),
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx as AnyCtx);
+    const venue = await getOrCreateVenue(ctx as AnyCtx);
+    await ensureDemoData(ctx as AnyCtx, venue._id);
+
+    const existing = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const email = identity.email ?? 'member@venueflow.test';
+    const roleName = existing?.role ?? 'staff';
+    let profile = existing;
+
+    if (!profile) {
+      const profileId = await (ctx as AnyCtx).db.insert('profiles', {
+        tokenIdentifier: identity.tokenIdentifier,
+        email,
+        fullName: args.fullName?.trim() || displayName(identity),
+        role: roleName,
+        jobTitle: defaultJobTitle(roleName),
+        venueId: venue._id,
+      });
+      profile = await (ctx as AnyCtx).db.get(profileId);
+    }
+
+    if (!profile) throw new Error('Unable to load profile');
+    return { profile: mapProfile(profile), venue: mapVenue(venue) };
+  },
+});
+
+export const getMe = query({
+  args: {},
+  returns: v.union(v.null(), v.object({ profile: profileValue, venue: venueValue })),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !profile.venueId) return null;
+    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    if (!venue) return null;
+    return { profile: mapProfile(profile), venue: mapVenue(venue) };
+  },
+});
+
+export const getMyVenueBilling = query({
+  args: {},
+  returns: v.union(
+    v.null(),
+    v.object({
+      venueId: v.string(),
+      status: subscriptionStatusValue,
+      platform: subscriptionPlatformValue,
+      trialStartedAt: v.number(),
+      trialEndsAt: v.number(),
+      currentPeriodStart: v.union(v.number(), v.null()),
+      currentPeriodEnd: v.union(v.number(), v.null()),
+      cancelAtPeriodEnd: v.boolean(),
+      cancelledAt: v.union(v.number(), v.null()),
+      planId: v.string(),
+      priceCents: v.number(),
+      currency: v.string(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile?.venueId) return null;
+    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
+    if (!subscription) return null;
+    return {
+      venueId: subscription.venueId,
+      status: subscription.status,
+      platform: subscription.platform,
+      trialStartedAt: subscription.trialStartedAt,
+      trialEndsAt: subscription.trialEndsAt,
+      currentPeriodStart: subscription.currentPeriodStart,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+      cancelledAt: subscription.cancelledAt,
+      planId: subscription.planId,
+      priceCents: subscription.priceCents,
+      currency: subscription.currency,
+    };
+  },
+});
+
+export const getDashboard = query({
+  args: {},
+  returns: v.union(
+    v.null(),
+    v.object({
+      profile: profileValue,
+      venue: venueValue,
+      analytics: v.object({
+        teamCount: v.number(),
+        scheduledCount: v.number(),
+        openShiftCount: v.number(),
+        coveredShiftCount: v.number(),
+        openClockCount: v.number(),
+        clockedInCount: v.number(),
+      }),
+      schedule: v.array(scheduleShiftValue),
+      activeClockEntries: v.array(clockEntryValue),
+    }),
+  ),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !profile.venueId) return null;
+    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    if (!venue) return null;
+    await ensureDemoData(ctx as AnyCtx, venue._id);
+
+    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+    const team = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+
+    const activeEntries: Array<{ entry: Doc<'timeEntries'>; profile: Doc<'profiles'>; venue: Doc<'venues'> }> = [];
+    for (const entry of entries) {
+      if (!entry.isOpen) continue;
+      const entryProfile = await (ctx as AnyCtx).db.get(entry.profileId);
+      if (!entryProfile) continue;
+      activeEntries.push({ entry, profile: entryProfile, venue });
+    }
+
+    const schedule: Array<ReturnType<typeof mapShift>> = [];
+    for (const shift of shifts.slice(0, 14)) {
+      const shiftProfile = shift.profileId ? await (ctx as AnyCtx).db.get(shift.profileId) : null;
+      schedule.push(mapShift(shift, shiftProfile?.fullName ?? null));
+    }
+
+    return {
+      profile: mapProfile(profile),
+      venue: mapVenue(venue),
+      analytics: {
+        teamCount: team.length,
+        scheduledCount: shifts.length,
+        openShiftCount: shifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'open').length,
+        coveredShiftCount: shifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'covered').length,
+        openClockCount: entries.filter((item: Doc<'timeEntries'>) => item.isOpen).length,
+        clockedInCount: activeEntries.length,
+      },
+      schedule,
+      activeClockEntries: activeEntries.map(({ entry, profile: entryProfile, venue: entryVenue }) =>
+        mapClockEntry(entry, entryProfile, entryVenue),
+      ),
+    };
+  },
+});
+
+export const getWeeklySchedule = query({
+  args: {},
+  returns: v.union(v.null(), v.array(scheduleShiftValue)),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !profile.venueId) return null;
+    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    const mapped: Array<ReturnType<typeof mapShift>> = [];
+    for (const shift of shifts) {
+      const shiftProfile = shift.profileId ? await (ctx as AnyCtx).db.get(shift.profileId) : null;
+      mapped.push(mapShift(shift, shiftProfile?.fullName ?? null));
+    }
+    return mapped;
+  },
+});
+
+export const getClockBoard = query({
+  args: {},
+  returns: v.union(v.null(), v.object({ venue: venueValue, activeClockEntries: v.array(clockEntryValue), employeeEntry: v.union(clockEntryValue, v.null()) })),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !profile.venueId) return null;
+    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    if (!venue) return null;
+    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+    const openEntries: Array<ReturnType<typeof mapClockEntry>> = [];
+    for (const entry of entries) {
+      if (!entry.isOpen) continue;
+      const entryProfile = await (ctx as AnyCtx).db.get(entry.profileId);
+      if (!entryProfile) continue;
+      openEntries.push(mapClockEntry(entry, entryProfile, venue));
+    }
+    const myOpenEntry = openEntries.find((item: ReturnType<typeof mapClockEntry>) => item.memberId === profile._id) ?? null;
+    return { venue: mapVenue(venue), activeClockEntries: openEntries, employeeEntry: myOpenEntry };
+  },
+});
+
+export const clockIn = mutation({
+  args: { lat: v.number(), lng: v.number(), accuracy: v.number(), mocked: v.boolean() },
+  returns: clockEntryValue,
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx as AnyCtx);
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !profile.venueId) throw new Error('Profile is not initialized');
+    await requireActiveSubscription(ctx as any, profile.venueId);
+    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    if (!venue) throw new Error('Assigned venue not found');
+    assertWithinGeofence(args.lat, args.lng, args.accuracy, args.mocked, venue);
+    const activeEntry = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profile._id).eq('isOpen', true)).unique();
+    if (activeEntry) throw new Error('Already clocked in');
+    const entryId = await (ctx as AnyCtx).db.insert('timeEntries', {
+      profileId: profile._id,
+      venueId: venue._id,
+      clockInAt: Date.now(),
+      clockOutAt: undefined,
+      clockInLat: args.lat,
+      clockInLng: args.lng,
+      clockInAccuracyM: args.accuracy,
+      clockInMocked: args.mocked,
+      clockOutLat: undefined,
+      clockOutLng: undefined,
+      clockOutAccuracyM: undefined,
+      clockOutMocked: undefined,
+      isOpen: true,
+    });
+    const entry = await (ctx as AnyCtx).db.get(entryId);
+    if (!entry) throw new Error('Unable to create time entry');
+    return mapClockEntry(entry, profile, venue);
+  },
+});
+
+export const clockOut = mutation({
+  args: { lat: v.number(), lng: v.number(), accuracy: v.number(), mocked: v.boolean() },
+  returns: clockEntryValue,
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx as AnyCtx);
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !profile.venueId) throw new Error('Profile is not initialized');
+    await requireActiveSubscription(ctx as any, profile.venueId);
+    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    if (!venue) throw new Error('Assigned venue not found');
+    assertWithinGeofence(args.lat, args.lng, args.accuracy, args.mocked, venue);
+    const activeEntry = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profile._id).eq('isOpen', true)).unique();
+    if (!activeEntry) throw new Error('No active clock-in found');
+    await (ctx as AnyCtx).db.patch(activeEntry._id, {
+      clockOutAt: Date.now(),
+      clockOutLat: args.lat,
+      clockOutLng: args.lng,
+      clockOutAccuracyM: args.accuracy,
+      clockOutMocked: args.mocked,
+      isOpen: false,
+    });
+    const entry = await (ctx as AnyCtx).db.get(activeEntry._id);
+    if (!entry) throw new Error('Unable to update time entry');
+    return mapClockEntry(entry, profile, venue);
+  },
+});
+
+export const getAdminAnalytics = query({
+  args: {},
+  returns: v.union(v.null(), v.object({ profile: profileValue, venue: venueValue, analytics: v.object({ totalShifts: v.number(), openShifts: v.number(), activeClocks: v.number() }) })),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !profile.venueId || !isAdminRole(profile.role)) return null;
+    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    if (!venue) return null;
+    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+    return {
+      profile: mapProfile(profile),
+      venue: mapVenue(venue),
+      analytics: {
+        totalShifts: shifts.length,
+        openShifts: shifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'open').length,
+        activeClocks: entries.filter((item: Doc<'timeEntries'>) => item.isOpen).length,
+      },
+    };
+  },
+});
+
+export const listStaffRequests = query({
+  args: { venueId: v.string() },
+  returns: v.array(staffRequestValue),
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx, (await ctx.auth.getUserIdentity())?.tokenIdentifier ?? '');
+    if (!profile || profile.venueId !== args.venueId) return [];
+    await requireActiveSubscription(ctx as any, args.venueId);
+    const requests = await (ctx as AnyCtx).db.query('staffRequests').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+    return requests.map((request: Doc<'staffRequests'>) => ({
+      _id: request._id,
+      _creationTime: request._creationTime,
+      venueId: request.venueId,
+      profileId: request.profileId,
+      kind: request.kind,
+      status: request.status,
+      title: request.title,
+      details: request.details,
+      requestedForDate: request.requestedForDate ?? null,
+      requestedShiftId: request.requestedShiftId ?? null,
+      requestedRangeStart: request.requestedRangeStart ?? null,
+      requestedRangeEnd: request.requestedRangeEnd ?? null,
+      availability: request.availability ?? null,
+      reviewerId: request.reviewerId ?? null,
+      reviewedAt: request.reviewedAt ?? null,
+      responseNotes: request.responseNotes ?? null,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+    }));
+  },
+});
+
+export const createStaffRequest = mutation({
+  args: {
+    venueId: v.string(),
+    kind: requestKind,
+    title: v.string(),
+    details: v.string(),
+    requestedForDate: v.optional(v.string()),
+    requestedShiftId: v.optional(v.id('scheduleShifts')),
+    requestedRangeStart: v.optional(v.string()),
+    requestedRangeEnd: v.optional(v.string()),
+    availability: v.optional(
+      v.array(
+        v.object({
+          dayIndex: v.number(),
+          startMinutes: v.number(),
+          endMinutes: v.number(),
+          available: v.boolean(),
+        }),
+      ),
+    ),
+  },
+  returns: staffRequestValue,
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx as AnyCtx);
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || profile.venueId !== args.venueId) throw new Error('Profile does not belong to this venue');
+    await requireActiveSubscription(ctx as any, args.venueId);
+    const now = Date.now();
+    const requestId = await (ctx as AnyCtx).db.insert('staffRequests', {
+      venueId: args.venueId,
+      profileId: profile._id,
+      kind: args.kind,
+      status: 'pending',
+      title: args.title,
+      details: args.details,
+      requestedForDate: args.requestedForDate,
+      requestedShiftId: args.requestedShiftId,
+      requestedRangeStart: args.requestedRangeStart,
+      requestedRangeEnd: args.requestedRangeEnd,
+      availability: args.availability,
+      reviewerId: undefined,
+      reviewedAt: undefined,
+      responseNotes: undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const request = await (ctx as AnyCtx).db.get(requestId);
+    if (!request) throw new Error('Unable to create request');
+    return {
+      _id: request._id,
+      _creationTime: request._creationTime,
+      venueId: request.venueId,
+      profileId: request.profileId,
+      kind: request.kind,
+      status: request.status,
+      title: request.title,
+      details: request.details,
+      requestedForDate: request.requestedForDate ?? null,
+      requestedShiftId: request.requestedShiftId ?? null,
+      requestedRangeStart: request.requestedRangeStart ?? null,
+      requestedRangeEnd: request.requestedRangeEnd ?? null,
+      availability: request.availability ?? null,
+      reviewerId: request.reviewerId ?? null,
+      reviewedAt: request.reviewedAt ?? null,
+      responseNotes: request.responseNotes ?? null,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+    };
+  },
+});
+
+export const reviewStaffRequest = mutation({
+  args: {
+    requestId: v.id('staffRequests'),
+    status: requestStatus,
+    responseNotes: v.optional(v.string()),
+  },
+  returns: staffRequestValue,
+  handler: async (ctx, args) => {
+    const identity = await requireIdentity(ctx as AnyCtx);
+    const reviewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!reviewer || !reviewer.venueId || !(reviewer.role === 'admin' || reviewer.role === 'owner' || reviewer.role === 'manager')) {
+      throw new Error('Not authorized');
+    }
+    await requireActiveSubscription(ctx as any, reviewer.venueId);
+    const request = await (ctx as AnyCtx).db.get(args.requestId);
+    if (!request) throw new Error('Request not found');
+    if (request.venueId !== reviewer.venueId) throw new Error('Request does not belong to this venue');
+    await (ctx as AnyCtx).db.patch(request._id, {
+      status: args.status,
+      reviewerId: reviewer._id,
+      reviewedAt: Date.now(),
+      responseNotes: args.responseNotes,
+      updatedAt: Date.now(),
+    });
+    const updated = await (ctx as AnyCtx).db.get(request._id);
+    if (!updated) throw new Error('Unable to update request');
+    return {
+      _id: updated._id,
+      _creationTime: updated._creationTime,
+      venueId: updated.venueId,
+      profileId: updated.profileId,
+      kind: updated.kind,
+      status: updated.status,
+      title: updated.title,
+      details: updated.details,
+      requestedForDate: updated.requestedForDate ?? null,
+      requestedShiftId: updated.requestedShiftId ?? null,
+      requestedRangeStart: updated.requestedRangeStart ?? null,
+      requestedRangeEnd: updated.requestedRangeEnd ?? null,
+      availability: updated.availability ?? null,
+      reviewerId: updated.reviewerId ?? null,
+      reviewedAt: updated.reviewedAt ?? null,
+      responseNotes: updated.responseNotes ?? null,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    };
+  },
+});
+
+export const getMyHoursAndRequests = query({
+  args: { venueId: v.string() },
+  returns: v.union(
+    v.null(),
+    v.object({
+      hoursWorked: v.number(),
+      hoursThisWeek: v.number(),
+      requests: v.array(staffRequestValue),
+      openShifts: v.array(scheduleShiftValue),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || profile.venueId !== args.venueId) return null;
+    await requireActiveSubscription(ctx as any, args.venueId);
+    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profile._id).eq('isOpen', false)).collect();
+    const requests = await (ctx as AnyCtx).db.query('staffRequests').withIndex('by_profileId', (q: any) => q.eq('profileId', profile._id)).collect();
+    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_profileId', (q: any) => q.eq('profileId', profile._id)).collect();
+    const now = Date.now();
+    const hoursWorked = entries.reduce((sum: number, entry: Doc<'timeEntries'>) => {
+      if (!entry.clockOutAt) return sum;
+      return sum + (entry.clockOutAt - entry.clockInAt) / 3600000;
+    }, 0);
+    const hoursThisWeek = entries.reduce((sum: number, entry: Doc<'timeEntries'>) => {
+      if (!entry.clockOutAt) return sum;
+      if (now - entry.clockOutAt > 1000 * 60 * 60 * 24 * 7) return sum;
+      return sum + (entry.clockOutAt - entry.clockInAt) / 3600000;
+    }, 0);
+    return {
+      hoursWorked: Math.round(hoursWorked * 10) / 10,
+      hoursThisWeek: Math.round(hoursThisWeek * 10) / 10,
+      requests: requests.map((request: Doc<'staffRequests'>) => ({
+        _id: request._id,
+        _creationTime: request._creationTime,
+        venueId: request.venueId,
+        profileId: request.profileId,
+        kind: request.kind,
+        status: request.status,
+        title: request.title,
+        details: request.details,
+        requestedForDate: request.requestedForDate ?? null,
+        requestedShiftId: request.requestedShiftId ?? null,
+        requestedRangeStart: request.requestedRangeStart ?? null,
+        requestedRangeEnd: request.requestedRangeEnd ?? null,
+        availability: request.availability ?? null,
+        reviewerId: request.reviewerId ?? null,
+        reviewedAt: request.reviewedAt ?? null,
+        responseNotes: request.responseNotes ?? null,
+        createdAt: request.createdAt,
+        updatedAt: request.updatedAt,
+      })),
+      openShifts: shifts.map((shift: Doc<'scheduleShifts'>) => ({
+        _id: shift._id,
+        _creationTime: shift._creationTime,
+        venueId: shift.venueId,
+        profileId: shift.profileId ?? null,
+        dayIndex: shift.dayIndex,
+        startMinutes: shift.startMinutes,
+        endMinutes: shift.endMinutes,
+        jobTitle: shift.jobTitle,
+        station: shift.station,
+        notes: shift.notes ?? null,
+        status: shift.status,
+        dayLabel: dayLabel(shift.dayIndex),
+        memberName: profile.fullName,
+        startTime: minutesToTime(shift.startMinutes),
+        endTime: minutesToTime(shift.endMinutes),
+      })),
+    };
+  },
+});
+
+const staffProfileValue = profileValue;
+
+export const listVenueStaff = query({
+  args: { venueId: v.string() },
+  returns: v.array(staffProfileValue),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!viewer || viewer.venueId !== args.venueId || !isAdminRole(viewer.role)) return [];
+    const staff = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+    return staff
+      .filter((member: Doc<'profiles'>) => member.venueId === args.venueId)
+      .sort((a: Doc<'profiles'>, b: Doc<'profiles'>) => a.fullName.localeCompare(b.fullName))
+      .map(mapProfile);
+  },
+});
+
+export const upsertVenueStaff = mutation({
+  args: {
+    venueId: v.string(),
+    email: v.string(),
+    fullName: v.string(),
+    role,
+    jobTitle: v.string(),
+  },
+  returns: staffProfileValue,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error('Unauthenticated');
+    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!viewer || viewer.venueId !== args.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
+
+    const existing = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+    const member = existing.find((item: Doc<'profiles'>) => item.email.toLowerCase() === args.email.toLowerCase()) ?? null;
+    const now = Date.now();
+
+    if (member) {
+      await (ctx as AnyCtx).db.patch(member._id, {
+        email: args.email,
+        fullName: args.fullName,
+        role: args.role,
+        jobTitle: args.jobTitle,
+        venueId: args.venueId,
+      });
+      const updated = await (ctx as AnyCtx).db.get(member._id);
+      if (!updated) throw new Error('Unable to update staff member');
+      return mapProfile(updated);
+    }
+
+    const profileId = await (ctx as AnyCtx).db.insert('profiles', {
+      tokenIdentifier: `${args.email.toLowerCase()}:invited:${now}`,
+      email: args.email,
+      fullName: args.fullName,
+      role: args.role,
+      jobTitle: args.jobTitle,
+      venueId: args.venueId,
+    });
+    const created = await (ctx as AnyCtx).db.get(profileId);
+    if (!created) throw new Error('Unable to create staff member');
+    return mapProfile(created);
+  },
+});
+
+export const listVenues = query({
+  args: {},
+  returns: v.array(venueValue),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!profile || !isAdminRole(profile.role)) return [];
+    const venues = await (ctx as AnyCtx).db.query('venues').collect();
+    return venues.map(mapVenue).sort((a: ReturnType<typeof mapVenue>, b: ReturnType<typeof mapVenue>) => a.name.localeCompare(b.name));
+  },
+});
+
+export const deactivateVenueStaff = mutation({
+  args: { staffId: v.id('profiles') },
+  returns: profileValue,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error('Unauthenticated');
+    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!viewer || !viewer.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
+    const staff = await (ctx as AnyCtx).db.get(args.staffId);
+    if (!staff) throw new Error('Staff member not found');
+    if (staff.venueId !== viewer.venueId) throw new Error('Staff member does not belong to this venue');
+    await (ctx as AnyCtx).db.patch(staff._id, { venueId: undefined });
+    const updated = await (ctx as AnyCtx).db.get(staff._id);
+    if (!updated) throw new Error('Unable to deactivate staff member');
+    return mapProfile(updated);
+  },
+});
+
+export const transferVenueStaff = mutation({
+  args: { staffId: v.id('profiles'), targetVenueId: v.string() },
+  returns: profileValue,
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error('Unauthenticated');
+    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    if (!viewer || !viewer.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
+    const staff = await (ctx as AnyCtx).db.get(args.staffId);
+    if (!staff) throw new Error('Staff member not found');
+    if (staff.venueId !== viewer.venueId) throw new Error('Staff member does not belong to this venue');
+    const venues = await (ctx as AnyCtx).db.query('venues').collect();
+    if (!venues.find((venue: Doc<'venues'>) => venue._id === args.targetVenueId)) {
+      throw new Error('Target venue not found');
+    }
+    await (ctx as AnyCtx).db.patch(staff._id, { venueId: args.targetVenueId });
+    const updated = await (ctx as AnyCtx).db.get(staff._id);
+    if (!updated) throw new Error('Unable to transfer staff member');
+    return mapProfile(updated);
+  },
+});

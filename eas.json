@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 13.0.0"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.venueflow.example",
+        "GOOGLE_MAPS_ANDROID_API_KEY": "replace-me",
+        "EXPO_ACCESS_TOKEN": "replace-me"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.venueflow.example",
+        "GOOGLE_MAPS_ANDROID_API_KEY": "replace-me",
+        "EXPO_ACCESS_TOKEN": "replace-me"
+      },
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
