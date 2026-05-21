@@ -195,78 +195,6 @@ async function getOrCreateVenue(ctx: AnyCtx) {
   return venue;
 }
 
-async function ensureDemoData(ctx: AnyCtx, venueId: Id<'venues'>) {
-  const existingTeams = await ctx.db.query('teams').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).take(1);
-  if (existingTeams.length > 0) return;
-
-  const teams = [
-    { name: 'Front of House', memberCount: 6 },
-    { name: 'Bar', memberCount: 4 },
-    { name: 'Kitchen', memberCount: 5 },
-    { name: 'Management', memberCount: 2 },
-  ];
-
-  for (const team of teams) {
-    await ctx.db.insert('teams', { venueId, ...team });
-  }
-
-  const profiles = [
-    { email: 'admin@venueflow.test', fullName: 'Alex Admin', role: 'admin' as const, jobTitle: 'Operations Admin' },
-    { email: 'manager@venueflow.test', fullName: 'Mia Manager', role: 'manager' as const, jobTitle: 'Shift Manager' },
-    { email: 'server@venueflow.test', fullName: 'Sam Server', role: 'server' as const, jobTitle: 'Server' },
-    { email: 'staff@venueflow.test', fullName: 'Taylor Team', role: 'staff' as const, jobTitle: 'Support Staff' },
-  ];
-
-  const profileIds: Id<'profiles'>[] = [];
-  for (const profile of profiles) {
-    const profileId = await ctx.db.insert('profiles', {
-      tokenIdentifier: `${profile.email}:demo`,
-      email: profile.email,
-      fullName: profile.fullName,
-      role: profile.role,
-      jobTitle: profile.jobTitle,
-      venueId,
-    });
-    profileIds.push(profileId);
-  }
-
-  const baseDay = new Date().getDay();
-  const shifts = [
-    { dayOffset: 0, start: 8 * 60, end: 16 * 60, jobTitle: 'Server', station: 'Patio', memberIndex: 2, status: 'scheduled' as const },
-    { dayOffset: 0, start: 10 * 60, end: 18 * 60, jobTitle: 'Shift Manager', station: 'Floor', memberIndex: 1, status: 'scheduled' as const },
-    { dayOffset: 1, start: 9 * 60, end: 17 * 60, jobTitle: 'Support Staff', station: 'Host', memberIndex: 3, status: 'open' as const },
-    { dayOffset: 2, start: 14 * 60, end: 22 * 60, jobTitle: 'Server', station: 'Dining Room', memberIndex: 2, status: 'covered' as const },
-    { dayOffset: 3, start: 11 * 60, end: 19 * 60, jobTitle: 'Shift Manager', station: 'Floor', memberIndex: 1, status: 'scheduled' as const },
-    { dayOffset: 4, start: 8 * 60, end: 14 * 60, jobTitle: 'Support Staff', station: 'Bar', memberIndex: 3, status: 'scheduled' as const },
-  ];
-
-  for (const shift of shifts) {
-    const dayIndex = (baseDay + shift.dayOffset) % 7;
-    await ctx.db.insert('scheduleShifts', {
-      venueId,
-      profileId: shift.status === 'open' ? undefined : profileIds[shift.memberIndex],
-      dayIndex,
-      startMinutes: shift.start,
-      endMinutes: shift.end,
-      jobTitle: shift.jobTitle,
-      station: shift.station,
-      notes: shift.status === 'open' ? 'Needs coverage' : undefined,
-      status: shift.status,
-    });
-  }
-
-  await ctx.db.insert('timeEntries', {
-    profileId: profileIds[1],
-    venueId,
-    clockInAt: Date.now() - 1000 * 60 * 45,
-    clockInLat: 37.7748,
-    clockInLng: -122.4195,
-    clockInAccuracyM: 8,
-    clockInMocked: false,
-    isOpen: true,
-  });
-}
-
 function mapProfile(profile: Doc<'profiles'>) {
   return {
     _id: profile._id,
@@ -361,7 +289,6 @@ export const bootstrapProfile = mutation({
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx as AnyCtx);
     const venue = await getOrCreateVenue(ctx as AnyCtx);
-    await ensureDemoData(ctx as AnyCtx, venue._id);
 
     const existing = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
     const email = identity.email ?? 'member@venueflow.test';
@@ -468,7 +395,6 @@ export const getDashboard = query({
     if (!profile || !profile.venueId) return null;
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
-    await ensureDemoData(ctx as AnyCtx, venue._id);
 
     const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
     const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();

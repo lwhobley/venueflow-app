@@ -1,4 +1,4 @@
-import { View } from 'react-native';
+import { ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { colors, spacing } from '../../lib/theme';
@@ -25,10 +25,10 @@ export default function ProfileScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
-      <Card style={{ backgroundColor: colors.surface, marginBottom: spacing.md }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
+      <Card style={{ backgroundColor: colors.surface, marginBottom: spacing.md, borderRadius: 16 }}>
         <Card.Content style={{ gap: 6 }}>
-          <Text variant="headlineSmall">Profile</Text>
+          <Text variant="headlineSmall" style={{ fontWeight: '700' }}>Profile</Text>
           <Text>{user?.full_name}</Text>
           <Text style={{ color: colors.muted }}>{user?.email}</Text>
           <Text style={{ color: colors.muted }}>{user?.job_title}</Text>
@@ -51,6 +51,6 @@ export default function ProfileScreen() {
       <Button mode="outlined" textColor={colors.primary} onPress={onLogout}>
         Sign out
       </Button>
-    </View>
+    </ScrollView>
   );
 }
