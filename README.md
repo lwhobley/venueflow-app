@@ -51,7 +51,8 @@ VenueFlow is a native iOS/Android venue ops app built with Expo Router and Conve
    - `eas submit -p ios --profile production`
    - `eas submit -p android --profile production`
 
-> Note: `preview`/`production` env in `eas.json` still has `replace-me` values for `GOOGLE_MAPS_ANDROID_API_KEY` and `EXPO_ACCESS_TOKEN` — fill these before shipping.
+> Auth: run `eas login` for local builds. For CI, set `EXPO_ACCESS_TOKEN` as a
+> CI/environment secret — never commit it to `eas.json` (this repo is public).
 
 ## Backend
 
