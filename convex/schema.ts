@@ -30,13 +30,20 @@ const assignmentHoldType = v.union(v.literal('reserved'), v.literal('held'), v.l
 export default defineSchema({
   ...authTables,
   profiles: defineTable({
-    tokenIdentifier: v.string(),
+    // Stable Convex Auth user id (from getAuthUserId). This is the canonical
+    // key for a profile — tokenIdentifier embeds the session id and changes
+    // every session, so it must NOT be used to look up profiles.
+    userId: v.optional(v.id('users')),
+    tokenIdentifier: v.optional(v.string()),
     email: v.string(),
     fullName: v.string(),
     role,
     jobTitle: v.string(),
     venueId: v.optional(v.id('venues')),
-  }).index('by_tokenIdentifier', ['tokenIdentifier']).index('by_venueId', ['venueId']),
+  })
+    .index('by_userId', ['userId'])
+    .index('by_tokenIdentifier', ['tokenIdentifier'])
+    .index('by_venueId', ['venueId']),
   venues: defineTable({
     name: v.string(),
     latitude: v.number(),

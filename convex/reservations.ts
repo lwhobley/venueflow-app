@@ -2,6 +2,7 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import { requireActiveSubscription } from './billing/shared';
+import { getAuthUserId } from '@convex-dev/auth/server';
 
 const roleValue = v.union(v.literal('admin'), v.literal('owner'), v.literal('manager'));
 const reservationSourceValue = v.union(v.literal('direct'), v.literal('opentable'), v.literal('resy'), v.literal('phone'), v.literal('walk_in'));
@@ -58,9 +59,9 @@ function canManage(role: string) {
 }
 
 async function requireProfile(ctx: any) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error('Unauthenticated');
-  const profile = await ctx.db.query('profiles').withIndex('by_tokenIdentifier', (q: any) => q.eq('tokenIdentifier', identity.tokenIdentifier)).unique();
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error('Unauthenticated');
+  const profile = await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
   if (!profile) throw new Error('Profile not found');
   return profile as Doc<'profiles'>;
 }

@@ -1,5 +1,6 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
+import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Id } from './_generated/dataModel';
 import { requireActiveSubscription } from './billing/shared';
 
@@ -39,8 +40,10 @@ function periodEndForPackage(packageRef: string, now: number) {
   return now + 30 * 24 * 60 * 60 * 1000;
 }
 
-async function getProfile(ctx: AnyCtx, tokenIdentifier: string) {
-  return await ctx.db.query('profiles').withIndex('by_tokenIdentifier', (q: any) => q.eq('tokenIdentifier', tokenIdentifier)).unique();
+async function getProfile(ctx: AnyCtx) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) return null;
+  return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
 export const getMyBilling = query({
@@ -49,7 +52,7 @@ export const getMyBilling = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId) return null;
     const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
     if (!subscription) return null;
@@ -80,7 +83,7 @@ export const reconcilePaidSubscription = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Unauthenticated');
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId) throw new Error('Profile is not initialized');
 
     const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
@@ -136,7 +139,7 @@ export const syncVenueSubscription = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Unauthenticated');
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId) throw new Error('Not authorized');
     const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).unique();
     if (!subscription) throw new Error('Subscription not found');

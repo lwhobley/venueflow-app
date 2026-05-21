@@ -1,3 +1,4 @@
+import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc } from './_generated/dataModel';
 
 // Shared authorization helpers. Every mutation/query that touches venue-scoped
@@ -21,13 +22,14 @@ export function isOperator(role: Role): boolean {
   return OPERATOR_ROLES.has(role);
 }
 
-/** Loads the authenticated profile or throws. */
+/** Loads the authenticated profile or throws. Keyed by the stable Convex Auth
+ * user id — NOT tokenIdentifier (which embeds the session id and rotates). */
 export async function requireProfile(ctx: any): Promise<Profile> {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error('Unauthenticated');
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error('Unauthenticated');
   const profile = await ctx.db
     .query('profiles')
-    .withIndex('by_tokenIdentifier', (q: any) => q.eq('tokenIdentifier', identity.tokenIdentifier))
+    .withIndex('by_userId', (q: any) => q.eq('userId', userId))
     .unique();
   if (!profile) throw new Error('Profile not found');
   return profile as Profile;

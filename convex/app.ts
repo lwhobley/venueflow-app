@@ -1,5 +1,6 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
+import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { requireActiveSubscription } from './billing/shared';
 
@@ -28,7 +29,7 @@ const requestStatus = v.union(v.literal('pending'), v.literal('approved'), v.lit
 const profileValue = v.object({
   _id: v.id('profiles'),
   _creationTime: v.number(),
-  tokenIdentifier: v.string(),
+  tokenIdentifier: v.union(v.string(), v.null()),
   email: v.string(),
   fullName: v.string(),
   role,
@@ -155,8 +156,12 @@ async function requireIdentity(ctx: AnyCtx) {
   return identity;
 }
 
-async function getProfile(ctx: AnyCtx, tokenIdentifier: string) {
-  return await ctx.db.query('profiles').withIndex('by_tokenIdentifier', (q: any) => q.eq('tokenIdentifier', tokenIdentifier)).unique();
+// Loads the profile for the currently-authenticated user using the stable
+// Convex Auth user id. Returns null if unauthenticated or no profile yet.
+async function getProfile(ctx: AnyCtx) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) return null;
+  return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
 async function getOrCreateVenue(ctx: AnyCtx) {
@@ -199,7 +204,7 @@ function mapProfile(profile: Doc<'profiles'>) {
   return {
     _id: profile._id,
     _creationTime: profile._creationTime,
-    tokenIdentifier: profile.tokenIdentifier,
+    tokenIdentifier: profile.tokenIdentifier ?? null,
     email: profile.email,
     fullName: profile.fullName,
     role: profile.role,
@@ -288,15 +293,18 @@ export const bootstrapProfile = mutation({
   returns: v.object({ profile: profileValue, venue: venueValue }),
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx as AnyCtx);
+    const userId = await getAuthUserId(ctx as AnyCtx);
+    if (!userId) throw new Error('Unauthenticated');
     const venue = await getOrCreateVenue(ctx as AnyCtx);
 
-    const existing = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const existing = await getProfile(ctx as AnyCtx);
     const email = identity.email ?? 'member@venueflow.test';
     const roleName = existing?.role ?? 'staff';
     let profile = existing;
 
     if (!profile) {
       const profileId = await (ctx as AnyCtx).db.insert('profiles', {
+        userId,
         tokenIdentifier: identity.tokenIdentifier,
         email,
         fullName: args.fullName?.trim() || displayName(identity),
@@ -305,6 +313,11 @@ export const bootstrapProfile = mutation({
         venueId: venue._id,
       });
       profile = await (ctx as AnyCtx).db.get(profileId);
+    } else if (!existing.userId) {
+      // Backfill userId on a profile created before this key migration, and
+      // refresh the (now-stale) tokenIdentifier.
+      await (ctx as AnyCtx).db.patch(existing._id, { userId, tokenIdentifier: identity.tokenIdentifier });
+      profile = await (ctx as AnyCtx).db.get(existing._id);
     }
 
     if (!profile) throw new Error('Unable to load profile');
@@ -318,7 +331,7 @@ export const getMe = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) return null;
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
@@ -348,7 +361,7 @@ export const getMyVenueBilling = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId) return null;
     const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
     if (!subscription) return null;
@@ -391,7 +404,7 @@ export const getDashboard = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) return null;
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
@@ -439,7 +452,7 @@ export const getWeeklySchedule = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) return null;
     const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
     const mapped: Array<ReturnType<typeof mapShift>> = [];
@@ -457,7 +470,7 @@ export const getClockBoard = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) return null;
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
@@ -479,7 +492,7 @@ export const clockIn = mutation({
   returns: clockEntryValue,
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx as AnyCtx);
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) throw new Error('Profile is not initialized');
     await requireActiveSubscription(ctx as any, profile.venueId);
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
@@ -513,7 +526,7 @@ export const clockOut = mutation({
   returns: clockEntryValue,
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx as AnyCtx);
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) throw new Error('Profile is not initialized');
     await requireActiveSubscription(ctx as any, profile.venueId);
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
@@ -541,7 +554,7 @@ export const getAdminAnalytics = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId || !isAdminRole(profile.role)) return null;
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
@@ -563,7 +576,7 @@ export const listStaffRequests = query({
   args: { venueId: v.id('venues') },
   returns: v.array(staffRequestValue),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx, (await ctx.auth.getUserIdentity())?.tokenIdentifier ?? '');
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId) return [];
     await requireActiveSubscription(ctx as any, args.venueId);
     const requests = await (ctx as AnyCtx).db.query('staffRequests').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
@@ -614,7 +627,7 @@ export const createStaffRequest = mutation({
   returns: staffRequestValue,
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx as AnyCtx);
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId) throw new Error('Profile does not belong to this venue');
     await requireActiveSubscription(ctx as any, args.venueId);
     const now = Date.now();
@@ -670,7 +683,7 @@ export const reviewStaffRequest = mutation({
   returns: staffRequestValue,
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx as AnyCtx);
-    const reviewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const reviewer = await getProfile(ctx as AnyCtx);
     if (!reviewer || !reviewer.venueId || !(reviewer.role === 'admin' || reviewer.role === 'owner' || reviewer.role === 'manager')) {
       throw new Error('Not authorized');
     }
@@ -724,7 +737,7 @@ export const getMyHoursAndRequests = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId) return null;
     await requireActiveSubscription(ctx as any, args.venueId);
     const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profile._id).eq('isOpen', false)).collect();
@@ -792,7 +805,7 @@ export const listVenueStaff = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
-    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const viewer = await getProfile(ctx as AnyCtx);
     if (!viewer || viewer.venueId !== args.venueId || !isAdminRole(viewer.role)) return [];
     const staff = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     return staff
@@ -814,7 +827,7 @@ export const upsertVenueStaff = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Unauthenticated');
-    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const viewer = await getProfile(ctx as AnyCtx);
     if (!viewer || viewer.venueId !== args.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
 
     const existing = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
@@ -854,7 +867,7 @@ export const listVenues = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
-    const profile = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !isAdminRole(profile.role)) return [];
     const venues = await (ctx as AnyCtx).db.query('venues').collect();
     return venues.map(mapVenue).sort((a: ReturnType<typeof mapVenue>, b: ReturnType<typeof mapVenue>) => a.name.localeCompare(b.name));
@@ -867,7 +880,7 @@ export const deactivateVenueStaff = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Unauthenticated');
-    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const viewer = await getProfile(ctx as AnyCtx);
     if (!viewer || !viewer.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
     const staff = await (ctx as AnyCtx).db.get(args.staffId);
     if (!staff) throw new Error('Staff member not found');
@@ -885,7 +898,7 @@ export const transferVenueStaff = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Unauthenticated');
-    const viewer = await getProfile(ctx as AnyCtx, identity.tokenIdentifier);
+    const viewer = await getProfile(ctx as AnyCtx);
     if (!viewer || !viewer.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
     const staff = await (ctx as AnyCtx).db.get(args.staffId);
     if (!staff) throw new Error('Staff member not found');

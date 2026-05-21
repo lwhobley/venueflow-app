@@ -4,6 +4,7 @@ import type { Doc } from './_generated/dataModel';
 
 // Import for billing check
 import { requireActiveSubscription } from './billing/shared';
+import { getAuthUserId } from '@convex-dev/auth/server';
 
 const tableShape = v.union(v.literal('round'), v.literal('square'), v.literal('rect'), v.literal('booth'));
 const tableSection = v.union(v.literal('main'), v.literal('patio'), v.literal('bar'), v.literal('vip'));
@@ -95,9 +96,9 @@ function canManageFloor(role: Doc<'profiles'>['role']) {
 }
 
 async function requireProfile(ctx: any) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error('Unauthenticated');
-  const profile = await ctx.db.query('profiles').withIndex('by_tokenIdentifier', (q: any) => q.eq('tokenIdentifier', identity.tokenIdentifier)).unique();
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error('Unauthenticated');
+  const profile = await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
   if (!profile) throw new Error('Profile not found');
   return profile as Doc<'profiles'>;
 }
