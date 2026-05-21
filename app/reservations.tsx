@@ -4,10 +4,12 @@ import { Button, Card, Chip, Text, TextInput as PaperTextInput } from 'react-nat
 import { useMutation, useQuery } from 'convex/react';
 import { useRouter } from 'expo-router';
 import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 import { colors, spacing } from '../lib/theme';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 
 const sourceFilters = ['all', 'direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
+const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 const reservationStatuses = ['requested', 'confirmed', 'checked_in', 'seated', 'completed', 'no_show', 'cancelled'] as const;
 
 type ReservationRow = {
@@ -104,7 +106,7 @@ export default function ReservationsScreen() {
   const [partySize, setPartySize] = useState('2');
   const [reservationTime, setReservationTime] = useState('');
   const [durationMinutes, setDurationMinutes] = useState('120');
-  const [source, setSource] = useState<(typeof sourceFilters)[number]>('direct');
+  const [source, setSource] = useState<(typeof reservationSources)[number]>('direct');
   const [status, setStatus] = useState<(typeof reservationStatuses)[number]>('confirmed');
   const [specialRequests, setSpecialRequests] = useState('');
   const [notes, setNotes] = useState('');
@@ -121,7 +123,7 @@ export default function ReservationsScreen() {
     setPartySize(String(editingReservation.partySize));
     setReservationTime(String(editingReservation.reservationTime));
     setDurationMinutes(String(editingReservation.durationMinutes));
-    setSource(editingReservation.source as (typeof sourceFilters)[number]);
+    setSource(editingReservation.source as (typeof reservationSources)[number]);
     setStatus(editingReservation.status as (typeof reservationStatuses)[number]);
     setSpecialRequests(editingReservation.specialRequests ?? '');
     setNotes(editingReservation.notes ?? '');
@@ -138,7 +140,7 @@ export default function ReservationsScreen() {
     if (!venue?.id || !canEdit) return;
     await saveReservation({
       venueId: venue.id,
-      reservationId: editingReservationId ?? undefined,
+      reservationId: (editingReservationId ?? undefined) as Id<'reservations'> | undefined,
       guestName,
       guestPhone: guestPhone || undefined,
       guestEmail: guestEmail || undefined,

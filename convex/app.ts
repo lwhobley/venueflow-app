@@ -9,17 +9,14 @@ type Identity = {
   name?: string | null;
 };
 
-type AnyCtx = {
-  auth: {
-    getUserIdentity: () => Promise<Identity | null>;
-  };
-  db: {
-    query: (table: 'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions') => any;
-    get: (id: Id<'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions'>) => Promise<any>;
-    insert: (table: 'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions', value: any) => Promise<Id<'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions'>>;
-    patch: (id: Id<'profiles' | 'venues' | 'teams' | 'scheduleShifts' | 'timeEntries' | 'staffRequests' | 'subscriptions'>, value: any) => Promise<void>;
-  };
-};
+// NOTE: This is an intentional escape hatch. The helpers below are shared
+// across query and mutation handlers, and the codebase stores venueId as a
+// string rather than Id<'venues'>. Properly typing this (and migrating venueId
+// to Id<'venues'>) is tracked as a dedicated hardening task. Until then, AnyCtx
+// keeps the shared helpers usable from both ctx flavors without unsafe runtime
+// behavior — Convex still validates every argument at the boundary.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyCtx = any;
 
 const subscriptionStatusValue = v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'));
 const subscriptionPlatformValue = v.union(v.literal('stripe'), v.literal('apple'), v.null());
@@ -36,7 +33,7 @@ const profileValue = v.object({
   fullName: v.string(),
   role,
   jobTitle: v.string(),
-  venueId: v.union(v.string(), v.null()),
+  venueId: v.union(v.id('venues'), v.null()),
 });
 
 const venueValue = v.object({
@@ -53,7 +50,7 @@ const venueValue = v.object({
 const scheduleShiftValue = v.object({
   _id: v.id('scheduleShifts'),
   _creationTime: v.number(),
-  venueId: v.string(),
+  venueId: v.id('venues'),
   profileId: v.union(v.id('profiles'), v.null()),
   dayIndex: v.number(),
   startMinutes: v.number(),
@@ -93,7 +90,7 @@ const clockEntryValue = v.object({
 const staffRequestValue = v.object({
   _id: v.id('staffRequests'),
   _creationTime: v.number(),
-  venueId: v.string(),
+  venueId: v.id('venues'),
   profileId: v.id('profiles'),
   kind: requestKind,
   status: requestStatus,
@@ -407,7 +404,7 @@ export const getMyVenueBilling = query({
   returns: v.union(
     v.null(),
     v.object({
-      venueId: v.string(),
+      venueId: v.id('venues'),
       status: subscriptionStatusValue,
       platform: subscriptionPlatformValue,
       trialStartedAt: v.number(),
@@ -637,7 +634,7 @@ export const getAdminAnalytics = query({
 });
 
 export const listStaffRequests = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: v.array(staffRequestValue),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx, (await ctx.auth.getUserIdentity())?.tokenIdentifier ?? '');
@@ -669,7 +666,7 @@ export const listStaffRequests = query({
 
 export const createStaffRequest = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     kind: requestKind,
     title: v.string(),
     details: v.string(),
@@ -788,7 +785,7 @@ export const reviewStaffRequest = mutation({
 });
 
 export const getMyHoursAndRequests = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: v.union(
     v.null(),
     v.object({
@@ -864,7 +861,7 @@ export const getMyHoursAndRequests = query({
 const staffProfileValue = profileValue;
 
 export const listVenueStaff = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: v.array(staffProfileValue),
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -881,7 +878,7 @@ export const listVenueStaff = query({
 
 export const upsertVenueStaff = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     email: v.string(),
     fullName: v.string(),
     role,

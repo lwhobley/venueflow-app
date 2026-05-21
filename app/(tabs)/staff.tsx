@@ -3,6 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import type { Role } from '../../lib/types';
@@ -77,13 +78,13 @@ export default function StaffScreen() {
 
   const onDeactivate = async (member: StaffMember) => {
     if (!canManage) return;
-    await deactivateStaff({ staffId: member._id });
+    await deactivateStaff({ staffId: member._id as Id<'profiles'> });
     if (selectedStaffId === member._id) clearForm();
   };
 
   const onTransfer = async (member: StaffMember) => {
     if (!canManage || !transferVenueId) return;
-    await transferStaff({ staffId: member._id, targetVenueId: transferVenueId });
+    await transferStaff({ staffId: member._id as Id<'profiles'>, targetVenueId: transferVenueId });
     if (selectedStaffId === member._id) clearForm();
   };
 

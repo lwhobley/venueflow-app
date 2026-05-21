@@ -41,6 +41,7 @@ export default function SignInScreen() {
           email: profile.email,
           full_name: profile.fullName,
           role: profile.role,
+          job_title: profile.jobTitle,
           venue_id: profile.venueId ?? null,
         },
         venue: venue

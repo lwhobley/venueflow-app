@@ -5,6 +5,7 @@ import { useQuery } from 'convex/react';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { api } from '../convex/_generated/api';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
+import { config } from '../lib/config';
 import type { SubscriptionRequiredReason } from '../convex/billing/shared';
 
 const blockedStatuses = new Set(['past_due', 'cancelled', 'expired', 'paused']);
@@ -33,7 +34,8 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const billing = useQuery(api.app.getMyVenueBilling, me?.venue?._id ? {} : 'skip');
   const { isPremium } = useA0Purchases();
   const route = `/${segments.join('/')}`;
-  const blocked = billing ? blockedStatuses.has(billing.status) && !isPremium : false;
+  // When billing is disabled (no real IAP wired yet), never hard-lock users.
+  const blocked = config.billingEnabled && billing ? blockedStatuses.has(billing.status) && !isPremium : false;
   const reason = reasonFromStatus(billing?.status ?? null);
 
   useEffect(() => {

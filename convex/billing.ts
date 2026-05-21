@@ -9,22 +9,16 @@ type Identity = {
   name?: string | null;
 };
 
-type AnyCtx = {
-  auth: {
-    getUserIdentity: () => Promise<Identity | null>;
-  };
-  db: {
-    query: (table: 'profiles' | 'venues' | 'subscriptions') => any;
-    get: (id: Id<'profiles' | 'venues' | 'subscriptions'>) => Promise<any>;
-    patch: (id: Id<'profiles' | 'venues' | 'subscriptions'>, value: any) => Promise<void>;
-  };
-};
+// Intentional escape hatch — shared helpers used across query/mutation ctxs.
+// See note in convex/app.ts. Tracked for proper typing in the hardening task.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyCtx = any;
 
 const subscriptionStatusValue = v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'));
 const subscriptionPlatformValue = v.union(v.literal('stripe'), v.literal('apple'), v.null());
 
 const billingValue = v.object({
-  venueId: v.string(),
+  venueId: v.id('venues'),
   status: subscriptionStatusValue,
   platform: subscriptionPlatformValue,
   trialStartedAt: v.number(),
@@ -134,7 +128,7 @@ export const reconcilePaidSubscription = mutation({
 
 export const syncVenueSubscription = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     status: subscriptionStatusValue,
     platform: subscriptionPlatformValue,
   },

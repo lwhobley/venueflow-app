@@ -3,6 +3,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Text } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { router } from 'expo-router';
@@ -116,7 +117,7 @@ export default function FloorScreen() {
   const markDirty = useMutation(api.tables.markDirty);
   const markClean = useMutation(api.tables.markClean);
 
-  const canEdit = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager' || user?.role === 'host';
+  const canEdit = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
   const activeFloor = floor ?? null;
   const reservationQueue = unassignedReservations ?? [];
   const waitlistQueue = openWaitlist ?? [];
@@ -141,7 +142,7 @@ export default function FloorScreen() {
     if (!venue?.id) return;
     await releaseAssignment({
       venueId: venue.id,
-      assignmentId: assignmentId as never,
+      assignmentId: assignmentId as Id<'tableAssignments'>,
       reason: 'Released from floor screen',
       actorRole: user?.role ?? 'staff',
     });
@@ -308,10 +309,10 @@ export default function FloorScreen() {
 
             {canEdit ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                <Button mode="outlined" onPress={() => void markDirty({ tableId: selected.table._id })}>
+                <Button mode="outlined" onPress={() => void markDirty({ tableId: selected.table._id as Id<'tables'> })}>
                   Mark dirty
                 </Button>
-                <Button mode="outlined" onPress={() => void markClean({ tableId: selected.table._id })}>
+                <Button mode="outlined" onPress={() => void markClean({ tableId: selected.table._id as Id<'tables'> })}>
                   Mark clean
                 </Button>
               </View>

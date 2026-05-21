@@ -18,7 +18,7 @@ const reservationStatusValue = v.union(
 const reservationValue = v.object({
   _id: v.id('reservations'),
   _creationTime: v.number(),
-  venueId: v.string(),
+  venueId: v.id('venues'),
   guestId: v.union(v.id('guests'), v.null()),
   guestName: v.string(),
   guestPhone: v.union(v.string(), v.null()),
@@ -45,7 +45,7 @@ const reservationValue = v.object({
 const reservationSettingsValue = v.object({
   _id: v.id('reservationSettings'),
   _creationTime: v.number(),
-  venueId: v.string(),
+  venueId: v.id('venues'),
   defaultDiningMinutes: v.number(),
   defaultTurnMinutes: v.number(),
   bookingWindowDays: v.number(),
@@ -65,7 +65,7 @@ async function requireProfile(ctx: any) {
   return profile as Doc<'profiles'>;
 }
 
-async function loadSettings(ctx: any, venueId: string) {
+async function loadSettings(ctx: any, venueId: string): Promise<Doc<'reservationSettings'> | null> {
   return await ctx.db.query('reservationSettings').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).unique();
 }
 
@@ -106,7 +106,7 @@ async function listReservations(ctx: any, venueId: string) {
 }
 
 export const getReservationsPage = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: v.union(
     v.null(),
     v.object({
@@ -148,7 +148,7 @@ export const getReservationsPage = query({
 
 export const saveReservationSettings = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     defaultDiningMinutes: v.number(),
     defaultTurnMinutes: v.number(),
     bookingWindowDays: v.number(),
@@ -201,7 +201,7 @@ export const saveReservationSettings = mutation({
 
 export const saveReservation = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     reservationId: v.optional(v.id('reservations')),
     guestName: v.string(),
     guestPhone: v.optional(v.string()),
@@ -274,7 +274,7 @@ export const saveReservation = mutation({
 });
 
 export const removeReservation = mutation({
-  args: { venueId: v.string(), reservationId: v.id('reservations') },
+  args: { venueId: v.id('venues'), reservationId: v.id('reservations') },
   returns: v.null(),
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);

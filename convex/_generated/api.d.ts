@@ -10,6 +10,7 @@
 
 import type * as app from "../app.js";
 import type * as auth from "../auth.js";
+import type * as authz from "../authz.js";
 import type * as billing from "../billing.js";
 import type * as billing_shared from "../billing/shared.js";
 import type * as floor from "../floor.js";
@@ -28,6 +29,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   app: typeof app;
   auth: typeof auth;
+  authz: typeof authz;
   billing: typeof billing;
   "billing/shared": typeof billing_shared;
   floor: typeof floor;

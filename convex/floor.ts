@@ -19,7 +19,7 @@ const tableStatus = v.union(
 const floorPlanValue = v.object({
   _id: v.id('floorPlans'),
   _creationTime: v.number(),
-  venueId: v.string(),
+  venueId: v.id('venues'),
   name: v.string(),
   width: v.number(),
   height: v.number(),
@@ -49,7 +49,7 @@ const tableValue = v.object({
 const tableStateValue = v.object({
   _id: v.id('tableStates'),
   _creationTime: v.number(),
-  venueId: v.string(),
+  venueId: v.id('venues'),
   tableId: v.id('tables'),
   status: tableStatus,
   partySize: v.union(v.number(), v.null()),
@@ -80,7 +80,7 @@ const floorStatsValue = v.object({
 const floorHistoryValue = v.object({
   _id: v.id('tableStateHistory'),
   _creationTime: v.number(),
-  venueId: v.string(),
+  venueId: v.id('venues'),
   tableId: v.id('tables'),
   fromStatus: tableStatus,
   toStatus: tableStatus,
@@ -102,6 +102,13 @@ async function requireProfile(ctx: any) {
   return profile as Doc<'profiles'>;
 }
 
+// Ensures the caller belongs to `venueId` before returning venue-scoped data.
+async function requireVenueMember(ctx: any, venueId: string) {
+  const profile = await requireProfile(ctx);
+  if (!profile.venueId || profile.venueId !== venueId) throw new Error('Resource is outside your venue');
+  return profile;
+}
+
 async function loadFloorPlan(ctx: any, venueId: string) {
   return await ctx.db.query('floorPlans').withIndex('by_venue_active', (q: any) => q.eq('venueId', venueId).eq('isActive', true)).unique();
 }
@@ -111,9 +118,10 @@ async function loadState(ctx: any, tableId: Doc<'tables'>['_id']) {
 }
 
 export const getActiveFloorPlan = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: v.union(v.null(), v.object({ floorPlan: floorPlanValue, tables: v.array(floorTableValue) })),
   handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
     const plan = await loadFloorPlan(ctx, args.venueId);
     if (!plan) return null;
     const tables = await ctx.db.query('tables').withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', plan._id)).collect();
@@ -172,9 +180,10 @@ export const getActiveFloorPlan = query({
 });
 
 export const getFloorStats = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: floorStatsValue,
   handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
     const plan = await loadFloorPlan(ctx, args.venueId);
     if (!plan) {
       return {
@@ -227,6 +236,7 @@ export const getTableHistory = query({
     if (!table) return [];
     const plan = await ctx.db.get(table.floorPlanId);
     if (!plan) return [];
+    await requireVenueMember(ctx, plan.venueId);
 
     const history = await ctx.db.query('tableStateHistory').withIndex('by_table_time', (q: any) => q.eq('tableId', args.tableId)).order('desc').take(Math.max(1, Math.min(args.limit, 50)));
     return history.map((item: Doc<'tableStateHistory'>) => ({
@@ -246,7 +256,7 @@ export const getTableHistory = query({
 
 export const saveFloorPlan = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     name: v.string(),
     width: v.number(),
     height: v.number(),
@@ -275,7 +285,7 @@ export const saveFloorPlan = mutation({
     // Require active billing subscription
     await requireActiveSubscription(ctx as any, args.venueId);
 
-    if (profile.venueId && profile.venueId !== args.venueId) throw new Error('Profile does not belong to this venue');
+    if (!profile.venueId || profile.venueId !== args.venueId) throw new Error('Profile does not belong to this venue');
 
     const existing = await loadFloorPlan(ctx, args.venueId);
     if (existing) await ctx.db.patch(existing._id, { isActive: false, updatedAt: Date.now() });

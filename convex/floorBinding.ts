@@ -1,14 +1,20 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
+import { requireVenueManager, requireVenueMember } from './authz';
 
-const roleValue = v.union(v.literal('admin'), v.literal('owner'), v.literal('manager'));
+// Legacy validator kept only so older clients that still send `actorRole` pass
+// arg validation. The value is ignored — authorization is derived server-side
+// from the authenticated profile via convex/authz.ts.
+const roleValue = v.union(
+  v.literal('admin'),
+  v.literal('owner'),
+  v.literal('manager'),
+  v.literal('server'),
+  v.literal('staff'),
+);
 const holdTypeValue = v.union(v.literal('reserved'), v.literal('held'), v.literal('seated'));
 const sourceValue = v.union(v.literal('reservation'), v.literal('waitlist'));
-
-function canEdit(role: string) {
-  return role === 'admin' || role === 'owner' || role === 'manager';
-}
 
 function startOfDay(date: string) {
   return new Date(`${date}T00:00:00.000Z`).getTime();
@@ -230,9 +236,10 @@ async function assignToTables(ctx: any, args: { venueId: string; tableIds: Id<'t
 }
 
 export const getActiveFloorPlan = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: v.any(),
   handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
     const venue = await findVenuePlan(ctx, args.venueId);
     if (!venue) return null;
     const now = Date.now();
@@ -262,6 +269,11 @@ export const getTableTimeline = query({
   args: { tableId: v.id('tables'), date: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
+    const table = await ctx.db.get(args.tableId);
+    if (!table) throw new Error('Table not found');
+    const plan = await ctx.db.get(table.floorPlanId);
+    if (!plan) throw new Error('Floor plan not found');
+    await requireVenueMember(ctx, plan.venueId);
     const start = startOfDay(args.date);
     const end = endOfDay(args.date);
     const assignments = await ctx.db.query('tableAssignments').withIndex('by_table_time', (q: any) => q.eq('tableId', args.tableId)).collect();
@@ -277,9 +289,10 @@ export const getTableTimeline = query({
 });
 
 export const getUnassignedReservations = query({
-  args: { venueId: v.string(), withinMinutes: v.number() },
+  args: { venueId: v.id('venues'), withinMinutes: v.number() },
   returns: v.any(),
   handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
     const now = Date.now();
     const windowEnd = now + Math.max(15, args.withinMinutes) * 60 * 1000;
     const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
@@ -307,9 +320,10 @@ export const getUnassignedReservations = query({
 });
 
 export const getOpenWaitlist = query({
-  args: { venueId: v.string() },
+  args: { venueId: v.id('venues') },
   returns: v.any(),
   handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
     const waitlist = await ctx.db.query('waitlist').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
     return waitlist
       .filter((item: Doc<'waitlist'>) => item.status === 'waiting' || item.status === 'assigned')
@@ -328,17 +342,19 @@ export const getOpenWaitlist = query({
 
 export const assignReservationToTables = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     reservationId: v.id('reservations'),
     tableIds: v.array(v.id('tables')),
     holdType: holdTypeValue,
     startsAt: v.number(),
     endsAt: v.number(),
-    actorRole: roleValue,
+    // Accepted for backward compatibility but ignored: authorization is derived
+    // from the authenticated profile, never from this client-supplied value.
+    actorRole: v.optional(roleValue),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    if (!canEdit(args.actorRole)) throw new Error('Not authorized');
+    await requireVenueManager(ctx, args.venueId);
     await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, reservationId: args.reservationId, sourceType: 'reservation' });
     return null;
   },
@@ -346,27 +362,27 @@ export const assignReservationToTables = mutation({
 
 export const assignWaitlistToTables = mutation({
   args: {
-    venueId: v.string(),
+    venueId: v.id('venues'),
     waitlistId: v.id('waitlist'),
     tableIds: v.array(v.id('tables')),
     holdType: holdTypeValue,
     startsAt: v.number(),
     endsAt: v.number(),
-    actorRole: roleValue,
+    actorRole: v.optional(roleValue),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    if (!canEdit(args.actorRole)) throw new Error('Not authorized');
+    await requireVenueManager(ctx, args.venueId);
     await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, waitlistId: args.waitlistId, sourceType: 'waitlist' });
     return null;
   },
 });
 
 export const releaseAssignment = mutation({
-  args: { venueId: v.string(), assignmentId: v.id('tableAssignments'), reason: v.string(), actorRole: roleValue },
+  args: { venueId: v.id('venues'), assignmentId: v.id('tableAssignments'), reason: v.string(), actorRole: v.optional(roleValue) },
   returns: v.null(),
   handler: async (ctx, args) => {
-    if (!canEdit(args.actorRole)) throw new Error('Not authorized');
+    await requireVenueManager(ctx, args.venueId);
     const assignment = await ctx.db.get(args.assignmentId);
     if (!assignment) throw new Error('Assignment not found');
     if (assignment.venueId !== args.venueId) throw new Error('Wrong venue');

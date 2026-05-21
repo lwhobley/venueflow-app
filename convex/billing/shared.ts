@@ -20,7 +20,7 @@ export const subscriptionAllowlist = {
   webhooks: ['stripe', 'apple', 'toast', 'opentable', 'resy'],
 } as const;
 
-function reasonFromStatus(status: Doc<'venues'>['subscriptionStatus'] | null | undefined, hasSubscriptionRow: boolean): SubscriptionRequiredReason {
+export function reasonFromStatus(status: Doc<'venues'>['subscriptionStatus'] | null | undefined, hasSubscriptionRow: boolean): SubscriptionRequiredReason {
   if (!hasSubscriptionRow || status == null) return 'never_subscribed';
   if (status === 'trialing') return 'never_subscribed';
   if (status === 'active') return 'never_subscribed';

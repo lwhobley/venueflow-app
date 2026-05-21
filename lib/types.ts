@@ -1,7 +1,9 @@
+import type { Id } from '../convex/_generated/dataModel';
+
 export type Role = 'admin' | 'owner' | 'manager' | 'server' | 'staff';
 
 export type Venue = {
-  id: string;
+  id: Id<'venues'>;
   name: string;
   latitude: number;
   longitude: number;
@@ -13,7 +15,8 @@ export type UserSummary = {
   email: string;
   full_name: string;
   role: Role;
-  venue_id: string | null;
+  job_title: string;
+  venue_id: Id<'venues'> | null;
 };
 
 export type TeamMember = {

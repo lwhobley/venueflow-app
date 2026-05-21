@@ -7,6 +7,8 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud",
+        "EXPO_PUBLIC_BILLING_ENABLED": "false",
         "EXPO_PUBLIC_API_URL": "https://api.venueflow.example",
         "GOOGLE_MAPS_ANDROID_API_KEY": "replace-me",
         "EXPO_ACCESS_TOKEN": "replace-me"
@@ -15,6 +17,8 @@
     "production": {
       "channel": "production",
       "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://REPLACE-with-prod-deployment.convex.cloud",
+        "EXPO_PUBLIC_BILLING_ENABLED": "false",
         "EXPO_PUBLIC_API_URL": "https://api.venueflow.example",
         "GOOGLE_MAPS_ANDROID_API_KEY": "replace-me",
         "EXPO_ACCESS_TOKEN": "replace-me"

@@ -1,4 +1,6 @@
 import * as Location from 'expo-location';
+import { haversineMeters, isWithinGeofence } from './geo';
+import type { GeofenceRule } from './geo';
 
 export type CurrentLocation = {
   latitude: number;
@@ -7,21 +9,9 @@ export type CurrentLocation = {
   mocked: boolean;
 };
 
-export function haversineMeters(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const radius = 6371_000;
-  const toRadians = (value: number) => (value * Math.PI) / 180;
-  const deltaLat = toRadians(lat2 - lat1);
-  const deltaLng = toRadians(lng2 - lng1);
-  const a =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(deltaLng / 2) ** 2;
-  return 2 * radius * Math.asin(Math.sqrt(a));
-}
+// Re-export the pure helpers so existing imports from './location' keep working.
+export { haversineMeters, isWithinGeofence };
+export type { GeofenceRule };
 
 export async function getPreciseLocation(): Promise<CurrentLocation> {
   const permission = await Location.requestForegroundPermissionsAsync();

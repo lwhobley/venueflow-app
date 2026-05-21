@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { useA0Purchases } from '../../lib/a0-purchases-stub';
 import { colors, spacing } from '../../lib/theme';
+import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 const headlineByReason: Record<string, string> = {
@@ -67,7 +68,16 @@ export default function BillingLockedScreen() {
               </Card.Content>
             </Card>
 
-            {canPay ? (
+            {!config.billingEnabled ? (
+              <>
+                <Text style={{ color: colors.muted }}>
+                  Billing isn't enabled in this build, so there's nothing to pay for yet. You can continue using the app.
+                </Text>
+                <Button mode="contained" buttonColor={colors.primary} onPress={() => router.replace('/(tabs)/home')}>
+                  Back to app
+                </Button>
+              </>
+            ) : canPay ? (
               <>
                 {packages.length > 0 ? (
                   <Button mode="contained" buttonColor={colors.primary} loading={purchasing || isLoading} onPress={onSubscribe}>

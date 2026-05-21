@@ -6,7 +6,10 @@
       "PowerShell(gh auth status)",
       "Bash(git init *)",
       "Bash(git config *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m 'Initial commit: VenueFlow with Convex backend *)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); gh --version; gh auth status)",
+      "PowerShell(cd \"C:\\\\Users\\\\lwhob\\\\Downloads\\\\a0-project\"; \\(Get-ChildItem -Recurse -Directory -Filter convex -Path node_modules -ErrorAction SilentlyContinue | Where-Object { Test-Path \\(Join-Path $_.FullName 'package.json'\\) } | ForEach-Object { \"$\\($_.FullName\\): \" + \\(Get-Content \\(Join-Path $_.FullName 'package.json'\\) | ConvertFrom-Json\\).version }\\) -join \"`n\")"
     ]
   }
 }

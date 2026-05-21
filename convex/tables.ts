@@ -71,7 +71,9 @@ async function applyUpdate(
   patch: Partial<Pick<Doc<'tableStates'>, 'status' | 'partySize' | 'serverId' | 'toastCheckGuid' | 'seatedAt' | 'lastActivityAt' | 'notes'>>,
 ) {
   const { table, floorPlan } = await loadTableAndPlan(ctx, tableId);
-  if (profile.venueId && profile.venueId !== floorPlan.venueId) throw new Error('Table is outside your venue');
+  // Deny if the caller has no venue, or belongs to a different venue.
+  // (A falsy venueId previously skipped this check entirely — a cross-venue hole.)
+  if (!profile.venueId || profile.venueId !== floorPlan.venueId) throw new Error('Table is outside your venue');
 
   const current = await loadState(ctx, tableId);
   if (profile.role === 'server' && current?.serverId && current.serverId !== profile._id) {
@@ -164,10 +166,10 @@ export const markClean = mutation({
     await requireActiveSubscription(ctx as any, floorPlan.venueId);
     await applyUpdate(ctx, profile, args.tableId, {
       status: 'available',
-      partySize: null,
-      serverId: null,
-      notes: null,
-      toastCheckGuid: null,
+      partySize: undefined,
+      serverId: undefined,
+      notes: undefined,
+      toastCheckGuid: undefined,
     });
     return null;
   },
@@ -187,9 +189,9 @@ export const transferTable = mutation({
       status: 'seated',
       partySize: source.partySize ?? 0,
       serverId: source.serverId ?? args.actorId,
-      notes: source.notes ?? null,
+      notes: source.notes ?? undefined,
     });
-    await applyUpdate(ctx, profile, args.fromTableId, { status: 'dirty', partySize: null, serverId: null, notes: null, toastCheckGuid: null });
+    await applyUpdate(ctx, profile, args.fromTableId, { status: 'dirty', partySize: undefined, serverId: undefined, notes: undefined, toastCheckGuid: undefined });
     return null;
   },
 });
@@ -207,7 +209,7 @@ export const mergeTables = mutation({
     const totalGuests = (primary.partySize ?? 0) + args.mergeTableIds.length;
     await applyUpdate(ctx, profile, args.primaryTableId, { status: 'seated', partySize: totalGuests, serverId: primary.serverId ?? args.actorId });
     for (const tableId of args.mergeTableIds) {
-      await applyUpdate(ctx, profile, tableId, { status: 'held', notes: 'Merged into primary table', partySize: null, serverId: null });
+      await applyUpdate(ctx, profile, tableId, { status: 'held', notes: 'Merged into primary table', partySize: undefined, serverId: undefined });
     }
     return null;
   },

@@ -3,6 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
@@ -96,7 +97,7 @@ export default function ScheduleScreen() {
       title: requestTitle,
       details: requestDetails,
       requestedForDate: requestedDate || undefined,
-      requestedShiftId: selectedShiftId,
+      requestedShiftId: selectedShiftId as Id<'scheduleShifts'> | undefined,
       requestedRangeStart: rangeStart || undefined,
       requestedRangeEnd: rangeEnd || undefined,
       availability: requestKind === 'availability' ? availabilityDraft.map((item: AvailabilityDraft) => ({ ...item })) : undefined,
@@ -236,8 +237,8 @@ export default function ScheduleScreen() {
                   <Text style={{ color: colors.muted }}>{request.kind.replace('_', ' ')} · {request.status}</Text>
                   <Text>{request.details}</Text>
                   <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                    <Button mode="contained" onPress={() => void reviewRequest({ requestId: request._id, status: 'approved' })}>Approve</Button>
-                    <Button mode="outlined" onPress={() => void reviewRequest({ requestId: request._id, status: 'denied' })}>Deny</Button>
+                    <Button mode="contained" onPress={() => void reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' })}>Approve</Button>
+                    <Button mode="outlined" onPress={() => void reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' })}>Deny</Button>
                   </View>
                 </View>
               ))

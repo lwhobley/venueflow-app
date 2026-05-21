@@ -35,7 +35,7 @@ export default defineSchema({
     fullName: v.string(),
     role,
     jobTitle: v.string(),
-    venueId: v.optional(v.string()),
+    venueId: v.optional(v.id('venues')),
   }).index('by_tokenIdentifier', ['tokenIdentifier']).index('by_venueId', ['venueId']),
   venues: defineTable({
     name: v.string(),
@@ -46,12 +46,12 @@ export default defineSchema({
     subscriptionPlatform: v.optional(v.union(v.literal('stripe'), v.literal('apple'), v.null())),
   }),
   teams: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     name: v.string(),
     memberCount: v.number(),
   }).index('by_venueId', ['venueId']),
   scheduleShifts: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     profileId: v.optional(v.id('profiles')),
     dayIndex: v.number(),
     startMinutes: v.number(),
@@ -63,7 +63,7 @@ export default defineSchema({
   }).index('by_venueId', ['venueId']).index('by_dayIndex', ['dayIndex']).index('by_profileId', ['profileId']),
   timeEntries: defineTable({
     profileId: v.id('profiles'),
-    venueId: v.string(),
+    venueId: v.id('venues'),
     clockInAt: v.number(),
     clockOutAt: v.optional(v.number()),
     clockInLat: v.number(),
@@ -77,7 +77,7 @@ export default defineSchema({
     isOpen: v.boolean(),
   }).index('by_profileId_and_isOpen', ['profileId', 'isOpen']).index('by_venueId', ['venueId']).index('by_isOpen', ['isOpen']),
   staffRequests: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     profileId: v.id('profiles'),
     kind: v.union(v.literal('add_shift'), v.literal('drop_shift'), v.literal('time_off'), v.literal('availability')),
     status: requestStatus,
@@ -100,7 +100,7 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_venueId', ['venueId']).index('by_profileId', ['profileId']).index('by_status', ['status']).index('by_kind', ['kind']),
   guests: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     fullName: v.string(),
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
@@ -110,7 +110,7 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_venue', ['venueId']).index('by_phone', ['phone']).index('by_email', ['email']),
   reservations: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     guestId: v.optional(v.id('guests')),
     guestName: v.string(),
     guestPhone: v.optional(v.string()),
@@ -134,7 +134,7 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_venue_time', ['venueId', 'reservationTime']).index('by_venue_status', ['venueId', 'status']).index('by_guest', ['guestId']).index('by_external_id', ['externalId']),
   reservationSettings: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     defaultDiningMinutes: v.number(),
     defaultTurnMinutes: v.number(),
     bookingWindowDays: v.number(),
@@ -142,7 +142,7 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_venue', ['venueId']),
   waitlist: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     guestId: v.optional(v.id('guests')),
     guestName: v.string(),
     guestPhone: v.optional(v.string()),
@@ -156,7 +156,7 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_venue_time', ['venueId', 'requestedAt']).index('by_venue_status', ['venueId', 'status']),
   tableAssignments: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     reservationId: v.optional(v.id('reservations')),
     waitlistId: v.optional(v.id('waitlist')),
     tableId: v.id('tables'),
@@ -168,7 +168,7 @@ export default defineSchema({
     releasedReason: v.optional(v.string()),
   }).index('by_table_time', ['tableId', 'startsAt']).index('by_reservation', ['reservationId']).index('by_waitlist', ['waitlistId']).index('by_venue_time', ['venueId', 'startsAt']),
   floorPlans: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     name: v.string(),
     width: v.number(),
     height: v.number(),
@@ -192,7 +192,7 @@ export default defineSchema({
     isReservable: v.boolean(),
   }).index('by_floor_plan', ['floorPlanId']).index('by_floor_plan_section', ['floorPlanId', 'section']),
   tableStates: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     tableId: v.id('tables'),
     status: tableStatus,
     partySize: v.optional(v.number()),
@@ -203,7 +203,7 @@ export default defineSchema({
     notes: v.optional(v.string()),
   }).index('by_table', ['tableId']).index('by_status', ['status']).index('by_server', ['serverId']).index('by_venue', ['venueId']),
   tableStateHistory: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     tableId: v.id('tables'),
     fromStatus: tableStatus,
     toStatus: tableStatus,
@@ -213,7 +213,7 @@ export default defineSchema({
     metadata: v.optional(v.record(v.string(), v.union(v.string(), v.number(), v.boolean(), v.null()))),
   }).index('by_table_time', ['tableId', 'timestamp']).index('by_venue_time', ['venueId', 'timestamp']),
   subscriptions: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     status: v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused')),
     platform: v.union(v.literal('stripe'), v.literal('apple'), v.null()),
     planId: v.string(),
@@ -232,7 +232,7 @@ export default defineSchema({
     dataRetentionWarnedAt: v.optional(v.number()),
   }).index('by_venue', ['venueId']).index('by_status', ['status']).index('by_external_id', ['externalSubscriptionId']),
   subscriptionEvents: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     source: v.union(v.literal('stripe'), v.literal('apple'), v.literal('internal')),
     externalEventId: v.string(),
     eventType: v.string(),
@@ -242,7 +242,7 @@ export default defineSchema({
     errorMessage: v.union(v.string(), v.null()),
   }).index('by_source_external_id', ['source', 'externalEventId']).index('by_venue_time', ['venueId', 'processedAt']),
   paymentMethods: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     stripePaymentMethodId: v.string(),
     brand: v.string(),
     last4: v.string(),
@@ -252,7 +252,7 @@ export default defineSchema({
     createdAt: v.number(),
   }).index('by_venue', ['venueId']),
   invoices: defineTable({
-    venueId: v.string(),
+    venueId: v.id('venues'),
     stripeInvoiceId: v.string(),
     amountCents: v.number(),
     currency: v.string(),

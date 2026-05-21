@@ -7,7 +7,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { getPreciseLocation, haversineMeters, type CurrentLocation } from '../../lib/location';
+import { getPreciseLocation, haversineMeters, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 
 type ActiveClockEntry = {
   _id: string;
@@ -28,7 +28,21 @@ export default function ClockScreen() {
   const clockIn = useMutation(api.app.clockIn);
   const clockOut = useMutation(api.app.clockOut);
 
-  const activeVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
+  // Sources differ in casing: the Zustand store uses snake_case
+  // (geofence_radius_m) while Convex returns camelCase (geofenceRadiusM).
+  // Normalize to a single shape so downstream reads are consistent.
+  const rawVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
+  const activeVenue = useMemo(() => {
+    if (!rawVenue) return null;
+    const geofenceRadiusM =
+      'geofenceRadiusM' in rawVenue ? rawVenue.geofenceRadiusM : rawVenue.geofence_radius_m;
+    return {
+      name: rawVenue.name,
+      latitude: rawVenue.latitude,
+      longitude: rawVenue.longitude,
+      geofenceRadiusM,
+    };
+  }, [rawVenue]);
   const employeeEntry = clockBoard?.employeeEntry ?? null;
   const activeClockEntries = (clockBoard?.activeClockEntries ?? []) as ActiveClockEntry[];
   const isClockedIn = Boolean(employeeEntry);
@@ -59,14 +73,7 @@ export default function ClockScreen() {
     return haversineMeters(location.latitude, location.longitude, activeVenue.latitude, activeVenue.longitude);
   }, [location, activeVenue]);
 
-  const canClock = Boolean(
-    activeVenue &&
-      location &&
-      location.accuracy <= 50 &&
-      !location.mocked &&
-      distance !== null &&
-      distance <= activeVenue.geofenceRadiusM,
-  );
+  const canClock = Boolean(activeVenue && location && isWithinGeofence(location, activeVenue));
 
   async function refreshLocation() {
     setLoadingLocation(true);

@@ -22,16 +22,36 @@ VenueFlow is a native iOS/Android venue ops app built with Expo Router and Conve
 
 ## Local setup
 
-1. Start the mobile app with Expo.
-2. Sync Convex after any backend change.
-3. Test the sign-in flow, geofenced clock actions, and role-specific screens.
+1. `npm install --legacy-peer-deps` (the `--legacy-peer-deps` flag is required; see `.npmrc`).
+2. Copy `.env.example` to `.env` and set `EXPO_PUBLIC_CONVEX_URL` to your Convex deployment URL.
+3. In one terminal: `npx convex dev` (keeps functions/types in sync with the backend).
+4. In another terminal: `npm start` (Expo).
+5. Test the sign-in flow, geofenced clock actions, and role-specific screens.
 
-## EAS
+## Environment variables
 
-- `eas build -p ios --profile production`
-- `eas build -p android --profile production`
-- `eas submit -p ios --profile production`
-- `eas submit -p android --profile production`
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `EXPO_PUBLIC_CONVEX_URL` | Convex deployment the client connects to | required |
+| `EXPO_PUBLIC_BILLING_ENABLED` | Enables the subscription gate. Keep `false` until a real in-app purchase provider is wired into `lib/a0-purchases-stub.tsx`. | `false` |
+
+## Quality gates
+
+- `npm run typecheck` — strict TypeScript, must be clean.
+- `npm test` — Vitest unit suite (geofence anti-fraud rules, authorization role checks, billing state mapping).
+
+## Production deploy
+
+1. **Provision a production Convex deployment** (separate from dev):
+   - `npx convex deploy` — this creates/pushes to your prod deployment and prints its URL.
+2. **Point the build at prod**: set `EXPO_PUBLIC_CONVEX_URL` in `eas.json`'s `production.env` to that URL (currently a `REPLACE-with-prod-deployment` placeholder).
+3. **Build & submit**:
+   - `eas build -p ios --profile production`
+   - `eas build -p android --profile production`
+   - `eas submit -p ios --profile production`
+   - `eas submit -p android --profile production`
+
+> Note: `preview`/`production` env in `eas.json` still has `replace-me` values for `GOOGLE_MAPS_ANDROID_API_KEY` and `EXPO_ACCESS_TOKEN` — fill these before shipping.
 
 ## Backend
 

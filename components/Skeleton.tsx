@@ -1,4 +1,4 @@
-import type { StyleProp, ViewStyle } from 'react-native';
+import type { DimensionValue, StyleProp, ViewStyle } from 'react-native';
 import { View } from 'react-native';
 import { colors } from '../lib/theme';
 
@@ -7,8 +7,8 @@ export function Skeleton({
   height = 16,
   style,
 }: {
-  width?: number | string;
-  height?: number;
+  width?: DimensionValue;
+  height?: DimensionValue;
   style?: StyleProp<ViewStyle>;
 }) {
   return <View style={[{ width, height, borderRadius: 12, backgroundColor: colors.border }, style]} />;
