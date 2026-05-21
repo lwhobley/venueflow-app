@@ -15,6 +15,7 @@ import type * as billing from "../billing.js";
 import type * as billing_shared from "../billing/shared.js";
 import type * as floor from "../floor.js";
 import type * as floorBinding from "../floorBinding.js";
+import type * as http from "../http.js";
 import type * as notifications from "../notifications.js";
 import type * as reservations from "../reservations.js";
 import type * as seed from "../seed.js";
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   "billing/shared": typeof billing_shared;
   floor: typeof floor;
   floorBinding: typeof floorBinding;
+  http: typeof http;
   notifications: typeof notifications;
   reservations: typeof reservations;
   seed: typeof seed;

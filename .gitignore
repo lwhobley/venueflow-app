@@ -41,3 +41,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Generated auth keys (contain a private key — never commit)
+scripts/.auth-keys.json
