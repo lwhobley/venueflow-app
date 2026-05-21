@@ -10,4 +10,29 @@ config.resolver.blockList = [
   new RegExp(`${apiPath}/.*`),
 ];
 
+// zustand's ESM build (resolved via package "exports" on web in SDK 54) uses
+// `import.meta.env`, which ships a literal `import.meta` into the web bundle and
+// throws "Cannot use 'import.meta' outside a module" when the browser loads it
+// as a classic script. zustand's CJS build is import.meta-free, so resolve the
+// CJS entry points explicitly. Scoped to zustand to avoid disabling package
+// exports globally (which would break subpath-only packages like
+// @convex-dev/auth).
+const zustandCjs = {
+  zustand: path.resolve(__dirname, 'node_modules/zustand/index.js'),
+  'zustand/middleware': path.resolve(__dirname, 'node_modules/zustand/middleware.js'),
+  'zustand/shallow': path.resolve(__dirname, 'node_modules/zustand/shallow.js'),
+};
+
+const defaultResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const cjsTarget = zustandCjs[moduleName];
+  if (cjsTarget) {
+    return { type: 'sourceFile', filePath: cjsTarget };
+  }
+  if (defaultResolveRequest) {
+    return defaultResolveRequest(context, moduleName, platform);
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 module.exports = config;
