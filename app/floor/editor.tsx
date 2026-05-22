@@ -9,12 +9,14 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 type Shape = 'round' | 'square' | 'rect' | 'booth';
 type Section = 'main' | 'patio' | 'bar' | 'vip';
+type SeatLabelStyle = 'number' | 'letter' | 'none';
 
 type DraftTable = {
   key: string;
   label: string;
   shape: Shape;
   seats: number;
+  seatLabelStyle: SeatLabelStyle;
   x: number;
   y: number;
   width: number;
@@ -25,11 +27,18 @@ type DraftTable = {
   isReservable: boolean;
 };
 
+function seatText(style: SeatLabelStyle, i: number): string {
+  if (style === 'none') return '';
+  if (style === 'letter') return String.fromCharCode(65 + (i % 26));
+  return String(i + 1);
+}
+
 type DraftChair = {
   key: string;
   x: number;
   y: number;
   rotation: number;
+  label: string;
 };
 
 const CHAIR_SIZE = 30;
@@ -163,22 +172,30 @@ function TableNode({
         height: Animated.multiply(size.y, scale),
       }}
     >
-      {/* Chairs (rendered relative to table box) */}
-      {chairs.map((c, i) => (
-        <View
-          key={i}
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: c.x * scale - 5,
-            top: c.y * scale - 5,
-            width: 10,
-            height: 10,
-            borderRadius: 5,
-            backgroundColor: '#cbd2e0',
-          }}
-        />
-      ))}
+      {/* Attached seat chairs (appendages — move/rotate with the table) */}
+      {chairs.map((c, i) => {
+        const label = seatText(table.seatLabelStyle, i);
+        const sz = label ? 16 : 10;
+        return (
+          <View
+            key={i}
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: c.x * scale - sz / 2,
+              top: c.y * scale - sz / 2,
+              width: sz,
+              height: sz,
+              borderRadius: sz / 2,
+              backgroundColor: '#cbd2e0',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {label ? <Text style={{ fontSize: 9, fontWeight: '700', color: '#2a2f42' }}>{label}</Text> : null}
+          </View>
+        );
+      })}
       <Animated.View
         {...drag.panHandlers}
         style={{
@@ -301,6 +318,11 @@ function ChairNode({
           backgroundColor: selected ? '#fff' : '#6b7488',
         }}
       />
+      {chair.label ? (
+        <View pointerEvents="none" style={{ position: 'absolute', bottom: -14 * scale, width: 80, alignItems: 'center', left: (CHAIR_SIZE * scale) / 2 - 40 }}>
+          <Text style={{ fontSize: 9, fontWeight: '700', color: '#cbd2e0' }} numberOfLines={1}>{chair.label}</Text>
+        </View>
+      ) : null}
     </Animated.View>
   );
 }
@@ -335,6 +357,7 @@ export default function FloorEditorScreen() {
         label: t.table.label,
         shape: t.table.shape,
         seats: t.table.seats,
+        seatLabelStyle: (t.table.seatLabelStyle ?? 'number') as SeatLabelStyle,
         x: t.table.x,
         y: t.table.y,
         width: t.table.width,
@@ -351,6 +374,7 @@ export default function FloorEditorScreen() {
         x: c.x,
         y: c.y,
         rotation: c.rotation,
+        label: c.label ?? '',
       })),
     );
   }, [floor]);
@@ -378,7 +402,7 @@ export default function FloorEditorScreen() {
     const key = `newc_${chairCounter.current++}_${Date.now()}`;
     setChairs((cur) => [
       ...cur,
-      { key, x: snap(clamp(venueW / 2 - CHAIR_SIZE / 2, 0, venueW - CHAIR_SIZE), 5), y: snap(clamp(venueH / 2 - CHAIR_SIZE / 2, 0, venueH - CHAIR_SIZE), 5), rotation: 0 },
+      { key, x: snap(clamp(venueW / 2 - CHAIR_SIZE / 2, 0, venueW - CHAIR_SIZE), 5), y: snap(clamp(venueH / 2 - CHAIR_SIZE / 2, 0, venueH - CHAIR_SIZE), 5), rotation: 0, label: '' },
     ]);
     selectChair(key);
   };
@@ -408,6 +432,7 @@ export default function FloorEditorScreen() {
         label: `${d.label} ${count}`,
         shape,
         seats: d.seats,
+        seatLabelStyle: 'number',
         x: snap(clamp(venueW / 2 - d.width / 2, 0, venueW - d.width)),
         y: snap(clamp(venueH / 2 - d.height / 2, 0, venueH - d.height)),
         width: d.width,
@@ -439,6 +464,7 @@ export default function FloorEditorScreen() {
         label: t.label,
         shape: t.shape,
         seats: t.seats,
+        seatLabelStyle: t.seatLabelStyle,
         x: t.x,
         y: t.y,
         width: t.width,
@@ -448,7 +474,7 @@ export default function FloorEditorScreen() {
         minSpend: t.minSpend,
         isReservable: t.isReservable,
       })),
-      chairs: chairs.map((c) => ({ x: c.x, y: c.y, rotation: c.rotation })),
+      chairs: chairs.map((c) => ({ x: c.x, y: c.y, rotation: c.rotation, label: c.label || undefined })),
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -617,6 +643,15 @@ export default function FloorEditorScreen() {
               <IconButton icon="plus" mode="outlined" size={16} onPress={() => update(selected.key, { seats: Math.min(20, selected.seats + 1) })} />
             </View>
 
+            <Text style={{ color: colors.muted }}>Seat labels</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {(['number', 'letter', 'none'] as SeatLabelStyle[]).map((st) => (
+                <Chip key={st} selected={selected.seatLabelStyle === st} onPress={() => update(selected.key, { seatLabelStyle: st })}>
+                  {st === 'number' ? '1, 2, 3' : st === 'letter' ? 'A, B, C' : 'Hidden'}
+                </Chip>
+              ))}
+            </View>
+
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text style={{ width: 64 }}>Rotate</Text>
               <IconButton icon="rotate-left" mode="outlined" size={16} onPress={() => update(selected.key, { rotation: (selected.rotation - 15 + 360) % 360 })} />
@@ -640,9 +675,10 @@ export default function FloorEditorScreen() {
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Chair</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Chair{selectedChair.label ? ` · ${selectedChair.label}` : ''}</Text>
               <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelectedChair}>Delete</Button>
             </View>
+            <TextInput label="Label (e.g. Bar 1)" value={selectedChair.label} onChangeText={(v) => updateChair(selectedChair.key, { label: v })} mode="outlined" style={{ backgroundColor: colors.surface }} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text style={{ width: 64 }}>Rotate</Text>
               <IconButton icon="rotate-left" mode="outlined" size={16} onPress={() => updateChair(selectedChair.key, { rotation: (selectedChair.rotation - 15 + 360) % 360 })} />

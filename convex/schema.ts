@@ -210,12 +210,15 @@ export default defineSchema({
     x: v.number(),
     y: v.number(),
     rotation: v.number(),
+    label: v.optional(v.string()),
   }).index('by_floor_plan', ['floorPlanId']).index('by_venue', ['venueId']),
   tables: defineTable({
     floorPlanId: v.id('floorPlans'),
     label: v.string(),
     shape: tableShape,
     seats: v.number(),
+    // How attached seat chairs are labeled: 1,2,3 / A,B,C / hidden.
+    seatLabelStyle: v.optional(v.union(v.literal('number'), v.literal('letter'), v.literal('none'))),
     x: v.number(),
     y: v.number(),
     width: v.number(),

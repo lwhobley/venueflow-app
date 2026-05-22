@@ -30,6 +30,8 @@ const floorPlanValue = v.object({
   updatedAt: v.number(),
 });
 
+const seatLabelStyleValue = v.union(v.literal('number'), v.literal('letter'), v.literal('none'));
+
 const tableValue = v.object({
   _id: v.id('tables'),
   _creationTime: v.number(),
@@ -37,6 +39,7 @@ const tableValue = v.object({
   label: v.string(),
   shape: tableShape,
   seats: v.number(),
+  seatLabelStyle: v.union(seatLabelStyleValue, v.null()),
   x: v.number(),
   y: v.number(),
   width: v.number(),
@@ -71,6 +74,7 @@ const floorChairValue = v.object({
   x: v.number(),
   y: v.number(),
   rotation: v.number(),
+  label: v.union(v.string(), v.null()),
 });
 
 const floorStatsValue = v.object({
@@ -142,7 +146,7 @@ export const getActiveFloorPlan = query({
       view.push({ table, state: await loadState(ctx, table._id) });
     }
     return {
-      chairs: chairRows.map((c: Doc<'floorChairs'>) => ({ _id: c._id, x: c.x, y: c.y, rotation: c.rotation })),
+      chairs: chairRows.map((c: Doc<'floorChairs'>) => ({ _id: c._id, x: c.x, y: c.y, rotation: c.rotation, label: c.label ?? null })),
       floorPlan: {
         _id: plan._id,
         _creationTime: plan._creationTime,
@@ -163,6 +167,7 @@ export const getActiveFloorPlan = query({
           label: table.label,
           shape: table.shape,
           seats: table.seats,
+          seatLabelStyle: table.seatLabelStyle ?? null,
           x: table.x,
           y: table.y,
           width: table.width,
@@ -279,6 +284,7 @@ export const saveFloorPlan = mutation({
         label: v.string(),
         shape: tableShape,
         seats: v.number(),
+        seatLabelStyle: v.optional(seatLabelStyleValue),
         x: v.number(),
         y: v.number(),
         width: v.number(),
@@ -289,7 +295,7 @@ export const saveFloorPlan = mutation({
         isReservable: v.boolean(),
       }),
     ),
-    chairs: v.optional(v.array(v.object({ x: v.number(), y: v.number(), rotation: v.number() }))),
+    chairs: v.optional(v.array(v.object({ x: v.number(), y: v.number(), rotation: v.number(), label: v.optional(v.string()) }))),
   },
   returns: v.object({ floorPlanId: v.id('floorPlans') }),
   handler: async (ctx, args) => {
@@ -321,6 +327,7 @@ export const saveFloorPlan = mutation({
         label: table.label,
         shape: table.shape,
         seats: table.seats,
+        seatLabelStyle: table.seatLabelStyle ?? 'number',
         x: table.x,
         y: table.y,
         width: table.width,
@@ -350,6 +357,7 @@ export const saveFloorPlan = mutation({
         x: chair.x,
         y: chair.y,
         rotation: chair.rotation,
+        label: chair.label,
       });
     }
 
