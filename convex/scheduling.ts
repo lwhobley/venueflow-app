@@ -220,6 +220,7 @@ const managerShiftValue = v.object({
   endTime: v.string(),
   jobTitle: v.string(),
   station: v.string(),
+  notes: v.union(v.string(), v.null()),
   status: shiftStatus,
   profileId: v.union(v.id('profiles'), v.null()),
   memberName: v.union(v.string(), v.null()),
@@ -233,6 +234,7 @@ const staffValue = v.object({
   jobTitle: v.string(),
   weeklyHours: v.number(),
   overtime: v.boolean(),
+  availability: v.array(availabilityRow),
 });
 
 export const getManagerSchedule = query({
@@ -282,6 +284,7 @@ export const getManagerSchedule = query({
           endTime: minutesToTime(shift.endMinutes),
           jobTitle: shift.jobTitle,
           station: shift.station,
+          notes: shift.notes ?? null,
           status: shift.status,
           profileId: shift.profileId ?? null,
           memberName: shift.profileId ? nameById.get(shift.profileId) ?? null : null,
@@ -303,6 +306,14 @@ export const getManagerSchedule = query({
           jobTitle: s.jobTitle,
           weeklyHours: Math.round((mins / 60) * 10) / 10,
           overtime: mins > OVERTIME_MINUTES,
+          availability: (availByProfile.get(s._id) ?? [])
+            .sort((a: Doc<'availability'>, b: Doc<'availability'>) => a.dayIndex - b.dayIndex || a.startMinutes - b.startMinutes)
+            .map((a: Doc<'availability'>) => ({
+              dayIndex: a.dayIndex,
+              startMinutes: a.startMinutes,
+              endMinutes: a.endMinutes,
+              available: a.available,
+            })),
         };
       }),
       laborBudgetHours: venue?.weeklyLaborBudgetHours ?? null,
@@ -352,6 +363,35 @@ export const createShift = mutation({
       });
     }
     return shiftId;
+  },
+});
+
+export const updateShift = mutation({
+  args: {
+    venueId: v.id('venues'),
+    shiftId: v.id('scheduleShifts'),
+    dayIndex: v.number(),
+    startMinutes: v.number(),
+    endMinutes: v.number(),
+    jobTitle: v.string(),
+    station: v.string(),
+    notes: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    if (args.endMinutes <= args.startMinutes) throw new Error('End time must be after start time');
+    const shift = await ctx.db.get(args.shiftId);
+    if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
+    await ctx.db.patch(shift._id, {
+      dayIndex: args.dayIndex,
+      startMinutes: args.startMinutes,
+      endMinutes: args.endMinutes,
+      jobTitle: args.jobTitle.trim() || 'Staff',
+      station: args.station.trim() || 'Floor',
+      notes: args.notes?.trim() || undefined,
+    });
+    return null;
   },
 });
 
