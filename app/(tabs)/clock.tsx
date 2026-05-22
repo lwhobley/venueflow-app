@@ -34,7 +34,9 @@ function fmtTime(at: number) {
 export default function ClockScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const isAdmin = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  // Admin/owner/manager are salaried: they don't punch a time clock.
+  const salaried = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const isAdmin = salaried;
   const [location, setLocation] = useState<CurrentLocation | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [now, setNow] = useState(() => new Date());
@@ -115,6 +117,19 @@ export default function ClockScreen() {
         </View>
       </View>
 
+      {salaried ? (
+        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card.Content style={{ gap: 4 }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Salaried role</Text>
+            <Text style={{ color: colors.muted }}>
+              {(user?.role ?? 'manager').toUpperCase()} positions are salaried — no clock-in required. Use the board below to see who's on the clock.
+            </Text>
+          </Card.Content>
+        </Card>
+      ) : null}
+
+      {!salaried ? (
+      <>
       {/* Punch Now button */}
       <Pressable
         onPress={() => void onPunch()}
@@ -186,6 +201,8 @@ export default function ClockScreen() {
           )}
         </Card.Content>
       </Card>
+      </>
+      ) : null}
 
       {/* Manager board */}
       {isAdmin ? (

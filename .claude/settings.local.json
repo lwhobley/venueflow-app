@@ -14,7 +14,8 @@
       "Bash(git push *)",
       "Bash(perl -CSD -0pi -e 's/fmt\\\\x{0422}ime/fmtResTime/g' app/reservations.tsx)",
       "Bash(rm -f convex/cleanup.ts)",
-      "Bash(sed -n '1,45p' components/SubscriptionGate.tsx)"
+      "Bash(sed -n '1,45p' components/SubscriptionGate.tsx)",
+      "Bash(node -e \"const m=require\\('./node_modules/@convex-dev/auth/dist/server/index.js'\\); console.log\\(Object.keys\\(m\\).filter\\(k=>/account|signIn|store|modify|retrieve|create/i.test\\(k\\)\\)\\)\")"
     ]
   }
 }

@@ -14,7 +14,6 @@ import type * as authz from "../authz.js";
 import type * as billing from "../billing.js";
 import type * as billing_shared from "../billing/shared.js";
 import type * as chat from "../chat.js";
-import type * as cleanup from "../cleanup.js";
 import type * as floor from "../floor.js";
 import type * as floorBinding from "../floorBinding.js";
 import type * as http from "../http.js";
@@ -22,6 +21,7 @@ import type * as notifications from "../notifications.js";
 import type * as reservations from "../reservations.js";
 import type * as scheduling from "../scheduling.js";
 import type * as seed from "../seed.js";
+import type * as staffAuth from "../staffAuth.js";
 import type * as tables from "../tables.js";
 
 import type {
@@ -37,7 +37,6 @@ declare const fullApi: ApiFromModules<{
   billing: typeof billing;
   "billing/shared": typeof billing_shared;
   chat: typeof chat;
-  cleanup: typeof cleanup;
   floor: typeof floor;
   floorBinding: typeof floorBinding;
   http: typeof http;
@@ -45,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   reservations: typeof reservations;
   scheduling: typeof scheduling;
   seed: typeof seed;
+  staffAuth: typeof staffAuth;
   tables: typeof tables;
 }>;
 
