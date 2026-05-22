@@ -151,7 +151,7 @@ export default function FloorScreen() {
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
       <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontFamily: 'serif' }}>
+        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
           Floor Plan
         </Text>
         <Text style={{ color: colors.muted }}>

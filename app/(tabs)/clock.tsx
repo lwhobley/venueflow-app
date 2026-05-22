@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Text } from 'react-native-paper';
+import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Card, Text } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { colors, spacing } from '../../lib/theme';
+import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { getPreciseLocation, haversineMeters, isWithinGeofence, type CurrentLocation } from '../../lib/location';
+import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 
 type ActiveClockEntry = {
   _id: string;
@@ -17,260 +17,197 @@ type ActiveClockEntry = {
   clockInAt: number;
 };
 
+function fmtClock(d: Date) {
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 === 0 ? 12 : h % 12;
+  return { time: `${h}:${m.toString().padStart(2, '0')}`, ampm };
+}
+function fmtDate(d: Date) {
+  return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+}
+function fmtTime(at: number) {
+  return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
 export default function ClockScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const isAdmin = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
   const [location, setLocation] = useState<CurrentLocation | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(true);
+  const [now, setNow] = useState(() => new Date());
+  const [busy, setBusy] = useState(false);
+
   const clockBoard = useQuery(api.app.getClockBoard);
   const dashboard = useQuery(api.app.getDashboard);
+  const timeClock = useQuery(api.app.getMyTimeClock);
   const clockIn = useMutation(api.app.clockIn);
   const clockOut = useMutation(api.app.clockOut);
 
-  // Sources differ in casing: the Zustand store uses snake_case
-  // (geofence_radius_m) while Convex returns camelCase (geofenceRadiusM).
-  // Normalize to a single shape so downstream reads are consistent.
   const rawVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
   const activeVenue = useMemo(() => {
     if (!rawVenue) return null;
-    const geofenceRadiusM =
-      'geofenceRadiusM' in rawVenue ? rawVenue.geofenceRadiusM : rawVenue.geofence_radius_m;
-    return {
-      name: rawVenue.name,
-      latitude: rawVenue.latitude,
-      longitude: rawVenue.longitude,
-      geofenceRadiusM,
-    };
+    const geofenceRadiusM = 'geofenceRadiusM' in rawVenue ? rawVenue.geofenceRadiusM : rawVenue.geofence_radius_m;
+    return { name: rawVenue.name, latitude: rawVenue.latitude, longitude: rawVenue.longitude, geofenceRadiusM };
   }, [rawVenue]);
-  const employeeEntry = clockBoard?.employeeEntry ?? null;
+
   const activeClockEntries = (clockBoard?.activeClockEntries ?? []) as ActiveClockEntry[];
-  const isClockedIn = Boolean(employeeEntry);
-  const openShiftCount = dashboard?.analytics.openShiftCount ?? 0;
+  const isClockedIn = timeClock?.isClockedIn ?? Boolean(clockBoard?.employeeEntry);
+
+  // Live ticking clock.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoadingLocation(true);
     getPreciseLocation()
-      .then((nextLocation) => {
-        if (!cancelled) setLocation(nextLocation);
-      })
+      .then((next) => !cancelled && setLocation(next))
       .catch((error) => {
-        if (!cancelled) {
-          Alert.alert('Location needed', error instanceof Error ? error.message : 'Unable to get your location.');
-        }
+        if (!cancelled) Alert.alert('Location needed', error instanceof Error ? error.message : 'Unable to get your location.');
       })
-      .finally(() => {
-        if (!cancelled) setLoadingLocation(false);
-      });
+      .finally(() => !cancelled && setLoadingLocation(false));
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const distance = useMemo(() => {
-    if (!location || !activeVenue) return null;
-    return haversineMeters(location.latitude, location.longitude, activeVenue.latitude, activeVenue.longitude);
-  }, [location, activeVenue]);
-
   const canClock = Boolean(activeVenue && location && isWithinGeofence(location, activeVenue));
 
-  async function refreshLocation() {
-    setLoadingLocation(true);
+  const onPunch = async () => {
+    if (!location || !canClock || busy) return;
+    setBusy(true);
     try {
-      const nextLocation = await getPreciseLocation();
-      setLocation(nextLocation);
+      const args = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
+      if (isClockedIn) await clockOut(args);
+      else await clockIn(args);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('Location needed', error instanceof Error ? error.message : 'Unable to get your location.');
+      Alert.alert('Punch failed', error instanceof Error ? error.message : 'Unable to record punch.');
     } finally {
-      setLoadingLocation(false);
-    }
-  }
-
-  const submitClockIn = async () => {
-    if (!location || !canClock) return;
-    try {
-      await clockIn({
-        lat: location.latitude,
-        lng: location.longitude,
-        accuracy: location.accuracy,
-        mocked: location.mocked,
-      });
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      Alert.alert('Clock in failed', error instanceof Error ? error.message : 'Unable to clock in.');
+      setBusy(false);
     }
   };
 
-  const submitClockOut = async () => {
-    if (!location || !canClock) return;
-    try {
-      await clockOut({
-        lat: location.latitude,
-        lng: location.longitude,
-        accuracy: location.accuracy,
-        mocked: location.mocked,
-      });
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      Alert.alert('Clock out failed', error instanceof Error ? error.message : 'Unable to clock out.');
-    }
-  };
+  const { time, ampm } = fmtClock(now);
+  const punches = timeClock?.punches ?? [];
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
-      <Card style={{ backgroundColor: colors.surface }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Header: live time + date + venue pill */}
+      <View style={{ backgroundColor: colors.primary, borderRadius: 22, padding: spacing.xl, alignItems: 'center', gap: 6 }}>
+        <Text style={{ color: 'rgba(255,255,255,0.85)', fontWeight: '700' }}>{user?.full_name ?? 'Time clock'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+          <Text style={{ color: '#fff', fontSize: 56, fontWeight: '800', lineHeight: 60 }}>{time}</Text>
+          <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8, marginLeft: 4 }}>{ampm}</Text>
+        </View>
+        <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: '600' }}>{fmtDate(now)}</Text>
+        <View style={{ marginTop: 8, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 999, paddingVertical: 8, paddingHorizontal: 18 }}>
+          <Text style={{ color: '#fff', fontWeight: '600' }}>{activeVenue?.name ?? 'No venue'}</Text>
+        </View>
+      </View>
+
+      {/* Punch Now button */}
+      <Pressable
+        onPress={() => void onPunch()}
+        disabled={!canClock || busy}
+        style={{
+          backgroundColor: canClock ? (isClockedIn ? colors.danger : colors.secondary) : colors.border,
+          borderRadius: 18,
+          paddingVertical: 20,
+          alignItems: 'center',
+          opacity: busy ? 0.7 : 1,
+        }}
+      >
+        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800' }}>
+          {busy ? 'Working…' : isClockedIn ? 'Punch Out' : 'Punch Now'}
+        </Text>
+      </Pressable>
+      {!canClock ? (
+        <Text style={{ color: colors.muted, textAlign: 'center', marginTop: -4 }}>
+          {loadingLocation
+            ? 'Checking your location…'
+            : !location
+              ? 'Location unavailable — enable GPS to punch.'
+              : location.mocked
+                ? 'Mocked location detected — punching is disabled.'
+                : `You must be within ${activeVenue?.geofenceRadiusM ?? 120}m of ${activeVenue?.name ?? 'your venue'} to punch.`}
+        </Text>
+      ) : (
+        <Text style={{ color: accents[2].fg, textAlign: 'center', marginTop: -4 }}>
+          ✓ You're inside the geofence{timeClock?.openSince ? ` · in since ${fmtTime(timeClock.openSince)}` : ''}
+        </Text>
+      )}
+
+      {/* Period totals */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontFamily: 'serif' }}>
-            {isAdmin ? 'Admin Clock Board' : 'Employee Time Clock'}
-          </Text>
-          <Text style={{ color: colors.muted }}>
-            {isAdmin
-              ? 'See who is currently clocked in and whether they are inside the geofence.'
-              : 'Clock in and out only when your live GPS position matches your assigned venue.'}
-          </Text>
-          {openShiftCount > 0 ? (
-            <Chip compact style={{ alignSelf: 'flex-start', backgroundColor: '#F6E8E4' }} textStyle={{ color: colors.danger }}>
-              {openShiftCount} open shift{openShiftCount === 1 ? '' : 's'} need coverage
-            </Chip>
-          ) : null}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Period totals</Text>
+            <Text style={{ color: colors.primary, fontWeight: '800' }}>Total: {timeClock?.totalHours ?? 0}h</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: spacing.lg }}>
+            <View>
+              <Text style={{ color: colors.muted }}>Regular</Text>
+              <Text style={{ fontWeight: '700' }}>{timeClock?.regularHours ?? 0}h</Text>
+            </View>
+            <View>
+              <Text style={{ color: colors.muted }}>Sick</Text>
+              <Text style={{ fontWeight: '700' }}>{timeClock?.sickHours ?? 0}h</Text>
+            </View>
+          </View>
         </Card.Content>
       </Card>
 
-      {activeVenue ? (
-        <Card style={{ backgroundColor: colors.surface }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-              <Text variant="titleMedium">Venue geofence preview</Text>
-              <Chip compact>{activeVenue.geofenceRadiusM}m radius</Chip>
-            </View>
-            <View
-              style={{
-                height: 190,
-                borderRadius: 20,
-                backgroundColor: '#E9E1D4',
-                borderWidth: 1,
-                borderColor: colors.border,
-                overflow: 'hidden',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <View
-                style={{
-                  width: 146,
-                  height: 146,
-                  borderRadius: 73,
-                  borderWidth: 2,
-                  borderColor: colors.success,
-                  backgroundColor: 'rgba(46, 107, 74, 0.08)',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: colors.primary }} />
-              </View>
-              <View style={{ position: 'absolute', bottom: 16, left: 16, right: 16, gap: 4 }}>
-                <Text style={{ color: colors.charcoal, fontWeight: '600' }}>{activeVenue.name}</Text>
-                <Text style={{ color: colors.muted }}>
-                  {activeVenue.latitude.toFixed(4)}, {activeVenue.longitude.toFixed(4)}
-                </Text>
-              </View>
-            </View>
-          </Card.Content>
-        </Card>
-      ) : null}
-
-      {!isAdmin ? (
-        <>
-          <Card style={{ backgroundColor: colors.surface }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium">Current location</Text>
-              {loadingLocation ? (
-                <Text style={{ color: colors.muted }}>Checking GPS location…</Text>
-              ) : location ? (
-                <>
-                  <Text>
-                    You are {distance !== null ? `${Math.round(distance)}m` : '—'} from {activeVenue?.name ?? 'your venue'}
-                  </Text>
-                  <Text style={{ color: colors.muted }}>
-                    Accuracy: {Math.round(location.accuracy)}m · Mocked: {location.mocked ? 'Yes' : 'No'}
-                  </Text>
-                </>
-              ) : null}
-              <Button mode="outlined" onPress={refreshLocation}>
-                Refresh location
-              </Button>
-            </Card.Content>
-          </Card>
-
-          <Card style={{ backgroundColor: colors.surface }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium">Your clock status</Text>
-              <Text>{isClockedIn ? 'You are clocked in.' : 'You are not clocked in.'}</Text>
-
-              {activeVenue ? (
-                <View style={{ padding: 12, borderRadius: 14, backgroundColor: colors.cream, borderWidth: 1, borderColor: colors.border, gap: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <MaterialCommunityIcons name="map-marker-radius" size={18} color={colors.primary} />
-                    <Text>{activeVenue.name}</Text>
-                  </View>
-                  <Text style={{ color: colors.muted }}>{activeVenue.geofenceRadiusM}m geofence</Text>
+      {/* Daily punches */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Daily punches</Text>
+          {punches.length === 0 ? (
+            <Text style={{ color: colors.muted }}>No punches yet today.</Text>
+          ) : (
+            punches.map((p, i) => (
+              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < punches.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <MaterialCommunityIcons name={p.type === 'in' ? 'login' : 'logout'} size={18} color={p.type === 'in' ? accents[2].fg : colors.danger} />
+                  <Text>{p.type === 'in' ? 'Clock In' : 'Clock Out'}</Text>
                 </View>
-              ) : null}
+                <Text style={{ color: colors.primary, fontWeight: '700' }}>{fmtTime(p.at)}</Text>
+              </View>
+            ))
+          )}
+        </Card.Content>
+      </Card>
 
-              {isClockedIn ? (
-                <Button mode="contained" buttonColor={colors.danger} disabled={!canClock} onPress={submitClockOut}>
-                  Clock out
-                </Button>
-              ) : (
-                <Button mode="contained" buttonColor={colors.primary} disabled={!canClock} onPress={submitClockIn}>
-                  Clock in
-                </Button>
-              )}
-
-              {!canClock && location && activeVenue ? (
-                <Text style={{ color: colors.muted }}>
-                  You're {distance !== null ? `${Math.round(distance)}m` : 'too far'} from {activeVenue.name}.
-                  {location.mocked ? ' Mocked location detected.' : ''}
-                </Text>
-              ) : null}
-            </Card.Content>
-          </Card>
-        </>
-      ) : (
-        <Card style={{ backgroundColor: colors.surface, flex: 1 }}>
-          <Card.Content style={{ gap: spacing.sm, flex: 1 }}>
-            <Text variant="titleMedium">Currently clocked in</Text>
+      {/* Manager board */}
+      {isAdmin ? (
+        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Who's clocked in</Text>
             {activeClockEntries.length === 0 ? (
-              <Text style={{ color: colors.muted }}>No employees are clocked in right now.</Text>
+              <Text style={{ color: colors.muted }}>No one is clocked in right now.</Text>
             ) : (
-              activeClockEntries.map((person: ActiveClockEntry) => (
-                <View
-                  key={person._id}
-                  style={{
-                    paddingVertical: 12,
-                    borderBottomWidth: 1,
-                    borderBottomColor: colors.border,
-                    gap: 6,
-                  }}
-                >
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                    <Text style={{ fontWeight: '600' }}>{person.memberName}</Text>
-                    <Chip compact selected>
-                      {person.jobTitle}
-                    </Chip>
+              activeClockEntries.map((e) => (
+                <View key={e._id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                  <View>
+                    <Text style={{ fontWeight: '600' }}>{e.memberName}</Text>
+                    <Text style={{ color: colors.muted }}>{e.jobTitle}</Text>
                   </View>
-                  <Text style={{ color: colors.muted }}>{person.venueName}</Text>
-                  <Text style={{ color: colors.muted }}>
-                    Clocked in at {new Date(person.clockInAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                  </Text>
+                  <Text style={{ color: colors.muted }}>in {fmtTime(e.clockInAt)}</Text>
                 </View>
               ))
             )}
           </Card.Content>
         </Card>
-      )}
+      ) : null}
     </ScrollView>
   );
 }

@@ -487,6 +487,59 @@ export const getClockBoard = query({
   },
 });
 
+export const getMyTimeClock = query({
+  args: {},
+  returns: v.union(
+    v.null(),
+    v.object({
+      isClockedIn: v.boolean(),
+      openSince: v.union(v.number(), v.null()),
+      regularHours: v.number(),
+      sickHours: v.number(),
+      totalHours: v.number(),
+      punches: v.array(v.object({ type: v.union(v.literal('in'), v.literal('out')), at: v.number() })),
+    }),
+  ),
+  handler: async (ctx) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile) return null;
+    const open = await (ctx as AnyCtx).db
+      .query('timeEntries')
+      .withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profile._id).eq('isOpen', true))
+      .collect();
+    const closed = await (ctx as AnyCtx).db
+      .query('timeEntries')
+      .withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profile._id).eq('isOpen', false))
+      .collect();
+    const all = [...open, ...closed] as Doc<'timeEntries'>[];
+
+    const startOfToday = new Date().setHours(0, 0, 0, 0);
+    const now = Date.now();
+    const punches: { type: 'in' | 'out'; at: number }[] = [];
+    for (const e of all) {
+      if (e.clockInAt >= startOfToday) punches.push({ type: 'in', at: e.clockInAt });
+      if (e.clockOutAt && e.clockOutAt >= startOfToday) punches.push({ type: 'out', at: e.clockOutAt });
+    }
+    punches.sort((a, b) => a.at - b.at);
+
+    const weekMs = 1000 * 60 * 60 * 24 * 7;
+    const regularHours = closed.reduce((sum: number, e: Doc<'timeEntries'>) => {
+      if (!e.clockOutAt || now - e.clockOutAt > weekMs) return sum;
+      return sum + (e.clockOutAt - e.clockInAt) / 3600000;
+    }, 0);
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+
+    return {
+      isClockedIn: open.length > 0,
+      openSince: open[0]?.clockInAt ?? null,
+      regularHours: round1(regularHours),
+      sickHours: 0,
+      totalHours: round1(regularHours),
+      punches,
+    };
+  },
+});
+
 export const clockIn = mutation({
   args: { lat: v.number(), lng: v.number(), accuracy: v.number(), mocked: v.boolean() },
   returns: clockEntryValue,

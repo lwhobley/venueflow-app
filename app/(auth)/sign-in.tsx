@@ -70,7 +70,7 @@ export default function SignInScreen() {
     >
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center' }}>
         <View style={{ marginBottom: spacing.lg }}>
-          <Text variant="headlineLarge" style={{ color: colors.primary, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif' }}>
+          <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>
             VenueFlow
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, marginTop: 8 }}>
