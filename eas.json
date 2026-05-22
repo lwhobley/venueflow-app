@@ -14,7 +14,7 @@
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_CONVEX_URL": "https://REPLACE-with-prod-deployment.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_URL": "https://unique-egret-100.convex.cloud",
         "EXPO_PUBLIC_BILLING_ENABLED": "false"
       },
       "ios": {
