@@ -18,6 +18,7 @@ import type * as floorBinding from "../floorBinding.js";
 import type * as http from "../http.js";
 import type * as notifications from "../notifications.js";
 import type * as reservations from "../reservations.js";
+import type * as scheduling from "../scheduling.js";
 import type * as seed from "../seed.js";
 import type * as tables from "../tables.js";
 
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   notifications: typeof notifications;
   reservations: typeof reservations;
+  scheduling: typeof scheduling;
   seed: typeof seed;
   tables: typeof tables;
 }>;

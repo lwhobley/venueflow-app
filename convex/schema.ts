@@ -68,6 +68,18 @@ export default defineSchema({
     notes: v.optional(v.string()),
     status: v.union(v.literal('scheduled'), v.literal('open'), v.literal('covered')),
   }).index('by_venueId', ['venueId']).index('by_dayIndex', ['dayIndex']).index('by_profileId', ['profileId']),
+  availability: defineTable({
+    venueId: v.id('venues'),
+    profileId: v.id('profiles'),
+    dayIndex: v.number(), // 0 = Sun ... 6 = Sat
+    startMinutes: v.number(),
+    endMinutes: v.number(),
+    available: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index('by_profile', ['profileId'])
+    .index('by_venue', ['venueId'])
+    .index('by_profile_day', ['profileId', 'dayIndex']),
   timeEntries: defineTable({
     profileId: v.id('profiles'),
     venueId: v.id('venues'),
