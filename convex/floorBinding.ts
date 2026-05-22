@@ -202,6 +202,24 @@ async function validateNoOverlap(ctx: any, tableIds: Id<'tables'>[], startsAt: n
 async function assignToTables(ctx: any, args: { venueId: string; tableIds: Id<'tables'>[]; holdType: 'reserved' | 'held' | 'seated'; startsAt: number; endsAt: number; reservationId?: Id<'reservations'>; waitlistId?: Id<'waitlist'>; sourceType: 'reservation' | 'waitlist'; }) {
   const venue = await findVenuePlan(ctx, args.venueId);
   if (!venue) throw new Error('Floor plan not found');
+  if (args.tableIds.length === 0) throw new Error('Select at least one table');
+  if (args.endsAt <= args.startsAt) throw new Error('End time must be after start time');
+
+  const tableIdsInPlan = new Set(venue.tables.map((table: Doc<'tables'>) => table._id));
+  for (const tableId of args.tableIds) {
+    if (!tableIdsInPlan.has(tableId)) throw new Error('Table is outside this venue');
+  }
+
+  if (args.reservationId) {
+    const reservation = await ctx.db.get(args.reservationId);
+    if (!reservation || reservation.venueId !== args.venueId) throw new Error('Reservation is outside this venue');
+  }
+
+  if (args.waitlistId) {
+    const waitlist = await ctx.db.get(args.waitlistId);
+    if (!waitlist || waitlist.venueId !== args.venueId) throw new Error('Waitlist entry is outside this venue');
+  }
+
   await validateNoOverlap(ctx, args.tableIds, args.startsAt, args.endsAt);
 
   const createdAt = Date.now();

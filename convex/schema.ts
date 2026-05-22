@@ -40,10 +40,12 @@ export default defineSchema({
     role,
     jobTitle: v.string(),
     venueId: v.optional(v.id('venues')),
-    // PIN-login staff (managers + hourly) are provisioned by an admin: they
-    // sign in with a 4-digit PIN via a synthetic Convex Auth handle.
+    // PIN-login staff (managers + hourly) are provisioned by an admin. The
+    // auth handle is never returned in the public roster; it is exchanged only
+    // after a rate-limited PIN check.
     isPinUser: v.optional(v.boolean()),
     loginHandle: v.optional(v.string()),
+    pinHash: v.optional(v.string()),
   })
     .index('by_userId', ['userId'])
     .index('by_tokenIdentifier', ['tokenIdentifier'])
@@ -61,6 +63,12 @@ export default defineSchema({
     venueId: v.id('venues'),
     name: v.string(),
   }).index('by_venue', ['venueId']),
+  pinLoginAttempts: defineTable({
+    venueId: v.id('venues'),
+    profileId: v.id('profiles'),
+    success: v.boolean(),
+    createdAt: v.number(),
+  }).index('by_profile_and_createdAt', ['profileId', 'createdAt']),
   teams: defineTable({
     venueId: v.id('venues'),
     name: v.string(),

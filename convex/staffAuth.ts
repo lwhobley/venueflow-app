@@ -5,12 +5,39 @@ import type { Doc, Id } from './_generated/dataModel';
 import { requireVenueManager, requireVenueMember } from './authz';
 
 const accessRoleValue = v.union(v.literal('manager'), v.literal('server'), v.literal('staff'));
+const PIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
+const PIN_MAX_FAILURES = 5;
 
 function randomCode(len = 6) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let out = '';
   for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
   return out;
+}
+
+async function hashPin(venueId: Id<'venues'>, loginHandle: string, pin: string) {
+  const bytes = new TextEncoder().encode(`${venueId}:${loginHandle}:${pin}`);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function recentPinFailures(ctx: any, profileId: Id<'profiles'>) {
+  const cutoff = Date.now() - PIN_LOCK_WINDOW_MS;
+  const attempts = await ctx.db
+    .query('pinLoginAttempts')
+    .withIndex('by_profile_and_createdAt', (q: any) => q.eq('profileId', profileId))
+    .order('desc')
+    .take(PIN_MAX_FAILURES);
+  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success && attempt.createdAt >= cutoff).length;
+}
+
+async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'profiles'>, success: boolean) {
+  await ctx.db.insert('pinLoginAttempts', {
+    venueId,
+    profileId,
+    success,
+    createdAt: Date.now(),
+  });
 }
 
 // ---------- Custom roles / positions ----------
@@ -94,6 +121,7 @@ export const inviteStaff = mutation({
     if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
 
     const handle = `pin_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}@pin.venueflow`;
+    const pinHash = await hashPin(args.venueId, handle, args.pin);
 
     // Provision a Convex Auth password account so the staff member can sign in
     // with their PIN as the password.
@@ -112,6 +140,7 @@ export const inviteStaff = mutation({
       venueId: args.venueId,
       isPinUser: true,
       loginHandle: handle,
+      pinHash,
     });
 
     return { loginHandle: handle };
@@ -119,7 +148,8 @@ export const inviteStaff = mutation({
 });
 
 // ---------- Public roster for PIN login ----------
-// No auth required: staff entering a venue code see names to pick, then PIN in.
+// No auth required: staff entering a venue code see names to pick. The private
+// auth handle is exchanged only after a rate-limited PIN check below.
 
 export const getVenueRoster = query({
   args: { code: v.string() },
@@ -127,7 +157,7 @@ export const getVenueRoster = query({
     v.null(),
     v.object({
       venueName: v.string(),
-      staff: v.array(v.object({ profileId: v.id('profiles'), fullName: v.string(), jobTitle: v.string(), loginHandle: v.string() })),
+      staff: v.array(v.object({ profileId: v.id('profiles'), fullName: v.string(), jobTitle: v.string() })),
     }),
   ),
   handler: async (ctx, args) => {
@@ -141,7 +171,36 @@ export const getVenueRoster = query({
       staff: profiles
         .filter((p: Doc<'profiles'>) => p.isPinUser && p.loginHandle)
         .sort((a: Doc<'profiles'>, b: Doc<'profiles'>) => a.fullName.localeCompare(b.fullName))
-        .map((p: Doc<'profiles'>) => ({ profileId: p._id, fullName: p.fullName, jobTitle: p.jobTitle, loginHandle: p.loginHandle as string })),
+        .map((p: Doc<'profiles'>) => ({ profileId: p._id, fullName: p.fullName, jobTitle: p.jobTitle })),
     };
+  },
+});
+
+export const exchangePinForLogin = mutation({
+  args: { code: v.string(), profileId: v.id('profiles'), pin: v.string() },
+  returns: v.object({ loginHandle: v.string() }),
+  handler: async (ctx, args) => {
+    const code = args.code.trim().toUpperCase();
+    if (!code || !/^\d{4}$/.test(args.pin)) throw new Error('Wrong PIN or code');
+
+    const venue = await ctx.db.query('venues').withIndex('by_code', (q: any) => q.eq('code', code)).first();
+    const profile = await ctx.db.get(args.profileId);
+    if (!venue || !profile || profile.venueId !== venue._id || !profile.isPinUser || !profile.loginHandle) {
+      throw new Error('Wrong PIN or code');
+    }
+
+    if (await recentPinFailures(ctx, profile._id) >= PIN_MAX_FAILURES) {
+      throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
+    }
+
+    if (!profile.pinHash) {
+      throw new Error('This PIN must be reset by a manager before sign-in.');
+    }
+
+    const pinHash = await hashPin(venue._id, profile.loginHandle, args.pin);
+    const success = pinHash === profile.pinHash;
+    await recordPinAttempt(ctx, venue._id, profile._id, success);
+    if (!success) throw new Error('Wrong PIN or code');
+    return { loginHandle: profile.loginHandle };
   },
 });

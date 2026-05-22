@@ -6,6 +6,7 @@ import { Button, Card, SegmentedButtons, Text, TextInput } from 'react-native-pa
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
@@ -14,6 +15,7 @@ type Mode = 'admin' | 'staff';
 export default function SignInScreen() {
   const { signIn } = useAuthActions();
   const bootstrapProfile = useMutation(api.app.bootstrapProfile);
+  const exchangePinForLogin = useMutation(api.staffAuth.exchangePinForLogin);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
 
   const [mode, setMode] = useState<Mode>('staff');
@@ -26,7 +28,7 @@ export default function SignInScreen() {
 
   // Staff (PIN)
   const [code, setCode] = useState('');
-  const [pickedHandle, setPickedHandle] = useState<string | null>(null);
+  const [pickedProfileId, setPickedProfileId] = useState<string | null>(null);
   const [pin, setPin] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -61,13 +63,18 @@ export default function SignInScreen() {
   };
 
   const onPinSubmit = async () => {
-    if (!pickedHandle || !/^\d{4}$/.test(pin)) {
+    if (!pickedProfileId || !/^\d{4}$/.test(pin)) {
       Alert.alert('Enter your PIN', 'Pick your name and enter your 4-digit PIN.');
       return;
     }
     setSubmitting(true);
     try {
-      await signIn('password', { email: pickedHandle, password: pin, flow: 'signIn' });
+      const { loginHandle } = await exchangePinForLogin({
+        code: code.trim().toUpperCase(),
+        profileId: pickedProfileId as Id<'profiles'>,
+        pin,
+      });
+      await signIn('password', { email: loginHandle, password: pin, flow: 'signIn' });
       await finishSession();
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Wrong PIN or code. Try again.');
@@ -118,7 +125,7 @@ export default function SignInScreen() {
                 value={code}
                 onChangeText={(t) => {
                   setCode(t.toUpperCase());
-                  setPickedHandle(null);
+                  setPickedProfileId(null);
                 }}
                 autoCapitalize="characters"
                 mode="outlined"
@@ -139,17 +146,17 @@ export default function SignInScreen() {
                           <Pressable
                             key={s.profileId}
                             onPress={() => {
-                              setPickedHandle(s.loginHandle);
+                              setPickedProfileId(s.profileId);
                               setPin('');
                             }}
                             style={{
                               paddingVertical: 8,
                               paddingHorizontal: 14,
                               borderRadius: 999,
-                              backgroundColor: pickedHandle === s.loginHandle ? colors.primary : colors.cream,
+                              backgroundColor: pickedProfileId === s.profileId ? colors.primary : colors.cream,
                             }}
                           >
-                            <Text style={{ color: pickedHandle === s.loginHandle ? '#fff' : colors.charcoal, fontWeight: '600' }}>{s.fullName}</Text>
+                            <Text style={{ color: pickedProfileId === s.profileId ? '#fff' : colors.charcoal, fontWeight: '600' }}>{s.fullName}</Text>
                           </Pressable>
                         ))
                       )}
@@ -160,7 +167,7 @@ export default function SignInScreen() {
                 <Text style={{ color: colors.muted }}>Ask your manager for the venue code.</Text>
               )}
 
-              {pickedHandle ? (
+              {pickedProfileId ? (
                 <>
                   <TextInput
                     label="4-digit PIN"

@@ -123,6 +123,16 @@ function displayName(identity: Identity) {
   return identity.name?.trim() || identity.email?.split('@')[0] || 'Team member';
 }
 
+function isBootstrapAdminEmail(email: string | null | undefined) {
+  const configured = process.env.VENUEFLOW_ADMIN_EMAILS;
+  if (!configured || !email) return false;
+  const allowlist = configured
+    .split(',')
+    .map((item: string) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return allowlist.includes(email.toLowerCase());
+}
+
 function defaultJobTitle(roleName: string) {
   switch (roleName) {
     case 'admin':
@@ -299,9 +309,7 @@ export const bootstrapProfile = mutation({
 
     const existing = await getProfile(ctx as AnyCtx);
     const email = identity.email ?? 'member@venueflow.test';
-    // Emails that should always be granted admin (e.g. the venue owner).
-    const ADMIN_EMAILS = ['lwhobley@gmail.com'];
-    const isAllowlistedAdmin = !!identity.email && ADMIN_EMAILS.includes(identity.email.toLowerCase());
+    const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
     const roleName = isAllowlistedAdmin ? 'admin' : existing?.role ?? 'staff';
     let profile = existing;
 

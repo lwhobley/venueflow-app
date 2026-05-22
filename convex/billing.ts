@@ -1,14 +1,6 @@
-import { mutation, query } from './_generated/server';
+import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { getAuthUserId } from '@convex-dev/auth/server';
-import type { Id } from './_generated/dataModel';
-import { requireActiveSubscription } from './billing/shared';
-
-type Identity = {
-  tokenIdentifier: string;
-  email?: string | null;
-  name?: string | null;
-};
 
 // Intentional escape hatch — shared helpers used across query/mutation ctxs.
 // See note in convex/app.ts. Tracked for proper typing in the hardening task.
@@ -73,23 +65,19 @@ export const getMyBilling = query({
   },
 });
 
-export const reconcilePaidSubscription = mutation({
+export const reconcilePaidSubscription = internalMutation({
   args: {
+    venueId: v.id('venues'),
     packageRef: v.string(),
     productId: v.optional(v.string()),
     platform: subscriptionPlatformValue,
   },
   returns: billingValue,
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error('Unauthenticated');
-    const profile = await getProfile(ctx as AnyCtx);
-    if (!profile?.venueId) throw new Error('Profile is not initialized');
-
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
+    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).unique();
     if (!subscription) throw new Error('Subscription not found');
 
-    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    const venue = await (ctx as AnyCtx).db.get(args.venueId);
     if (!venue) throw new Error('Venue not found');
 
     const now = Date.now();
@@ -137,10 +125,13 @@ export const syncVenueSubscription = mutation({
   },
   returns: billingValue,
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error('Unauthenticated');
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== args.venueId || (profile.role !== 'admin' && profile.role !== 'owner')) {
+      throw new Error('Not authorized');
+    }
+    if (args.status === 'active' || args.status === 'trialing') {
+      throw new Error('Paid subscription status must be reconciled by a verified billing provider');
+    }
     const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).unique();
     if (!subscription) throw new Error('Subscription not found');
     await (ctx as AnyCtx).db.patch(subscription._id, {
