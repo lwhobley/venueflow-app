@@ -99,6 +99,11 @@ function toReservationValue(reservation: Doc<'reservations'>) {
   };
 }
 
+function csvCell(value: string | number | null | undefined) {
+  const text = value == null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 async function listReservations(ctx: any, venueId: string) {
   const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', venueId)).collect();
   return reservations
@@ -286,5 +291,31 @@ export const removeReservation = mutation({
     if (existing.venueId !== args.venueId) throw new Error('Wrong venue');
     await ctx.db.patch(existing._id, { status: 'cancelled', updatedAt: Date.now(), notes: 'Removed by staff' });
     return null;
+  },
+});
+
+export const exportReservationsCsv = query({
+  args: { venueId: v.id('venues') },
+  returns: v.union(v.null(), v.string()),
+  handler: async (ctx, args) => {
+    const profile = await requireProfile(ctx);
+    if (!canManage(profile.role) || profile.venueId !== args.venueId) return null;
+    const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
+    const rows = [['guestName', 'partySize', 'reservationTime', 'durationMinutes', 'source', 'status', 'phone', 'email', 'tags', 'notes']];
+    for (const reservation of reservations.sort((a: Doc<'reservations'>, b: Doc<'reservations'>) => b.reservationTime - a.reservationTime).slice(0, 500)) {
+      rows.push([
+        reservation.guestName,
+        String(reservation.partySize),
+        new Date(reservation.reservationTime).toISOString(),
+        String(reservation.durationMinutes),
+        reservation.source,
+        reservation.status,
+        reservation.guestPhone ?? '',
+        reservation.guestEmail ?? '',
+        (reservation.tags ?? []).join('|'),
+        reservation.notes ?? reservation.specialRequests ?? '',
+      ]);
+    }
+    return rows.map((row) => row.map(csvCell).join(',')).join('\n');
   },
 });

@@ -9,7 +9,9 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 type Shift = {
   _id: Id<'scheduleShifts'>;
+  dayIndex: number;
   dayLabel: string;
+  startMinutes: number;
   startTime: string;
   endTime: string;
   jobTitle: string;
@@ -41,6 +43,14 @@ export function MyShifts() {
   const open = useMemo(() => (data?.open ?? []) as Shift[], [data]);
   const roster = useMemo(() => (data?.roster ?? []) as RosterDay[], [data]);
   const blackouts = useMemo(() => (blackoutData ?? []) as Blackout[], [blackoutData]);
+  const nextShift = useMemo(() => {
+    const now = new Date();
+    const today = now.getDay();
+    const minutesNow = now.getHours() * 60 + now.getMinutes();
+    return [...mine]
+      .filter((shift) => shift.dayIndex > today || (shift.dayIndex === today && shift.startMinutes >= minutesNow))
+      .sort((a, b) => a.dayIndex - b.dayIndex || a.startMinutes - b.startMinutes)[0] ?? null;
+  }, [mine]);
 
   const submitTimeOff = async () => {
     setOffError(null);
@@ -71,6 +81,17 @@ export function MyShifts() {
 
   return (
     <View style={{ gap: spacing.md }}>
+      {nextShift ? (
+        <Card style={{ backgroundColor: accents[0].bg, borderRadius: 16 }}>
+          <Card.Content style={{ gap: 4 }}>
+            <Text variant="titleMedium" style={{ color: accents[0].fg, fontWeight: '800' }}>Upcoming shift reminder</Text>
+            <Text style={{ color: colors.charcoal }}>
+              {nextShift.dayLabel} at {nextShift.startTime} · {nextShift.jobTitle} · {nextShift.station}
+            </Text>
+          </Card.Content>
+        </Card>
+      ) : null}
+
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>My shifts</Text>

@@ -1,16 +1,26 @@
 import { ScrollView, View } from 'react-native';
 import { Card, Chip, Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useQuery } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+
+type NotificationItem = {
+  _id: Id<'notificationEvents'>;
+  title: string;
+  body: string;
+  read: boolean;
+};
 
 export default function HomeScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const dashboard = useQuery(api.app.getDashboard);
+  const notifications = useQuery(api.app.getNotifications);
+  const markNotificationRead = useMutation(api.app.markNotificationRead);
   const loading = dashboard === undefined;
 
   const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? 'there';
@@ -44,6 +54,8 @@ export default function HomeScreen() {
       }))
     : [];
 
+  const recentNotifications = (notifications ?? []) as NotificationItem[];
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
@@ -74,6 +86,30 @@ export default function HomeScreen() {
           </Card.Content>
         </Card>
       ) : null}
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Notifications</Text>
+            <Chip compact>{recentNotifications.filter((item) => !item.read).length} unread</Chip>
+          </View>
+          {recentNotifications.length === 0 ? (
+            <Text style={{ color: colors.muted }}>No notifications yet.</Text>
+          ) : (
+            recentNotifications.slice(0, 4).map((item) => (
+              <View key={item._id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 4 }}>
+                <Text style={{ fontWeight: item.read ? '600' : '800' }}>{item.title}</Text>
+                <Text style={{ color: colors.muted }}>{item.body}</Text>
+                {!item.read ? (
+                  <Chip compact onPress={() => void markNotificationRead({ notificationId: item._id })}>
+                    Mark read
+                  </Chip>
+                ) : null}
+              </View>
+            ))
+          )}
+        </Card.Content>
+      </Card>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {analytics.map((item: any, i: number) => {

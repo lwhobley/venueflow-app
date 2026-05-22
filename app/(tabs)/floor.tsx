@@ -33,6 +33,9 @@ type AssignmentRow = {
   guestName: string;
   partySize: number;
   source: string;
+  tags: string[];
+  notes: string | null;
+  status: string;
   startsAt: number;
   endsAt: number;
 };
@@ -321,7 +324,7 @@ export default function FloorScreen() {
                     {currentAssignment ? (
                       <View style={{ marginTop: 4, alignItems: 'center' }}>
                         <Text style={{ color: colors.cream, fontSize: 11, fontWeight: '700' }}>{currentAssignment.guestName}</Text>
-                        <Text style={{ color: colors.cream, fontSize: 10 }}>{formatTime(currentAssignment.startsAt)}</Text>
+                        <Text style={{ color: colors.cream, fontSize: 10 }}>{currentAssignment.partySize}p · {formatTime(currentAssignment.startsAt)}</Text>
                       </View>
                     ) : nextAssignment ? (
                       <Text style={{ color: colors.cream, fontSize: 10, marginTop: 4 }}>Next · {nextAssignment.guestName}</Text>
@@ -383,6 +386,17 @@ export default function FloorScreen() {
                       <Text style={{ color: colors.cream, fontSize: 12 }}>
                         {assignment.source} · {formatTime(assignment.startsAt)} - {formatTime(assignment.endsAt)}
                       </Text>
+                      <Text style={{ color: colors.cream, fontSize: 12 }}>Party of {assignment.partySize}</Text>
+                      {assignment.notes ? <Text style={{ color: colors.cream, fontSize: 12 }}>{assignment.notes}</Text> : null}
+                      {assignment.tags.length > 0 ? (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                          {assignment.tags.map((tag) => (
+                            <Chip key={tag} compact style={{ backgroundColor: colors.cream }} textStyle={{ color: colors.charcoal }}>
+                              {tag}
+                            </Chip>
+                          ))}
+                        </View>
+                      ) : null}
                       {canEdit ? (
                         <Button mode="text" textColor={colors.primary} onPress={() => void onRelease(assignment.assignmentId)}>
                           Release

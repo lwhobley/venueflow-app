@@ -19,6 +19,9 @@ type ReservationRow = {
   durationMinutes: number;
   source: string;
   status: string;
+  tags: string[];
+  specialRequests: string | null;
+  notes: string | null;
 };
 
 type FloorTable = {
@@ -72,6 +75,8 @@ export default function ReservationsScreen() {
   const [date, setDate] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
   const [time, setTime] = useState(`${pad((now.getHours() + 1) % 24)}:00`);
   const [source, setSource] = useState<Source>('direct');
+  const [tags, setTags] = useState('');
+  const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
@@ -101,9 +106,13 @@ export default function ReservationsScreen() {
         durationMinutes: 120,
         source,
         status: 'confirmed',
-        tags: [],
+        tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        specialRequests: notes.trim() || undefined,
+        notes: notes.trim() || undefined,
       });
       setGuestName('');
+      setTags('');
+      setNotes('');
       setPartySize(2);
       setShowForm(false);
     } catch (e) {
@@ -189,6 +198,8 @@ export default function ReservationsScreen() {
                     <Chip key={s} selected={source === s} onPress={() => setSource(s)}>{s.replace('_', ' ')}</Chip>
                   ))}
                 </View>
+                <TextInput label="Tags (comma separated)" value={tags} onChangeText={setTags} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                <TextInput label="Notes / requests" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
                 <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()}>Create reservation</Button>
               </>
@@ -218,6 +229,15 @@ export default function ReservationsScreen() {
                   </View>
                   <Text>{res.guestName} · party of {res.partySize}</Text>
                   <Text style={{ color: colors.muted }}>{fmtDay(res.reservationTime)} · {res.source.replace('_', ' ')}</Text>
+
+                  {res.notes || res.specialRequests ? <Text style={{ color: colors.muted }}>{res.notes ?? res.specialRequests}</Text> : null}
+                  {res.tags?.length ? (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {res.tags.map((tag) => (
+                        <Chip key={tag} compact>{tag}</Chip>
+                      ))}
+                    </View>
+                  ) : null}
 
                   {canManage && !cancelled ? (
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>

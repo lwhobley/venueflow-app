@@ -113,6 +113,16 @@ export default defineSchema({
     text: v.string(),
     createdAt: v.number(),
   }).index('by_conversation', ['conversationId']),
+  notificationEvents: defineTable({
+    venueId: v.id('venues'),
+    profileId: v.optional(v.id('profiles')),
+    audience: v.union(v.literal('managers'), v.literal('staff'), v.literal('profile')),
+    kind: v.union(v.literal('shift_assigned'), v.literal('request_created'), v.literal('request_reviewed'), v.literal('reservation_due'), v.literal('clock_alert')),
+    title: v.string(),
+    body: v.string(),
+    readBy: v.array(v.id('profiles')),
+    createdAt: v.number(),
+  }).index('by_venue_and_createdAt', ['venueId', 'createdAt']).index('by_profile_and_createdAt', ['profileId', 'createdAt']),
   blackoutDates: defineTable({
     venueId: v.id('venues'),
     startDate: v.string(), // YYYY-MM-DD (inclusive)

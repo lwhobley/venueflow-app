@@ -119,6 +119,23 @@ const staffRequestValue = v.object({
   updatedAt: v.number(),
 });
 
+const notificationEventValue = v.object({
+  _id: v.id('notificationEvents'),
+  kind: v.union(v.literal('shift_assigned'), v.literal('request_created'), v.literal('request_reviewed'), v.literal('reservation_due'), v.literal('clock_alert')),
+  title: v.string(),
+  body: v.string(),
+  createdAt: v.number(),
+  read: v.boolean(),
+});
+
+const managerAlertValue = v.object({
+  kind: v.union(v.literal('late_clock_in'), v.literal('missed_clock_out')),
+  severity: v.union(v.literal('warning'), v.literal('danger')),
+  profileId: v.id('profiles'),
+  memberName: v.string(),
+  detail: v.string(),
+});
+
 function displayName(identity: Identity) {
   return identity.name?.trim() || identity.email?.split('@')[0] || 'Team member';
 }
@@ -158,6 +175,36 @@ function minutesToTime(minutes: number) {
   const suffix = hours >= 12 ? 'PM' : 'AM';
   const displayHour = hours % 12 === 0 ? 12 : hours % 12;
   return `${displayHour}:${mins.toString().padStart(2, '0')} ${suffix}`;
+}
+
+function csvCell(value: string | number | null | undefined) {
+  const text = value == null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+async function notifyProfile(ctx: AnyCtx, args: { venueId: Id<'venues'>; profileId: Id<'profiles'>; kind: 'request_reviewed'; title: string; body: string }) {
+  await ctx.db.insert('notificationEvents', {
+    venueId: args.venueId,
+    profileId: args.profileId,
+    audience: 'profile',
+    kind: args.kind,
+    title: args.title,
+    body: args.body,
+    readBy: [],
+    createdAt: Date.now(),
+  });
+}
+
+async function notifyManagers(ctx: AnyCtx, args: { venueId: Id<'venues'>; kind: 'request_created' | 'clock_alert'; title: string; body: string }) {
+  await ctx.db.insert('notificationEvents', {
+    venueId: args.venueId,
+    audience: 'managers',
+    kind: args.kind,
+    title: args.title,
+    body: args.body,
+    readBy: [],
+    createdAt: Date.now(),
+  });
 }
 
 async function requireIdentity(ctx: AnyCtx) {
@@ -523,7 +570,7 @@ export const getWeeklySchedule = query({
 
 export const getClockBoard = query({
   args: {},
-  returns: v.union(v.null(), v.object({ venue: venueValue, activeClockEntries: v.array(clockEntryValue), employeeEntry: v.union(clockEntryValue, v.null()) })),
+  returns: v.union(v.null(), v.object({ venue: venueValue, activeClockEntries: v.array(clockEntryValue), employeeEntry: v.union(clockEntryValue, v.null()), managerAlerts: v.array(managerAlertValue) })),
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
@@ -540,7 +587,43 @@ export const getClockBoard = query({
       openEntries.push(mapClockEntry(entry, entryProfile, venue));
     }
     const myOpenEntry = openEntries.find((item: ReturnType<typeof mapClockEntry>) => item.memberId === profile._id) ?? null;
-    return { venue: mapVenue(venue), activeClockEntries: openEntries, employeeEntry: myOpenEntry };
+    const managerAlerts: Array<{ kind: 'late_clock_in' | 'missed_clock_out'; severity: 'warning' | 'danger'; profileId: Id<'profiles'>; memberName: string; detail: string }> = [];
+    if (isAdminRole(profile.role)) {
+      const now = Date.now();
+      const today = new Date().getDay();
+      const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+      const openByProfile = new Set(entries.filter((entry: Doc<'timeEntries'>) => entry.isOpen).map((entry: Doc<'timeEntries'>) => entry.profileId));
+      const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+      for (const shift of shifts) {
+        if (shift.dayIndex !== today || !shift.profileId || shift.status === 'open') continue;
+        if (minutesNow >= shift.startMinutes + 15 && minutesNow <= shift.endMinutes && !openByProfile.has(shift.profileId)) {
+          const staff = await (ctx as AnyCtx).db.get(shift.profileId);
+          if (staff) {
+            managerAlerts.push({
+              kind: 'late_clock_in',
+              severity: 'warning',
+              profileId: staff._id,
+              memberName: staff.fullName,
+              detail: `${shift.jobTitle} was scheduled at ${minutesToTime(shift.startMinutes)} and is not clocked in.`,
+            });
+          }
+        }
+      }
+      for (const entry of entries) {
+        if (!entry.isOpen || now - entry.clockInAt < 10 * 60 * 60 * 1000) continue;
+        const staff = await (ctx as AnyCtx).db.get(entry.profileId);
+        if (staff) {
+          managerAlerts.push({
+            kind: 'missed_clock_out',
+            severity: 'danger',
+            profileId: staff._id,
+            memberName: staff.fullName,
+            detail: `Clocked in since ${new Date(entry.clockInAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`,
+          });
+        }
+      }
+    }
+    return { venue: mapVenue(venue), activeClockEntries: openEntries, employeeEntry: myOpenEntry, managerAlerts: managerAlerts.slice(0, 8) };
   },
 });
 
@@ -776,6 +859,12 @@ export const createStaffRequest = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    await notifyManagers(ctx as AnyCtx, {
+      venueId: args.venueId,
+      kind: 'request_created',
+      title: 'New staff request',
+      body: `${profile.fullName} submitted ${args.kind.replace('_', ' ')}: ${args.title}`,
+    });
     const request = await (ctx as AnyCtx).db.get(requestId);
     if (!request) throw new Error('Unable to create request');
     return {
@@ -824,6 +913,13 @@ export const reviewStaffRequest = mutation({
       reviewedAt: Date.now(),
       responseNotes: args.responseNotes,
       updatedAt: Date.now(),
+    });
+    await notifyProfile(ctx as AnyCtx, {
+      venueId: reviewer.venueId,
+      profileId: request.profileId,
+      kind: 'request_reviewed',
+      title: `Request ${args.status}`,
+      body: args.responseNotes?.trim() || `${reviewer.fullName} marked your ${request.kind.replace('_', ' ')} request ${args.status}.`,
     });
     const updated = await (ctx as AnyCtx).db.get(request._id);
     if (!updated) throw new Error('Unable to update request');
@@ -1038,5 +1134,108 @@ export const transferVenueStaff = mutation({
     const updated = await (ctx as AnyCtx).db.get(staff._id);
     if (!updated) throw new Error('Unable to transfer staff member');
     return mapProfile(updated);
+  },
+});
+
+export const getNotifications = query({
+  args: {},
+  returns: v.array(notificationEventValue),
+  handler: async (ctx) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile?.venueId) return [];
+    const rows = await (ctx as AnyCtx).db
+      .query('notificationEvents')
+      .withIndex('by_venue_and_createdAt', (q: any) => q.eq('venueId', profile.venueId))
+      .order('desc')
+      .take(20);
+    return rows
+      .filter((row: Doc<'notificationEvents'>) => row.audience !== 'profile' || row.profileId === profile._id)
+      .filter((row: Doc<'notificationEvents'>) => row.audience !== 'managers' || isAdminRole(profile.role))
+      .map((row: Doc<'notificationEvents'>) => ({
+        _id: row._id,
+        kind: row.kind,
+        title: row.title,
+        body: row.body,
+        createdAt: row.createdAt,
+        read: row.readBy.some((id) => id === profile._id),
+      }));
+  },
+});
+
+export const markNotificationRead = mutation({
+  args: { notificationId: v.id('notificationEvents') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile?.venueId) throw new Error('Profile is not initialized');
+    const row = await (ctx as AnyCtx).db.get(args.notificationId);
+    if (!row || row.venueId !== profile.venueId) throw new Error('Notification not found');
+    const canRead = row.audience === 'staff' || (row.audience === 'managers' && isAdminRole(profile.role)) || row.profileId === profile._id;
+    if (!canRead) throw new Error('Not authorized');
+    if (!row.readBy.some((id: Id<'profiles'>) => id === profile._id)) {
+      await (ctx as AnyCtx).db.patch(row._id, { readBy: [...row.readBy, profile._id] });
+    }
+    return null;
+  },
+});
+
+export const getManagerInsights = query({
+  args: {},
+  returns: v.union(
+    v.null(),
+    v.object({
+      scheduledShifts: v.number(),
+      openShifts: v.number(),
+      activeClocks: v.number(),
+      lateOrMissedAlerts: v.number(),
+      activeReservations: v.number(),
+      upcomingReservations: v.number(),
+      pendingRequests: v.number(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile?.venueId || !isAdminRole(profile.role)) return null;
+    const now = Date.now();
+    const upcomingEnd = now + 24 * 60 * 60 * 1000;
+    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    const reservations = await (ctx as AnyCtx).db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    const requests = await (ctx as AnyCtx).db.query('staffRequests').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    const activeClocks = entries.filter((entry: Doc<'timeEntries'>) => entry.isOpen);
+    return {
+      scheduledShifts: shifts.filter((shift: Doc<'scheduleShifts'>) => shift.status === 'scheduled' || shift.status === 'covered').length,
+      openShifts: shifts.filter((shift: Doc<'scheduleShifts'>) => shift.status === 'open').length,
+      activeClocks: activeClocks.length,
+      lateOrMissedAlerts: activeClocks.filter((entry: Doc<'timeEntries'>) => now - entry.clockInAt >= 10 * 60 * 60 * 1000).length,
+      activeReservations: reservations.filter((reservation: Doc<'reservations'>) => reservation.status === 'confirmed' || reservation.status === 'checked_in' || reservation.status === 'seated').length,
+      upcomingReservations: reservations.filter((reservation: Doc<'reservations'>) => reservation.reservationTime >= now && reservation.reservationTime <= upcomingEnd && reservation.status !== 'cancelled').length,
+      pendingRequests: requests.filter((request: Doc<'staffRequests'>) => request.status === 'pending').length,
+    };
+  },
+});
+
+export const exportTimeEntriesCsv = query({
+  args: {},
+  returns: v.union(v.null(), v.string()),
+  handler: async (ctx) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile?.venueId || !isAdminRole(profile.role)) return null;
+    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    const rows = [['member', 'jobTitle', 'clockInAt', 'clockOutAt', 'hours', 'clockInAccuracyM', 'clockInMocked']];
+    for (const entry of entries.sort((a: Doc<'timeEntries'>, b: Doc<'timeEntries'>) => b.clockInAt - a.clockInAt).slice(0, 500)) {
+      const staff = await (ctx as AnyCtx).db.get(entry.profileId);
+      const hours = entry.clockOutAt ? Math.round(((entry.clockOutAt - entry.clockInAt) / 3600000) * 100) / 100 : '';
+      rows.push([
+        staff?.fullName ?? 'Unknown',
+        staff?.jobTitle ?? '',
+        new Date(entry.clockInAt).toISOString(),
+        entry.clockOutAt ? new Date(entry.clockOutAt).toISOString() : '',
+        String(hours),
+        String(entry.clockInAccuracyM),
+        String(entry.clockInMocked),
+      ]);
+    }
+    return rows.map((row) => row.map(csvCell).join(',')).join('\n');
   },
 });

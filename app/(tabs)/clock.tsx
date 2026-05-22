@@ -17,6 +17,14 @@ type ActiveClockEntry = {
   clockInAt: number;
 };
 
+type ManagerAlert = {
+  kind: 'late_clock_in' | 'missed_clock_out';
+  severity: 'warning' | 'danger';
+  profileId: string;
+  memberName: string;
+  detail: string;
+};
+
 function fmtClock(d: Date) {
   let h = d.getHours();
   const m = d.getMinutes();
@@ -56,6 +64,7 @@ export default function ClockScreen() {
   }, [rawVenue]);
 
   const activeClockEntries = (clockBoard?.activeClockEntries ?? []) as ActiveClockEntry[];
+  const managerAlerts = (clockBoard?.managerAlerts ?? []) as ManagerAlert[];
   const isClockedIn = timeClock?.isClockedIn ?? Boolean(clockBoard?.employeeEntry);
 
   // Live ticking clock.
@@ -206,24 +215,41 @@ export default function ClockScreen() {
 
       {/* Manager board */}
       {isAdmin ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Who's clocked in</Text>
-            {activeClockEntries.length === 0 ? (
-              <Text style={{ color: colors.muted }}>No one is clocked in right now.</Text>
-            ) : (
-              activeClockEntries.map((e) => (
-                <View key={e._id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                  <View>
-                    <Text style={{ fontWeight: '600' }}>{e.memberName}</Text>
-                    <Text style={{ color: colors.muted }}>{e.jobTitle}</Text>
+        <>
+          <Card style={{ backgroundColor: managerAlerts.length > 0 ? '#FDE7E9' : colors.surface, borderRadius: 16 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Manager alerts</Text>
+              {managerAlerts.length === 0 ? (
+                <Text style={{ color: colors.muted }}>No late clock-ins or missed clock-outs right now.</Text>
+              ) : (
+                managerAlerts.map((alert) => (
+                  <View key={`${alert.kind}-${alert.profileId}`} style={{ gap: 2, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                    <Text style={{ color: alert.severity === 'danger' ? colors.danger : accents[1].fg, fontWeight: '800' }}>{alert.memberName}</Text>
+                    <Text style={{ color: colors.charcoal }}>{alert.detail}</Text>
                   </View>
-                  <Text style={{ color: colors.muted }}>in {fmtTime(e.clockInAt)}</Text>
-                </View>
-              ))
-            )}
-          </Card.Content>
-        </Card>
+                ))
+              )}
+            </Card.Content>
+          </Card>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Who's clocked in</Text>
+              {activeClockEntries.length === 0 ? (
+                <Text style={{ color: colors.muted }}>No one is clocked in right now.</Text>
+              ) : (
+                activeClockEntries.map((e) => (
+                  <View key={e._id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                    <View>
+                      <Text style={{ fontWeight: '600' }}>{e.memberName}</Text>
+                      <Text style={{ color: colors.muted }}>{e.jobTitle}</Text>
+                    </View>
+                    <Text style={{ color: colors.muted }}>in {fmtTime(e.clockInAt)}</Text>
+                  </View>
+                ))
+              )}
+            </Card.Content>
+          </Card>
+        </>
       ) : null}
     </ScrollView>
   );

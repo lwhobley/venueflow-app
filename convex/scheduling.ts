@@ -27,6 +27,31 @@ function dayLabel(index: number) {
   return dayLabels[index] ?? 'Day';
 }
 
+async function notifyProfile(ctx: any, args: { venueId: Doc<'venues'>['_id']; profileId: Doc<'profiles'>['_id']; kind: 'shift_assigned' | 'request_created' | 'request_reviewed'; title: string; body: string }) {
+  await ctx.db.insert('notificationEvents', {
+    venueId: args.venueId,
+    profileId: args.profileId,
+    audience: 'profile',
+    kind: args.kind,
+    title: args.title,
+    body: args.body,
+    readBy: [],
+    createdAt: Date.now(),
+  });
+}
+
+async function notifyManagers(ctx: any, args: { venueId: Doc<'venues'>['_id']; kind: 'shift_assigned' | 'request_created' | 'request_reviewed'; title: string; body: string }) {
+  await ctx.db.insert('notificationEvents', {
+    venueId: args.venueId,
+    audience: 'managers',
+    kind: args.kind,
+    title: args.title,
+    body: args.body,
+    readBy: [],
+    createdAt: Date.now(),
+  });
+}
+
 // A shift assigned to a member conflicts with availability when, for that day,
 // the member has availability data and either an explicit unavailable window
 // overlaps the shift, or no available window fully covers it.
@@ -248,7 +273,7 @@ export const createShift = mutation({
   handler: async (ctx, args) => {
     await requireVenueManager(ctx, args.venueId);
     if (args.endMinutes <= args.startMinutes) throw new Error('End time must be after start time');
-    return await ctx.db.insert('scheduleShifts', {
+    const shiftId = await ctx.db.insert('scheduleShifts', {
       venueId: args.venueId,
       profileId: args.profileId,
       dayIndex: args.dayIndex,
@@ -258,6 +283,23 @@ export const createShift = mutation({
       station: args.station,
       status: args.profileId ? 'scheduled' : 'open',
     });
+    if (args.profileId) {
+      await notifyProfile(ctx, {
+        venueId: args.venueId,
+        profileId: args.profileId,
+        kind: 'shift_assigned',
+        title: 'New shift assigned',
+        body: `${dayLabel(args.dayIndex)} ${minutesToTime(args.startMinutes)}-${minutesToTime(args.endMinutes)} · ${args.jobTitle}`,
+      });
+    } else {
+      await notifyManagers(ctx, {
+        venueId: args.venueId,
+        kind: 'shift_assigned',
+        title: 'Open shift added',
+        body: `${dayLabel(args.dayIndex)} ${minutesToTime(args.startMinutes)}-${minutesToTime(args.endMinutes)} needs coverage.`,
+      });
+    }
+    return shiftId;
   },
 });
 
@@ -271,6 +313,13 @@ export const assignShift = mutation({
     const member = await ctx.db.get(args.profileId);
     if (!member || member.venueId !== args.venueId) throw new Error('Staff member is not in this venue');
     await ctx.db.patch(shift._id, { profileId: args.profileId, status: 'scheduled' });
+    await notifyProfile(ctx, {
+      venueId: args.venueId,
+      profileId: args.profileId,
+      kind: 'shift_assigned',
+      title: 'Shift assigned',
+      body: `${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)} · ${shift.jobTitle}`,
+    });
     return null;
   },
 });
@@ -412,6 +461,12 @@ export const claimOpenShift = mutation({
     if (!shift || shift.venueId !== profile.venueId) throw new Error('Shift not found');
     if (shift.profileId || shift.status !== 'open') throw new Error('This shift is no longer open');
     await ctx.db.patch(shift._id, { profileId: profile._id, status: 'covered' });
+    await notifyManagers(ctx, {
+      venueId: profile.venueId,
+      kind: 'shift_assigned',
+      title: 'Open shift covered',
+      body: `${profile.fullName} picked up ${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)}.`,
+    });
     return null;
   },
 });
@@ -426,7 +481,7 @@ export const requestDropShift = mutation({
     if (!shift || shift.venueId !== profile.venueId) throw new Error('Shift not found');
     if (shift.profileId !== profile._id) throw new Error('You can only drop your own shifts');
     const now = Date.now();
-    return await ctx.db.insert('staffRequests', {
+    const requestId = await ctx.db.insert('staffRequests', {
       venueId: profile.venueId,
       profileId: profile._id,
       kind: 'drop_shift',
@@ -437,5 +492,12 @@ export const requestDropShift = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    await notifyManagers(ctx, {
+      venueId: profile.venueId,
+      kind: 'request_created',
+      title: 'Drop shift request',
+      body: `${profile.fullName} asked to drop ${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}.`,
+    });
+    return requestId;
   },
 });
