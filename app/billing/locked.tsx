@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { useA0Purchases } from '../../lib/a0-purchases-stub';
+import { useAction } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -20,32 +21,21 @@ export default function BillingLockedScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const reason = Array.isArray(params.reason) ? params.reason[0] : params.reason ?? 'never_subscribed';
   const canPay = user?.role === 'admin' || user?.role === 'owner';
-  const { offerings, purchase, restore, isPremium, isLoading } = useA0Purchases();
-  const [purchasing, setPurchasing] = useState(false);
+  const createCheckout = useAction(api.billing.createStripeCheckoutSession);
+  const createPortal = useAction(api.billing.createStripeBillingPortalSession);
+  const [loading, setLoading] = useState<'checkout' | 'portal' | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const packages = offerings?.current?.availablePackages ?? [];
-  const primaryPackage = packages[0] ?? null;
-
-  const onSubscribe = async () => {
-    if (!primaryPackage) return;
-    setPurchasing(true);
+  const openStripe = async (kind: 'checkout' | 'portal') => {
+    setLoading(kind);
+    setError(null);
     try {
-      await purchase(primaryPackage.identifier);
-      router.replace('/(tabs)/profile');
+      const session = kind === 'checkout' ? await createCheckout({}) : await createPortal({});
+      await Linking.openURL(session.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open Stripe billing.');
     } finally {
-      setPurchasing(false);
-    }
-  };
-
-  const onRestore = async () => {
-    setPurchasing(true);
-    try {
-      await restore();
-      if (isPremium) {
-        router.replace('/(tabs)/profile');
-      }
-    } finally {
-      setPurchasing(false);
+      setLoading(null);
     }
   };
 
@@ -64,7 +54,7 @@ export default function BillingLockedScreen() {
             <Card style={{ backgroundColor: colors.background, marginTop: spacing.xs }}>
               <Card.Content style={{ gap: 4 }}>
                 <Text variant="titleMedium">14-day free trial, then $49/month</Text>
-                <Text style={{ color: colors.muted }}>Unlimited reservations, waitlist, floor plan, integrations, and staff.</Text>
+                <Text style={{ color: colors.muted }}>Stripe manages subscriptions, renewals, invoices, and payment methods.</Text>
               </Card.Content>
             </Card>
 
@@ -79,17 +69,12 @@ export default function BillingLockedScreen() {
               </>
             ) : canPay ? (
               <>
-                {packages.length > 0 ? (
-                  <Button mode="contained" buttonColor={colors.primary} loading={purchasing || isLoading} onPress={onSubscribe}>
-                    {primaryPackage ? `Subscribe — ${primaryPackage.product.priceString}` : 'Subscribe'}
-                  </Button>
-                ) : (
-                  <Text style={{ color: colors.danger }}>
-                    No active products are available yet. Sync monetization before charging customers.
-                  </Text>
-                )}
-                <Button mode="outlined" textColor={colors.primary} loading={purchasing} onPress={onRestore}>
-                  Restore purchases
+                {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
+                <Button mode="contained" buttonColor={colors.primary} loading={loading === 'checkout'} onPress={() => void openStripe('checkout')}>
+                  Subscribe with Stripe
+                </Button>
+                <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openStripe('portal')}>
+                  Manage billing
                 </Button>
               </>
             ) : (

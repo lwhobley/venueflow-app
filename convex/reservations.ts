@@ -111,6 +111,55 @@ async function listReservations(ctx: any, venueId: string) {
     .map((reservation: Doc<'reservations'>) => toReservationValue(reservation));
 }
 
+function normalizeText(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function mergeTags(existing: string[], incoming: string[]) {
+  return Array.from(new Set([...existing, ...incoming].map((tag) => tag.trim()).filter(Boolean))).slice(0, 12);
+}
+
+async function upsertReservationGuest(ctx: any, args: { venueId: Id<'venues'>; guestName: string; guestPhone?: string; guestEmail?: string; tags: string[]; notes?: string }) {
+  const phone = normalizeText(args.guestPhone);
+  const email = normalizeText(args.guestEmail)?.toLowerCase();
+  let guest: Doc<'guests'> | null = null;
+  if (email) {
+    const matches = await ctx.db.query('guests').withIndex('by_email', (q: any) => q.eq('email', email)).take(10);
+    guest = matches.find((item: Doc<'guests'>) => item.venueId === args.venueId) ?? null;
+  }
+  if (!guest && phone) {
+    const matches = await ctx.db.query('guests').withIndex('by_phone', (q: any) => q.eq('phone', phone)).take(10);
+    guest = matches.find((item: Doc<'guests'>) => item.venueId === args.venueId) ?? null;
+  }
+  if (!guest) {
+    const guests = await ctx.db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(100);
+    guest = guests.find((item: Doc<'guests'>) => item.fullName.toLowerCase() === args.guestName.trim().toLowerCase()) ?? null;
+  }
+  const now = Date.now();
+  if (guest) {
+    await ctx.db.patch(guest._id, {
+      fullName: args.guestName.trim(),
+      phone: phone ?? guest.phone,
+      email: email ?? guest.email,
+      tags: mergeTags(guest.tags, args.tags),
+      notes: normalizeText(args.notes) ?? guest.notes,
+      updatedAt: now,
+    });
+    return guest._id;
+  }
+  return await ctx.db.insert('guests', {
+    venueId: args.venueId,
+    fullName: args.guestName.trim(),
+    phone,
+    email,
+    tags: mergeTags([], args.tags),
+    notes: normalizeText(args.notes),
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 export const getReservationsPage = query({
   args: { venueId: v.id('venues') },
   returns: v.union(
@@ -231,7 +280,16 @@ export const saveReservation = mutation({
       const existing = await ctx.db.get(args.reservationId);
       if (!existing) throw new Error('Reservation not found');
       if (existing.venueId !== args.venueId) throw new Error('Wrong venue');
+      const guestId = await upsertReservationGuest(ctx, {
+        venueId: args.venueId,
+        guestName: args.guestName,
+        guestPhone: args.guestPhone,
+        guestEmail: args.guestEmail,
+        tags: args.tags ?? [],
+        notes: args.notes ?? args.specialRequests,
+      });
       await ctx.db.patch(existing._id, {
+        guestId,
         guestName: args.guestName,
         guestPhone: args.guestPhone,
         guestEmail: args.guestEmail,
@@ -251,7 +309,14 @@ export const saveReservation = mutation({
     }
     const reservationId = await ctx.db.insert('reservations', {
       venueId: args.venueId,
-      guestId: undefined,
+      guestId: await upsertReservationGuest(ctx, {
+        venueId: args.venueId,
+        guestName: args.guestName,
+        guestPhone: args.guestPhone,
+        guestEmail: args.guestEmail,
+        tags: args.tags ?? [],
+        notes: args.notes ?? args.specialRequests,
+      }),
       guestName: args.guestName,
       guestPhone: args.guestPhone,
       guestEmail: args.guestEmail,

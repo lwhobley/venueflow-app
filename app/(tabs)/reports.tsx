@@ -1,6 +1,6 @@
 import { ScrollView, View } from 'react-native';
-import { Card, Text } from 'react-native-paper';
-import { useQuery } from 'convex/react';
+import { Button, Card, Text } from 'react-native-paper';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -22,6 +22,9 @@ export default function ReportsScreen() {
   const insights = useQuery(api.app.getManagerInsights) as Insight | null | undefined;
   const timeCsv = useQuery(api.app.exportTimeEntriesCsv, canManage ? {} : 'skip') as string | null | undefined;
   const reservationCsv = useQuery(api.reservations.exportReservationsCsv, canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  const payroll = useQuery(api.payroll.getPayrollSummary, canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const payrollCsv = useQuery(api.payroll.exportPayrollCsv, canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  const recordPayrollExport = useMutation(api.payroll.recordPayrollExport);
 
   if (!canManage) {
     return (
@@ -68,6 +71,34 @@ export default function ReportsScreen() {
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Time entries CSV</Text>
           <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
             {timeCsv ?? 'Loading export...'}
+          </Text>
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, alignItems: 'center' }}>
+            <View style={{ flex: 1 }}>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Payroll integration</Text>
+              <Text style={{ color: colors.muted }}>
+                {payroll ? `${payroll.totalHours} hours · ${payroll.openEntryCount} open entries` : 'Loading payroll summary...'}
+              </Text>
+            </View>
+            <Button
+              compact
+              mode="outlined"
+              textColor={colors.primary}
+              onPress={() => {
+                if (venue?.id && payroll) {
+                  void recordPayrollExport({ venueId: venue.id, provider: 'csv', periodStart: payroll.periodStart, periodEnd: payroll.periodEnd });
+                }
+              }}
+            >
+              Record export
+            </Button>
+          </View>
+          <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
+            {payrollCsv ?? 'Loading payroll export...'}
           </Text>
         </Card.Content>
       </Card>

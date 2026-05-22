@@ -34,6 +34,14 @@ export default function TabsLayout() {
       <Tabs.Screen name="clock" options={{ title: 'Clock', tabBarIcon: icon('clock-outline') }} />
       <Tabs.Screen name="reservations" options={{ title: 'Reservations', tabBarIcon: icon('book-clock-outline') }} />
       <Tabs.Screen
+        name="guests"
+        options={{ title: 'Guests', href: canManage ? '/guests' : null, tabBarIcon: icon('account-heart-outline') }}
+      />
+      <Tabs.Screen
+        name="integrations"
+        options={{ title: 'Integrations', href: canManage ? '/integrations' : null, tabBarIcon: icon('connection') }}
+      />
+      <Tabs.Screen
         name="reports"
         options={{ title: 'Reports', href: canManage ? '/reports' : null, tabBarIcon: icon('chart-box-outline') }}
       />

@@ -26,6 +26,9 @@ const reservationStatus = v.union(
 const reservationSource = v.union(v.literal('direct'), v.literal('opentable'), v.literal('resy'), v.literal('phone'), v.literal('walk_in'));
 const waitlistStatus = v.union(v.literal('waiting'), v.literal('assigned'), v.literal('seated'), v.literal('completed'), v.literal('removed'));
 const assignmentHoldType = v.union(v.literal('reserved'), v.literal('held'), v.literal('seated'));
+const posProvider = v.union(v.literal('toast'), v.literal('square'), v.literal('clover'), v.literal('generic'));
+const posConnectionStatus = v.union(v.literal('connected'), v.literal('paused'), v.literal('error'));
+const posCheckStatus = v.union(v.literal('open'), v.literal('paid'), v.literal('void'));
 
 export default defineSchema({
   ...authTables,
@@ -179,6 +182,44 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index('by_venue', ['venueId']).index('by_phone', ['phone']).index('by_email', ['email']),
+  posConnections: defineTable({
+    venueId: v.id('venues'),
+    provider: posProvider,
+    externalLocationId: v.optional(v.string()),
+    status: posConnectionStatus,
+    lastSyncAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_venue', ['venueId']).index('by_venue_and_provider', ['venueId', 'provider']),
+  posChecks: defineTable({
+    venueId: v.id('venues'),
+    provider: posProvider,
+    externalCheckId: v.string(),
+    tableLabel: v.optional(v.string()),
+    tableId: v.optional(v.id('tables')),
+    serverName: v.optional(v.string()),
+    serverId: v.optional(v.id('profiles')),
+    guestName: v.optional(v.string()),
+    guestId: v.optional(v.id('guests')),
+    openedAt: v.number(),
+    closedAt: v.optional(v.number()),
+    subtotalCents: v.number(),
+    tipCents: v.number(),
+    totalCents: v.number(),
+    status: posCheckStatus,
+    raw: v.optional(v.any()),
+    updatedAt: v.number(),
+  }).index('by_venue_openedAt', ['venueId', 'openedAt']).index('by_provider_external', ['provider', 'externalCheckId']).index('by_guest', ['guestId']),
+  payrollExports: defineTable({
+    venueId: v.id('venues'),
+    provider: v.union(v.literal('gusto'), v.literal('adp'), v.literal('paychex'), v.literal('csv')),
+    periodStart: v.number(),
+    periodEnd: v.number(),
+    rowCount: v.number(),
+    totalHours: v.number(),
+    createdBy: v.id('profiles'),
+    createdAt: v.number(),
+  }).index('by_venue_createdAt', ['venueId', 'createdAt']),
   reservations: defineTable({
     venueId: v.id('venues'),
     guestId: v.optional(v.id('guests')),

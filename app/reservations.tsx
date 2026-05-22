@@ -71,6 +71,8 @@ export default function ReservationsScreen() {
   const now = new Date();
   const [showForm, setShowForm] = useState(false);
   const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
   const [partySize, setPartySize] = useState(2);
   const [date, setDate] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
   const [time, setTime] = useState(`${pad((now.getHours() + 1) % 24)}:00`);
@@ -101,6 +103,8 @@ export default function ReservationsScreen() {
       await saveReservation({
         venueId: venue.id,
         guestName: guestName.trim(),
+        guestPhone: guestPhone.trim() || undefined,
+        guestEmail: guestEmail.trim() || undefined,
         partySize,
         reservationTime: ts,
         durationMinutes: 120,
@@ -111,6 +115,8 @@ export default function ReservationsScreen() {
         notes: notes.trim() || undefined,
       });
       setGuestName('');
+      setGuestPhone('');
+      setGuestEmail('');
       setTags('');
       setNotes('');
       setPartySize(2);
@@ -183,6 +189,10 @@ export default function ReservationsScreen() {
             {showForm ? (
               <>
                 <TextInput label="Guest name" value={guestName} onChangeText={setGuestName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  <TextInput label="Phone" value={guestPhone} onChangeText={setGuestPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
+                  <TextInput label="Email" value={guestEmail} onChangeText={setGuestEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
+                </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Text style={{ width: 64 }}>Party</Text>
                   <IconButton icon="minus" mode="outlined" size={16} onPress={() => setPartySize((p) => Math.max(1, p - 1))} />
