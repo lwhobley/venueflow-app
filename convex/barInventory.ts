@@ -305,7 +305,7 @@ export const parseBarInventoryInput = action({
                       sku: { type: 'string' },
                       notes: { type: 'string' },
                     },
-                    required: ['name', 'category', 'area', 'unit', 'parLevel', 'onHand', 'unitCostCents', 'supplier', 'sku', 'notes'],
+                    required: ['name', 'category', 'unit'],
                   },
                 },
               },

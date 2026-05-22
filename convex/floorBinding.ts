@@ -237,7 +237,12 @@ async function assignToTables(ctx: any, args: { venueId: string; tableIds: Id<'t
       releasedAt: undefined,
       releasedReason: undefined,
     });
-    await applyTableStatus(ctx, args.venueId, tableId, args.holdType === 'seated' ? 'seated' : args.holdType === 'held' ? 'held' : 'reserved', args.sourceType === 'reservation' ? undefined : undefined);
+    const partySize = args.reservationId
+        ? (await ctx.db.get(args.reservationId))?.partySize
+        : args.waitlistId
+          ? (await ctx.db.get(args.waitlistId))?.partySize
+          : undefined;
+await applyTableStatus(ctx, args.venueId, tableId, args.holdType === 'seated' ? 'seated' : args.holdType === 'held' ? 'held' : 'reserved', partySize);
   }
 
   if (args.reservationId) {

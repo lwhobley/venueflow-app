@@ -82,9 +82,34 @@ export default function ReservationsScreen() {
 
   const seatWaitlist = async (entryId: string, tableId: string) => {
     if (!venue?.id) return;
-    const startsAt = Date.now();
-    await assignWaitlist({ venueId: venue.id, waitlistId: entryId as Id<'waitlist'>, tableIds: [tableId as Id<'tables'>], holdType: 'seated', startsAt, endsAt: startsAt + 120 * 60 * 1000 });
-    setSeatingWaitlistId(null);
+    setWaitlistError(null);
+    try {
+      const startsAt = Date.now();
+      await assignWaitlist({ venueId: venue.id, waitlistId: entryId as Id<'waitlist'>, tableIds: [tableId as Id<'tables'>], holdType: 'seated', startsAt, endsAt: startsAt + 120 * 60 * 1000 });
+      setSeatingWaitlistId(null);
+    } catch (e) {
+      setWaitlistError(e instanceof Error ? e.message : 'Failed to seat guest');
+    }
+  };
+
+  const handleMarkWaitlistReady = async (waitlistId: string) => {
+    if (!venue?.id) return;
+    setWaitlistError(null);
+    try {
+      await markWaitlistReady({ venueId: venue.id, waitlistId: waitlistId as Id<'waitlist'> });
+    } catch (e) {
+      setWaitlistError(e instanceof Error ? e.message : 'Failed to mark ready');
+    }
+  };
+
+  const handleRemoveFromWaitlist = async (waitlistId: string) => {
+    if (!venue?.id) return;
+    setWaitlistError(null);
+    try {
+      await removeFromWaitlist({ venueId: venue.id, waitlistId: waitlistId as Id<'waitlist'> });
+    } catch (e) {
+      setWaitlistError(e instanceof Error ? e.message : 'Failed to remove');
+    }
   };
 
   const reservations = useMemo(() => (page?.reservations ?? []) as ReservationRow[], [page]);
@@ -107,6 +132,7 @@ export default function ReservationsScreen() {
   const [tags, setTags] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [waitlistError, setWaitlistError] = useState<string | null>(null);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
@@ -217,6 +243,7 @@ export default function ReservationsScreen() {
             <TextInput label="Phone (optional)" value={wlPhone} onChangeText={setWlPhone} mode="outlined" dense keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
             <Button mode="contained" buttonColor={colors.primary} onPress={() => void addWalkIn()}>Add</Button>
           </View>
+          {waitlistError ? <Text style={{ color: colors.danger }}>{waitlistError}</Text> : null}
           {waitlist.length === 0 ? (
             <Text style={{ color: colors.muted }}>No one waiting.</Text>
           ) : (
@@ -229,11 +256,11 @@ export default function ReservationsScreen() {
                     {w.readyAt ? <Chip compact style={{ backgroundColor: accents[2].bg }} textStyle={{ color: accents[2].fg }}>Ready</Chip> : <Text style={{ color: colors.muted }}>{waitMins}m waiting</Text>}
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                    {!w.readyAt ? <Button compact mode="outlined" textColor={accents[2].fg} onPress={() => void markWaitlistReady({ venueId: venue!.id, waitlistId: w.id as Id<'waitlist'> })}>Mark ready</Button> : null}
+                    {!w.readyAt ? <Button compact mode="outlined" textColor={accents[2].fg} onPress={() => void handleMarkWaitlistReady(w.id)}>Mark ready</Button> : null}
                     <Button compact mode={seatingWaitlistId === w.id ? 'contained' : 'outlined'} buttonColor={seatingWaitlistId === w.id ? colors.primary : undefined} textColor={seatingWaitlistId === w.id ? '#fff' : colors.primary} onPress={() => setSeatingWaitlistId(seatingWaitlistId === w.id ? null : w.id)}>
                       {seatingWaitlistId === w.id ? 'Pick a table…' : 'Seat'}
                     </Button>
-                    <Button compact mode="text" textColor={colors.danger} onPress={() => void removeFromWaitlist({ venueId: venue!.id, waitlistId: w.id as Id<'waitlist'> })}>Remove</Button>
+                    <Button compact mode="text" textColor={colors.danger} onPress={() => void handleRemoveFromWaitlist(w.id)}>Remove</Button>
                   </View>
                   {seatingWaitlistId === w.id ? (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: colors.background, borderRadius: 12, padding: 10 }}>

@@ -11,9 +11,14 @@ function fmtTime(at: number) {
   return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
+function isValidId(id: string): id is Id<'conversations'> {
+  return /^[a-zA-Z0-9_-]+$/.test(id) && id.length >= 10;
+}
+
 export default function ConversationScreen() {
   const params = useLocalSearchParams<{ id: string }>();
-  const conversationId = (Array.isArray(params.id) ? params.id[0] : params.id) as Id<'conversations'>;
+  const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const conversationId: Id<'conversations'> | null = rawId && isValidId(rawId) ? rawId as Id<'conversations'> : null;
   const data = useQuery(api.chat.getMessages, conversationId ? { conversationId } : 'skip');
   const sendMessage = useMutation(api.chat.sendMessage);
   const [text, setText] = useState('');

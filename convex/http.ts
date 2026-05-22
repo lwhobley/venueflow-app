@@ -74,7 +74,7 @@ http.route({
     try {
       await ctx.runMutation(internal.pos.ingestPosCheck, { venueId: body.venueId, provider: body.provider, check: body.check });
     } catch (e) {
-      return new Response(e instanceof Error ? e.message : 'Rejected', { status: 400 });
+      return new Response('Rejected', { status: 400 });
     }
     return new Response('ok', { status: 200 });
   }),
@@ -97,7 +97,7 @@ http.route({
     try {
       await ctx.runMutation(internal.reservationIntegrations.ingestExternalReservation, { venueId: body.venueId, provider: body.provider, reservation: body.reservation });
     } catch (e) {
-      return new Response(e instanceof Error ? e.message : 'Rejected', { status: 400 });
+      return new Response('Rejected', { status: 400 });
     }
     return new Response('ok', { status: 200 });
   }),
