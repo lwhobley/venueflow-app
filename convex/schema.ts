@@ -80,6 +80,14 @@ export default defineSchema({
     .index('by_profile', ['profileId'])
     .index('by_venue', ['venueId'])
     .index('by_profile_day', ['profileId', 'dayIndex']),
+  blackoutDates: defineTable({
+    venueId: v.id('venues'),
+    startDate: v.string(), // YYYY-MM-DD (inclusive)
+    endDate: v.string(), // YYYY-MM-DD (inclusive)
+    reason: v.string(),
+    createdBy: v.id('profiles'),
+    createdAt: v.number(),
+  }).index('by_venue', ['venueId']),
   timeEntries: defineTable({
     profileId: v.id('profiles'),
     venueId: v.id('venues'),

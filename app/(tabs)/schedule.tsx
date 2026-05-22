@@ -9,6 +9,7 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { ManagerCalendar } from '../../components/schedule/ManagerCalendar';
 import { MyShifts } from '../../components/schedule/MyShifts';
 import { AvailabilityEditor } from '../../components/schedule/AvailabilityEditor';
+import { BlackoutManager } from '../../components/schedule/BlackoutManager';
 
 type StaffRequest = {
   _id: string;
@@ -55,7 +56,7 @@ export default function ScheduleScreen() {
   const role = user?.role ?? 'staff';
   const canManage = role === 'admin' || role === 'owner' || role === 'manager';
 
-  const [managerTab, setManagerTab] = useState<'calendar' | 'requests'>('calendar');
+  const [managerTab, setManagerTab] = useState<'calendar' | 'requests' | 'blackouts'>('calendar');
   const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');
 
   return (
@@ -83,13 +84,20 @@ export default function ScheduleScreen() {
         <>
           <SegmentedButtons
             value={managerTab}
-            onValueChange={(v) => setManagerTab(v as 'calendar' | 'requests')}
+            onValueChange={(v) => setManagerTab(v as 'calendar' | 'requests' | 'blackouts')}
             buttons={[
               { value: 'calendar', label: 'Calendar' },
               { value: 'requests', label: 'Requests' },
+              { value: 'blackouts', label: 'Blackouts' },
             ]}
           />
-          {managerTab === 'calendar' ? <ManagerCalendar venueId={venue.id} /> : <RequestQueue venueId={venue.id} />}
+          {managerTab === 'calendar' ? (
+            <ManagerCalendar venueId={venue.id} />
+          ) : managerTab === 'requests' ? (
+            <RequestQueue venueId={venue.id} />
+          ) : (
+            <BlackoutManager venueId={venue.id} />
+          )}
         </>
       ) : (
         <>

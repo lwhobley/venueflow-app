@@ -630,6 +630,23 @@ export const createStaffRequest = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId) throw new Error('Profile does not belong to this venue');
     await requireActiveSubscription(ctx as any, args.venueId);
+
+    // Block time-off requests that overlap a manager-defined blackout window.
+    if (args.kind === 'time_off') {
+      const reqStart = args.requestedRangeStart || args.requestedForDate;
+      const reqEnd = args.requestedRangeEnd || args.requestedForDate || reqStart;
+      if (reqStart && reqEnd) {
+        const blackouts = await (ctx as AnyCtx).db
+          .query('blackoutDates')
+          .withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId))
+          .collect();
+        const hit = blackouts.find((b: Doc<'blackoutDates'>) => reqStart <= b.endDate && b.startDate <= reqEnd);
+        if (hit) {
+          throw new Error(`Time off is blacked out ${hit.startDate}${hit.endDate !== hit.startDate ? ` – ${hit.endDate}` : ''} (${hit.reason}). Please choose other dates.`);
+        }
+      }
+    }
+
     const now = Date.now();
     const requestId = await (ctx as AnyCtx).db.insert('staffRequests', {
       venueId: args.venueId,

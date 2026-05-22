@@ -1,7 +1,16 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc } from './_generated/dataModel';
-import { requireProfile, requireVenueManager } from './authz';
+import { requireProfile, requireVenueManager, requireVenueMember } from './authz';
+
+// YYYY-MM-DD strings compare lexicographically in date order, so range overlap
+// is a plain string comparison. Two inclusive ranges overlap when each starts
+// on or before the other ends.
+export function dateRangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
+const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 
 const shiftStatus = v.union(v.literal('scheduled'), v.literal('open'), v.literal('covered'));
 
@@ -81,6 +90,63 @@ export const setMyAvailability = mutation({
         updatedAt: now,
       });
     }
+    return null;
+  },
+});
+
+// ---------- Blackout dates (manager-managed) ----------
+
+const blackoutValue = v.object({
+  _id: v.id('blackoutDates'),
+  startDate: v.string(),
+  endDate: v.string(),
+  reason: v.string(),
+});
+
+export const listBlackouts = query({
+  args: { venueId: v.id('venues') },
+  returns: v.array(blackoutValue),
+  handler: async (ctx, args) => {
+    // Any venue member can see blackout dates (so employees know before requesting off).
+    await requireVenueMember(ctx, args.venueId);
+    const rows = await ctx.db
+      .query('blackoutDates')
+      .withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId))
+      .collect();
+    return rows
+      .sort((a: Doc<'blackoutDates'>, b: Doc<'blackoutDates'>) => a.startDate.localeCompare(b.startDate))
+      .map((r: Doc<'blackoutDates'>) => ({ _id: r._id, startDate: r.startDate, endDate: r.endDate, reason: r.reason }));
+  },
+});
+
+export const addBlackout = mutation({
+  args: { venueId: v.id('venues'), startDate: v.string(), endDate: v.optional(v.string()), reason: v.string() },
+  returns: v.id('blackoutDates'),
+  handler: async (ctx, args) => {
+    const profile = await requireVenueManager(ctx, args.venueId);
+    const start = args.startDate.trim();
+    const end = (args.endDate?.trim() || start);
+    if (!isoDate.test(start) || !isoDate.test(end)) throw new Error('Dates must be in YYYY-MM-DD format');
+    if (end < start) throw new Error('End date must be on or after the start date');
+    return await ctx.db.insert('blackoutDates', {
+      venueId: args.venueId,
+      startDate: start,
+      endDate: end,
+      reason: args.reason.trim() || 'Blackout',
+      createdBy: profile._id,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const removeBlackout = mutation({
+  args: { venueId: v.id('venues'), blackoutId: v.id('blackoutDates') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const row = await ctx.db.get(args.blackoutId);
+    if (!row || row.venueId !== args.venueId) throw new Error('Blackout not found');
+    await ctx.db.delete(row._id);
     return null;
   },
 });
