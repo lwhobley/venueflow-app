@@ -316,12 +316,30 @@ const myShiftValue = v.object({
   conflict: v.boolean(),
 });
 
+const coworkerValue = v.object({
+  name: v.string(),
+  jobTitle: v.string(),
+  startTime: v.string(),
+  endTime: v.string(),
+  withMe: v.boolean(), // overlaps one of my shifts that day
+});
+
+const rosterDayValue = v.object({
+  dayIndex: v.number(),
+  dayLabel: v.string(),
+  coworkers: v.array(coworkerValue),
+});
+
 export const getMySchedule = query({
   args: {},
-  returns: v.object({ mine: v.array(myShiftValue), open: v.array(myShiftValue) }),
+  returns: v.object({
+    mine: v.array(myShiftValue),
+    open: v.array(myShiftValue),
+    roster: v.array(rosterDayValue),
+  }),
   handler: async (ctx) => {
     const profile = await requireProfile(ctx);
-    if (!profile.venueId) return { mine: [], open: [] };
+    if (!profile.venueId) return { mine: [], open: [], roster: [] };
     const shifts = await ctx.db
       .query('scheduleShifts')
       .withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId))
@@ -330,6 +348,11 @@ export const getMySchedule = query({
       .query('availability')
       .withIndex('by_profile', (q: any) => q.eq('profileId', profile._id))
       .collect();
+    const staff = await ctx.db
+      .query('profiles')
+      .withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId))
+      .collect();
+    const nameById = new Map(staff.map((s: Doc<'profiles'>) => [s._id, s.fullName]));
 
     const toValue = (shift: Doc<'scheduleShifts'>) => ({
       _id: shift._id,
@@ -349,9 +372,32 @@ export const getMySchedule = query({
     const sorted = shifts.sort(
       (a: Doc<'scheduleShifts'>, b: Doc<'scheduleShifts'>) => a.dayIndex - b.dayIndex || a.startMinutes - b.startMinutes,
     );
+    const mineShifts = sorted.filter((s: Doc<'scheduleShifts'>) => s.profileId === profile._id);
+
+    // For each day I work, list the coworkers also scheduled that day and flag
+    // whether their shift overlaps mine ("on shift with").
+    const myDays = Array.from(new Set(mineShifts.map((s: Doc<'scheduleShifts'>) => s.dayIndex))).sort((a, b) => a - b);
+    const roster = myDays.map((dayIndex) => {
+      const myDayShifts = mineShifts.filter((s: Doc<'scheduleShifts'>) => s.dayIndex === dayIndex);
+      const coworkers = sorted
+        .filter(
+          (s: Doc<'scheduleShifts'>) =>
+            s.dayIndex === dayIndex && s.profileId && s.profileId !== profile._id,
+        )
+        .map((s: Doc<'scheduleShifts'>) => ({
+          name: nameById.get(s.profileId as Doc<'profiles'>['_id']) ?? 'Teammate',
+          jobTitle: s.jobTitle,
+          startTime: minutesToTime(s.startMinutes),
+          endTime: minutesToTime(s.endMinutes),
+          withMe: myDayShifts.some((m: Doc<'scheduleShifts'>) => m.startMinutes < s.endMinutes && s.startMinutes < m.endMinutes),
+        }));
+      return { dayIndex, dayLabel: dayLabel(dayIndex), coworkers };
+    });
+
     return {
-      mine: sorted.filter((s: Doc<'scheduleShifts'>) => s.profileId === profile._id).map(toValue),
+      mine: mineShifts.map(toValue),
       open: sorted.filter((s: Doc<'scheduleShifts'>) => s.status === 'open' && !s.profileId).map(toValue),
+      roster,
     };
   },
 });

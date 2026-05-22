@@ -20,6 +20,8 @@ type Shift = {
 };
 
 type Blackout = { _id: Id<'blackoutDates'>; startDate: string; endDate: string; reason: string };
+type Coworker = { name: string; jobTitle: string; startTime: string; endTime: string; withMe: boolean };
+type RosterDay = { dayIndex: number; dayLabel: string; coworkers: Coworker[] };
 
 export function MyShifts() {
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -37,6 +39,7 @@ export function MyShifts() {
 
   const mine = useMemo(() => (data?.mine ?? []) as Shift[], [data]);
   const open = useMemo(() => (data?.open ?? []) as Shift[], [data]);
+  const roster = useMemo(() => (data?.roster ?? []) as RosterDay[], [data]);
   const blackouts = useMemo(() => (blackoutData ?? []) as Blackout[], [blackoutData]);
 
   const submitTimeOff = async () => {
@@ -84,6 +87,36 @@ export function MyShifts() {
                 <Button compact mode="outlined" textColor={colors.danger} onPress={() => void requestDropShift({ shiftId: s._id })}>
                   Request to drop
                 </Button>
+              </View>
+            ))
+          )}
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Who you're working with</Text>
+          {roster.length === 0 ? (
+            <Text style={{ color: colors.muted }}>Once you're scheduled, the rest of the crew on those days shows up here.</Text>
+          ) : (
+            roster.map((day) => (
+              <View key={day.dayIndex} style={{ gap: 6, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                <Text style={{ fontWeight: '700' }}>{day.dayLabel}</Text>
+                {day.coworkers.length === 0 ? (
+                  <Text style={{ color: colors.muted }}>You're the only one scheduled.</Text>
+                ) : (
+                  day.coworkers.map((c, i) => (
+                    <View key={`${day.dayIndex}-${i}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text>{c.name}</Text>
+                        <Text style={{ color: colors.muted }}>{c.jobTitle} · {c.startTime} – {c.endTime}</Text>
+                      </View>
+                      <Chip compact style={{ backgroundColor: c.withMe ? accents[2].bg : colors.cream }} textStyle={{ color: c.withMe ? accents[2].fg : colors.muted }}>
+                        {c.withMe ? 'On with you' : 'Same day'}
+                      </Chip>
+                    </View>
+                  ))
+                )}
               </View>
             ))
           )}

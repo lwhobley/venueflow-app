@@ -50,6 +50,20 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const staff = useMemo(() => (data?.staff ?? []) as Staff[], [data]);
   const pickedName = staff.find((s) => s._id === pickedStaff)?.fullName ?? null;
 
+  // Shift pool grouped by position (jobTitle) so managers can assign by role.
+  const staffByPosition = useMemo(() => {
+    const groups = new Map<string, Staff[]>();
+    for (const s of staff) {
+      const key = s.jobTitle?.trim() || 'Unassigned';
+      const list = groups.get(key) ?? [];
+      list.push(s);
+      groups.set(key, list);
+    }
+    return Array.from(groups.entries())
+      .map(([position, members]) => ({ position, members: members.sort((a, b) => a.fullName.localeCompare(b.fullName)) }))
+      .sort((a, b) => a.position.localeCompare(b.position));
+  }, [staff]);
+
   const onCreate = async () => {
     const s = parseTime(start);
     const e = parseTime(end);
@@ -79,26 +93,37 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
       {/* Staff picker (tap to pick up) */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Assign staff</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shift pool</Text>
           <Text style={{ color: colors.muted }}>
-            {pickedName ? `Picked: ${pickedName}. Tap a shift's "Assign here".` : 'Tap a teammate to pick them up, then tap a shift to assign.'}
+            {pickedName ? `Picked: ${pickedName}. Tap a shift's "Assign here".` : 'Staff grouped by position. Tap a teammate to pick them up, then tap a shift to assign.'}
           </Text>
           {staff.length === 0 ? (
             <Text style={{ color: colors.muted }}>No staff yet. Add team members from the Staff tab.</Text>
           ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {staff.map((s) => (
-                <Chip
-                  key={s._id}
-                  selected={pickedStaff === s._id}
-                  onPress={() => setPickedStaff(pickedStaff === s._id ? null : s._id)}
-                  style={{ backgroundColor: pickedStaff === s._id ? accents[0].bg : colors.cream }}
-                  textStyle={{ color: pickedStaff === s._id ? accents[0].fg : colors.charcoal }}
-                >
-                  {s.fullName}
-                </Chip>
-              ))}
-            </View>
+            staffByPosition.map((group, gi) => {
+              const accent = accents[gi % accents.length];
+              return (
+                <View key={group.position} style={{ gap: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ fontWeight: '700', color: accent.fg }}>{group.position}</Text>
+                    <Chip compact style={{ backgroundColor: accent.bg }} textStyle={{ color: accent.fg }}>{group.members.length}</Chip>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {group.members.map((s) => (
+                      <Chip
+                        key={s._id}
+                        selected={pickedStaff === s._id}
+                        onPress={() => setPickedStaff(pickedStaff === s._id ? null : s._id)}
+                        style={{ backgroundColor: pickedStaff === s._id ? accent.fg : colors.cream }}
+                        textStyle={{ color: pickedStaff === s._id ? '#fff' : colors.charcoal }}
+                      >
+                        {s.fullName}
+                      </Chip>
+                    ))}
+                  </View>
+                </View>
+              );
+            })
           )}
         </Card.Content>
       </Card>
