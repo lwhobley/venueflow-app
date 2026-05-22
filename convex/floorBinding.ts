@@ -172,7 +172,7 @@ async function applyTableStatus(ctx: any, venueId: string, tableId: Id<'tables'>
     venueId,
     tableId,
     status,
-    partySize: partySize ?? null,
+    partySize: partySize ?? undefined,
     serverId: undefined,
     toastCheckGuid: state?.toastCheckGuid ?? undefined,
     seatedAt: status === 'seated' ? state?.seatedAt ?? now : undefined,

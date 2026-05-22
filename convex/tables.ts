@@ -86,16 +86,19 @@ async function applyUpdate(
   const previousStatus = current?.status ?? 'available';
   const isSeated = nextStatus === 'seated';
   const isLeavingSeated = previousStatus === 'seated' && nextStatus !== 'seated';
+  // tableStates optional fields are v.optional (undefined when empty) — never
+  // null, which the schema rejects.
+  const clearedStatus = nextStatus === 'available' || nextStatus === 'dirty' || nextStatus === 'out_of_service';
   const nextState = {
     venueId: floorPlan.venueId,
     tableId,
     status: nextStatus,
-    partySize: patch.partySize ?? (isSeated ? current?.partySize ?? null : nextStatus === 'available' || nextStatus === 'dirty' || nextStatus === 'out_of_service' ? null : current?.partySize ?? null),
-    serverId: patch.serverId ?? (nextStatus === 'available' || nextStatus === 'dirty' || nextStatus === 'out_of_service' ? null : current?.serverId ?? profile._id),
-    toastCheckGuid: patch.toastCheckGuid ?? current?.toastCheckGuid ?? null,
-    seatedAt: isSeated ? current?.seatedAt ?? now : null,
+    partySize: patch.partySize ?? (clearedStatus ? undefined : current?.partySize ?? undefined),
+    serverId: patch.serverId ?? (clearedStatus ? undefined : current?.serverId ?? profile._id),
+    toastCheckGuid: patch.toastCheckGuid ?? current?.toastCheckGuid ?? undefined,
+    seatedAt: isSeated ? current?.seatedAt ?? now : undefined,
     lastActivityAt: now,
-    notes: patch.notes ?? current?.notes ?? null,
+    notes: patch.notes ?? current?.notes ?? undefined,
   };
 
   if (current) await ctx.db.patch(current._id, nextState);
