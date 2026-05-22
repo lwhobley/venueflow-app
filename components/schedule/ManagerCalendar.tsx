@@ -30,14 +30,23 @@ type ManagerShift = {
   conflict: boolean;
 };
 
-type Staff = { _id: Id<'profiles'>; fullName: string; role: string; jobTitle: string };
+type Staff = { _id: Id<'profiles'>; fullName: string; role: string; jobTitle: string; weeklyHours: number; overtime: boolean };
+type Template = { _id: Id<'scheduleTemplates'>; name: string; shiftCount: number };
 
 export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const data = useQuery(api.scheduling.getManagerSchedule, { venueId });
+  const templates = useQuery(api.scheduling.listScheduleTemplates, { venueId });
   const createShift = useMutation(api.scheduling.createShift);
   const assignShift = useMutation(api.scheduling.assignShift);
   const unassignShift = useMutation(api.scheduling.unassignShift);
   const deleteShift = useMutation(api.scheduling.deleteShift);
+  const publishSchedule = useMutation(api.scheduling.publishSchedule);
+  const saveTemplate = useMutation(api.scheduling.saveScheduleTemplate);
+  const applyTemplate = useMutation(api.scheduling.applyScheduleTemplate);
+  const deleteTemplate = useMutation(api.scheduling.deleteScheduleTemplate);
+  const copyDayShifts = useMutation(api.scheduling.copyDayShifts);
+  const clearWeek = useMutation(api.scheduling.clearWeek);
+  const setLaborBudget = useMutation(api.scheduling.setLaborBudget);
 
   const [pickedStaff, setPickedStaff] = useState<Id<'profiles'> | null>(null);
   const [day, setDay] = useState(1);
@@ -45,6 +54,20 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const [end, setEnd] = useState('17:00');
   const [jobTitle, setJobTitle] = useState('Server');
   const [station, setStation] = useState('Floor');
+  const [templateName, setTemplateName] = useState('');
+  const [copyFrom, setCopyFrom] = useState(1);
+  const [budgetInput, setBudgetInput] = useState('');
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+
+  const templateList = useMemo(() => (templates ?? []) as Template[], [templates]);
+  const laborBudget = data?.laborBudgetHours ?? null;
+  const totalHours = data?.totalScheduledHours ?? 0;
+  const overBudget = laborBudget != null && totalHours > laborBudget;
+
+  const flash = (msg: string) => {
+    setActionMsg(msg);
+    setTimeout(() => setActionMsg(null), 2500);
+  };
 
   const shifts = useMemo(() => (data?.shifts ?? []) as ManagerShift[], [data]);
   const staff = useMemo(() => (data?.staff ?? []) as Staff[], [data]);
@@ -90,6 +113,60 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
 
   return (
     <View style={{ gap: spacing.md }}>
+      {/* Schedule actions */}
+      <Card style={{ backgroundColor: overBudget ? '#FDE7E9' : accents[0].bg, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700', color: overBudget ? colors.danger : accents[0].fg }}>
+              {totalHours}h scheduled{laborBudget != null ? ` / ${laborBudget}h budget` : ''}
+            </Text>
+            {overBudget ? <Text style={{ color: colors.danger, fontWeight: '700' }}>⚠ Over budget</Text> : null}
+          </View>
+          <Button mode="contained" buttonColor={colors.primary} icon="bell-ring" onPress={async () => { const r = await publishSchedule({ venueId }); flash(`Published — notified ${r.notified} staff.`); }}>
+            Publish & notify staff
+          </Button>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
+            <TextInput label="Weekly labor budget (h)" value={budgetInput} onChangeText={setBudgetInput} keyboardType="number-pad" mode="outlined" dense style={{ flex: 1, backgroundColor: colors.surface }} />
+            <Button mode="outlined" textColor={colors.primary} onPress={async () => { await setLaborBudget({ venueId, weeklyLaborBudgetHours: budgetInput.trim() ? Number(budgetInput) : null }); setBudgetInput(''); flash('Labor budget saved.'); }}>Set</Button>
+          </View>
+          {actionMsg ? <Text style={{ color: accents[2].fg }}>{actionMsg}</Text> : null}
+        </Card.Content>
+      </Card>
+
+      {/* Templates & quick copy */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Templates & copy</Text>
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <TextInput label="Save current week as…" value={templateName} onChangeText={setTemplateName} mode="outlined" dense style={{ flex: 1, backgroundColor: colors.surface }} />
+            <Button mode="outlined" textColor={colors.primary} onPress={async () => { if (!templateName.trim()) return; await saveTemplate({ venueId, name: templateName.trim() }); setTemplateName(''); flash('Template saved.'); }}>Save</Button>
+          </View>
+          {templateList.length > 0 ? (
+            <View style={{ gap: 6 }}>
+              {templateList.map((t) => (
+                <View key={t._id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ flex: 1 }}>{t.name} · {t.shiftCount} shifts</Text>
+                  <Button compact mode="text" textColor={colors.primary} onPress={async () => { const r = await applyTemplate({ venueId, templateId: t._id, replace: true }); flash(`Applied ${r.added} shifts.`); }}>Apply</Button>
+                  <Button compact mode="text" textColor={colors.danger} onPress={() => void deleteTemplate({ venueId, templateId: t._id })}>✕</Button>
+                </View>
+              ))}
+            </View>
+          ) : <Text style={{ color: colors.muted }}>No templates yet.</Text>}
+          <Text style={{ color: colors.muted }}>Copy a day to the rest of the week</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {dayLabels.map((label, i) => (
+                <Chip key={label} selected={copyFrom === i} onPress={() => setCopyFrom(i)} style={{ backgroundColor: copyFrom === i ? accents[3].bg : colors.cream }} textStyle={{ color: copyFrom === i ? accents[3].fg : colors.charcoal }}>{label}</Chip>
+              ))}
+            </View>
+          </ScrollView>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+            <Button compact mode="outlined" textColor={colors.primary} onPress={async () => { const to = [0,1,2,3,4,5,6].filter((d) => d !== copyFrom); const r = await copyDayShifts({ venueId, fromDay: copyFrom, toDays: to }); flash(`Copied ${r.added} shifts.`); }}>Copy {dayLabels[copyFrom]} → all days</Button>
+            <Button compact mode="text" textColor={colors.danger} onPress={async () => { const r = await clearWeek({ venueId }); flash(`Cleared ${r.removed} shifts.`); }}>Clear week</Button>
+          </View>
+        </Card.Content>
+      </Card>
+
       {/* Staff picker (tap to pick up) */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
@@ -114,10 +191,10 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                         key={s._id}
                         selected={pickedStaff === s._id}
                         onPress={() => setPickedStaff(pickedStaff === s._id ? null : s._id)}
-                        style={{ backgroundColor: pickedStaff === s._id ? accent.fg : colors.cream }}
-                        textStyle={{ color: pickedStaff === s._id ? '#fff' : colors.charcoal }}
+                        style={{ backgroundColor: pickedStaff === s._id ? accent.fg : s.overtime ? '#FDE7E9' : colors.cream }}
+                        textStyle={{ color: pickedStaff === s._id ? '#fff' : s.overtime ? colors.danger : colors.charcoal }}
                       >
-                        {s.fullName}
+                        {s.fullName} · {s.weeklyHours}h{s.overtime ? ' ⚠ OT' : ''}
                       </Chip>
                     ))}
                   </View>

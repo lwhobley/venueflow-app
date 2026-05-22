@@ -1,7 +1,10 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
-import type { Doc } from './_generated/dataModel';
+import { internal } from './_generated/api';
+import type { Doc, Id } from './_generated/dataModel';
 import { requireProfile, requireVenueManager, requireVenueMember } from './authz';
+
+const OVERTIME_MINUTES = 40 * 60; // weekly overtime threshold
 
 // YYYY-MM-DD strings compare lexicographically in date order, so range overlap
 // is a plain string comparison. Two inclusive ranges overlap when each starts
@@ -27,7 +30,7 @@ function dayLabel(index: number) {
   return dayLabels[index] ?? 'Day';
 }
 
-async function notifyProfile(ctx: any, args: { venueId: Doc<'venues'>['_id']; profileId: Doc<'profiles'>['_id']; kind: 'shift_assigned' | 'request_created' | 'request_reviewed'; title: string; body: string }) {
+async function notifyProfile(ctx: any, args: { venueId: Doc<'venues'>['_id']; profileId: Doc<'profiles'>['_id']; kind: 'shift_assigned' | 'request_created' | 'request_reviewed' | 'swap_proposed' | 'swap_reviewed'; title: string; body: string }) {
   await ctx.db.insert('notificationEvents', {
     venueId: args.venueId,
     profileId: args.profileId,
@@ -40,7 +43,7 @@ async function notifyProfile(ctx: any, args: { venueId: Doc<'venues'>['_id']; pr
   });
 }
 
-async function notifyManagers(ctx: any, args: { venueId: Doc<'venues'>['_id']; kind: 'shift_assigned' | 'request_created' | 'request_reviewed'; title: string; body: string }) {
+async function notifyManagers(ctx: any, args: { venueId: Doc<'venues'>['_id']; kind: 'shift_assigned' | 'request_created' | 'request_reviewed' | 'swap_proposed'; title: string; body: string }) {
   await ctx.db.insert('notificationEvents', {
     venueId: args.venueId,
     audience: 'managers',
@@ -50,6 +53,35 @@ async function notifyManagers(ctx: any, args: { venueId: Doc<'venues'>['_id']; k
     readBy: [],
     createdAt: Date.now(),
   });
+}
+
+// Inbox + push to the whole venue staff.
+async function notifyStaffWithPush(ctx: any, args: { venueId: Id<'venues'>; kind: 'schedule_published'; title: string; body: string }) {
+  await ctx.db.insert('notificationEvents', {
+    venueId: args.venueId,
+    audience: 'staff',
+    kind: args.kind,
+    title: args.title,
+    body: args.body,
+    readBy: [],
+    createdAt: Date.now(),
+  });
+  await ctx.runMutation(internal.push.sendPushToAudience, {
+    venueId: args.venueId,
+    audience: 'staff',
+    title: args.title,
+    body: args.body,
+    data: { screen: 'schedule' },
+  });
+}
+
+function weeklyMinutesByProfile(shifts: Doc<'scheduleShifts'>[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const s of shifts) {
+    if (!s.profileId) continue;
+    map.set(s.profileId, (map.get(s.profileId) ?? 0) + Math.max(0, s.endMinutes - s.startMinutes));
+  }
+  return map;
 }
 
 // A shift assigned to a member conflicts with availability when, for that day,
@@ -199,6 +231,8 @@ const staffValue = v.object({
   fullName: v.string(),
   role: v.string(),
   jobTitle: v.string(),
+  weeklyHours: v.number(),
+  overtime: v.boolean(),
 });
 
 export const getManagerSchedule = query({
@@ -206,8 +240,11 @@ export const getManagerSchedule = query({
   returns: v.object({
     shifts: v.array(managerShiftValue),
     staff: v.array(staffValue),
+    laborBudgetHours: v.union(v.number(), v.null()),
+    totalScheduledHours: v.number(),
   }),
   handler: async (ctx, args) => {
+    const venue = await ctx.db.get(args.venueId);
     await requireVenueManager(ctx, args.venueId);
     const shifts = await ctx.db
       .query('scheduleShifts')
@@ -252,9 +289,24 @@ export const getManagerSchedule = query({
         };
       });
 
+    const weekly = weeklyMinutesByProfile(shifts);
+    const totalScheduledMinutes = Array.from(weekly.values()).reduce((sum, m) => sum + m, 0);
+
     return {
       shifts: mapped,
-      staff: staff.map((s: Doc<'profiles'>) => ({ _id: s._id, fullName: s.fullName, role: s.role, jobTitle: s.jobTitle })),
+      staff: staff.map((s: Doc<'profiles'>) => {
+        const mins = weekly.get(s._id) ?? 0;
+        return {
+          _id: s._id,
+          fullName: s.fullName,
+          role: s.role,
+          jobTitle: s.jobTitle,
+          weeklyHours: Math.round((mins / 60) * 10) / 10,
+          overtime: mins > OVERTIME_MINUTES,
+        };
+      }),
+      laborBudgetHours: venue?.weeklyLaborBudgetHours ?? null,
+      totalScheduledHours: Math.round((totalScheduledMinutes / 60) * 10) / 10,
     };
   },
 });
@@ -499,5 +551,296 @@ export const requestDropShift = mutation({
       body: `${profile.fullName} asked to drop ${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}.`,
     });
     return requestId;
+  },
+});
+
+// ---------- Publish & notify ----------
+
+export const publishSchedule = mutation({
+  args: { venueId: v.id('venues') },
+  returns: v.object({ notified: v.number() }),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+    const assigned = shifts.filter((s: Doc<'scheduleShifts'>) => s.profileId).length;
+    const open = shifts.filter((s: Doc<'scheduleShifts'>) => s.status === 'open').length;
+    await notifyStaffWithPush(ctx, {
+      venueId: args.venueId,
+      kind: 'schedule_published',
+      title: 'Schedule posted',
+      body: `${assigned} shift${assigned === 1 ? '' : 's'} scheduled${open > 0 ? `, ${open} open to pick up` : ''}. Check your shifts.`,
+    });
+    return { notified: assigned };
+  },
+});
+
+export const setLaborBudget = mutation({
+  args: { venueId: v.id('venues'), weeklyLaborBudgetHours: v.union(v.number(), v.null()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    await ctx.db.patch(args.venueId, { weeklyLaborBudgetHours: args.weeklyLaborBudgetHours ?? undefined });
+    return null;
+  },
+});
+
+// ---------- Templates & copy ----------
+
+const templateValue = v.object({
+  _id: v.id('scheduleTemplates'),
+  name: v.string(),
+  shiftCount: v.number(),
+  createdAt: v.number(),
+});
+
+export const listScheduleTemplates = query({
+  args: { venueId: v.id('venues') },
+  returns: v.array(templateValue),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const rows = await ctx.db.query('scheduleTemplates').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).collect();
+    return rows
+      .sort((a: Doc<'scheduleTemplates'>, b: Doc<'scheduleTemplates'>) => b.createdAt - a.createdAt)
+      .map((t: Doc<'scheduleTemplates'>) => ({ _id: t._id, name: t.name, shiftCount: t.shifts.length, createdAt: t.createdAt }));
+  },
+});
+
+export const saveScheduleTemplate = mutation({
+  args: { venueId: v.id('venues'), name: v.string() },
+  returns: v.id('scheduleTemplates'),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const name = args.name.trim();
+    if (!name) throw new Error('Enter a template name');
+    const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+    return await ctx.db.insert('scheduleTemplates', {
+      venueId: args.venueId,
+      name,
+      shifts: shifts.map((s: Doc<'scheduleShifts'>) => ({
+        dayIndex: s.dayIndex,
+        startMinutes: s.startMinutes,
+        endMinutes: s.endMinutes,
+        jobTitle: s.jobTitle,
+        station: s.station,
+      })),
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const applyScheduleTemplate = mutation({
+  args: { venueId: v.id('venues'), templateId: v.id('scheduleTemplates'), replace: v.boolean() },
+  returns: v.object({ added: v.number() }),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const template = await ctx.db.get(args.templateId);
+    if (!template || template.venueId !== args.venueId) throw new Error('Template not found');
+    if (args.replace) {
+      const existing = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+      for (const s of existing) await ctx.db.delete(s._id);
+    }
+    for (const slot of template.shifts) {
+      await ctx.db.insert('scheduleShifts', {
+        venueId: args.venueId,
+        dayIndex: slot.dayIndex,
+        startMinutes: slot.startMinutes,
+        endMinutes: slot.endMinutes,
+        jobTitle: slot.jobTitle,
+        station: slot.station,
+        status: 'open', // templates are unassigned slots
+      });
+    }
+    return { added: template.shifts.length };
+  },
+});
+
+export const deleteScheduleTemplate = mutation({
+  args: { venueId: v.id('venues'), templateId: v.id('scheduleTemplates') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const template = await ctx.db.get(args.templateId);
+    if (!template || template.venueId !== args.venueId) throw new Error('Template not found');
+    await ctx.db.delete(template._id);
+    return null;
+  },
+});
+
+export const copyDayShifts = mutation({
+  args: { venueId: v.id('venues'), fromDay: v.number(), toDays: v.array(v.number()) },
+  returns: v.object({ added: v.number() }),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+    const source = shifts.filter((s: Doc<'scheduleShifts'>) => s.dayIndex === args.fromDay);
+    let added = 0;
+    for (const day of args.toDays) {
+      if (day === args.fromDay) continue;
+      for (const s of source) {
+        await ctx.db.insert('scheduleShifts', {
+          venueId: args.venueId,
+          dayIndex: day,
+          startMinutes: s.startMinutes,
+          endMinutes: s.endMinutes,
+          jobTitle: s.jobTitle,
+          station: s.station,
+          status: 'open', // copied as unassigned slots
+        });
+        added++;
+      }
+    }
+    return { added };
+  },
+});
+
+export const clearWeek = mutation({
+  args: { venueId: v.id('venues') },
+  returns: v.object({ removed: v.number() }),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
+    for (const s of shifts) await ctx.db.delete(s._id);
+    return { removed: shifts.length };
+  },
+});
+
+// ---------- Peer shift swaps ----------
+
+const swapValue = v.object({
+  _id: v.id('shiftSwaps'),
+  status: v.union(v.literal('proposed'), v.literal('accepted'), v.literal('declined'), v.literal('approved'), v.literal('denied'), v.literal('cancelled')),
+  note: v.union(v.string(), v.null()),
+  requesterName: v.string(),
+  targetName: v.string(),
+  requesterShift: v.string(),
+  targetShift: v.union(v.string(), v.null()),
+  direction: v.union(v.literal('incoming'), v.literal('outgoing'), v.literal('other')),
+  createdAt: v.number(),
+});
+
+function shiftLabel(s: Doc<'scheduleShifts'> | null): string {
+  if (!s) return 'shift';
+  return `${dayLabel(s.dayIndex)} ${minutesToTime(s.startMinutes)}–${minutesToTime(s.endMinutes)}`;
+}
+
+export const proposeShiftSwap = mutation({
+  args: { myShiftId: v.id('scheduleShifts'), targetProfileId: v.id('profiles'), targetShiftId: v.optional(v.id('scheduleShifts')), note: v.optional(v.string()) },
+  returns: v.id('shiftSwaps'),
+  handler: async (ctx, args) => {
+    const me = await requireProfile(ctx);
+    if (!me.venueId) throw new Error('Your account is not assigned to a venue');
+    const myShift = await ctx.db.get(args.myShiftId);
+    if (!myShift || myShift.venueId !== me.venueId || myShift.profileId !== me._id) throw new Error('That is not your shift');
+    const target = await ctx.db.get(args.targetProfileId);
+    if (!target || target.venueId !== me.venueId || target._id === me._id) throw new Error('Invalid teammate');
+    if (args.targetShiftId) {
+      const ts = await ctx.db.get(args.targetShiftId);
+      if (!ts || ts.venueId !== me.venueId || ts.profileId !== target._id) throw new Error("That is not the teammate's shift");
+    }
+    const now = Date.now();
+    const swapId = await ctx.db.insert('shiftSwaps', {
+      venueId: me.venueId,
+      requesterProfileId: me._id,
+      requesterShiftId: args.myShiftId,
+      targetProfileId: args.targetProfileId,
+      targetShiftId: args.targetShiftId,
+      status: 'proposed',
+      note: args.note?.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await notifyProfile(ctx, { venueId: me.venueId, profileId: target._id, kind: 'swap_proposed', title: 'Shift swap proposed', body: `${me.fullName} wants to swap ${shiftLabel(myShift)}.` });
+    return swapId;
+  },
+});
+
+export const respondToShiftSwap = mutation({
+  args: { swapId: v.id('shiftSwaps'), accept: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const me = await requireProfile(ctx);
+    const swap = await ctx.db.get(args.swapId);
+    if (!swap || swap.targetProfileId !== me._id) throw new Error('Not authorized');
+    if (swap.status !== 'proposed') throw new Error('This swap is no longer open');
+    await ctx.db.patch(swap._id, { status: args.accept ? 'accepted' : 'declined', updatedAt: Date.now() });
+    if (args.accept && swap.venueId) {
+      await notifyManagers(ctx, { venueId: swap.venueId, kind: 'swap_proposed', title: 'Swap needs approval', body: `${me.fullName} accepted a shift swap — approve it in the schedule.` });
+    }
+    return null;
+  },
+});
+
+export const reviewShiftSwap = mutation({
+  args: { swapId: v.id('shiftSwaps'), approve: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const swap = await ctx.db.get(args.swapId);
+    if (!swap) throw new Error('Swap not found');
+    await requireVenueManager(ctx, swap.venueId);
+    if (swap.status !== 'accepted' && swap.status !== 'proposed') throw new Error('Swap is not pending');
+
+    if (args.approve) {
+      const reqShift = await ctx.db.get(swap.requesterShiftId);
+      if (reqShift) await ctx.db.patch(reqShift._id, { profileId: swap.targetProfileId, status: 'scheduled' });
+      if (swap.targetShiftId) {
+        const tShift = await ctx.db.get(swap.targetShiftId);
+        if (tShift) await ctx.db.patch(tShift._id, { profileId: swap.requesterProfileId, status: 'scheduled' });
+      }
+    }
+    await ctx.db.patch(swap._id, { status: args.approve ? 'approved' : 'denied', updatedAt: Date.now() });
+    await notifyProfile(ctx, { venueId: swap.venueId, profileId: swap.requesterProfileId, kind: 'swap_reviewed', title: `Swap ${args.approve ? 'approved' : 'denied'}`, body: `Your shift swap was ${args.approve ? 'approved' : 'denied'}.` });
+    await notifyProfile(ctx, { venueId: swap.venueId, profileId: swap.targetProfileId, kind: 'swap_reviewed', title: `Swap ${args.approve ? 'approved' : 'denied'}`, body: `A shift swap was ${args.approve ? 'approved' : 'denied'}.` });
+    return null;
+  },
+});
+
+async function mapSwaps(ctx: any, venueId: Id<'venues'>, swaps: Doc<'shiftSwaps'>[], meId: Id<'profiles'> | null) {
+  const staff = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).collect();
+  const nameById = new Map(staff.map((s: Doc<'profiles'>) => [s._id, s.fullName]));
+  const out = [];
+  for (const swap of swaps) {
+    const reqShift = await ctx.db.get(swap.requesterShiftId);
+    const tShift = swap.targetShiftId ? await ctx.db.get(swap.targetShiftId) : null;
+    out.push({
+      _id: swap._id,
+      status: swap.status,
+      note: swap.note ?? null,
+      requesterName: (nameById.get(swap.requesterProfileId) as string) ?? 'Teammate',
+      targetName: (nameById.get(swap.targetProfileId) as string) ?? 'Teammate',
+      requesterShift: shiftLabel(reqShift),
+      targetShift: tShift ? shiftLabel(tShift) : null,
+      direction: (meId === swap.targetProfileId ? 'incoming' : meId === swap.requesterProfileId ? 'outgoing' : 'other') as 'incoming' | 'outgoing' | 'other',
+      createdAt: swap.createdAt,
+    });
+  }
+  return out.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export const getMyShiftSwaps = query({
+  args: {},
+  returns: v.array(swapValue),
+  handler: async (ctx) => {
+    const me = await requireProfile(ctx);
+    if (!me.venueId) return [];
+    const incoming = await ctx.db.query('shiftSwaps').withIndex('by_target', (q: any) => q.eq('targetProfileId', me._id)).collect();
+    const outgoing = await ctx.db.query('shiftSwaps').withIndex('by_requester', (q: any) => q.eq('requesterProfileId', me._id)).collect();
+    const seen = new Set<string>();
+    const merged = [...incoming, ...outgoing].filter((s: Doc<'shiftSwaps'>) => {
+      if (seen.has(s._id)) return false;
+      seen.add(s._id);
+      return true;
+    });
+    return await mapSwaps(ctx, me.venueId, merged, me._id);
+  },
+});
+
+export const listShiftSwaps = query({
+  args: { venueId: v.id('venues') },
+  returns: v.array(swapValue),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    const swaps = await ctx.db.query('shiftSwaps').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).collect();
+    const pending = swaps.filter((s: Doc<'shiftSwaps'>) => s.status === 'accepted' || s.status === 'proposed');
+    return await mapSwaps(ctx, args.venueId, pending, null);
   },
 });

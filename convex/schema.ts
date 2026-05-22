@@ -66,6 +66,7 @@ export default defineSchema({
     longitude: v.number(),
     geofenceRadiusM: v.number(),
     code: v.optional(v.string()), // short join code for PIN staff login
+    weeklyLaborBudgetHours: v.optional(v.number()), // for scheduling budget warnings
     subscriptionStatus: v.optional(v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'))),
     subscriptionPlatform: v.optional(v.union(v.literal('stripe'), v.literal('apple'), v.null())),
   }).index('by_code', ['code']),
@@ -95,6 +96,41 @@ export default defineSchema({
     notes: v.optional(v.string()),
     status: v.union(v.literal('scheduled'), v.literal('open'), v.literal('covered')),
   }).index('by_venueId', ['venueId']).index('by_dayIndex', ['dayIndex']).index('by_profileId', ['profileId']),
+  scheduleTemplates: defineTable({
+    venueId: v.id('venues'),
+    name: v.string(),
+    shifts: v.array(
+      v.object({
+        dayIndex: v.number(),
+        startMinutes: v.number(),
+        endMinutes: v.number(),
+        jobTitle: v.string(),
+        station: v.string(),
+      }),
+    ),
+    createdAt: v.number(),
+  }).index('by_venue', ['venueId']),
+  shiftSwaps: defineTable({
+    venueId: v.id('venues'),
+    requesterProfileId: v.id('profiles'),
+    requesterShiftId: v.id('scheduleShifts'),
+    targetProfileId: v.id('profiles'),
+    targetShiftId: v.optional(v.id('scheduleShifts')), // mutual swap; omitted = give-away
+    status: v.union(
+      v.literal('proposed'),
+      v.literal('accepted'),
+      v.literal('declined'),
+      v.literal('approved'),
+      v.literal('denied'),
+      v.literal('cancelled'),
+    ),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_venue', ['venueId'])
+    .index('by_requester', ['requesterProfileId'])
+    .index('by_target', ['targetProfileId']),
   availability: defineTable({
     venueId: v.id('venues'),
     profileId: v.id('profiles'),
@@ -129,6 +165,9 @@ export default defineSchema({
     audience: v.union(v.literal('managers'), v.literal('staff'), v.literal('profile')),
     kind: v.union(
       v.literal('shift_assigned'),
+      v.literal('schedule_published'),
+      v.literal('swap_proposed'),
+      v.literal('swap_reviewed'),
       v.literal('request_created'),
       v.literal('request_reviewed'),
       v.literal('reservation_due'),

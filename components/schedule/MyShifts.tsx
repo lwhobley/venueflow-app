@@ -32,12 +32,28 @@ export function MyShifts() {
   const claimOpenShift = useMutation(api.scheduling.claimOpenShift);
   const requestDropShift = useMutation(api.scheduling.requestDropShift);
   const createRequest = useMutation(api.app.createStaffRequest);
+  const proposeSwap = useMutation(api.scheduling.proposeShiftSwap);
+  const respondToSwap = useMutation(api.scheduling.respondToShiftSwap);
+  const directory = useQuery(api.chat.listDirectory, venue?.id ? { venueId: venue.id } : 'skip');
+  const swaps = useQuery(api.scheduling.getMyShiftSwaps);
 
   const [offStart, setOffStart] = useState('');
   const [offEnd, setOffEnd] = useState('');
   const [offReason, setOffReason] = useState('');
   const [offError, setOffError] = useState<string | null>(null);
   const [offOk, setOffOk] = useState(false);
+  const [swapShiftId, setSwapShiftId] = useState<string | null>(null);
+
+  const teammates = useMemo(() => (directory ?? []) as { _id: Id<'profiles'>; fullName: string; jobTitle: string }[], [directory]);
+  const mySwaps = useMemo(() => (swaps ?? []) as Array<{ _id: Id<'shiftSwaps'>; status: string; requesterName: string; targetName: string; requesterShift: string; targetShift: string | null; direction: string }>, [swaps]);
+  const incomingSwaps = mySwaps.filter((s) => s.direction === 'incoming' && s.status === 'proposed');
+  const otherSwaps = mySwaps.filter((s) => !(s.direction === 'incoming' && s.status === 'proposed'));
+
+  const offerSwap = async (shiftId: string, targetProfileId: Id<'profiles'>) => {
+    if (!venue?.id) return;
+    await proposeSwap({ myShiftId: shiftId as Id<'scheduleShifts'>, targetProfileId });
+    setSwapShiftId(null);
+  };
 
   const mine = useMemo(() => (data?.mine ?? []) as Shift[], [data]);
   const open = useMemo(() => (data?.open ?? []) as Shift[], [data]);
@@ -105,14 +121,56 @@ export function MyShifts() {
                   {s.conflict ? <Text style={{ color: colors.danger, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
                 </View>
                 <Text>{s.jobTitle} · {s.station}</Text>
-                <Button compact mode="outlined" textColor={colors.danger} onPress={() => void requestDropShift({ shiftId: s._id })}>
-                  Request to drop
-                </Button>
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void requestDropShift({ shiftId: s._id })}>
+                    Request to drop
+                  </Button>
+                  <Button compact mode={swapShiftId === s._id ? 'contained' : 'outlined'} buttonColor={swapShiftId === s._id ? colors.primary : undefined} textColor={swapShiftId === s._id ? '#fff' : colors.primary} onPress={() => setSwapShiftId(swapShiftId === s._id ? null : s._id)}>
+                    {swapShiftId === s._id ? 'Pick teammate…' : 'Offer swap'}
+                  </Button>
+                </View>
+                {swapShiftId === s._id ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {teammates.length === 0 ? (
+                      <Text style={{ color: colors.muted }}>No teammates to offer to.</Text>
+                    ) : (
+                      teammates.map((t) => (
+                        <Chip key={t._id} onPress={() => void offerSwap(s._id, t._id)}>{t.fullName}</Chip>
+                      ))
+                    )}
+                  </View>
+                ) : null}
               </View>
             ))
           )}
         </Card.Content>
       </Card>
+
+      {/* Shift swaps */}
+      {incomingSwaps.length > 0 || otherSwaps.length > 0 ? (
+        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shift swaps</Text>
+            {incomingSwaps.map((sw) => (
+              <View key={sw._id} style={{ padding: 10, borderRadius: 12, backgroundColor: accents[0].bg, gap: 6 }}>
+                <Text>{sw.requesterName} wants you to take {sw.requesterShift}{sw.targetShift ? ` (for your ${sw.targetShift})` : ''}.</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void respondToSwap({ swapId: sw._id, accept: true })}>Accept</Button>
+                  <Button compact mode="text" textColor={colors.danger} onPress={() => void respondToSwap({ swapId: sw._id, accept: false })}>Decline</Button>
+                </View>
+              </View>
+            ))}
+            {otherSwaps.map((sw) => (
+              <View key={sw._id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                <Text style={{ flex: 1, color: colors.muted }}>
+                  {sw.direction === 'outgoing' ? `You → ${sw.targetName}` : `${sw.requesterName} → ${sw.targetName}`} · {sw.requesterShift}
+                </Text>
+                <Chip compact>{sw.status}</Chip>
+              </View>
+            ))}
+          </Card.Content>
+        </Card>
+      ) : null}
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>

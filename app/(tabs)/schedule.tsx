@@ -19,12 +19,37 @@ type StaffRequest = {
   details: string;
 };
 
+type SwapRow = { _id: Id<'shiftSwaps'>; status: string; requesterName: string; targetName: string; requesterShift: string; targetShift: string | null };
+
 function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
   const queueQuery = useQuery(api.app.listStaffRequests, { venueId });
   const reviewRequest = useMutation(api.app.reviewStaffRequest);
   const queue = useMemo(() => (queueQuery ?? []) as StaffRequest[], [queueQuery]);
+  const swapsQuery = useQuery(api.scheduling.listShiftSwaps, { venueId });
+  const reviewSwap = useMutation(api.scheduling.reviewShiftSwap);
+  const swaps = useMemo(() => (swapsQuery ?? []) as SwapRow[], [swapsQuery]);
 
   return (
+    <>
+    <Card style={{ backgroundColor: colors.surface, borderRadius: 16, marginBottom: spacing.md }}>
+      <Card.Content style={{ gap: spacing.sm }}>
+        <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shift swaps</Text>
+        {swaps.length === 0 ? (
+          <Text style={{ color: colors.muted }}>No swaps awaiting approval.</Text>
+        ) : (
+          swaps.map((sw) => (
+            <View key={sw._id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
+              <Text>{sw.requesterName} → {sw.targetName}</Text>
+              <Text style={{ color: colors.muted }}>{sw.requesterShift}{sw.targetShift ? ` ⇄ ${sw.targetShift}` : ' (give-away)'} · {sw.status}</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void reviewSwap({ swapId: sw._id, approve: true })}>Approve</Button>
+                <Button compact mode="outlined" textColor={colors.danger} onPress={() => void reviewSwap({ swapId: sw._id, approve: false })}>Deny</Button>
+              </View>
+            </View>
+          ))
+        )}
+      </Card.Content>
+    </Card>
     <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
       <Card.Content style={{ gap: spacing.sm }}>
         <Text variant="titleMedium" style={{ fontWeight: '700' }}>Request review queue</Text>
@@ -47,6 +72,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
         )}
       </Card.Content>
     </Card>
+    </>
   );
 }
 
