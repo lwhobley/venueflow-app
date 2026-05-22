@@ -8,7 +8,8 @@ import { A0PurchaseProvider } from '../lib/a0-purchases-stub';
 import { ConvexReactClient } from 'convex/react';
 import { ConvexAuthProvider } from '@convex-dev/auth/react';
 import * as SecureStore from 'expo-secure-store';
-import { lightTheme, darkTheme } from '../lib/theme';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { lightTheme, darkTheme, colors } from '../lib/theme';
 import { SubscriptionGate } from '../components/SubscriptionGate';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 
@@ -80,17 +81,23 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ConvexAuthProvider client={convexClient} storage={Platform.OS === 'web' ? undefined : secureStorage}>
-        <QueryClientProvider client={queryClient}>
-          <PaperProvider theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
-            <A0PurchaseProvider config={{ appUserId: userId ?? undefined, debug }}>
-              <SubscriptionGate>
-                <Stack screenOptions={{ headerShown: false }} />
-              </SubscriptionGate>
-            </A0PurchaseProvider>
-          </PaperProvider>
-        </QueryClientProvider>
-      </ConvexAuthProvider>
+      <SafeAreaProvider>
+        <ConvexAuthProvider client={convexClient} storage={Platform.OS === 'web' ? undefined : secureStorage}>
+          <QueryClientProvider client={queryClient}>
+            <PaperProvider theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
+              <A0PurchaseProvider config={{ appUserId: userId ?? undefined, debug }}>
+                {/* Top inset keeps content below the status bar / notch; the tab
+                    bar and screens handle the bottom inset. */}
+                <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'left', 'right']}>
+                  <SubscriptionGate>
+                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+                  </SubscriptionGate>
+                </SafeAreaView>
+              </A0PurchaseProvider>
+            </PaperProvider>
+          </QueryClientProvider>
+        </ConvexAuthProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
