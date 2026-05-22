@@ -287,11 +287,8 @@ export const handleStripeWebhook = internalMutation({
 
     const patch: Record<string, unknown> = { updatedAt: Date.now(), platform: 'stripe' };
     if (event.type === 'checkout.session.completed') {
-      patch.status = 'active';
       patch.externalCustomerId = object.customer ?? subscription.externalCustomerId;
       patch.externalSubscriptionId = object.subscription ?? subscription.externalSubscriptionId;
-      patch.cancelAtPeriodEnd = false;
-      patch.cancelledAt = null;
     }
     if (String(event.type ?? '').startsWith('customer.subscription.')) {
       patch.status = mapStripeStatus(object.status);
@@ -302,7 +299,25 @@ export const handleStripeWebhook = internalMutation({
       patch.cancelAtPeriodEnd = Boolean(object.cancel_at_period_end);
       patch.cancelledAt = stripeMs(object.canceled_at);
     }
-    await (ctx as AnyCtx).db.patch(subscription._id, patch);
+    const invoiceStatusPatch: Record<string, unknown> = {};
+    if (event.type === 'invoice.paid') {
+      invoiceStatusPatch.status = 'active';
+      invoiceStatusPatch.externalCustomerId = object.customer ?? subscription.externalCustomerId;
+      invoiceStatusPatch.externalSubscriptionId = object.subscription ?? subscription.externalSubscriptionId;
+      invoiceStatusPatch.currentPeriodStart = stripeMs(object.period_start);
+      invoiceStatusPatch.currentPeriodEnd = stripeMs(object.period_end);
+      invoiceStatusPatch.cancelAtPeriodEnd = false;
+      invoiceStatusPatch.cancelledAt = null;
+    }
+    if (event.type === 'invoice.payment_failed') {
+      invoiceStatusPatch.status = 'past_due';
+      invoiceStatusPatch.externalCustomerId = object.customer ?? subscription.externalCustomerId;
+      invoiceStatusPatch.externalSubscriptionId = object.subscription ?? subscription.externalSubscriptionId;
+      invoiceStatusPatch.currentPeriodStart = stripeMs(object.period_start);
+      invoiceStatusPatch.currentPeriodEnd = stripeMs(object.period_end);
+    }
+
+    await (ctx as AnyCtx).db.patch(subscription._id, { ...patch, ...invoiceStatusPatch });
     const updated = await (ctx as AnyCtx).db.get(subscription._id);
     if (updated) {
       await (ctx as AnyCtx).db.patch(updated.venueId, {

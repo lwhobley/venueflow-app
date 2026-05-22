@@ -62,6 +62,7 @@ type FloorTableRow = {
     status: keyof typeof statusColors;
     partySize: number | null;
     notes: string | null;
+    mergeGroupId?: string | null;
   } | null;
   activeAssignments: AssignmentRow[];
   nextAssignment: AssignmentRow | null;
@@ -149,11 +150,41 @@ export default function FloorScreen() {
   const releaseAssignment = useMutation(api.floorBinding.releaseAssignment);
   const markDirty = useMutation(api.tables.markDirty);
   const markClean = useMutation(api.tables.markClean);
+  const mergeTablesForParty = useMutation(api.tables.mergeTablesForParty);
+  const splitMergedTables = useMutation(api.tables.splitMergedTables);
+
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeSel, setMergeSel] = useState<string[]>([]);
+  const [mergeParty, setMergeParty] = useState(6);
 
   const canEdit = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
   const activeFloor = floor ?? null;
   const reservationQueue = unassignedReservations ?? [];
   const waitlistQueue = openWaitlist ?? [];
+
+  const mergeableTables = useMemo(
+    () => (activeFloor?.tables ?? []).filter((t: FloorTableRow) => !t.state || t.state.status === 'available' || t.state.status === 'dirty'),
+    [activeFloor],
+  );
+  const mergeGroups = useMemo(() => {
+    const groups = new Map<string, FloorTableRow[]>();
+    for (const t of activeFloor?.tables ?? []) {
+      const g = t.state?.mergeGroupId;
+      if (!g) continue;
+      const list = groups.get(g) ?? [];
+      list.push(t);
+      groups.set(g, list);
+    }
+    return Array.from(groups.entries());
+  }, [activeFloor]);
+
+  const toggleMerge = (id: string) => setMergeSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  const doMerge = async () => {
+    if (!venue?.id || mergeSel.length < 2) return;
+    await mergeTablesForParty({ venueId: venue.id, tableIds: mergeSel as Id<'tables'>[], partySize: mergeParty });
+    setMergeSel([]);
+    setMergeOpen(false);
+  };
 
   const filteredTables = useMemo(() => {
     if (!activeFloor) return [];
@@ -360,6 +391,68 @@ export default function FloorScreen() {
           </Card.Content>
         </Card>
       )}
+
+      {canEdit && activeFloor ? (
+        <Card style={{ backgroundColor: colors.surface }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+              <View style={{ flex: 1 }}>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Merge tables</Text>
+                <Text style={{ color: colors.muted }}>Combine available tables for larger parties, then split them when the party leaves.</Text>
+              </View>
+              <Button mode={mergeOpen ? 'contained-tonal' : 'outlined'} onPress={() => setMergeOpen((value) => !value)}>
+                {mergeOpen ? 'Close' : 'Merge'}
+              </Button>
+            </View>
+
+            {mergeGroups.length > 0 ? (
+              <View style={{ gap: 8 }}>
+                {mergeGroups.map(([groupId, tables]) => (
+                  <View key={groupId} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingVertical: 6 }}>
+                    <Text style={{ flex: 1, color: colors.muted }}>
+                      {tables.map((table) => table.table.label).join(' + ')}
+                    </Text>
+                    <Button compact mode="outlined" onPress={() => venue?.id && void splitMergedTables({ venueId: venue.id, mergeGroupId: groupId })}>
+                      Split
+                    </Button>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {mergeOpen ? (
+              <View style={{ gap: spacing.sm }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                  <Text style={{ color: colors.muted, flex: 1 }}>Party size</Text>
+                  <Button compact mode="outlined" onPress={() => setMergeParty((value) => Math.max(2, value - 1))}>-</Button>
+                  <Chip compact>{mergeParty}</Chip>
+                  <Button compact mode="outlined" onPress={() => setMergeParty((value) => Math.min(50, value + 1))}>+</Button>
+                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {mergeableTables.map((item) => {
+                    const selectedForMerge = mergeSel.includes(item.table._id);
+                    return (
+                      <Chip
+                        key={item.table._id}
+                        selected={selectedForMerge}
+                        onPress={() => toggleMerge(item.table._id)}
+                        style={{ backgroundColor: selectedForMerge ? colors.primary : colors.background }}
+                        textStyle={{ color: selectedForMerge ? '#fff' : colors.charcoal }}
+                      >
+                        {item.table.label}
+                      </Chip>
+                    );
+                  })}
+                </View>
+                {mergeableTables.length === 0 ? <Text style={{ color: colors.muted }}>No available tables to merge right now.</Text> : null}
+                <Button mode="contained" buttonColor={colors.primary} disabled={mergeSel.length < 2} onPress={() => void doMerge()}>
+                  Merge selected
+                </Button>
+              </View>
+            ) : null}
+          </Card.Content>
+        </Card>
+      ) : null}
 
       {selected ? (
         <Card style={{ backgroundColor: colors.surface }}>

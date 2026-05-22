@@ -23,6 +23,11 @@ const parsedItemValue = v.object({
   notes: v.optional(v.string()),
 });
 
+const MAX_IMPORT_ITEMS = 100;
+const MAX_PARSE_TEXT_CHARS = 20_000;
+const MAX_IMAGE_BASE64_CHARS = 6_000_000;
+const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+
 async function getProfile(ctx: AnyCtx) {
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
@@ -186,12 +191,17 @@ export const importParsedBarItems = mutation({
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     let imported = 0;
-    for (const item of args.items.slice(0, 100)) {
+    const existingRows = (await (ctx as AnyCtx).db.query('barInventoryItems').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(500)) as Doc<'barInventoryItems'>[];
+    const existingByName = new Map<string, Doc<'barInventoryItems'>>(existingRows.map((row) => [row.name.toLowerCase(), row]));
+    const seenNames = new Set<string>();
+    for (const item of args.items.slice(0, MAX_IMPORT_ITEMS)) {
       const name = item.name.trim();
       if (!name) continue;
+      const nameKey = name.toLowerCase();
+      if (seenNames.has(nameKey)) continue;
+      seenNames.add(nameKey);
       const now = Date.now();
-      const existingRows = await (ctx as AnyCtx).db.query('barInventoryItems').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(300);
-      const existing = existingRows.find((row: Doc<'barInventoryItems'>) => row.name.toLowerCase() === name.toLowerCase());
+      const existing = existingByName.get(nameKey);
       const payload = {
         venueId: args.venueId,
         name,
@@ -219,7 +229,9 @@ export const authorizeAiParse = internalQuery({
   returns: v.boolean(),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    return Boolean(profile && profile.venueId === args.venueId && canManage(profile.role));
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return false;
+    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    return true;
   },
 });
 
@@ -236,18 +248,23 @@ export const parseBarInventoryInput = action({
     if (!authorized) throw new Error('Not authorized');
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
-    if (!args.text?.trim() && !args.imageBase64) throw new Error('Add pasted text, a CSV/list upload, or a photo to parse');
+    const inputText = args.text?.trim() ?? '';
+    if (!inputText && !args.imageBase64) throw new Error('Add pasted text, a CSV/list upload, or a photo to parse');
+    if (inputText.length > MAX_PARSE_TEXT_CHARS) throw new Error(`Text imports are limited to ${MAX_PARSE_TEXT_CHARS.toLocaleString()} characters`);
+    if (args.imageBase64 && args.imageBase64.length > MAX_IMAGE_BASE64_CHARS) throw new Error('Photo imports are limited to about 4.5MB');
+    const imageMimeType = args.imageMimeType ?? 'image/jpeg';
+    if (args.imageBase64 && !ALLOWED_IMAGE_MIME_TYPES.has(imageMimeType)) throw new Error('Photo imports must be JPEG, PNG, WebP, HEIC, or HEIF');
 
     const content: Array<Record<string, unknown>> = [
       {
         type: 'input_text',
-        text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present.\n\n${args.text ?? ''}`,
+        text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present.\n\n${inputText}`,
       },
     ];
     if (args.imageBase64) {
       content.push({
         type: 'input_image',
-        image_url: `data:${args.imageMimeType ?? 'image/jpeg'};base64,${args.imageBase64}`,
+        image_url: `data:${imageMimeType};base64,${args.imageBase64}`,
         detail: 'high',
       });
     }

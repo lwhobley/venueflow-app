@@ -224,7 +224,7 @@ export const ingestExternalReservation = internalMutation({
     const eventId = args.reservation.externalEventId ?? `${args.provider}:${args.reservation.externalId}:${args.reservation.status}`;
     const duplicate = await (ctx as AnyCtx).db
       .query('reservationSyncEvents')
-      .withIndex('by_provider_external_id', (q: any) => q.eq('provider', args.provider).eq('externalEventId', eventId))
+      .withIndex('by_venue_provider_external_id', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider).eq('externalEventId', eventId))
       .unique();
     if (duplicate?.reservationId) return { reservationId: duplicate.reservationId, created: false };
 
@@ -240,7 +240,7 @@ export const ingestExternalReservation = internalMutation({
     });
     const existing = await (ctx as AnyCtx).db
       .query('reservations')
-      .withIndex('by_external_id', (q: any) => q.eq('externalId', args.reservation.externalId))
+      .withIndex('by_venue_external_id', (q: any) => q.eq('venueId', args.venueId).eq('externalId', args.reservation.externalId))
       .unique();
     const payload = {
       venueId: args.venueId,

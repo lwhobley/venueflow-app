@@ -121,7 +121,7 @@ export default function HomeScreen() {
           <Card.Content style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
               <Text variant="titleMedium" style={{ fontWeight: '700' }}>Manager command center</Text>
-              <Chip compact>{managerDashboard?.totalReservations ?? 0} reservations</Chip>
+              <Chip compact>{managerDashboard?.totalReservations ?? 0} recent reservations</Chip>
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
               <Chip compact>{managerDashboard?.todayReservations ?? 0} today</Chip>

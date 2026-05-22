@@ -56,9 +56,36 @@ export default function ReservationsScreen() {
 
   const page = useQuery(api.reservations.getReservationsPage, venue?.id ? { venueId: venue.id } : 'skip') as any;
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const waitlistData = useQuery(api.floorBinding.getOpenWaitlist, venue?.id ? { venueId: venue.id } : 'skip') as any;
   const saveReservation = useMutation(api.reservations.saveReservation);
   const removeReservation = useMutation(api.reservations.removeReservation);
   const assignReservation = useMutation(api.floorBinding.assignReservationToTables);
+  const addToWaitlist = useMutation(api.floorBinding.addToWaitlist);
+  const markWaitlistReady = useMutation(api.floorBinding.markWaitlistReady);
+  const removeFromWaitlist = useMutation(api.floorBinding.removeFromWaitlist);
+  const assignWaitlist = useMutation(api.floorBinding.assignWaitlistToTables);
+
+  // Waitlist form/state
+  const [wlName, setWlName] = useState('');
+  const [wlParty, setWlParty] = useState(2);
+  const [wlPhone, setWlPhone] = useState('');
+  const [seatingWaitlistId, setSeatingWaitlistId] = useState<string | null>(null);
+  const waitlist = useMemo(() => (waitlistData ?? []) as Array<{ id: string; guestName: string; partySize: number; requestedAt: number; readyAt: number | null; notes: string | null }>, [waitlistData]);
+
+  const addWalkIn = async () => {
+    if (!venue?.id || !wlName.trim()) return;
+    await addToWaitlist({ venueId: venue.id, guestName: wlName.trim(), partySize: wlParty, guestPhone: wlPhone.trim() || undefined });
+    setWlName('');
+    setWlPhone('');
+    setWlParty(2);
+  };
+
+  const seatWaitlist = async (entryId: string, tableId: string) => {
+    if (!venue?.id) return;
+    const startsAt = Date.now();
+    await assignWaitlist({ venueId: venue.id, waitlistId: entryId as Id<'waitlist'>, tableIds: [tableId as Id<'tables'>], holdType: 'seated', startsAt, endsAt: startsAt + 120 * 60 * 1000 });
+    setSeatingWaitlistId(null);
+  };
 
   const reservations = useMemo(() => (page?.reservations ?? []) as ReservationRow[], [page]);
   const tables = useMemo(() => (floor?.tables ?? []) as FloorTable[], [floor]);
@@ -175,6 +202,56 @@ export default function ReservationsScreen() {
           </Card>
         ))}
       </View>
+
+      {/* Waitlist */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Waitlist</Text>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
+            <TextInput label="Walk-in name" value={wlName} onChangeText={setWlName} mode="outlined" dense style={{ flex: 1, backgroundColor: colors.surface }} />
+            <IconButton icon="minus" mode="outlined" size={16} onPress={() => setWlParty((p) => Math.max(1, p - 1))} />
+            <Text style={{ minWidth: 20, textAlign: 'center' }}>{wlParty}</Text>
+            <IconButton icon="plus" mode="outlined" size={16} onPress={() => setWlParty((p) => Math.min(30, p + 1))} />
+          </View>
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <TextInput label="Phone (optional)" value={wlPhone} onChangeText={setWlPhone} mode="outlined" dense keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <Button mode="contained" buttonColor={colors.primary} onPress={() => void addWalkIn()}>Add</Button>
+          </View>
+          {waitlist.length === 0 ? (
+            <Text style={{ color: colors.muted }}>No one waiting.</Text>
+          ) : (
+            waitlist.map((w) => {
+              const waitMins = Math.max(0, Math.round((Date.now() - w.requestedAt) / 60000));
+              return (
+                <View key={w.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: '700' }}>{w.guestName} · party of {w.partySize}</Text>
+                    {w.readyAt ? <Chip compact style={{ backgroundColor: accents[2].bg }} textStyle={{ color: accents[2].fg }}>Ready</Chip> : <Text style={{ color: colors.muted }}>{waitMins}m waiting</Text>}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                    {!w.readyAt ? <Button compact mode="outlined" textColor={accents[2].fg} onPress={() => void markWaitlistReady({ venueId: venue!.id, waitlistId: w.id as Id<'waitlist'> })}>Mark ready</Button> : null}
+                    <Button compact mode={seatingWaitlistId === w.id ? 'contained' : 'outlined'} buttonColor={seatingWaitlistId === w.id ? colors.primary : undefined} textColor={seatingWaitlistId === w.id ? '#fff' : colors.primary} onPress={() => setSeatingWaitlistId(seatingWaitlistId === w.id ? null : w.id)}>
+                      {seatingWaitlistId === w.id ? 'Pick a table…' : 'Seat'}
+                    </Button>
+                    <Button compact mode="text" textColor={colors.danger} onPress={() => void removeFromWaitlist({ venueId: venue!.id, waitlistId: w.id as Id<'waitlist'> })}>Remove</Button>
+                  </View>
+                  {seatingWaitlistId === w.id ? (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: colors.background, borderRadius: 12, padding: 10 }}>
+                      {openTables.length === 0 ? (
+                        <Text style={{ color: colors.danger }}>No open tables.</Text>
+                      ) : (
+                        openTables.map((t) => (
+                          <Chip key={t.table._id} onPress={() => void seatWaitlist(w.id, t.table._id)}>{t.table.label} · {t.table.seats}</Chip>
+                        ))
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
+          )}
+        </Card.Content>
+      </Card>
 
       {/* New reservation */}
       {canManage ? (

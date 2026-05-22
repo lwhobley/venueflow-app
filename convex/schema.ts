@@ -273,7 +273,7 @@ export default defineSchema({
     status: posCheckStatus,
     raw: v.optional(v.any()),
     updatedAt: v.number(),
-  }).index('by_venue_openedAt', ['venueId', 'openedAt']).index('by_provider_external', ['provider', 'externalCheckId']).index('by_guest', ['guestId']),
+  }).index('by_venue_openedAt', ['venueId', 'openedAt']).index('by_provider_external', ['provider', 'externalCheckId']).index('by_venue_provider_external', ['venueId', 'provider', 'externalCheckId']).index('by_guest', ['guestId']),
   payrollExports: defineTable({
     venueId: v.id('venues'),
     provider: v.union(v.literal('gusto'), v.literal('adp'), v.literal('paychex'), v.literal('csv')),
@@ -307,7 +307,7 @@ export default defineSchema({
     notes: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index('by_venue_time', ['venueId', 'reservationTime']).index('by_venue_status', ['venueId', 'status']).index('by_guest', ['guestId']).index('by_external_id', ['externalId']),
+  }).index('by_venue_time', ['venueId', 'reservationTime']).index('by_venue_status', ['venueId', 'status']).index('by_guest', ['guestId']).index('by_external_id', ['externalId']).index('by_venue_external_id', ['venueId', 'externalId']),
   reservationConnections: defineTable({
     venueId: v.id('venues'),
     provider: reservationProvider,
@@ -327,7 +327,7 @@ export default defineSchema({
     processedAt: v.number(),
     status: v.union(v.literal('processed'), v.literal('skipped'), v.literal('error')),
     errorMessage: v.optional(v.string()),
-  }).index('by_provider_external_id', ['provider', 'externalEventId']).index('by_venue_processedAt', ['venueId', 'processedAt']),
+  }).index('by_provider_external_id', ['provider', 'externalEventId']).index('by_venue_provider_external_id', ['venueId', 'provider', 'externalEventId']).index('by_venue_processedAt', ['venueId', 'processedAt']),
   barInventoryItems: defineTable({
     venueId: v.id('venues'),
     name: v.string(),
@@ -343,7 +343,7 @@ export default defineSchema({
     lastCountedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index('by_venue', ['venueId']).index('by_venue_category', ['venueId', 'category']),
+  }).index('by_venue', ['venueId']).index('by_venue_category', ['venueId', 'category']).index('by_venue_name', ['venueId', 'name']),
   barInventoryMovements: defineTable({
     venueId: v.id('venues'),
     itemId: v.id('barInventoryItems'),
@@ -457,7 +457,9 @@ export default defineSchema({
     seatedAt: v.optional(v.number()),
     lastActivityAt: v.number(),
     notes: v.optional(v.string()),
-  }).index('by_table', ['tableId']).index('by_status', ['status']).index('by_server', ['serverId']).index('by_venue', ['venueId']),
+    // Tables merged for one big party share a group id; split clears it.
+    mergeGroupId: v.optional(v.string()),
+  }).index('by_table', ['tableId']).index('by_status', ['status']).index('by_server', ['serverId']).index('by_venue', ['venueId']).index('by_venue_merge_group', ['venueId', 'mergeGroupId']),
   tableStateHistory: defineTable({
     venueId: v.id('venues'),
     tableId: v.id('tables'),

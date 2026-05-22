@@ -218,3 +218,62 @@ export const mergeTables = mutation({
     return null;
   },
 });
+
+// Merge several tables into one big-party group (all seated, sharing a
+// mergeGroupId). Written as direct upserts so the group id survives.
+export const mergeTablesForParty = mutation({
+  args: { venueId: v.id('venues'), tableIds: v.array(v.id('tables')), partySize: v.number(), serverId: v.optional(v.id('profiles')) },
+  returns: v.object({ mergeGroupId: v.string() }),
+  handler: async (ctx, args) => {
+    const profile = await requireProfile(ctx);
+    if (!canTransfer(profile.role)) throw new Error('Not authorized');
+    if (profile.venueId !== args.venueId) throw new Error('Table is outside your venue');
+    await requireActiveSubscription(ctx as any, args.venueId);
+    if (args.tableIds.length < 2) throw new Error('Pick at least two tables to merge');
+
+    const groupId = `mg_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const now = Date.now();
+    for (const tableId of args.tableIds) {
+      const { floorPlan } = await loadTableAndPlan(ctx, tableId);
+      if (floorPlan.venueId !== args.venueId) throw new Error('Table is outside your venue');
+      const state = await loadState(ctx, tableId);
+      const next = {
+        venueId: args.venueId,
+        tableId,
+        status: 'seated' as const,
+        partySize: Math.max(1, Math.round(args.partySize)),
+        serverId: args.serverId ?? profile._id,
+        toastCheckGuid: state?.toastCheckGuid ?? undefined,
+        seatedAt: state?.seatedAt ?? now,
+        lastActivityAt: now,
+        notes: 'Merged party',
+        mergeGroupId: groupId,
+      };
+      if (state) await ctx.db.patch(state._id, next);
+      else await ctx.db.insert('tableStates', next);
+      await writeHistory(ctx, { tableId, venueId: args.venueId, fromStatus: state?.status ?? 'available', toStatus: 'seated', actorId: profile._id, partySize: next.partySize, metadata: { merge: groupId } });
+    }
+    return { mergeGroupId: groupId };
+  },
+});
+
+export const splitMergedTables = mutation({
+  args: { venueId: v.id('venues'), mergeGroupId: v.string() },
+  returns: v.object({ freed: v.number() }),
+  handler: async (ctx, args) => {
+    const profile = await requireProfile(ctx);
+    if (!canTransfer(profile.role)) throw new Error('Not authorized');
+    if (profile.venueId !== args.venueId) throw new Error('Table is outside your venue');
+    await requireActiveSubscription(ctx as any, args.venueId);
+    const group = await ctx.db
+      .query('tableStates')
+      .withIndex('by_venue_merge_group', (q: any) => q.eq('venueId', args.venueId).eq('mergeGroupId', args.mergeGroupId))
+      .take(50);
+    const now = Date.now();
+    for (const s of group) {
+      await ctx.db.patch(s._id, { status: 'available', partySize: undefined, serverId: undefined, seatedAt: undefined, notes: undefined, mergeGroupId: undefined, lastActivityAt: now });
+      await writeHistory(ctx, { tableId: s.tableId, venueId: args.venueId, fromStatus: s.status, toStatus: 'available', actorId: profile._id, partySize: null, metadata: { split: args.mergeGroupId } });
+    }
+    return { freed: group.length };
+  },
+});

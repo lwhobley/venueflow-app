@@ -111,7 +111,7 @@ async function upsertCheck(ctx: AnyCtx, args: { venueId: Id<'venues'>; provider:
   const guest = await findGuestByName(ctx, args.venueId, args.check.guestName);
   const existing = await ctx.db
     .query('posChecks')
-    .withIndex('by_provider_external', (q: any) => q.eq('provider', args.provider).eq('externalCheckId', args.check.externalCheckId))
+    .withIndex('by_venue_provider_external', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider).eq('externalCheckId', args.check.externalCheckId))
     .unique();
   const payload = {
     venueId: args.venueId,

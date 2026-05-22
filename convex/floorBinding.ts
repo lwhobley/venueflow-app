@@ -145,6 +145,7 @@ async function loadTableWithAssignments(ctx: any, table: Doc<'tables'>, now: num
           seatedAt: state.seatedAt ?? null,
           lastActivityAt: state.lastActivityAt,
           notes: state.notes ?? null,
+          mergeGroupId: state.mergeGroupId ?? null,
         }
       : null,
     activeAssignments: binding.activeAssignments,
@@ -355,12 +356,67 @@ export const getOpenWaitlist = query({
       .map((item: Doc<'waitlist'>) => ({
         id: item._id,
         guestName: item.guestName,
+        guestPhone: item.guestPhone ?? null,
         partySize: item.partySize,
         requestedAt: item.requestedAt,
+        readyAt: item.readyAt ?? null,
         source: item.source,
         status: item.status,
         notes: item.notes ?? null,
       }));
+  },
+});
+
+export const addToWaitlist = mutation({
+  args: {
+    venueId: v.id('venues'),
+    guestName: v.string(),
+    partySize: v.number(),
+    guestPhone: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  },
+  returns: v.id('waitlist'),
+  handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
+    const name = args.guestName.trim();
+    if (!name) throw new Error('Enter a guest name');
+    const now = Date.now();
+    return await ctx.db.insert('waitlist', {
+      venueId: args.venueId,
+      guestName: name,
+      guestPhone: args.guestPhone?.trim() || undefined,
+      partySize: Math.max(1, Math.round(args.partySize)),
+      source: 'walk_in',
+      status: 'waiting',
+      requestedAt: now,
+      notes: args.notes?.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const markWaitlistReady = mutation({
+  args: { venueId: v.id('venues'), waitlistId: v.id('waitlist') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
+    const entry = await ctx.db.get(args.waitlistId);
+    if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
+    await ctx.db.patch(entry._id, { readyAt: Date.now(), updatedAt: Date.now() });
+    return null;
+  },
+});
+
+export const removeFromWaitlist = mutation({
+  args: { venueId: v.id('venues'), waitlistId: v.id('waitlist') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireVenueMember(ctx, args.venueId);
+    const entry = await ctx.db.get(args.waitlistId);
+    if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
+    await ctx.db.patch(entry._id, { status: 'removed', updatedAt: Date.now() });
+    return null;
   },
 });
 
