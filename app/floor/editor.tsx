@@ -1,122 +1,208 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Text } from 'react-native-paper';
+import { Animated, Dimensions, PanResponder, Pressable, ScrollView, View } from 'react-native';
+import { Button, Card, Chip, IconButton, Text, TextInput } from 'react-native-paper';
+import { router } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { colors, spacing } from '../../lib/theme';
+import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
-type FloorTableState = {
-  status: 'available' | 'seated' | 'dirty' | 'reserved' | 'held' | 'out_of_service';
-  partySize: number | null;
-  notes: string | null;
-} | null;
+type Shape = 'round' | 'square' | 'rect' | 'booth';
+type Section = 'main' | 'patio' | 'bar' | 'vip';
 
-type FloorTableRow = {
-  table: {
-    _id: string;
-    label: string;
-    shape: 'round' | 'square' | 'rect' | 'booth';
-    seats: number;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    rotation: number;
-    section: 'main' | 'patio' | 'bar' | 'vip';
-    minSpend: number;
-    isReservable: boolean;
-  };
-  state: FloorTableState;
+type DraftTable = {
+  key: string;
+  label: string;
+  shape: Shape;
+  seats: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  section: Section;
+  minSpend: number;
+  isReservable: boolean;
 };
 
-type FloorData = {
-  floorPlan: { name: string; width: number; height: number };
-  tables: FloorTableRow[];
+const sectionColors: Record<Section, string> = {
+  main: '#6D5DF6',
+  patio: '#16A34A',
+  bar: '#F59E0B',
+  vip: '#EC4899',
+};
+const sections: Section[] = ['main', 'patio', 'bar', 'vip'];
+
+const shapeDefaults: Record<Shape, { width: number; height: number; seats: number; label: string }> = {
+  round: { width: 90, height: 90, seats: 4, label: 'Round' },
+  square: { width: 90, height: 90, seats: 4, label: 'Square' },
+  rect: { width: 150, height: 80, seats: 6, label: 'Table' },
+  booth: { width: 130, height: 90, seats: 4, label: 'Booth' },
 };
 
-type DraftTable = FloorTableRow['table'] & { state: FloorTableState };
+const MIN_SIZE = 50;
+const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+const snap = (v: number, grid = 10) => Math.round(v / grid) * grid;
 
-type EditorGestureState = {
-  dx: number;
-  dy: number;
-};
+// Chair (seat) positions around a table in table-local coordinates.
+function chairPositions(shape: Shape, w: number, h: number, seats: number): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  if (seats <= 0) return out;
+  if (shape === 'round') {
+    const r = Math.max(w, h) / 2 + 9;
+    for (let i = 0; i < seats; i++) {
+      const a = (2 * Math.PI * i) / seats - Math.PI / 2;
+      out.push({ x: w / 2 + r * Math.cos(a), y: h / 2 + r * Math.sin(a) });
+    }
+    return out;
+  }
+  // Rect/square/booth: split between top and bottom edges, overflow to sides.
+  const top = Math.ceil(seats / 2);
+  const bottom = seats - top;
+  for (let i = 0; i < top; i++) out.push({ x: ((i + 1) * w) / (top + 1), y: -9 });
+  for (let i = 0; i < bottom; i++) out.push({ x: ((i + 1) * w) / (bottom + 1), y: h + 9 });
+  return out;
+}
 
-type DraggableTableProps = {
+function TableNode({
+  table,
+  scale,
+  selected,
+  venueW,
+  venueH,
+  onSelect,
+  onMove,
+  onResize,
+}: {
   table: DraftTable;
+  scale: number;
   selected: boolean;
+  venueW: number;
+  venueH: number;
   onSelect: () => void;
-  onMove: (nextX: number, nextY: number) => void;
-};
-
-const sectionColors: Record<FloorTableRow['table']['section'], string> = {
-  main: '#C9A961',
-  patio: '#8C6A4F',
-  bar: '#A1643A',
-  vip: '#C74B6C',
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function snap(value: number, grid = 8) {
-  return Math.round(value / grid) * grid;
-}
-
-function DraggableTable({ table, selected, onSelect, onMove }: DraggableTableProps) {
-  const position = useRef(new Animated.ValueXY({ x: table.x, y: table.y })).current;
-  const startPosition = useRef({ x: table.x, y: table.y });
+  onMove: (x: number, y: number) => void;
+  onResize: (w: number, h: number) => void;
+}) {
+  const pos = useRef(new Animated.ValueXY({ x: table.x, y: table.y })).current;
+  const size = useRef(new Animated.ValueXY({ x: table.width, y: table.height })).current;
+  const start = useRef({ x: table.x, y: table.y, w: table.width, h: table.height });
 
   useEffect(() => {
-    position.setValue({ x: table.x, y: table.y });
-  }, [position, table.x, table.y]);
+    pos.setValue({ x: table.x, y: table.y });
+    size.setValue({ x: table.width, y: table.height });
+  }, [pos, size, table.x, table.y, table.width, table.height]);
 
-  const panResponder = useMemo(
+  const drag = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (_: unknown, gesture: EditorGestureState) => Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2,
         onPanResponderGrant: () => {
-          startPosition.current = { x: table.x, y: table.y };
+          start.current = { x: table.x, y: table.y, w: table.width, h: table.height };
           onSelect();
         },
-        onPanResponderMove: (_: unknown, gesture: EditorGestureState) => {
-          const nextX = snap(clamp(startPosition.current.x + gesture.dx, 0, 1440 - table.width));
-          const nextY = snap(clamp(startPosition.current.y + gesture.dy, 0, 960 - table.height));
-          position.setValue({ x: nextX, y: nextY });
+        onPanResponderMove: (_e, g) => {
+          pos.setValue({
+            x: clamp(start.current.x + g.dx / scale, 0, venueW - table.width),
+            y: clamp(start.current.y + g.dy / scale, 0, venueH - table.height),
+          });
         },
-        onPanResponderRelease: (_: unknown, gesture: EditorGestureState) => {
-          const nextX = snap(clamp(startPosition.current.x + gesture.dx, 0, 1440 - table.width));
-          const nextY = snap(clamp(startPosition.current.y + gesture.dy, 0, 960 - table.height));
-          position.setValue({ x: nextX, y: nextY });
-          onMove(nextX, nextY);
+        onPanResponderRelease: (_e, g) => {
+          const nx = snap(clamp(start.current.x + g.dx / scale, 0, venueW - table.width));
+          const ny = snap(clamp(start.current.y + g.dy / scale, 0, venueH - table.height));
+          pos.setValue({ x: nx, y: ny });
+          onMove(nx, ny);
         },
       }),
-    [onMove, onSelect, position, table.height, table.width, table.x, table.y],
+    [onMove, onSelect, pos, scale, table.height, table.width, table.x, table.y, venueH, venueW],
   );
+
+  const resize = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          start.current = { x: table.x, y: table.y, w: table.width, h: table.height };
+          onSelect();
+        },
+        onPanResponderMove: (_e, g) => {
+          size.setValue({
+            x: clamp(start.current.w + g.dx / scale, MIN_SIZE, venueW - table.x),
+            y: clamp(start.current.h + g.dy / scale, MIN_SIZE, venueH - table.y),
+          });
+        },
+        onPanResponderRelease: (_e, g) => {
+          const nw = snap(clamp(start.current.w + g.dx / scale, MIN_SIZE, venueW - table.x));
+          const nh = snap(clamp(start.current.h + g.dy / scale, MIN_SIZE, venueH - table.y));
+          size.setValue({ x: nw, y: nh });
+          onResize(nw, nh);
+        },
+      }),
+    [onResize, onSelect, size, scale, table.height, table.width, table.x, table.y, venueH, venueW],
+  );
+
+  const color = sectionColors[table.section];
+  const chairs = chairPositions(table.shape, table.width, table.height, table.seats);
 
   return (
     <Animated.View
-      {...panResponder.panHandlers}
       style={{
         position: 'absolute',
-        left: position.x,
-        top: position.y,
-        width: table.width,
-        height: table.height,
-        borderRadius: table.shape === 'round' ? 999 : table.shape === 'booth' ? 18 : 14,
-        borderWidth: selected ? 3 : 2,
-        borderColor: selected ? colors.cream : sectionColors[table.section],
-        backgroundColor: `${sectionColors[table.section]}22`,
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 8,
-        transform: [{ rotate: `${table.rotation}deg` }],
+        left: Animated.multiply(pos.x, scale),
+        top: Animated.multiply(pos.y, scale),
+        width: Animated.multiply(size.x, scale),
+        height: Animated.multiply(size.y, scale),
       }}
     >
-      <Text style={{ color: colors.cream, fontWeight: '700' }}>{table.label}</Text>
-      <Text style={{ color: colors.cream, fontSize: 12 }}>{table.seats} seats</Text>
+      {/* Chairs (rendered relative to table box) */}
+      {chairs.map((c, i) => (
+        <View
+          key={i}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: c.x * scale - 5,
+            top: c.y * scale - 5,
+            width: 10,
+            height: 10,
+            borderRadius: 5,
+            backgroundColor: '#cbd2e0',
+          }}
+        />
+      ))}
+      <Animated.View
+        {...drag.panHandlers}
+        style={{
+          width: '100%',
+          height: '100%',
+          borderRadius: table.shape === 'round' ? 999 : table.shape === 'booth' ? 16 : 8,
+          borderWidth: selected ? 3 : 2,
+          borderColor: selected ? '#fff' : color,
+          backgroundColor: `${color}33`,
+          alignItems: 'center',
+          justifyContent: 'center',
+          transform: [{ rotate: `${table.rotation}deg` }],
+        }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{table.label}</Text>
+        <Text style={{ color: '#fff', fontSize: 10 }}>{table.seats} seats</Text>
+      </Animated.View>
+      {selected ? (
+        <View
+          {...resize.panHandlers}
+          style={{
+            position: 'absolute',
+            right: -10,
+            bottom: -10,
+            width: 22,
+            height: 22,
+            borderRadius: 6,
+            backgroundColor: '#fff',
+            borderWidth: 2,
+            borderColor: color,
+          }}
+        />
+      ) : null}
     </Animated.View>
   );
 }
@@ -124,149 +210,281 @@ function DraggableTable({ table, selected, onSelect, onMove }: DraggableTablePro
 export default function FloorEditorScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
-  const floor = useQuery(api.floor.getActiveFloorPlan, venue?.id ? { venueId: venue.id } : 'skip') as FloorData | null | undefined;
-  const stats = useQuery(api.floor.getFloorStats, venue?.id ? { venueId: venue.id } : 'skip');
+  const floor = useQuery(api.floor.getActiveFloorPlan, venue?.id ? { venueId: venue.id } : 'skip') as any;
   const saveFloorPlan = useMutation(api.floor.saveFloorPlan);
-  const seedFloor = useMutation(api.seed.seedDemoFloorPlan);
-  const [draftTables, setDraftTables] = useState<DraftTable[]>([]);
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
-  const canEdit = user?.role === 'admin' || user?.role === 'owner';
+  const canEdit = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+
+  const [tables, setTables] = useState<DraftTable[]>([]);
+  const [venueW, setVenueW] = useState(1000);
+  const [venueH, setVenueH] = useState(700);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [name, setName] = useState('Main Floor');
+  const [saved, setSaved] = useState(false);
+  const counter = useRef(0);
 
   useEffect(() => {
     if (!floor) return;
-    setDraftTables(floor.tables.map(({ table, state }) => ({ ...table, state })));
-    setSelectedTableId((current: string | null) => current ?? floor.tables[0]?.table._id ?? null);
+    setName(floor.floorPlan.name ?? 'Main Floor');
+    setVenueW(Math.max(400, floor.floorPlan.width || 1000));
+    setVenueH(Math.max(300, floor.floorPlan.height || 700));
+    setTables(
+      (floor.tables ?? []).map((t: any, i: number) => ({
+        key: `t${i}`,
+        label: t.table.label,
+        shape: t.table.shape,
+        seats: t.table.seats,
+        x: t.table.x,
+        y: t.table.y,
+        width: t.table.width,
+        height: t.table.height,
+        rotation: t.table.rotation,
+        section: t.table.section,
+        minSpend: t.table.minSpend,
+        isReservable: t.table.isReservable,
+      })),
+    );
   }, [floor]);
 
-  const selectedTable = useMemo(
-    () => draftTables.find((item: DraftTable) => item._id === selectedTableId) ?? draftTables[0] ?? null,
-    [draftTables, selectedTableId],
-  );
+  const selected = useMemo(() => tables.find((t) => t.key === selectedKey) ?? null, [tables, selectedKey]);
 
-  const onSeed = async () => {
-    if (!venue?.id) return;
-    await seedFloor({ venueId: venue.id });
+  const screenW = Dimensions.get('window').width;
+  const canvasW = Math.min(screenW - spacing.lg * 2, 720);
+  const scale = canvasW / venueW;
+  const canvasH = venueH * scale;
+
+  const update = (key: string, patch: Partial<DraftTable>) =>
+    setTables((cur) => cur.map((t) => (t.key === key ? { ...t, ...patch } : t)));
+
+  const addTable = (shape: Shape) => {
+    const d = shapeDefaults[shape];
+    const key = `new_${counter.current++}_${Date.now()}`;
+    const count = tables.length + 1;
+    setTables((cur) => [
+      ...cur,
+      {
+        key,
+        label: `${d.label} ${count}`,
+        shape,
+        seats: d.seats,
+        x: snap(clamp(venueW / 2 - d.width / 2, 0, venueW - d.width)),
+        y: snap(clamp(venueH / 2 - d.height / 2, 0, venueH - d.height)),
+        width: d.width,
+        height: d.height,
+        rotation: 0,
+        section: 'main',
+        minSpend: 0,
+        isReservable: true,
+      },
+    ]);
+    setSelectedKey(key);
+  };
+
+  const deleteSelected = () => {
+    if (!selected) return;
+    setTables((cur) => cur.filter((t) => t.key !== selected.key));
+    setSelectedKey(null);
   };
 
   const onPublish = async () => {
     if (!venue?.id) return;
-    if (!floor) {
-      await onSeed();
-      return;
-    }
     await saveFloorPlan({
       venueId: venue.id,
-      name: floor.floorPlan.name,
-      width: floor.floorPlan.width,
-      height: floor.floorPlan.height,
+      name: name.trim() || 'Main Floor',
+      width: venueW,
+      height: venueH,
       backgroundImageUrl: null,
-      tables: draftTables.map((table: DraftTable) => ({
-        label: table.label,
-        shape: table.shape,
-        seats: table.seats,
-        x: table.x,
-        y: table.y,
-        width: table.width,
-        height: table.height,
-        rotation: table.rotation,
-        section: table.section,
-        minSpend: table.minSpend,
-        isReservable: table.isReservable,
+      tables: tables.map((t) => ({
+        label: t.label,
+        shape: t.shape,
+        seats: t.seats,
+        x: t.x,
+        y: t.y,
+        width: t.width,
+        height: t.height,
+        rotation: t.rotation,
+        section: t.section,
+        minSpend: t.minSpend,
+        isReservable: t.isReservable,
       })),
     });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
   };
 
-  const updateTablePosition = (tableId: string, nextX: number, nextY: number) => {
-    setDraftTables((current: DraftTable[]) => current.map((table: DraftTable) => (table._id === tableId ? { ...table, x: nextX, y: nextY } : table)));
-    setSelectedTableId(tableId);
-  };
-
-  const activeFloor = floor ?? null;
+  if (!canEdit) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
+        <Text style={{ color: colors.muted }}>Only managers and admins can edit the floor plan.</Text>
+        <Button mode="text" onPress={() => router.back()}>Back</Button>
+      </View>
+    );
+  }
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontFamily: 'serif' }}>
-          Floor Editor
-        </Text>
-        <Text style={{ color: colors.muted }}>
-          Drag tables on the canvas, then save and publish the new floor plan.
-        </Text>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <IconButton icon="arrow-left" onPress={() => router.back()} />
+        <View>
+          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Floor editor</Text>
+          <Text style={{ color: colors.muted }}>Drag to move · drag the corner to resize · tap to select.</Text>
+        </View>
       </View>
 
-      <Card style={{ backgroundColor: colors.surface }}>
+      {/* Add shapes */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Status</Text>
-          <Text>{activeFloor ? `Editing ${activeFloor.floorPlan.name}` : 'No active floor plan yet.'}</Text>
-          <Text style={{ color: colors.muted }}>
-            Occupied {stats?.occupiedCount ?? 0} · Waitlist {stats?.waitlistSize ?? 0}
-          </Text>
-          {canEdit ? (
-            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-              <Button mode="contained" onPress={() => void onPublish()}>
-                Save & Publish
-              </Button>
-              <Button mode="outlined" onPress={() => void onSeed()}>
-                Seed sample floor
-              </Button>
-            </View>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add a table</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Button mode="contained-tonal" icon="circle-outline" onPress={() => addTable('round')}>Circle</Button>
+            <Button mode="contained-tonal" icon="square-outline" onPress={() => addTable('square')}>Square</Button>
+            <Button mode="contained-tonal" icon="rectangle-outline" onPress={() => addTable('rect')}>Rectangle</Button>
+            <Button mode="contained-tonal" icon="sofa-outline" onPress={() => addTable('booth')}>Booth</Button>
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* Venue size */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Venue size</Text>
+          <Text style={{ color: colors.muted }}>Resize the room rectangle to fit your venue.</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ width: 56 }}>Width</Text>
+            <IconButton icon="minus" mode="outlined" size={16} onPress={() => setVenueW((w) => Math.max(400, w - 100))} />
+            <Text style={{ minWidth: 48, textAlign: 'center' }}>{venueW}</Text>
+            <IconButton icon="plus" mode="outlined" size={16} onPress={() => setVenueW((w) => Math.min(2400, w + 100))} />
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ width: 56 }}>Height</Text>
+            <IconButton icon="minus" mode="outlined" size={16} onPress={() => setVenueH((h) => Math.max(300, h - 100))} />
+            <Text style={{ minWidth: 48, textAlign: 'center' }}>{venueH}</Text>
+            <IconButton icon="plus" mode="outlined" size={16} onPress={() => setVenueH((h) => Math.min(2000, h + 100))} />
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* Service-area legend */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Service areas</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            {sections.map((s) => (
+              <View key={s} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: sectionColors[s] }} />
+                <Text style={{ textTransform: 'capitalize' }}>{s}</Text>
+              </View>
+            ))}
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* Canvas */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View
+            style={{
+              width: canvasW,
+              height: canvasH,
+              alignSelf: 'center',
+              borderRadius: 16,
+              backgroundColor: '#11141f',
+              borderWidth: 2,
+              borderColor: '#2a2f42',
+              overflow: 'hidden',
+            }}
+          >
+            <Pressable style={{ width: '100%', height: '100%' }} onPress={() => setSelectedKey(null)}>
+              {tables.map((t) => (
+                <TableNode
+                  key={t.key}
+                  table={t}
+                  scale={scale}
+                  selected={selected?.key === t.key}
+                  venueW={venueW}
+                  venueH={venueH}
+                  onSelect={() => setSelectedKey(t.key)}
+                  onMove={(x, y) => update(t.key, { x, y })}
+                  onResize={(w, h) => update(t.key, { width: w, height: h })}
+                />
+              ))}
+            </Pressable>
+          </View>
+          {tables.length === 0 ? (
+            <Text style={{ color: colors.muted, textAlign: 'center' }}>Add a table above to start building your floor.</Text>
           ) : null}
         </Card.Content>
       </Card>
 
-      {activeFloor ? (
-        <Card style={{ backgroundColor: colors.surface }}>
+      {/* Selected table inspector */}
+      {selected ? (
+        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium">Drag canvas</Text>
-            <Text style={{ color: colors.muted }}>
-              Move tables around the floor layout. Positions snap to an 8px grid.
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View
-                  style={{
-                    width: Math.max(activeFloor.floorPlan.width, 420),
-                    height: Math.max(activeFloor.floorPlan.height, 300),
-                    borderRadius: 24,
-                    backgroundColor: '#18120E',
-                    borderWidth: 1,
-                    borderColor: '#2C241D',
-                    overflow: 'hidden',
-                    position: 'relative',
-                  }}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{selected.label}</Text>
+              <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelected}>Delete</Button>
+            </View>
+
+            <TextInput label="Label" value={selected.label} onChangeText={(v) => update(selected.key, { label: v })} mode="outlined" style={{ backgroundColor: colors.surface }} />
+
+            <Text style={{ color: colors.muted }}>Shape</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {(['round', 'square', 'rect', 'booth'] as Shape[]).map((sh) => (
+                <Chip key={sh} selected={selected.shape === sh} onPress={() => update(selected.key, { shape: sh })}>
+                  {sh === 'round' ? 'Circle' : sh === 'rect' ? 'Rectangle' : sh.charAt(0).toUpperCase() + sh.slice(1)}
+                </Chip>
+              ))}
+            </View>
+
+            <Text style={{ color: colors.muted }}>Service area</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {sections.map((s) => (
+                <Chip
+                  key={s}
+                  selected={selected.section === s}
+                  onPress={() => update(selected.key, { section: s })}
+                  style={{ backgroundColor: selected.section === s ? sectionColors[s] : colors.cream }}
+                  textStyle={{ color: selected.section === s ? '#fff' : colors.charcoal }}
                 >
-                  {draftTables.map((table: DraftTable) => (
-                    <View key={table._id} style={{ position: 'absolute', left: 0, top: 0 }}>
-                      <DraggableTable
-                        table={table}
-                        selected={selectedTable?._id === table._id}
-                        onSelect={() => setSelectedTableId(table._id)}
-                        onMove={(nextX, nextY) => updateTablePosition(table._id, nextX, nextY)}
-                      />
-                    </View>
-                  ))}
-                </View>
-              </ScrollView>
-            </ScrollView>
+                  {s}
+                </Chip>
+              ))}
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ width: 64 }}>Seats</Text>
+              <IconButton icon="minus" mode="outlined" size={16} onPress={() => update(selected.key, { seats: Math.max(0, selected.seats - 1) })} />
+              <Text style={{ minWidth: 28, textAlign: 'center' }}>{selected.seats}</Text>
+              <IconButton icon="plus" mode="outlined" size={16} onPress={() => update(selected.key, { seats: Math.min(20, selected.seats + 1) })} />
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ width: 64 }}>Rotate</Text>
+              <IconButton icon="rotate-left" mode="outlined" size={16} onPress={() => update(selected.key, { rotation: (selected.rotation - 15 + 360) % 360 })} />
+              <Text style={{ minWidth: 40, textAlign: 'center' }}>{selected.rotation}°</Text>
+              <IconButton icon="rotate-right" mode="outlined" size={16} onPress={() => update(selected.key, { rotation: (selected.rotation + 15) % 360 })} />
+            </View>
+
+            <Chip
+              icon={selected.isReservable ? 'check' : 'close'}
+              selected={selected.isReservable}
+              onPress={() => update(selected.key, { isReservable: !selected.isReservable })}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              {selected.isReservable ? 'Reservable' : 'Not reservable'}
+            </Chip>
           </Card.Content>
         </Card>
       ) : null}
 
-      {selectedTable ? (
-        <Card style={{ backgroundColor: colors.surface }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium">{selectedTable.label}</Text>
-            <Text style={{ color: colors.muted }}>
-              {selectedTable.section.toUpperCase()} · {selectedTable.shape} · {selectedTable.seats} seats
-            </Text>
-            <Text style={{ color: colors.muted }}>
-              Position {selectedTable.x}, {selectedTable.y} · {selectedTable.minSpend > 0 ? `$${selectedTable.minSpend} min spend` : 'No minimum spend'}
-            </Text>
-            <Chip selected>{selectedTable.state?.status ?? 'available'}</Chip>
-          </Card.Content>
-        </Card>
-      ) : null}
+      <Button mode="contained" buttonColor={colors.primary} icon="content-save" onPress={() => void onPublish()}>
+        Save & publish floor plan
+      </Button>
+      {saved ? <Text style={{ color: accents[2].fg, textAlign: 'center' }}>Saved ✓</Text> : null}
     </ScrollView>
   );
 }

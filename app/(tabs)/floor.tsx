@@ -204,18 +204,30 @@ export default function FloorScreen() {
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium">No active floor plan yet</Text>
-            <Text style={{ color: colors.muted }}>Seed the sample floor plan to get started.</Text>
+            <Text style={{ color: colors.muted }}>Build your own in the editor, or seed a sample to get started.</Text>
             {canEdit ? (
-              <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSeed()}>
-                Seed sample floor
-              </Button>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                <Button mode="contained" buttonColor={colors.primary} icon="pencil" onPress={() => router.push('/floor/editor')}>
+                  Build floor plan
+                </Button>
+                <Button mode="outlined" textColor={colors.primary} onPress={() => void onSeed()}>
+                  Seed sample
+                </Button>
+              </View>
             ) : null}
           </Card.Content>
         </Card>
       ) : (
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium">{activeFloor.floorPlan.name}</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text variant="titleMedium">{activeFloor.floorPlan.name}</Text>
+              {canEdit ? (
+                <Button compact mode="outlined" textColor={colors.primary} icon="pencil" onPress={() => router.push('/floor/editor')}>
+                  Edit
+                </Button>
+              ) : null}
+            </View>
             <View
               style={{
                 height: 560,

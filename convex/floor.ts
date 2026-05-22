@@ -92,7 +92,7 @@ const floorHistoryValue = v.object({
 });
 
 function canManageFloor(role: Doc<'profiles'>['role']) {
-  return role === 'admin' || role === 'owner';
+  return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
 async function requireProfile(ctx: any) {
