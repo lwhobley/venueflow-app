@@ -42,6 +42,12 @@ export default function ProfileScreen() {
         </Button>
       ) : null}
 
+      {canManage ? (
+        <Button mode="outlined" textColor={colors.primary} icon="map-marker-radius" onPress={() => router.push('/venue/settings')} style={{ marginBottom: spacing.sm }}>
+          Venue location & geofence
+        </Button>
+      ) : null}
+
       {canViewBilling ? (
         <Button mode="outlined" textColor={colors.primary} onPress={onOpenBilling} style={{ marginBottom: spacing.sm }}>
           Billing

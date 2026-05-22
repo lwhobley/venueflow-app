@@ -16,6 +16,7 @@ export type AuthState = SessionState & {
     user: UserSummary;
     venue: Venue | null;
   }) => void;
+  setVenue: (venue: Venue) => void;
   clearSession: () => void;
 };
 
@@ -77,6 +78,7 @@ const createAuthStore = (set: (partial: Partial<AuthState>) => void): AuthState 
       user: session.user,
       venue: session.venue,
     }),
+  setVenue: (venue: Venue) => set({ venue }),
   clearSession: () => set({ user: null, venue: null }),
 });
 

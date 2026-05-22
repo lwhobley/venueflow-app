@@ -339,6 +339,44 @@ export const getMe = query({
   },
 });
 
+export const updateVenue = mutation({
+  args: {
+    venueId: v.id('venues'),
+    name: v.optional(v.string()),
+    latitude: v.optional(v.number()),
+    longitude: v.optional(v.number()),
+    geofenceRadiusM: v.optional(v.number()),
+  },
+  returns: venueValue,
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !isAdminRole(profile.role)) {
+      throw new Error('Not authorized');
+    }
+    const venue = await (ctx as AnyCtx).db.get(args.venueId);
+    if (!venue) throw new Error('Venue not found');
+
+    const patch: Record<string, unknown> = {};
+    if (args.name !== undefined && args.name.trim()) patch.name = args.name.trim();
+    if (args.latitude !== undefined) {
+      if (args.latitude < -90 || args.latitude > 90) throw new Error('Latitude must be between -90 and 90');
+      patch.latitude = args.latitude;
+    }
+    if (args.longitude !== undefined) {
+      if (args.longitude < -180 || args.longitude > 180) throw new Error('Longitude must be between -180 and 180');
+      patch.longitude = args.longitude;
+    }
+    if (args.geofenceRadiusM !== undefined) {
+      patch.geofenceRadiusM = Math.max(20, Math.min(2000, args.geofenceRadiusM));
+    }
+
+    await (ctx as AnyCtx).db.patch(venue._id, patch);
+    const updated = await (ctx as AnyCtx).db.get(venue._id);
+    if (!updated) throw new Error('Unable to update venue');
+    return mapVenue(updated);
+  },
+});
+
 export const getMyVenueBilling = query({
   args: {},
   returns: v.union(
