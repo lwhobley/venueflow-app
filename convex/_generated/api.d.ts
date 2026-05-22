@@ -11,6 +11,7 @@
 import type * as app from "../app.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
+import type * as barInventory from "../barInventory.js";
 import type * as billing from "../billing.js";
 import type * as billing_shared from "../billing/shared.js";
 import type * as chat from "../chat.js";
@@ -19,6 +20,7 @@ import type * as floorBinding from "../floorBinding.js";
 import type * as guests from "../guests.js";
 import type * as http from "../http.js";
 import type * as notifications from "../notifications.js";
+import type * as operations from "../operations.js";
 import type * as payroll from "../payroll.js";
 import type * as pos from "../pos.js";
 import type * as push from "../push.js";
@@ -39,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   app: typeof app;
   auth: typeof auth;
   authz: typeof authz;
+  barInventory: typeof barInventory;
   billing: typeof billing;
   "billing/shared": typeof billing_shared;
   chat: typeof chat;
@@ -47,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   guests: typeof guests;
   http: typeof http;
   notifications: typeof notifications;
+  operations: typeof operations;
   payroll: typeof payroll;
   pos: typeof pos;
   push: typeof push;

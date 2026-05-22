@@ -42,6 +42,10 @@ export default function TabsLayout() {
         options={{ title: 'Integrations', href: canManage ? '/integrations' : null, tabBarIcon: icon('connection') }}
       />
       <Tabs.Screen
+        name="bar-stock"
+        options={{ title: 'Bar Stock', href: canManage ? '/bar-stock' : null, tabBarIcon: icon('glass-cocktail') }}
+      />
+      <Tabs.Screen
         name="reports"
         options={{ title: 'Reports', href: canManage ? '/reports' : null, tabBarIcon: icon('chart-box-outline') }}
       />

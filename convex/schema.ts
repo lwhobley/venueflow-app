@@ -32,6 +32,10 @@ const posConnectionStatus = v.union(v.literal('connected'), v.literal('paused'),
 const posCheckStatus = v.union(v.literal('open'), v.literal('paid'), v.literal('void'));
 const reservationProvider = v.union(v.literal('opentable'), v.literal('resy'), v.literal('sevenrooms'), v.literal('tock'), v.literal('google'), v.literal('generic'));
 const integrationStatus = v.union(v.literal('connected'), v.literal('paused'), v.literal('error'));
+const barStockCategory = v.union(v.literal('spirit'), v.literal('wine'), v.literal('beer'), v.literal('mixer'), v.literal('garnish'), v.literal('supply'), v.literal('other'));
+const barStockMovementType = v.union(v.literal('count'), v.literal('received'), v.literal('waste'), v.literal('comp'), v.literal('transfer'), v.literal('correction'));
+const managerGoalPeriod = v.union(v.literal('day'), v.literal('week'));
+const managerGoalStatus = v.union(v.literal('open'), v.literal('done'), v.literal('cancelled'));
 
 export default defineSchema({
   ...authTables,
@@ -285,6 +289,57 @@ export default defineSchema({
     status: v.union(v.literal('processed'), v.literal('skipped'), v.literal('error')),
     errorMessage: v.optional(v.string()),
   }).index('by_provider_external_id', ['provider', 'externalEventId']).index('by_venue_processedAt', ['venueId', 'processedAt']),
+  barInventoryItems: defineTable({
+    venueId: v.id('venues'),
+    name: v.string(),
+    category: barStockCategory,
+    area: v.optional(v.string()),
+    unit: v.string(),
+    parLevel: v.number(),
+    onHand: v.number(),
+    unitCostCents: v.optional(v.number()),
+    supplier: v.optional(v.string()),
+    sku: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    lastCountedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_venue', ['venueId']).index('by_venue_category', ['venueId', 'category']),
+  barInventoryMovements: defineTable({
+    venueId: v.id('venues'),
+    itemId: v.id('barInventoryItems'),
+    movementType: barStockMovementType,
+    quantity: v.number(),
+    previousOnHand: v.number(),
+    nextOnHand: v.number(),
+    notes: v.optional(v.string()),
+    createdBy: v.id('profiles'),
+    createdAt: v.number(),
+  }).index('by_venue_createdAt', ['venueId', 'createdAt']).index('by_item_createdAt', ['itemId', 'createdAt']),
+  managerGoals: defineTable({
+    venueId: v.id('venues'),
+    title: v.string(),
+    details: v.optional(v.string()),
+    period: managerGoalPeriod,
+    targetDate: v.string(),
+    status: managerGoalStatus,
+    createdBy: v.id('profiles'),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_venue_targetDate', ['venueId', 'targetDate']).index('by_venue_status', ['venueId', 'status']),
+  venueEvents: defineTable({
+    venueId: v.id('venues'),
+    title: v.string(),
+    startsAt: v.number(),
+    endsAt: v.optional(v.number()),
+    expectedGuests: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    reservationId: v.optional(v.id('reservations')),
+    createdBy: v.id('profiles'),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_venue_startsAt', ['venueId', 'startsAt']).index('by_reservation', ['reservationId']),
   reservationSettings: defineTable({
     venueId: v.id('venues'),
     defaultDiningMinutes: v.number(),
