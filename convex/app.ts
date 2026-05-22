@@ -299,7 +299,10 @@ export const bootstrapProfile = mutation({
 
     const existing = await getProfile(ctx as AnyCtx);
     const email = identity.email ?? 'member@venueflow.test';
-    const roleName = existing?.role ?? 'staff';
+    // Emails that should always be granted admin (e.g. the venue owner).
+    const ADMIN_EMAILS = ['lwhobley@gmail.com'];
+    const isAllowlistedAdmin = !!identity.email && ADMIN_EMAILS.includes(identity.email.toLowerCase());
+    const roleName = isAllowlistedAdmin ? 'admin' : existing?.role ?? 'staff';
     let profile = existing;
 
     if (!profile) {
@@ -313,11 +316,19 @@ export const bootstrapProfile = mutation({
         venueId: venue._id,
       });
       profile = await (ctx as AnyCtx).db.get(profileId);
-    } else if (!existing.userId) {
-      // Backfill userId on a profile created before this key migration, and
-      // refresh the (now-stale) tokenIdentifier.
-      await (ctx as AnyCtx).db.patch(existing._id, { userId, tokenIdentifier: identity.tokenIdentifier });
-      profile = await (ctx as AnyCtx).db.get(existing._id);
+    } else {
+      const patch: Record<string, unknown> = {};
+      // Backfill userId on a profile created before the key migration.
+      if (!existing.userId) {
+        patch.userId = userId;
+        patch.tokenIdentifier = identity.tokenIdentifier;
+      }
+      // Promote allowlisted owners to admin if they aren't already.
+      if (isAllowlistedAdmin && existing.role !== 'admin') patch.role = 'admin';
+      if (Object.keys(patch).length > 0) {
+        await (ctx as AnyCtx).db.patch(existing._id, patch);
+        profile = await (ctx as AnyCtx).db.get(existing._id);
+      }
     }
 
     if (!profile) throw new Error('Unable to load profile');

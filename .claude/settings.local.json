@@ -12,7 +12,9 @@
       "PowerShell(cd \"C:\\\\Users\\\\lwhob\\\\Downloads\\\\a0-project\"; \\(Get-ChildItem -Recurse -Directory -Filter convex -Path node_modules -ErrorAction SilentlyContinue | Where-Object { Test-Path \\(Join-Path $_.FullName 'package.json'\\) } | ForEach-Object { \"$\\($_.FullName\\): \" + \\(Get-Content \\(Join-Path $_.FullName 'package.json'\\) | ConvertFrom-Json\\).version }\\) -join \"`n\")",
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
-      "Bash(perl -CSD -0pi -e 's/fmt\\\\x{0422}ime/fmtResTime/g' app/reservations.tsx)"
+      "Bash(perl -CSD -0pi -e 's/fmt\\\\x{0422}ime/fmtResTime/g' app/reservations.tsx)",
+      "Bash(rm -f convex/cleanup.ts)",
+      "Bash(sed -n '1,45p' components/SubscriptionGate.tsx)"
     ]
   }
 }

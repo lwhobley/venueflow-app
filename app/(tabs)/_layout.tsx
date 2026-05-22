@@ -39,7 +39,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="chat"
-        options={{ title: 'Requests', href: canManage ? '/chat' : null, tabBarIcon: icon('account-clock') }}
+        options={{ title: 'Chat', tabBarIcon: icon('chat-outline') }}
       />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: icon('account-circle') }} />
     </Tabs>

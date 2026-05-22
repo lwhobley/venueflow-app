@@ -30,7 +30,27 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const segments = useSegments();
   const hydrated = useAuthStore((state: AuthState) => state.hydrated);
   const user = useAuthStore((state: AuthState) => state.user);
+  const setSession = useAuthStore((state: AuthState) => state.setSession);
   const me = useQuery(api.app.getMe, hydrated && user ? {} : 'skip');
+
+  // Keep the local session in sync with the server profile (role, name, venue)
+  // so changes like an admin promotion reflect without re-login.
+  useEffect(() => {
+    if (!me?.profile || !user) return;
+    const p = me.profile;
+    const same =
+      user.role === p.role &&
+      user.full_name === p.fullName &&
+      user.job_title === p.jobTitle &&
+      user.venue_id === (p.venueId ?? null);
+    if (same) return;
+    setSession({
+      user: { id: p._id, email: p.email, full_name: p.fullName, role: p.role, job_title: p.jobTitle, venue_id: p.venueId ?? null },
+      venue: me.venue
+        ? { id: me.venue._id, name: me.venue.name, latitude: me.venue.latitude, longitude: me.venue.longitude, geofence_radius_m: me.venue.geofenceRadiusM }
+        : null,
+    });
+  }, [me, user, setSession]);
   const billing = useQuery(api.app.getMyVenueBilling, me?.venue?._id ? {} : 'skip');
   const { isPremium } = useA0Purchases();
   const route = `/${segments.join('/')}`;

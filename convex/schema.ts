@@ -80,6 +80,22 @@ export default defineSchema({
     .index('by_profile', ['profileId'])
     .index('by_venue', ['venueId'])
     .index('by_profile_day', ['profileId', 'dayIndex']),
+  conversations: defineTable({
+    venueId: v.id('venues'),
+    type: v.union(v.literal('group'), v.literal('dm')),
+    name: v.optional(v.string()),
+    // For DMs: the two participant profile ids. For groups: empty (any venue member).
+    memberIds: v.array(v.id('profiles')),
+    lastMessageAt: v.optional(v.number()),
+    lastMessageText: v.optional(v.string()),
+  }).index('by_venue', ['venueId']),
+  messages: defineTable({
+    conversationId: v.id('conversations'),
+    venueId: v.id('venues'),
+    senderId: v.id('profiles'),
+    text: v.string(),
+    createdAt: v.number(),
+  }).index('by_conversation', ['conversationId']),
   blackoutDates: defineTable({
     venueId: v.id('venues'),
     startDate: v.string(), // YYYY-MM-DD (inclusive)

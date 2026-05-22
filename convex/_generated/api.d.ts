@@ -13,6 +13,8 @@ import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as billing from "../billing.js";
 import type * as billing_shared from "../billing/shared.js";
+import type * as chat from "../chat.js";
+import type * as cleanup from "../cleanup.js";
 import type * as floor from "../floor.js";
 import type * as floorBinding from "../floorBinding.js";
 import type * as http from "../http.js";
@@ -34,6 +36,8 @@ declare const fullApi: ApiFromModules<{
   authz: typeof authz;
   billing: typeof billing;
   "billing/shared": typeof billing_shared;
+  chat: typeof chat;
+  cleanup: typeof cleanup;
   floor: typeof floor;
   floorBinding: typeof floorBinding;
   http: typeof http;
