@@ -53,6 +53,27 @@ export default function StaffScreen() {
   const addVenueRole = useMutation(api.staffAuth.addVenueRole);
   const removeVenueRole = useMutation(api.staffAuth.removeVenueRole);
   const inviteStaff = useMutation(api.staffAuth.inviteStaff);
+  const resetStaffPin = useMutation(api.staffAuth.resetStaffPin);
+
+  const [resetTargetId, setResetTargetId] = useState<string | null>(null);
+  const [resetPinValue, setResetPinValue] = useState('');
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+
+  const onResetPin = async (member: StaffMember) => {
+    setResetMsg(null);
+    if (!venue?.id || !/^\d{4}$/.test(resetPinValue)) {
+      setResetMsg('Enter a 4-digit PIN.');
+      return;
+    }
+    try {
+      await resetStaffPin({ venueId: venue.id, profileId: member._id as Id<'profiles'>, pin: resetPinValue });
+      setResetMsg(`PIN reset for ${member.fullName}.`);
+      setResetTargetId(null);
+      setResetPinValue('');
+    } catch (e) {
+      setResetMsg(e instanceof Error ? e.message : 'Could not reset PIN.');
+    }
+  };
 
   const [venueCode, setVenueCode] = useState<string | null>(null);
   const [newRole, setNewRole] = useState('');
@@ -324,12 +345,30 @@ export default function StaffScreen() {
                     <Button mode="outlined" onPress={() => { setSelectedStaffId(member._id); setTransferVenueId(venue?.id ?? null); }}>
                       Transfer
                     </Button>
+                    <Button mode="outlined" textColor={colors.primary} onPress={() => { setResetTargetId(resetTargetId === member._id ? null : member._id); setResetPinValue(''); setResetMsg(null); }}>
+                      Reset PIN
+                    </Button>
                     {selectedStaffId === member._id ? (
                       <Button mode="text" textColor={colors.primary} onPress={clearForm}>
                         Deselect
                       </Button>
                     ) : null}
                   </View>
+                  {resetTargetId === member._id ? (
+                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                      <PaperTextInput
+                        placeholder="New 4-digit PIN"
+                        value={resetPinValue}
+                        onChangeText={(t) => setResetPinValue(t.replace(/\D/g, '').slice(0, 4))}
+                        keyboardType="number-pad"
+                        maxLength={4}
+                        mode="outlined"
+                        style={{ flex: 1, backgroundColor: colors.surface }}
+                      />
+                      <Button mode="contained" buttonColor={colors.primary} onPress={() => void onResetPin(member)}>Save PIN</Button>
+                    </View>
+                  ) : null}
+                  {resetMsg && resetTargetId === member._id ? <Text style={{ color: colors.muted }}>{resetMsg}</Text> : null}
                 </Card.Content>
               </Card>
             ))

@@ -360,9 +360,12 @@ export const bootstrapProfile = mutation({
     const identity = await requireIdentity(ctx as AnyCtx);
     const userId = await getAuthUserId(ctx as AnyCtx);
     if (!userId) throw new Error('Unauthenticated');
-    const venue = await getOrCreateVenue(ctx as AnyCtx);
 
     const existing = await getProfile(ctx as AnyCtx);
+    // Use the profile's own venue when it has one; only fall back to
+    // get-or-create for brand-new accounts (first admin signup).
+    let venue = existing?.venueId ? await (ctx as AnyCtx).db.get(existing.venueId) : null;
+    if (!venue) venue = await getOrCreateVenue(ctx as AnyCtx);
     const email = identity.email ?? 'member@venueflow.test';
     const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
     const roleName = isAllowlistedAdmin ? 'admin' : existing?.role ?? 'staff';

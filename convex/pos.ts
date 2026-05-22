@@ -236,12 +236,14 @@ export const ingestPosCheck = internalMutation({
   args: { venueId: v.id('venues'), provider: posProviderValue, check: posCheckInputValue },
   returns: posCheckValue,
   handler: async (ctx, args) => {
-    const check = await upsertCheck(ctx as AnyCtx, args);
+    // Only accept webhook writes for venues that have configured this provider.
     const connection = await (ctx as AnyCtx).db
       .query('posConnections')
       .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
       .unique();
-    if (connection) await (ctx as AnyCtx).db.patch(connection._id, { lastSyncAt: Date.now(), status: 'connected', updatedAt: Date.now() });
+    if (!connection) throw new Error('No POS connection configured for this venue/provider');
+    const check = await upsertCheck(ctx as AnyCtx, args);
+    await (ctx as AnyCtx).db.patch(connection._id, { lastSyncAt: Date.now(), status: 'connected', updatedAt: Date.now() });
     return mapCheck(check);
   },
 });

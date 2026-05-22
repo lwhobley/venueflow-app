@@ -15,7 +15,8 @@
       "Bash(perl -CSD -0pi -e 's/fmt\\\\x{0422}ime/fmtResTime/g' app/reservations.tsx)",
       "Bash(rm -f convex/cleanup.ts)",
       "Bash(sed -n '1,45p' components/SubscriptionGate.tsx)",
-      "Bash(node -e \"const m=require\\('./node_modules/@convex-dev/auth/dist/server/index.js'\\); console.log\\(Object.keys\\(m\\).filter\\(k=>/account|signIn|store|modify|retrieve|create/i.test\\(k\\)\\)\\)\")"
+      "Bash(node -e \"const m=require\\('./node_modules/@convex-dev/auth/dist/server/index.js'\\); console.log\\(Object.keys\\(m\\).filter\\(k=>/account|signIn|store|modify|retrieve|create/i.test\\(k\\)\\)\\)\")",
+      "PowerShell(cd \"C:\\\\Users\\\\lwhob\\\\Downloads\\\\a0-project\"; npx vitest run 2>&1 | Select-String \"Tests |FAIL\"; \"--- mutation/query counts + authz usage per new file ---\"; foreach \\($f in @\\('pos','push','reservationIntegrations','payroll','operations','barInventory','guests','notifications'\\)\\) { $p=\"convex/$f.ts\"; if \\(Test-Path $p\\) { $defs=\\(Select-String -Path $p -Pattern \"export const \\\\w+ = \\(mutation|query|action|internalMutation|internalQuery|internalAction\\)\"\\).Count; $authz=\\(Select-String -Path $p -Pattern \"require\\(VenueMember|VenueManager|Profile\\)|getAuthUserId\"\\).Count; \"$f : defs=$defs authz=$authz\" } })"
     ]
   }
 }

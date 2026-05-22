@@ -213,6 +213,14 @@ export const ingestExternalReservation = internalMutation({
   args: { venueId: v.id('venues'), provider: providerValue, reservation: externalReservationInput },
   returns: v.object({ reservationId: v.id('reservations'), created: v.boolean() }),
   handler: async (ctx, args) => {
+    // Only accept webhook writes for venues that have actually configured this
+    // provider — limits a shared-secret holder to opted-in venues.
+    const configuredConnection = await (ctx as AnyCtx).db
+      .query('reservationConnections')
+      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
+      .unique();
+    if (!configuredConnection) throw new Error('No reservation connection configured for this venue/provider');
+
     const eventId = args.reservation.externalEventId ?? `${args.provider}:${args.reservation.externalId}:${args.reservation.status}`;
     const duplicate = await (ctx as AnyCtx).db
       .query('reservationSyncEvents')

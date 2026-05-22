@@ -1,6 +1,6 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
-import { createAccount } from '@convex-dev/auth/server';
+import { createAccount, modifyAccountCredentials } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { requireVenueManager, requireVenueMember } from './authz';
 
@@ -173,6 +173,37 @@ export const getVenueRoster = query({
         .sort((a: Doc<'profiles'>, b: Doc<'profiles'>) => a.fullName.localeCompare(b.fullName))
         .map((p: Doc<'profiles'>) => ({ profileId: p._id, fullName: p.fullName, jobTitle: p.jobTitle })),
     };
+  },
+});
+
+// Managers reset a staff PIN: updates BOTH the Convex Auth account secret and
+// the stored pinHash, and clears the lockout (recent failed attempts).
+export const resetStaffPin = mutation({
+  args: { venueId: v.id('venues'), profileId: v.id('profiles'), pin: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
+    const profile = await ctx.db.get(args.profileId);
+    if (!profile || profile.venueId !== args.venueId || !profile.isPinUser || !profile.loginHandle) {
+      throw new Error('Staff member not found');
+    }
+
+    await modifyAccountCredentials(ctx as any, {
+      provider: 'password',
+      account: { id: profile.loginHandle, secret: args.pin },
+    });
+    const pinHash = await hashPin(args.venueId, profile.loginHandle, args.pin);
+    await ctx.db.patch(profile._id, { pinHash });
+
+    // Clear lockout history so the staffer can sign in immediately.
+    const attempts = await ctx.db
+      .query('pinLoginAttempts')
+      .withIndex('by_profile_and_createdAt', (q: any) => q.eq('profileId', profile._id))
+      .collect();
+    for (const attempt of attempts) await ctx.db.delete(attempt._id);
+
+    return null;
   },
 });
 
