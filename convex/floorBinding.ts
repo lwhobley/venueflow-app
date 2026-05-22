@@ -122,6 +122,7 @@ async function loadTableWithAssignments(ctx: any, table: Doc<'tables'>, now: num
       label: table.label,
       shape: table.shape,
       seats: table.seats,
+      seatLabelStyle: table.seatLabelStyle ?? 'number',
       x: table.x,
       y: table.y,
       width: table.width,
@@ -247,6 +248,10 @@ export const getActiveFloorPlan = query({
     for (const table of venue.tables) {
       tables.push(await loadTableWithAssignments(ctx, table, now));
     }
+    const chairRows = await ctx.db
+      .query('floorChairs')
+      .withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', venue.plan._id))
+      .collect();
     return {
       floorPlan: {
         _id: venue.plan._id,
@@ -261,6 +266,7 @@ export const getActiveFloorPlan = query({
         updatedAt: venue.plan.updatedAt,
       },
       tables,
+      chairs: chairRows.map((c: Doc<'floorChairs'>) => ({ _id: c._id, x: c.x, y: c.y, rotation: c.rotation, label: c.label ?? null })),
     };
   },
 });

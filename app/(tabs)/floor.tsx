@@ -37,12 +37,15 @@ type AssignmentRow = {
   endsAt: number;
 };
 
+type SeatLabelStyle = 'number' | 'letter' | 'none';
+
 type FloorTableRow = {
   table: {
     _id: string;
     label: string;
     shape: 'round' | 'square' | 'rect' | 'booth';
     seats: number;
+    seatLabelStyle?: SeatLabelStyle | null;
     x: number;
     y: number;
     width: number;
@@ -61,10 +64,37 @@ type FloorTableRow = {
   nextAssignment: AssignmentRow | null;
 };
 
+type FloorChair = { _id: string; x: number; y: number; rotation: number; label: string | null };
+
 type FloorData = {
   floorPlan: { name: string };
   tables: FloorTableRow[];
+  chairs?: FloorChair[];
 };
+
+function seatText(style: SeatLabelStyle, i: number): string {
+  if (style === 'none') return '';
+  if (style === 'letter') return String.fromCharCode(65 + (i % 26));
+  return String(i + 1);
+}
+
+function chairPositions(shape: string, w: number, h: number, seats: number): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  if (seats <= 0) return out;
+  if (shape === 'round') {
+    const r = Math.max(w, h) / 2 + 9;
+    for (let i = 0; i < seats; i++) {
+      const a = (2 * Math.PI * i) / seats - Math.PI / 2;
+      out.push({ x: w / 2 + r * Math.cos(a), y: h / 2 + r * Math.sin(a) });
+    }
+    return out;
+  }
+  const top = Math.ceil(seats / 2);
+  const bottom = seats - top;
+  for (let i = 0; i < top; i++) out.push({ x: ((i + 1) * w) / (top + 1), y: -9 });
+  for (let i = 0; i < bottom; i++) out.push({ x: ((i + 1) * w) / (bottom + 1), y: h + 9 });
+  return out;
+}
 
 type ReservationQueueItem = {
   id: string;
@@ -263,6 +293,29 @@ export default function FloorScreen() {
                       padding: 8,
                     }}
                   >
+                    {chairPositions(table.shape, table.width, table.height, table.seats).map((c, i) => {
+                      const lbl = seatText((table.seatLabelStyle ?? 'number') as SeatLabelStyle, i);
+                      const sz = lbl ? 16 : 10;
+                      return (
+                        <View
+                          key={i}
+                          pointerEvents="none"
+                          style={{
+                            position: 'absolute',
+                            left: c.x - sz / 2,
+                            top: c.y - sz / 2,
+                            width: sz,
+                            height: sz,
+                            borderRadius: sz / 2,
+                            backgroundColor: '#cbd2e0',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {lbl ? <Text style={{ fontSize: 9, fontWeight: '700', color: '#2a2f42' }}>{lbl}</Text> : null}
+                        </View>
+                      );
+                    })}
                     <Text style={{ color: colors.cream, fontWeight: '700' }}>{table.label}</Text>
                     <Text style={{ color: colors.cream, fontSize: 12 }}>{table.seats} seats</Text>
                     {currentAssignment ? (
@@ -276,6 +329,30 @@ export default function FloorScreen() {
                   </Pressable>
                 );
               })}
+              {(activeFloor.chairs ?? []).map((chair: FloorChair) => (
+                <View
+                  key={chair._id}
+                  pointerEvents="none"
+                  style={{
+                    position: 'absolute',
+                    left: chair.x,
+                    top: chair.y,
+                    width: 30,
+                    height: 30,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transform: [{ rotate: `${chair.rotation}deg` }],
+                  }}
+                >
+                  <View style={{ width: '78%', height: '78%', borderRadius: 6, backgroundColor: '#9aa3b8' }} />
+                  <View style={{ position: 'absolute', top: 0, width: '78%', height: '26%', borderTopLeftRadius: 6, borderTopRightRadius: 6, backgroundColor: '#6b7488' }} />
+                  {chair.label ? (
+                    <View style={{ position: 'absolute', bottom: -13, width: 70, alignItems: 'center', left: 15 - 35 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#cbd2e0' }} numberOfLines={1}>{chair.label}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ))}
             </View>
           </Card.Content>
         </Card>
