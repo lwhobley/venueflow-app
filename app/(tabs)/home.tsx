@@ -7,6 +7,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { usePushNotifications } from '../../lib/usePushNotifications';
 
 type NotificationItem = {
   _id: Id<'notificationEvents'>;
@@ -16,6 +17,7 @@ type NotificationItem = {
 };
 
 export default function HomeScreen() {
+  usePushNotifications();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const dashboard = useQuery(api.app.getDashboard);

@@ -21,6 +21,8 @@ import type * as http from "../http.js";
 import type * as notifications from "../notifications.js";
 import type * as payroll from "../payroll.js";
 import type * as pos from "../pos.js";
+import type * as push from "../push.js";
+import type * as reservationIntegrations from "../reservationIntegrations.js";
 import type * as reservations from "../reservations.js";
 import type * as scheduling from "../scheduling.js";
 import type * as seed from "../seed.js";
@@ -47,6 +49,8 @@ declare const fullApi: ApiFromModules<{
   notifications: typeof notifications;
   payroll: typeof payroll;
   pos: typeof pos;
+  push: typeof push;
+  reservationIntegrations: typeof reservationIntegrations;
   reservations: typeof reservations;
   scheduling: typeof scheduling;
   seed: typeof seed;

@@ -65,4 +65,21 @@ http.route({
   }),
 });
 
+http.route({
+  path: '/reservations/webhook',
+  method: 'POST',
+  handler: httpAction(async (ctx, req) => {
+    const expected = process.env.RESERVATION_WEBHOOK_SECRET;
+    const received = req.headers.get('x-venueflow-reservation-secret');
+    if (!expected || received !== expected) return new Response('Unauthorized', { status: 401 });
+    const body = await req.json();
+    await ctx.runMutation(internal.reservationIntegrations.ingestExternalReservation, {
+      venueId: body.venueId,
+      provider: body.provider,
+      reservation: body.reservation,
+    });
+    return new Response('ok', { status: 200 });
+  }),
+});
+
 export default http;

@@ -24,11 +24,14 @@ const reservationStatus = v.union(
   v.literal('cancelled'),
 );
 const reservationSource = v.union(v.literal('direct'), v.literal('opentable'), v.literal('resy'), v.literal('phone'), v.literal('walk_in'));
+const externalReservationSource = v.union(reservationSource, v.literal('sevenrooms'), v.literal('tock'), v.literal('google'));
 const waitlistStatus = v.union(v.literal('waiting'), v.literal('assigned'), v.literal('seated'), v.literal('completed'), v.literal('removed'));
 const assignmentHoldType = v.union(v.literal('reserved'), v.literal('held'), v.literal('seated'));
 const posProvider = v.union(v.literal('toast'), v.literal('square'), v.literal('clover'), v.literal('generic'));
 const posConnectionStatus = v.union(v.literal('connected'), v.literal('paused'), v.literal('error'));
 const posCheckStatus = v.union(v.literal('open'), v.literal('paid'), v.literal('void'));
+const reservationProvider = v.union(v.literal('opentable'), v.literal('resy'), v.literal('sevenrooms'), v.literal('tock'), v.literal('google'), v.literal('generic'));
+const integrationStatus = v.union(v.literal('connected'), v.literal('paused'), v.literal('error'));
 
 export default defineSchema({
   ...authTables,
@@ -120,12 +123,30 @@ export default defineSchema({
     venueId: v.id('venues'),
     profileId: v.optional(v.id('profiles')),
     audience: v.union(v.literal('managers'), v.literal('staff'), v.literal('profile')),
-    kind: v.union(v.literal('shift_assigned'), v.literal('request_created'), v.literal('request_reviewed'), v.literal('reservation_due'), v.literal('clock_alert')),
+    kind: v.union(
+      v.literal('shift_assigned'),
+      v.literal('request_created'),
+      v.literal('request_reviewed'),
+      v.literal('reservation_due'),
+      v.literal('reservation_created'),
+      v.literal('reservation_updated'),
+      v.literal('clock_alert'),
+    ),
     title: v.string(),
     body: v.string(),
     readBy: v.array(v.id('profiles')),
     createdAt: v.number(),
   }).index('by_venue_and_createdAt', ['venueId', 'createdAt']).index('by_profile_and_createdAt', ['profileId', 'createdAt']),
+  pushTokens: defineTable({
+    venueId: v.id('venues'),
+    profileId: v.id('profiles'),
+    token: v.string(),
+    platform: v.union(v.literal('ios'), v.literal('android'), v.literal('web'), v.literal('unknown')),
+    enabled: v.boolean(),
+    lastSeenAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_profile', ['profileId']).index('by_venue', ['venueId']).index('by_token', ['token']),
   blackoutDates: defineTable({
     venueId: v.id('venues'),
     startDate: v.string(), // YYYY-MM-DD (inclusive)
@@ -229,7 +250,7 @@ export default defineSchema({
     partySize: v.number(),
     reservationTime: v.number(),
     durationMinutes: v.number(),
-    source: reservationSource,
+    source: externalReservationSource,
     status: reservationStatus,
     specialRequests: v.optional(v.string()),
     tags: v.array(v.string()),
@@ -244,6 +265,26 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index('by_venue_time', ['venueId', 'reservationTime']).index('by_venue_status', ['venueId', 'status']).index('by_guest', ['guestId']).index('by_external_id', ['externalId']),
+  reservationConnections: defineTable({
+    venueId: v.id('venues'),
+    provider: reservationProvider,
+    externalVenueId: v.optional(v.string()),
+    status: integrationStatus,
+    lastSyncAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_venue', ['venueId']).index('by_venue_and_provider', ['venueId', 'provider']),
+  reservationSyncEvents: defineTable({
+    venueId: v.id('venues'),
+    provider: reservationProvider,
+    externalEventId: v.string(),
+    eventType: v.string(),
+    reservationId: v.optional(v.id('reservations')),
+    payload: v.any(),
+    processedAt: v.number(),
+    status: v.union(v.literal('processed'), v.literal('skipped'), v.literal('error')),
+    errorMessage: v.optional(v.string()),
+  }).index('by_provider_external_id', ['provider', 'externalEventId']).index('by_venue_processedAt', ['venueId', 'processedAt']),
   reservationSettings: defineTable({
     venueId: v.id('venues'),
     defaultDiningMinutes: v.number(),

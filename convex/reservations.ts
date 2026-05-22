@@ -1,11 +1,21 @@
 import { mutation, query } from './_generated/server';
+import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import { requireActiveSubscription } from './billing/shared';
 import { getAuthUserId } from '@convex-dev/auth/server';
 
 const roleValue = v.union(v.literal('admin'), v.literal('owner'), v.literal('manager'));
-const reservationSourceValue = v.union(v.literal('direct'), v.literal('opentable'), v.literal('resy'), v.literal('phone'), v.literal('walk_in'));
+const reservationSourceValue = v.union(
+  v.literal('direct'),
+  v.literal('opentable'),
+  v.literal('resy'),
+  v.literal('phone'),
+  v.literal('walk_in'),
+  v.literal('sevenrooms'),
+  v.literal('tock'),
+  v.literal('google'),
+);
 const reservationStatusValue = v.union(
   v.literal('requested'),
   v.literal('confirmed'),
@@ -303,6 +313,22 @@ export const saveReservation = mutation({
         tags: args.tags ?? [],
         updatedAt: now,
       });
+      await ctx.db.insert('notificationEvents', {
+        venueId: args.venueId,
+        audience: 'managers',
+        kind: 'reservation_updated',
+        title: 'Reservation updated',
+        body: `${args.guestName} for ${args.partySize} on ${new Date(args.reservationTime).toLocaleString()}.`,
+        readBy: [],
+        createdAt: now,
+      });
+      await ctx.scheduler.runAfter(0, internal.push.sendPushToAudience, {
+        venueId: args.venueId,
+        audience: 'managers',
+        title: 'Reservation updated',
+        body: `${args.guestName} for ${args.partySize}.`,
+        data: { screen: 'reservations', reservationId: existing._id },
+      });
       const updated = await ctx.db.get(existing._id);
       if (!updated) throw new Error('Unable to update reservation');
       return toReservationValue(updated);
@@ -340,6 +366,22 @@ export const saveReservation = mutation({
     });
     const created = await ctx.db.get(reservationId);
     if (!created) throw new Error('Unable to create reservation');
+    await ctx.db.insert('notificationEvents', {
+      venueId: args.venueId,
+      audience: 'managers',
+      kind: 'reservation_created',
+      title: 'New reservation',
+      body: `${args.guestName} for ${args.partySize} on ${new Date(args.reservationTime).toLocaleString()}.`,
+      readBy: [],
+      createdAt: now,
+    });
+    await ctx.scheduler.runAfter(0, internal.push.sendPushToAudience, {
+      venueId: args.venueId,
+      audience: 'managers',
+      title: 'New reservation',
+      body: `${args.guestName} for ${args.partySize}.`,
+      data: { screen: 'reservations', reservationId },
+    });
     return toReservationValue(created);
   },
 });

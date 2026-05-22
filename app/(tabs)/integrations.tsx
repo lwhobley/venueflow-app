@@ -8,6 +8,8 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 const providers = ['toast', 'square', 'clover', 'generic'] as const;
 type Provider = (typeof providers)[number];
+const reservationProviders = ['opentable', 'resy', 'sevenrooms', 'tock', 'google', 'generic'] as const;
+type ReservationProvider = (typeof reservationProviders)[number];
 
 function money(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
@@ -22,11 +24,18 @@ export default function IntegrationsScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
   const overview = useQuery(api.pos.getPosOverview, canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const reservationOverview = useQuery(
+    api.reservationIntegrations.getReservationIntegrationOverview,
+    canManage && venue?.id ? { venueId: venue.id } : 'skip',
+  ) as any;
   const upsertConnection = useMutation(api.pos.upsertPosConnection);
   const importPosCheck = useMutation(api.pos.importPosCheck);
+  const upsertReservationConnection = useMutation(api.reservationIntegrations.upsertReservationConnection);
 
   const [provider, setProvider] = useState<Provider>('toast');
   const [locationId, setLocationId] = useState('');
+  const [reservationProvider, setReservationProvider] = useState<ReservationProvider>('opentable');
+  const [externalVenueId, setExternalVenueId] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -44,6 +53,25 @@ export default function IntegrationsScreen() {
       setMessage('POS connection saved.');
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not save POS connection.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveReservationConnection = async () => {
+    if (!venue?.id) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await upsertReservationConnection({
+        venueId: venue.id,
+        provider: reservationProvider,
+        externalVenueId: externalVenueId.trim() || undefined,
+        status: 'connected',
+      });
+      setMessage('Reservation connection saved.');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not save reservation connection.');
     } finally {
       setSaving(false);
     }
@@ -94,7 +122,7 @@ export default function IntegrationsScreen() {
     >
       <View style={{ gap: 4 }}>
         <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Integrations</Text>
-        <Text style={{ color: colors.muted }}>Connect POS sync and monitor provider activity for {venue?.name ?? 'your venue'}.</Text>
+        <Text style={{ color: colors.muted }}>Connect POS, reservation sync, and provider activity for {venue?.name ?? 'your venue'}.</Text>
       </View>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
@@ -133,6 +161,22 @@ export default function IntegrationsScreen() {
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservation integration</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {reservationProviders.map((item) => (
+              <Chip key={item} selected={reservationProvider === item} onPress={() => setReservationProvider(item)}>{item}</Chip>
+            ))}
+          </View>
+          <TextInput label="Provider venue ID" value={externalVenueId} onChangeText={setExternalVenueId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
+          <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveReservationConnection()}>
+            Save reservation connection
+          </Button>
+          <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with x-venueflow-reservation-secret.</Text>
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Connections</Text>
           {(overview?.connections ?? []).length === 0 ? (
             <Text style={{ color: colors.muted }}>No POS provider connected yet.</Text>
@@ -145,6 +189,33 @@ export default function IntegrationsScreen() {
               </View>
             ))
           )}
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservation connections</Text>
+          {(reservationOverview?.connections ?? []).length === 0 ? (
+            <Text style={{ color: colors.muted }}>No reservation provider connected yet.</Text>
+          ) : (
+            reservationOverview.connections.map((connection: any) => (
+              <View key={connection._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
+                <Text style={{ fontWeight: '700' }}>{connection.provider}</Text>
+                <Text style={{ color: colors.muted }}>Status: {connection.status} · Venue ID: {connection.externalVenueId ?? 'not set'}</Text>
+                <Text style={{ color: colors.muted }}>Last sync: {dateTime(connection.lastSyncAt)}</Text>
+              </View>
+            ))
+          )}
+          {(reservationOverview?.recentEvents ?? []).length > 0 ? (
+            <View style={{ gap: 4 }}>
+              <Text style={{ fontWeight: '700' }}>Recent reservation sync events</Text>
+              {reservationOverview.recentEvents.slice(0, 5).map((event: any) => (
+                <Text key={event._id} style={{ color: colors.muted }}>
+                  {event.provider} · {event.eventType} · {dateTime(event.processedAt)}
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </Card.Content>
       </Card>
 

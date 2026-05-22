@@ -121,7 +121,15 @@ const staffRequestValue = v.object({
 
 const notificationEventValue = v.object({
   _id: v.id('notificationEvents'),
-  kind: v.union(v.literal('shift_assigned'), v.literal('request_created'), v.literal('request_reviewed'), v.literal('reservation_due'), v.literal('clock_alert')),
+  kind: v.union(
+    v.literal('shift_assigned'),
+    v.literal('request_created'),
+    v.literal('request_reviewed'),
+    v.literal('reservation_due'),
+    v.literal('reservation_created'),
+    v.literal('reservation_updated'),
+    v.literal('clock_alert'),
+  ),
   title: v.string(),
   body: v.string(),
   createdAt: v.number(),
