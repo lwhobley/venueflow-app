@@ -204,6 +204,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index('by_venue', ['venueId']).index('by_venue_active', ['venueId', 'isActive']),
+  floorChairs: defineTable({
+    venueId: v.id('venues'),
+    floorPlanId: v.id('floorPlans'),
+    x: v.number(),
+    y: v.number(),
+    rotation: v.number(),
+  }).index('by_floor_plan', ['floorPlanId']).index('by_venue', ['venueId']),
   tables: defineTable({
     floorPlanId: v.id('floorPlans'),
     label: v.string(),

@@ -25,6 +25,15 @@ type DraftTable = {
   isReservable: boolean;
 };
 
+type DraftChair = {
+  key: string;
+  x: number;
+  y: number;
+  rotation: number;
+};
+
+const CHAIR_SIZE = 30;
+
 const sectionColors: Record<Section, string> = {
   main: '#6D5DF6',
   patio: '#16A34A',
@@ -207,6 +216,95 @@ function TableNode({
   );
 }
 
+function ChairNode({
+  chair,
+  scale,
+  selected,
+  venueW,
+  venueH,
+  onSelect,
+  onMove,
+}: {
+  chair: DraftChair;
+  scale: number;
+  selected: boolean;
+  venueW: number;
+  venueH: number;
+  onSelect: () => void;
+  onMove: (x: number, y: number) => void;
+}) {
+  const pos = useRef(new Animated.ValueXY({ x: chair.x, y: chair.y })).current;
+  const start = useRef({ x: chair.x, y: chair.y });
+
+  useEffect(() => {
+    pos.setValue({ x: chair.x, y: chair.y });
+  }, [pos, chair.x, chair.y]);
+
+  const drag = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2,
+        onPanResponderGrant: () => {
+          start.current = { x: chair.x, y: chair.y };
+          onSelect();
+        },
+        onPanResponderMove: (_e, g) => {
+          pos.setValue({
+            x: clamp(start.current.x + g.dx / scale, 0, venueW - CHAIR_SIZE),
+            y: clamp(start.current.y + g.dy / scale, 0, venueH - CHAIR_SIZE),
+          });
+        },
+        onPanResponderRelease: (_e, g) => {
+          const nx = snap(clamp(start.current.x + g.dx / scale, 0, venueW - CHAIR_SIZE), 5);
+          const ny = snap(clamp(start.current.y + g.dy / scale, 0, venueH - CHAIR_SIZE), 5);
+          pos.setValue({ x: nx, y: ny });
+          onMove(nx, ny);
+        },
+      }),
+    [onMove, onSelect, pos, scale, chair.x, chair.y, venueH, venueW],
+  );
+
+  return (
+    <Animated.View
+      {...drag.panHandlers}
+      style={{
+        position: 'absolute',
+        left: Animated.multiply(pos.x, scale),
+        top: Animated.multiply(pos.y, scale),
+        width: CHAIR_SIZE * scale,
+        height: CHAIR_SIZE * scale,
+        alignItems: 'center',
+        justifyContent: 'center',
+        transform: [{ rotate: `${chair.rotation}deg` }],
+      }}
+    >
+      {/* simple chair glyph: seat + backrest */}
+      <View
+        style={{
+          width: '78%',
+          height: '78%',
+          borderRadius: 6,
+          backgroundColor: selected ? '#fff' : '#9aa3b8',
+          borderWidth: selected ? 2 : 0,
+          borderColor: '#fff',
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          width: '78%',
+          height: '26%',
+          borderTopLeftRadius: 6,
+          borderTopRightRadius: 6,
+          backgroundColor: selected ? '#fff' : '#6b7488',
+        }}
+      />
+    </Animated.View>
+  );
+}
+
 export default function FloorEditorScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
@@ -216,12 +314,15 @@ export default function FloorEditorScreen() {
   const canEdit = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
 
   const [tables, setTables] = useState<DraftTable[]>([]);
+  const [chairs, setChairs] = useState<DraftChair[]>([]);
   const [venueW, setVenueW] = useState(1000);
   const [venueH, setVenueH] = useState(700);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedChairKey, setSelectedChairKey] = useState<string | null>(null);
   const [name, setName] = useState('Main Floor');
   const [saved, setSaved] = useState(false);
   const counter = useRef(0);
+  const chairCounter = useRef(0);
 
   useEffect(() => {
     if (!floor) return;
@@ -244,9 +345,49 @@ export default function FloorEditorScreen() {
         isReservable: t.table.isReservable,
       })),
     );
+    setChairs(
+      (floor.chairs ?? []).map((c: any, i: number) => ({
+        key: `c${i}`,
+        x: c.x,
+        y: c.y,
+        rotation: c.rotation,
+      })),
+    );
   }, [floor]);
 
   const selected = useMemo(() => tables.find((t) => t.key === selectedKey) ?? null, [tables, selectedKey]);
+  const selectedChair = useMemo(() => chairs.find((c) => c.key === selectedChairKey) ?? null, [chairs, selectedChairKey]);
+
+  const selectTable = (key: string) => {
+    setSelectedKey(key);
+    setSelectedChairKey(null);
+  };
+  const selectChair = (key: string) => {
+    setSelectedChairKey(key);
+    setSelectedKey(null);
+  };
+  const clearSelection = () => {
+    setSelectedKey(null);
+    setSelectedChairKey(null);
+  };
+
+  const updateChair = (key: string, patch: Partial<DraftChair>) =>
+    setChairs((cur) => cur.map((c) => (c.key === key ? { ...c, ...patch } : c)));
+
+  const addChair = () => {
+    const key = `newc_${chairCounter.current++}_${Date.now()}`;
+    setChairs((cur) => [
+      ...cur,
+      { key, x: snap(clamp(venueW / 2 - CHAIR_SIZE / 2, 0, venueW - CHAIR_SIZE), 5), y: snap(clamp(venueH / 2 - CHAIR_SIZE / 2, 0, venueH - CHAIR_SIZE), 5), rotation: 0 },
+    ]);
+    selectChair(key);
+  };
+
+  const deleteSelectedChair = () => {
+    if (!selectedChair) return;
+    setChairs((cur) => cur.filter((c) => c.key !== selectedChair.key));
+    setSelectedChairKey(null);
+  };
 
   const screenW = Dimensions.get('window').width;
   const canvasW = Math.min(screenW - spacing.lg * 2, 720);
@@ -277,7 +418,7 @@ export default function FloorEditorScreen() {
         isReservable: true,
       },
     ]);
-    setSelectedKey(key);
+    selectTable(key);
   };
 
   const deleteSelected = () => {
@@ -307,6 +448,7 @@ export default function FloorEditorScreen() {
         minSpend: t.minSpend,
         isReservable: t.isReservable,
       })),
+      chairs: chairs.map((c) => ({ x: c.x, y: c.y, rotation: c.rotation })),
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -338,12 +480,13 @@ export default function FloorEditorScreen() {
       {/* Add shapes */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add a table</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add to floor</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button mode="contained-tonal" icon="circle-outline" onPress={() => addTable('round')}>Circle</Button>
             <Button mode="contained-tonal" icon="square-outline" onPress={() => addTable('square')}>Square</Button>
             <Button mode="contained-tonal" icon="rectangle-outline" onPress={() => addTable('rect')}>Rectangle</Button>
             <Button mode="contained-tonal" icon="sofa-outline" onPress={() => addTable('booth')}>Booth</Button>
+            <Button mode="contained-tonal" icon="seat-outline" onPress={addChair}>Chair</Button>
           </View>
         </Card.Content>
       </Card>
@@ -398,7 +541,7 @@ export default function FloorEditorScreen() {
               overflow: 'hidden',
             }}
           >
-            <Pressable style={{ width: '100%', height: '100%' }} onPress={() => setSelectedKey(null)}>
+            <Pressable style={{ width: '100%', height: '100%' }} onPress={clearSelection}>
               {tables.map((t) => (
                 <TableNode
                   key={t.key}
@@ -407,15 +550,27 @@ export default function FloorEditorScreen() {
                   selected={selected?.key === t.key}
                   venueW={venueW}
                   venueH={venueH}
-                  onSelect={() => setSelectedKey(t.key)}
+                  onSelect={() => selectTable(t.key)}
                   onMove={(x, y) => update(t.key, { x, y })}
                   onResize={(w, h) => update(t.key, { width: w, height: h })}
                 />
               ))}
+              {chairs.map((c) => (
+                <ChairNode
+                  key={c.key}
+                  chair={c}
+                  scale={scale}
+                  selected={selectedChair?.key === c.key}
+                  venueW={venueW}
+                  venueH={venueH}
+                  onSelect={() => selectChair(c.key)}
+                  onMove={(x, y) => updateChair(c.key, { x, y })}
+                />
+              ))}
             </Pressable>
           </View>
-          {tables.length === 0 ? (
-            <Text style={{ color: colors.muted, textAlign: 'center' }}>Add a table above to start building your floor.</Text>
+          {tables.length === 0 && chairs.length === 0 ? (
+            <Text style={{ color: colors.muted, textAlign: 'center' }}>Add a table or chair above to start building your floor.</Text>
           ) : null}
         </Card.Content>
       </Card>
@@ -477,6 +632,24 @@ export default function FloorEditorScreen() {
             >
               {selected.isReservable ? 'Reservable' : 'Not reservable'}
             </Chip>
+          </Card.Content>
+        </Card>
+      ) : null}
+
+      {selectedChair ? (
+        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Chair</Text>
+              <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelectedChair}>Delete</Button>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ width: 64 }}>Rotate</Text>
+              <IconButton icon="rotate-left" mode="outlined" size={16} onPress={() => updateChair(selectedChair.key, { rotation: (selectedChair.rotation - 15 + 360) % 360 })} />
+              <Text style={{ minWidth: 40, textAlign: 'center' }}>{selectedChair.rotation}°</Text>
+              <IconButton icon="rotate-right" mode="outlined" size={16} onPress={() => updateChair(selectedChair.key, { rotation: (selectedChair.rotation + 15) % 360 })} />
+            </View>
+            <Text style={{ color: colors.muted }}>Drag the chair on the canvas to position it.</Text>
           </Card.Content>
         </Card>
       ) : null}

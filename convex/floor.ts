@@ -66,6 +66,13 @@ const floorTableValue = v.object({
   state: v.union(tableStateValue, v.null()),
 });
 
+const floorChairValue = v.object({
+  _id: v.id('floorChairs'),
+  x: v.number(),
+  y: v.number(),
+  rotation: v.number(),
+});
+
 const floorStatsValue = v.object({
   occupiedCount: v.number(),
   avgTurnTimeMinutes: v.number(),
@@ -120,17 +127,22 @@ async function loadState(ctx: any, tableId: Doc<'tables'>['_id']) {
 
 export const getActiveFloorPlan = query({
   args: { venueId: v.id('venues') },
-  returns: v.union(v.null(), v.object({ floorPlan: floorPlanValue, tables: v.array(floorTableValue) })),
+  returns: v.union(
+    v.null(),
+    v.object({ floorPlan: floorPlanValue, tables: v.array(floorTableValue), chairs: v.array(floorChairValue) }),
+  ),
   handler: async (ctx, args) => {
     await requireVenueMember(ctx, args.venueId);
     const plan = await loadFloorPlan(ctx, args.venueId);
     if (!plan) return null;
     const tables = await ctx.db.query('tables').withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', plan._id)).collect();
+    const chairRows = await ctx.db.query('floorChairs').withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', plan._id)).collect();
     const view: Array<{ table: Doc<'tables'>; state: Doc<'tableStates'> | null }> = [];
     for (const table of tables) {
       view.push({ table, state: await loadState(ctx, table._id) });
     }
     return {
+      chairs: chairRows.map((c: Doc<'floorChairs'>) => ({ _id: c._id, x: c.x, y: c.y, rotation: c.rotation })),
       floorPlan: {
         _id: plan._id,
         _creationTime: plan._creationTime,
@@ -277,6 +289,7 @@ export const saveFloorPlan = mutation({
         isReservable: v.boolean(),
       }),
     ),
+    chairs: v.optional(v.array(v.object({ x: v.number(), y: v.number(), rotation: v.number() }))),
   },
   returns: v.object({ floorPlanId: v.id('floorPlans') }),
   handler: async (ctx, args) => {
@@ -327,6 +340,16 @@ export const saveFloorPlan = mutation({
         seatedAt: undefined,
         lastActivityAt: Date.now(),
         notes: undefined,
+      });
+    }
+
+    for (const chair of args.chairs ?? []) {
+      await ctx.db.insert('floorChairs', {
+        venueId: args.venueId,
+        floorPlanId,
+        x: chair.x,
+        y: chair.y,
+        rotation: chair.rotation,
       });
     }
 
