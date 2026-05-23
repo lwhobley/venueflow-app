@@ -246,7 +246,7 @@ async function getOrCreateVenue(ctx: AnyCtx) {
     venueId,
     status: 'trialing',
     platform: null,
-    planId: 'enishvenueflow_pro_monthly',
+    planId: 'venueflow_pro_monthly',
     priceCents: 4900,
     currency: 'USD',
     trialStartedAt: now,
