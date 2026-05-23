@@ -103,7 +103,7 @@ export default function HomeScreen() {
           Dashboard
         </Text>
         <Text style={{ color: colors.muted }}>
-          Good to see you, {firstName}. {role.toUpperCase()} · {venueName}
+          Good to see you, {firstName}. {role.charAt(0).toUpperCase() + role.slice(1)} · {venueName}
         </Text>
       </View>
 

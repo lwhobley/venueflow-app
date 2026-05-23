@@ -460,7 +460,7 @@ export default function FloorScreen() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
                 <Text variant="titleMedium">{selected.table.label}</Text>
-                <Text style={{ color: colors.muted }}>{selected.table.section.toUpperCase()} · {selected.table.seats} seats</Text>
+                <Text style={{ color: colors.muted }}>{selected.table.section === 'vip' ? 'VIP' : selected.table.section.charAt(0).toUpperCase() + selected.table.section.slice(1)} · {selected.table.seats} seats</Text>
               </View>
               <Chip selected style={{ backgroundColor: `${statusColors[selectedState?.status ?? 'available']}22` }}>
                 {statusLabels[selectedState?.status ?? 'available']}

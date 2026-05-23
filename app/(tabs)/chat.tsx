@@ -88,7 +88,7 @@ export default function ChatScreen() {
 
       {/* Groups */}
       <View>
-        <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>GROUPS</Text>
+        <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Groups</Text>
         {groups.map((g) => (
           <Row key={g._id} name={g.title} subtitle={g.lastMessageText ?? 'Tap to open the team chat'} color={colors.primary} icon="account-group" onPress={() => router.push(`/chat/${g._id}`)} />
         ))}
@@ -97,7 +97,7 @@ export default function ChatScreen() {
       {/* Active DMs */}
       {dms.length > 0 ? (
         <View>
-          <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>DIRECT MESSAGES</Text>
+          <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Direct messages</Text>
           {dms.map((d, i) => (
             <Row key={d._id} name={d.title} subtitle={d.lastMessageText} color={colorFor(i)} onPress={() => router.push(`/chat/${d._id}`)} />
           ))}
@@ -106,7 +106,7 @@ export default function ChatScreen() {
 
       {/* Directory to start new chats */}
       <View>
-        <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>START A CHAT</Text>
+        <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Start a chat</Text>
         {directory === undefined ? (
           <Text style={{ color: colors.muted }}>Loading teammates…</Text>
         ) : newPeople.length === 0 ? (

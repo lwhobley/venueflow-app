@@ -131,7 +131,7 @@ export default function ClockScreen() {
           <Card.Content style={{ gap: 4 }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Salaried role</Text>
             <Text style={{ color: colors.muted }}>
-              {(user?.role ?? 'manager').toUpperCase()} positions are salaried — no clock-in required. Use the board below to see who's on the clock.
+              {((r) => r.charAt(0).toUpperCase() + r.slice(1))(user?.role ?? 'manager')} positions are salaried — no clock-in required. Use the board below to see who's on the clock.
             </Text>
           </Card.Content>
         </Card>
