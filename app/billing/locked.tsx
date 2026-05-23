@@ -8,6 +8,14 @@ import { colors, spacing } from '../../lib/theme';
 import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
+const plans = [
+  { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$149' },
+  { id: 'venueflow_growth_30_monthly', name: 'Growth', users: 'Up to 30 users', price: '$249' },
+  { id: 'venueflow_pro_50_monthly', name: 'Pro', users: 'Up to 50 users', price: '$399' },
+] as const;
+
+type PlanId = (typeof plans)[number]['id'];
+
 const headlineByReason: Record<string, string> = {
   trial_expired: 'Your 7-day trial has ended',
   payment_failed: "Your payment didn't go through",
@@ -23,14 +31,27 @@ export default function BillingLockedScreen() {
   const canPay = user?.role === 'admin' || user?.role === 'owner';
   const createCheckout = useAction(api.billing.createStripeCheckoutSession);
   const createPortal = useAction(api.billing.createStripeBillingPortalSession);
-  const [loading, setLoading] = useState<'checkout' | 'portal' | null>(null);
+  const [loading, setLoading] = useState<PlanId | 'portal' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const openStripe = async (kind: 'checkout' | 'portal') => {
-    setLoading(kind);
+  const openCheckout = async (planId: PlanId) => {
+    setLoading(planId);
     setError(null);
     try {
-      const session = kind === 'checkout' ? await createCheckout({}) : await createPortal({});
+      const session = await createCheckout({ planId });
+      await Linking.openURL(session.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open Stripe billing.');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const openPortal = async () => {
+    setLoading('portal');
+    setError(null);
+    try {
+      const session = await createPortal({});
       await Linking.openURL(session.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not open Stripe billing.');
@@ -51,12 +72,22 @@ export default function BillingLockedScreen() {
             <Text style={{ color: colors.muted }}>Venue: {venue?.name ?? 'No venue selected'}</Text>
             <Text style={{ color: colors.muted }}>Signed in as {user?.email ?? 'unknown'}</Text>
 
-            <Card style={{ backgroundColor: colors.background, marginTop: spacing.xs }}>
-              <Card.Content style={{ gap: 4 }}>
-                <Text variant="titleMedium">7-day free trial, then plans from $149/month</Text>
-                <Text style={{ color: colors.muted }}>Stripe manages subscriptions, renewals, invoices, and payment methods.</Text>
-              </Card.Content>
-            </Card>
+            <Text variant="titleMedium">7-day free trial</Text>
+            <Text style={{ color: colors.muted }}>Choose the user tier that fits this venue. Stripe manages subscriptions, renewals, invoices, and payment methods.</Text>
+
+            {plans.map((plan) => (
+              <View key={plan.id} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: spacing.md, gap: spacing.xs, backgroundColor: colors.background }}>
+                <Text variant="titleMedium" style={{ color: colors.primary, fontWeight: '800' }}>{plan.name}</Text>
+                <Text style={{ color: colors.charcoal, fontSize: 26, fontWeight: '800' }}>{plan.price}<Text style={{ fontSize: 14 }}> / month</Text></Text>
+                <Text style={{ color: colors.muted }}>{plan.users}</Text>
+                <Text style={{ color: colors.muted }}>Scheduling, time clock, reservations, floor plan, bar stock, reports, and integrations.</Text>
+                {config.billingEnabled && canPay ? (
+                  <Button mode="contained" buttonColor={colors.primary} loading={loading === plan.id} onPress={() => void openCheckout(plan.id)}>
+                    Choose {plan.name}
+                  </Button>
+                ) : null}
+              </View>
+            ))}
 
             {!config.billingEnabled ? (
               <>
@@ -70,10 +101,7 @@ export default function BillingLockedScreen() {
             ) : canPay ? (
               <>
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                <Button mode="contained" buttonColor={colors.primary} loading={loading === 'checkout'} onPress={() => void openStripe('checkout')}>
-                  Subscribe with Stripe
-                </Button>
-                <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openStripe('portal')}>
+                <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openPortal()}>
                   Manage billing
                 </Button>
               </>

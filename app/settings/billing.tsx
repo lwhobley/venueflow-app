@@ -7,23 +7,44 @@ import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
+const plans = [
+  { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$149' },
+  { id: 'venueflow_growth_30_monthly', name: 'Growth', users: 'Up to 30 users', price: '$249' },
+  { id: 'venueflow_pro_50_monthly', name: 'Pro', users: 'Up to 50 users', price: '$399' },
+] as const;
+
+type PlanId = (typeof plans)[number]['id'];
+
 export default function BillingScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const billing = useQuery(api.app.getMyVenueBilling, user && venue?.id ? {} : 'skip');
   const createCheckout = useAction(api.billing.createStripeCheckoutSession);
   const createPortal = useAction(api.billing.createStripeBillingPortalSession);
-  const [loading, setLoading] = useState<'checkout' | 'portal' | null>(null);
+  const [loading, setLoading] = useState<PlanId | 'portal' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 7;
   const canManageBilling = user?.role === 'admin' || user?.role === 'owner';
 
-  const openStripe = async (kind: 'checkout' | 'portal') => {
-    setLoading(kind);
+  const openCheckout = async (planId: PlanId) => {
+    setLoading(planId);
     setError(null);
     try {
-      const session = kind === 'checkout' ? await createCheckout({}) : await createPortal({});
+      const session = await createCheckout({ planId });
+      await Linking.openURL(session.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to open Stripe billing.');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const openPortal = async () => {
+    setLoading('portal');
+    setError(null);
+    try {
+      const session = await createPortal({});
       await Linking.openURL(session.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to open Stripe billing.');
@@ -38,18 +59,33 @@ export default function BillingScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="headlineSmall">Billing</Text>
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
-          <Text style={{ color: colors.muted }}>Plans: $149/month up to 15 users, $249 up to 30, $399 up to 50</Text>
+          <Text style={{ color: colors.muted }}>7-day free trial. Choose the user tier that fits this venue.</Text>
           <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'trialing'}</Text>
           <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in trial</Text>
           <Text style={{ color: colors.muted }}>Stripe manages checkout, renewals, payment methods, invoices, and cancellations.</Text>
+          <Text style={{ color: colors.muted }}>Current plan: {billing?.planId ?? 'Not subscribed'}</Text>
           <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
           {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
+          {plans.map((plan) => {
+            const current = billing?.planId === plan.id;
+            return (
+              <View key={plan.id} style={{ borderWidth: 1, borderColor: current ? colors.primary : colors.border, borderRadius: 12, padding: spacing.md, gap: spacing.xs, backgroundColor: current ? colors.cream : colors.surface }}>
+                <Text variant="titleMedium" style={{ color: colors.primary, fontWeight: '800' }}>{plan.name}</Text>
+                <Text style={{ color: colors.charcoal, fontSize: 26, fontWeight: '800' }}>{plan.price}<Text style={{ fontSize: 14 }}> / month</Text></Text>
+                <Text style={{ color: colors.muted }}>{plan.users}</Text>
+                <Text style={{ color: colors.muted }}>Scheduling, time clock, reservations, floor plan, bar stock, reports, and integrations.</Text>
+                {current ? <Text style={{ color: colors.success, fontWeight: '700' }}>Current plan</Text> : null}
+                {canManageBilling ? (
+                  <Button mode="contained" buttonColor={colors.primary} loading={loading === plan.id} onPress={() => void openCheckout(plan.id)}>
+                    Choose {plan.name}
+                  </Button>
+                ) : null}
+              </View>
+            );
+          })}
           {canManageBilling ? (
             <>
-              <Button mode="contained" buttonColor={colors.primary} loading={loading === 'checkout'} onPress={() => void openStripe('checkout')}>
-                Subscribe with Stripe
-              </Button>
-              <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openStripe('portal')}>
+              <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openPortal()}>
                 Manage billing portal
               </Button>
             </>
