@@ -526,9 +526,19 @@ export const getDashboard = query({
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
 
+    // Team-wide headcount, live clock-in roster, and coworker schedule names
+    // are management-only. Staff receive only their own shifts plus open shifts.
+    const canManage = isAdminRole(profile.role);
     const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
-    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
-    const team = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+    const visibleShifts = canManage
+      ? shifts
+      : shifts.filter((shift: Doc<'scheduleShifts'>) => shift.profileId === profile._id || shift.status === 'open');
+    const entries = canManage
+      ? await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect()
+      : [];
+    const team = canManage
+      ? await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect()
+      : [];
 
     const activeEntries: Array<{ entry: Doc<'timeEntries'>; profile: Doc<'profiles'>; venue: Doc<'venues'> }> = [];
     for (const entry of entries) {
@@ -539,24 +549,20 @@ export const getDashboard = query({
     }
 
     const schedule: Array<ReturnType<typeof mapShift>> = [];
-    for (const shift of shifts.slice(0, 14)) {
-      const shiftProfile = shift.profileId ? await (ctx as AnyCtx).db.get(shift.profileId) : null;
-      schedule.push(mapShift(shift, shiftProfile?.fullName ?? null));
+    for (const shift of visibleShifts.slice(0, 14)) {
+      const shiftProfile = canManage && shift.profileId ? await (ctx as AnyCtx).db.get(shift.profileId) : null;
+      const profileName = canManage ? shiftProfile?.fullName ?? null : shift.profileId === profile._id ? 'You' : null;
+      schedule.push(mapShift(shift, profileName));
     }
-
-    // Team-wide headcount and the live clock-in roster (which carries other
-    // members' names) are management-only. Non-managers get those fields
-    // zeroed/emptied so the data never leaves the server for staff accounts.
-    const canManage = isAdminRole(profile.role);
 
     return {
       profile: mapProfile(profile),
       venue: mapVenue(venue),
       analytics: {
         teamCount: canManage ? team.length : 0,
-        scheduledCount: shifts.length,
-        openShiftCount: shifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'open').length,
-        coveredShiftCount: shifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'covered').length,
+        scheduledCount: visibleShifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'scheduled').length,
+        openShiftCount: visibleShifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'open').length,
+        coveredShiftCount: visibleShifts.filter((item: Doc<'scheduleShifts'>) => item.status === 'covered').length,
         openClockCount: canManage ? entries.filter((item: Doc<'timeEntries'>) => item.isOpen).length : 0,
         clockedInCount: canManage ? activeEntries.length : 0,
       },
