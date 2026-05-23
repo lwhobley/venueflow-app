@@ -46,6 +46,21 @@ export default function BarStockScreen() {
   const recordMovement = useMutation(api.barInventory.recordBarStockMovement);
   const importParsed = useMutation(api.barInventory.importParsedBarItems);
   const parseInput = useAction(api.barInventory.parseBarInventoryInput);
+  const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm };
+  const addItemWideField = {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 140,
+    minWidth: 136,
+    backgroundColor: colors.surface,
+  };
+  const addItemNumberField = {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 120,
+    minWidth: 112,
+    backgroundColor: colors.surface,
+  };
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState<Category>('spirit');
@@ -224,14 +239,14 @@ export default function BarStockScreen() {
               <Chip key={item} selected={category === item} onPress={() => setCategory(item)}>{item}</Chip>
             ))}
           </View>
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <TextInput label="Area" value={area} onChangeText={setArea} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <TextInput label="Unit" value={unit} onChangeText={setUnit} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
+          <View style={addItemRow}>
+            <TextInput label="Area" value={area} onChangeText={setArea} mode="outlined" style={addItemWideField} />
+            <TextInput label="Unit" value={unit} onChangeText={setUnit} mode="outlined" style={addItemWideField} />
           </View>
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <TextInput label="Par" value={parLevel} onChangeText={setParLevel} keyboardType="numeric" mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <TextInput label="On hand" value={onHand} onChangeText={setOnHand} keyboardType="numeric" mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <TextInput label="Unit $" value={unitCost} onChangeText={setUnitCost} keyboardType="numeric" mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
+          <View style={addItemRow}>
+            <TextInput label="Par" value={parLevel} onChangeText={setParLevel} keyboardType="numeric" mode="outlined" style={addItemNumberField} />
+            <TextInput label="On hand" value={onHand} onChangeText={setOnHand} keyboardType="numeric" mode="outlined" style={addItemNumberField} />
+            <TextInput label="Unit $" value={unitCost} onChangeText={setUnitCost} keyboardType="numeric" mode="outlined" style={addItemNumberField} />
           </View>
           <TextInput label="Supplier" value={supplier} onChangeText={setSupplier} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <TextInput label="Notes" value={notes} onChangeText={setNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
