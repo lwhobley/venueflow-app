@@ -241,12 +241,17 @@ export default function FloorScreen() {
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-            <View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 180 }}>
               <Text variant="titleMedium">Needs assignment</Text>
               <Text style={{ color: colors.muted }}>{needsAssignmentCount} reservations need a table</Text>
             </View>
-            <Button mode="contained" buttonColor={colors.primary} onPress={() => router.push('/reservations')}>
+            <Button
+              mode="contained"
+              buttonColor={colors.primary}
+              style={{ alignSelf: 'flex-start', maxWidth: '100%' }}
+              onPress={() => router.push('/reservations')}
+            >
               Open reservations
             </Button>
           </View>
