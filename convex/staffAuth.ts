@@ -4,7 +4,7 @@ import { createAccount, modifyAccountCredentials } from '@convex-dev/auth/server
 import type { Doc, Id } from './_generated/dataModel';
 import { requireVenueManager, requireVenueMember } from './authz';
 
-const accessRoleValue = v.union(v.literal('manager'), v.literal('server'), v.literal('staff'));
+const accessRoleValue = v.union(v.literal('manager'), v.literal('staff'));
 const PIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
 const PIN_MAX_FAILURES = 5;
 

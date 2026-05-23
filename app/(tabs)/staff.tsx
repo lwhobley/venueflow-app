@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Text, TextInput as PaperTextInput } from 'react-native-paper';
+import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -9,7 +10,76 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
-type AccessRole = 'manager' | 'server' | 'staff';
+// Access level = permission tier. PIN-invited staff can be manager or staff;
+// admins are provisioned through the email form (they sign in by email).
+type AccessRole = 'manager' | 'staff';
+
+const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'staff', label: 'Staff' },
+];
+const PIN_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
+  { value: 'manager', label: 'Manager' },
+  { value: 'staff', label: 'Staff' },
+];
+
+// Job titles / positions, selectable from a dropdown.
+const JOB_ROLES = [
+  'Manager', 'Asst Manager', 'Supervisor', 'Server', 'Bartender', 'Host',
+  'Chef', 'Cook', 'Dishwasher', 'Cleaner', 'Busser', 'Barback', 'Temp', 'Contractor',
+];
+
+function Dropdown({
+  label,
+  value,
+  placeholder,
+  options,
+  onSelect,
+  style,
+}: {
+  label?: string;
+  value: string;
+  placeholder?: string;
+  options: Array<{ value: string; label: string }>;
+  onSelect: (value: string) => void;
+  style?: any;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.value === value);
+  return (
+    <View style={style}>
+      {label ? <Text style={{ color: colors.muted, marginBottom: 4 }}>{label}</Text> : null}
+      <Menu
+        visible={open}
+        onDismiss={() => setOpen(false)}
+        anchor={
+          <Button
+            mode="outlined"
+            textColor={colors.charcoal}
+            onPress={() => setOpen(true)}
+            contentStyle={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}
+            icon={() => <MaterialCommunityIcons name="menu-down" size={20} color={colors.muted} />}
+            style={{ borderColor: colors.border, justifyContent: 'flex-start' }}
+          >
+            {current?.label ?? value ?? placeholder ?? 'Select…'}
+          </Button>
+        }
+      >
+        {options.map((opt) => (
+          <Menu.Item
+            key={opt.value}
+            title={opt.label}
+            onPress={() => {
+              onSelect(opt.value);
+              setOpen(false);
+            }}
+          />
+        ))}
+      </Menu>
+    </View>
+  );
+}
 
 type StaffMember = {
   _id: string;
@@ -24,8 +94,6 @@ type VenueOption = {
   _id: string;
   name: string;
 };
-
-const roleOptions: Exclude<Role, 'host'>[] = ['staff', 'server', 'manager', 'admin', 'owner'];
 
 export default function StaffScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
@@ -49,6 +117,18 @@ export default function StaffScreen() {
   // Custom roles + PIN invite
   const rolesQuery = useQuery(api.staffAuth.listVenueRoles, venue?.id && canManage ? { venueId: venue.id } : 'skip');
   const customRoles = useMemo(() => (rolesQuery ?? []) as VenueRole[], [rolesQuery]);
+  // Dropdown options: the standard job titles plus any custom roles the venue added.
+  const jobRoleOptions = useMemo(() => {
+    const seen = new Set(JOB_ROLES.map((r) => r.toLowerCase()));
+    const merged = [...JOB_ROLES];
+    for (const r of customRoles) {
+      if (!seen.has(r.name.toLowerCase())) {
+        merged.push(r.name);
+        seen.add(r.name.toLowerCase());
+      }
+    }
+    return merged.map((name) => ({ value: name, label: name }));
+  }, [customRoles]);
   const ensureVenueCode = useMutation(api.staffAuth.ensureVenueCode);
   const addVenueRole = useMutation(api.staffAuth.addVenueRole);
   const removeVenueRole = useMutation(api.staffAuth.removeVenueRole);
@@ -236,19 +316,19 @@ export default function StaffScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Invite staff (PIN login)</Text>
           <PaperTextInput placeholder="Full name" value={inviteName} onChangeText={setInviteName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <Text style={{ color: colors.muted }}>Access level</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {(['staff', 'server', 'manager'] as AccessRole[]).map((r) => (
-              <Chip key={r} selected={inviteAccess === r} onPress={() => setInviteAccess(r)}>{r}</Chip>
-            ))}
-          </View>
-          <Text style={{ color: colors.muted }}>Position</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {customRoles.map((r) => (
-              <Chip key={r._id} selected={invitePosition === r.name} onPress={() => setInvitePosition(r.name)}>{r.name}</Chip>
-            ))}
-          </View>
-          <PaperTextInput placeholder="Position (or pick above)" value={invitePosition} onChangeText={setInvitePosition} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <Dropdown
+            label="Access level"
+            value={inviteAccess}
+            options={PIN_ACCESS_LEVELS}
+            onSelect={(v) => setInviteAccess(v as AccessRole)}
+          />
+          <Dropdown
+            label="Role"
+            value={invitePosition}
+            placeholder="Select a role"
+            options={jobRoleOptions}
+            onSelect={setInvitePosition}
+          />
           <PaperTextInput placeholder="4-digit PIN" value={invitePin} onChangeText={(t) => setInvitePin(t.replace(/\D/g, '').slice(0, 4))} keyboardType="number-pad" maxLength={4} mode="outlined" style={{ backgroundColor: colors.surface }} />
           {inviteErr ? <Text style={{ color: colors.danger }}>{inviteErr}</Text> : null}
           {inviteMsg ? <Text style={{ color: accents[2].fg }}>{inviteMsg}</Text> : null}
@@ -264,14 +344,19 @@ export default function StaffScreen() {
           </Text>
           <PaperTextInput placeholder="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <PaperTextInput placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Job title" value={jobTitle} onChangeText={setJobTitle} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {roleOptions.map((item) => (
-              <Chip key={item} selected={role === item} onPress={() => setRole(item)}>
-                {item}
-              </Chip>
-            ))}
-          </View>
+          <Dropdown
+            label="Access level"
+            value={role}
+            options={ACCESS_LEVELS}
+            onSelect={(v) => setRole(v as Role)}
+          />
+          <Dropdown
+            label="Role"
+            value={jobTitle}
+            placeholder="Select a role"
+            options={jobRoleOptions}
+            onSelect={setJobTitle}
+          />
           <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()}>
             {selectedStaff ? 'Update staff member' : 'Add staff member'}
           </Button>
