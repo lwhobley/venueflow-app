@@ -15,10 +15,20 @@ function randomCode(len = 6) {
   return out;
 }
 
-async function hashPin(venueId: Id<'venues'>, loginHandle: string, pin: string) {
-  const bytes = new TextEncoder().encode(`${venueId}:${loginHandle}:${pin}`);
+// PIN hash is salted by venue only (not the login handle), so the same PIN
+// always hashes the same way within a venue. That lets us (a) enforce unique
+// PINs per venue and (b) identify a staffer from their PIN alone at login.
+async function hashPin(venueId: Id<'venues'>, pin: string) {
+  const bytes = new TextEncoder().encode(`${venueId}:${pin}`);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// Reject a PIN that is already assigned to another staffer in the same venue.
+async function assertPinAvailable(ctx: any, venueId: Id<'venues'>, pinHash: string, excludeProfileId?: Id<'profiles'>) {
+  const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).collect();
+  const clash = profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.pinHash === pinHash && p._id !== excludeProfileId);
+  if (clash) throw new Error('That PIN is already in use. Choose a different 4-digit PIN.');
 }
 
 async function recentPinFailures(ctx: any, profileId: Id<'profiles'>) {
@@ -121,7 +131,8 @@ export const inviteStaff = mutation({
     if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
 
     const handle = `pin_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}@pin.venueflow`;
-    const pinHash = await hashPin(args.venueId, handle, args.pin);
+    const pinHash = await hashPin(args.venueId, args.pin);
+    await assertPinAvailable(ctx, args.venueId, pinHash);
 
     // Provision a Convex Auth password account so the staff member can sign in
     // with their PIN as the password.
@@ -147,66 +158,6 @@ export const inviteStaff = mutation({
   },
 });
 
-// ---------- Public roster for PIN login ----------
-// No auth required: staff entering a venue code see names to pick. The private
-// auth handle is exchanged only after a rate-limited PIN check below.
-
-export const getVenueRoster = query({
-  args: { code: v.string() },
-  returns: v.union(
-    v.null(),
-    v.object({
-      venueName: v.string(),
-      staff: v.array(v.object({ profileId: v.id('profiles'), fullName: v.string(), jobTitle: v.string() })),
-    }),
-  ),
-  handler: async (ctx, args) => {
-    const code = args.code.trim().toUpperCase();
-    if (!code) return null;
-    const venue = await ctx.db.query('venues').withIndex('by_code', (q: any) => q.eq('code', code)).first();
-    if (!venue) return null;
-    const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
-    return {
-      venueName: venue.name,
-      staff: profiles
-        .filter((p: Doc<'profiles'>) => p.isPinUser && p.loginHandle)
-        .sort((a: Doc<'profiles'>, b: Doc<'profiles'>) => a.fullName.localeCompare(b.fullName))
-        .map((p: Doc<'profiles'>) => ({ profileId: p._id, fullName: p.fullName, jobTitle: p.jobTitle })),
-    };
-  },
-});
-
-// Code-free staff directory for PIN login: staff just pick their name and enter
-// their PIN — no venue code needed. The venue is auto-provisioned when the owner
-// account is first created. The private auth handle is never exposed here; it is
-// only returned after a rate-limited PIN check in exchangePinForLogin.
-export const getStaffDirectory = query({
-  args: {},
-  returns: v.array(
-    v.object({
-      profileId: v.id('profiles'),
-      fullName: v.string(),
-      jobTitle: v.string(),
-      venueName: v.string(),
-    }),
-  ),
-  handler: async (ctx) => {
-    const profiles = await ctx.db.query('profiles').collect();
-    const venueNames = new Map<string, string>();
-    const result: Array<{ profileId: Id<'profiles'>; fullName: string; jobTitle: string; venueName: string }> = [];
-    for (const p of profiles) {
-      if (!p.isPinUser || !p.loginHandle || !p.venueId) continue;
-      const key = String(p.venueId);
-      if (!venueNames.has(key)) {
-        const venue = await ctx.db.get(p.venueId);
-        venueNames.set(key, venue?.name ?? 'Venue');
-      }
-      result.push({ profileId: p._id, fullName: p.fullName, jobTitle: p.jobTitle, venueName: venueNames.get(key) ?? 'Venue' });
-    }
-    return result.sort((a, b) => a.fullName.localeCompare(b.fullName));
-  },
-});
-
 // Managers reset a staff PIN: updates BOTH the Convex Auth account secret and
 // the stored pinHash, and clears the lockout (recent failed attempts).
 export const resetStaffPin = mutation({
@@ -221,11 +172,13 @@ export const resetStaffPin = mutation({
     }
     if (!profile.isPinUser || !profile.loginHandle) throw new Error('This staff member does not use PIN login');
 
+    const pinHash = await hashPin(args.venueId, args.pin);
+    await assertPinAvailable(ctx, args.venueId, pinHash, profile._id);
+
     await modifyAccountCredentials(ctx as any, {
       provider: 'password',
       account: { id: profile.loginHandle, secret: args.pin },
     });
-    const pinHash = await hashPin(args.venueId, profile.loginHandle, args.pin);
     await ctx.db.patch(profile._id, { pinHash });
 
     // Clear lockout history so the staffer can sign in immediately.
@@ -239,30 +192,33 @@ export const resetStaffPin = mutation({
   },
 });
 
-export const exchangePinForLogin = mutation({
-  // No venue code required: the staffer's venue is derived from their profile.
-  args: { profileId: v.id('profiles'), pin: v.string() },
+// PIN-only login: no name selection. The staffer just enters their 4-digit PIN
+// and we identify them by matching the venue-salted hash. PINs are unique per
+// venue (enforced at assignment), so a PIN maps to exactly one staffer.
+export const loginWithPin = mutation({
+  args: { pin: v.string() },
   returns: v.object({ loginHandle: v.string() }),
   handler: async (ctx, args) => {
-    if (!/^\d{4}$/.test(args.pin)) throw new Error('Wrong PIN');
+    if (!/^\d{4}$/.test(args.pin)) throw new Error('Enter your 4-digit PIN');
 
-    const profile = await ctx.db.get(args.profileId);
-    if (!profile || !profile.venueId || !profile.isPinUser || !profile.loginHandle) {
-      throw new Error('Wrong PIN');
+    // Find the PIN staffer whose venue-salted hash matches.
+    const profiles = await ctx.db.query('profiles').collect();
+    let match: Doc<'profiles'> | null = null;
+    for (const p of profiles) {
+      if (!p.isPinUser || !p.loginHandle || !p.pinHash || !p.venueId) continue;
+      const candidate = await hashPin(p.venueId, args.pin);
+      if (candidate === p.pinHash) {
+        match = p;
+        break;
+      }
     }
+    if (!match || !match.venueId || !match.loginHandle) throw new Error('Wrong PIN');
 
-    if (await recentPinFailures(ctx, profile._id) >= PIN_MAX_FAILURES) {
+    if (await recentPinFailures(ctx, match._id) >= PIN_MAX_FAILURES) {
       throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
     }
 
-    if (!profile.pinHash) {
-      throw new Error('This PIN must be reset by a manager before sign-in.');
-    }
-
-    const pinHash = await hashPin(profile.venueId, profile.loginHandle, args.pin);
-    const success = pinHash === profile.pinHash;
-    await recordPinAttempt(ctx, profile.venueId, profile._id, success);
-    if (!success) throw new Error('Wrong PIN');
-    return { loginHandle: profile.loginHandle };
+    await recordPinAttempt(ctx, match.venueId, match._id, true);
+    return { loginHandle: match.loginHandle };
   },
 });

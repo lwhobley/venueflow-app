@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -59,23 +58,26 @@ function Dropdown({
             textColor={colors.charcoal}
             onPress={() => setOpen(true)}
             contentStyle={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}
-            icon={() => <MaterialCommunityIcons name="menu-down" size={20} color={colors.muted} />}
+            icon={() => <Text style={{ color: colors.muted, fontSize: 16, lineHeight: 18 }}>▾</Text>}
             style={{ borderColor: colors.border, justifyContent: 'flex-start' }}
           >
             {current?.label ?? value ?? placeholder ?? 'Select…'}
           </Button>
         }
+        contentStyle={{ maxHeight: 280 }}
       >
-        {options.map((opt) => (
-          <Menu.Item
-            key={opt.value}
-            title={opt.label}
-            onPress={() => {
-              onSelect(opt.value);
-              setOpen(false);
-            }}
-          />
-        ))}
+        <ScrollView style={{ maxHeight: 280 }}>
+          {options.map((opt) => (
+            <Menu.Item
+              key={opt.value}
+              title={opt.label}
+              onPress={() => {
+                onSelect(opt.value);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </ScrollView>
       </Menu>
     </View>
   );

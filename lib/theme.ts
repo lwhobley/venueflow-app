@@ -35,8 +35,37 @@ export const spacing = {
   xxl: 32,
 };
 
+// Generous, fluid corner radii for the "liquid" look.
+export const radius = {
+  sm: 12,
+  md: 18,
+  lg: 24,
+  xl: 32,
+  pill: 999,
+};
+
+// Soft, diffuse shadow for floating/glassy surfaces (works on web + native).
+export const shadow = {
+  shadowColor: '#1A1A2E',
+  shadowOpacity: 0.08,
+  shadowRadius: 24,
+  shadowOffset: { width: 0, height: 12 },
+  elevation: 6,
+} as const;
+
+// Translucent "frosted glass" surface. On web the backdrop blur is applied via
+// a passthrough CSS property (cast to any at the call site).
+export const glass = {
+  backgroundColor: 'rgba(255, 255, 255, 0.72)',
+  borderWidth: 1,
+  borderColor: 'rgba(255, 255, 255, 0.6)',
+  backdropFilter: 'blur(18px)',
+  WebkitBackdropFilter: 'blur(18px)',
+} as const;
+
 export const lightTheme = {
   ...MD3LightTheme,
+  roundness: 14,
   colors: {
     ...MD3LightTheme.colors,
     primary: colors.primary,
@@ -56,6 +85,7 @@ export const lightTheme = {
 
 export const darkTheme = {
   ...MD3DarkTheme,
+  roundness: 14,
   colors: {
     ...MD3DarkTheme.colors,
     primary: '#B5C7B5',

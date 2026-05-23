@@ -1,12 +1,11 @@
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { useAuthActions } from '@convex-dev/auth/react';
-import { useMutation, useQuery } from 'convex/react';
+import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
@@ -15,7 +14,7 @@ type Mode = 'admin' | 'staff';
 export default function SignInScreen() {
   const { signIn, signOut } = useAuthActions();
   const bootstrapProfile = useMutation(api.app.bootstrapProfile);
-  const exchangePinForLogin = useMutation(api.staffAuth.exchangePinForLogin);
+  const loginWithPin = useMutation(api.staffAuth.loginWithPin);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
 
@@ -27,13 +26,10 @@ export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Staff (PIN) — no venue code needed; staff just pick their name and enter a PIN.
-  const [pickedProfileId, setPickedProfileId] = useState<string | null>(null);
+  // Staff (PIN) — no name selection; the staffer just enters their assigned PIN.
   const [pin, setPin] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-
-  const directory = useQuery(api.staffAuth.getStaffDirectory, {});
 
   // After signIn() resolves, the Convex client may briefly still be settling the
   // new auth token, so bootstrapProfile can throw "Unauthenticated" for a moment.
@@ -96,16 +92,13 @@ export default function SignInScreen() {
   };
 
   const onPinSubmit = async () => {
-    if (!pickedProfileId || !/^\d{4}$/.test(pin)) {
-      Alert.alert('Enter your PIN', 'Pick your name and enter your 4-digit PIN.');
+    if (!/^\d{4}$/.test(pin)) {
+      Alert.alert('Enter your PIN', 'Enter your 4-digit PIN.');
       return;
     }
     setSubmitting(true);
     try {
-      const { loginHandle } = await exchangePinForLogin({
-        profileId: pickedProfileId as Id<'profiles'>,
-        pin,
-      });
+      const { loginHandle } = await loginWithPin({ pin });
       await resetExistingSession();
       await signIn('password', { email: loginHandle, password: pin, flow: 'signIn' });
       await finishSession();
@@ -153,49 +146,20 @@ export default function SignInScreen() {
         ) : (
           <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
             <Card.Content style={{ gap: spacing.md }}>
-              <Text style={{ color: colors.muted }}>Pick your name and enter your PIN.</Text>
-              {directory === undefined ? (
-                <Text style={{ color: colors.muted }}>Loading team…</Text>
-              ) : directory.length === 0 ? (
-                <Text style={{ color: colors.muted }}>No staff invited yet. Ask your manager to invite you.</Text>
-              ) : (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  {directory.map((s) => (
-                    <Pressable
-                      key={s.profileId}
-                      onPress={() => {
-                        setPickedProfileId(s.profileId);
-                        setPin('');
-                      }}
-                      style={{
-                        paddingVertical: 8,
-                        paddingHorizontal: 14,
-                        borderRadius: 999,
-                        backgroundColor: pickedProfileId === s.profileId ? colors.primary : colors.cream,
-                      }}
-                    >
-                      <Text style={{ color: pickedProfileId === s.profileId ? '#fff' : colors.charcoal, fontWeight: '600' }}>{s.fullName}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-
-              {pickedProfileId ? (
-                <>
-                  <TextInput
-                    label="4-digit PIN"
-                    value={pin}
-                    onChangeText={(t) => setPin(t.replace(/\D/g, '').slice(0, 4))}
-                    keyboardType="number-pad"
-                    secureTextEntry
-                    maxLength={4}
-                    mode="outlined"
-                  />
-                  <Button mode="contained" buttonColor={colors.primary} loading={submitting} onPress={() => void onPinSubmit()}>
-                    Sign in
-                  </Button>
-                </>
-              ) : null}
+              <Text style={{ color: colors.muted }}>Enter the 4-digit PIN your manager assigned you.</Text>
+              <TextInput
+                label="4-digit PIN"
+                value={pin}
+                onChangeText={(t) => setPin(t.replace(/\D/g, '').slice(0, 4))}
+                onSubmitEditing={() => void onPinSubmit()}
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={4}
+                mode="outlined"
+              />
+              <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={pin.length !== 4} onPress={() => void onPinSubmit()}>
+                Sign in
+              </Button>
             </Card.Content>
           </Card>
         )}

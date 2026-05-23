@@ -4,6 +4,8 @@ import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaperProvider } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFonts } from 'expo-font';
 import { A0PurchaseProvider } from '../lib/a0-purchases-stub';
 import { ConvexReactClient } from 'convex/react';
 import { ConvexAuthProvider } from '@convex-dev/auth/react';
@@ -47,6 +49,9 @@ const shouldIgnoreWebError = (message: string) =>
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
+  // and the nav use it). Without this, web shows blank "tofu" squares.
+  useFonts(MaterialCommunityIcons.font);
   const queryClient = useMemo(() => new QueryClient(), []);
   const userId = useAuthStore((state: AuthState) => state.user?.id ?? null);
   const debug = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__);
