@@ -36,27 +36,26 @@ export default function SignInScreen() {
 
   const roster = useQuery(api.staffAuth.getVenueRoster, code.trim().length >= 4 ? { code: code.trim().toUpperCase() } : 'skip');
 
-  // After signIn() resolves, the Convex client may still carry the PREVIOUS
-  // session's auth token for a brief moment. If we bootstrap immediately, the
-  // stale (but still valid) token can return the wrong account — e.g. signing
-  // in as staff while an admin was logged in would return the admin profile.
-  // So we poll bootstrapProfile until the returned account matches the email we
-  // just authenticated with, tolerating transient unauthenticated errors.
-  const finishSessionFor = async (expectedEmail: string) => {
-    const target = expectedEmail.trim().toLowerCase();
+  // After signIn() resolves, the Convex client may briefly still be settling the
+  // new auth token, so bootstrapProfile can throw "Unauthenticated" for a moment.
+  // We retry until it succeeds. We deliberately do NOT match on email: the stored
+  // profile email can differ from the typed login (e.g. PIN handles, or an admin
+  // whose token carried no email and fell back to a placeholder). The wrong-account
+  // risk is already handled by resetExistingSession() signing out first, so the
+  // first successful bootstrap belongs to the account we just signed in as.
+  const finishSession = async () => {
     let last: { profile: any; venue: any } | null = null;
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 25; attempt += 1) {
       try {
-        const result = await bootstrapProfile({});
-        last = result;
-        if (result.profile.email.trim().toLowerCase() === target) break;
+        last = await bootstrapProfile({});
+        break;
       } catch (e) {
         lastError = e;
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      await new Promise((resolve) => setTimeout(resolve, 150));
     }
-    if (!last || last.profile.email.trim().toLowerCase() !== target) {
+    if (!last) {
       throw lastError instanceof Error ? lastError : new Error('Sign-in did not complete. Please try again.');
     }
     const { profile, venue } = last;
@@ -89,7 +88,7 @@ export default function SignInScreen() {
     try {
       await resetExistingSession();
       await signIn('password', { email: trimmed, password, flow });
-      await finishSessionFor(trimmed);
+      await finishSession();
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Try again.');
     } finally {
@@ -111,7 +110,7 @@ export default function SignInScreen() {
       });
       await resetExistingSession();
       await signIn('password', { email: loginHandle, password: pin, flow: 'signIn' });
-      await finishSessionFor(loginHandle);
+      await finishSession();
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Wrong PIN or code. Try again.');
       setPin('');
