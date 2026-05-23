@@ -150,7 +150,7 @@ function displayName(identity: Identity) {
 }
 
 function isBootstrapAdminEmail(email: string | null | undefined) {
-  const configured = process.env.VENUE_WRANGLER_ADMIN_EMAILS ?? process.env.VENUEFLOW_ADMIN_EMAILS;
+  const configured = process.env.VENUEFLOW_ADMIN_EMAILS;
   if (!configured || !email) return false;
   const allowlist = configured
     .split(',')
@@ -368,7 +368,7 @@ export const bootstrapProfile = mutation({
     // get-or-create for brand-new accounts (first admin signup).
     let venue = existing?.venueId ? await (ctx as AnyCtx).db.get(existing.venueId) : null;
     if (!venue) venue = await getOrCreateVenue(ctx as AnyCtx);
-    const email = identity.email ?? `${userId}@venuewrangler.local`;
+    const email = identity.email ?? `${userId}@venueflow.local`;
     const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
     // The first person to join a venue (the email signup who created it) is the
     // venue admin/owner. Everyone else defaults to staff unless already set.

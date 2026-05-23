@@ -114,15 +114,6 @@ export default defineSchema({
     ),
     createdAt: v.number(),
   }).index('by_venue', ['venueId']),
-  scheduleEmailEvents: defineTable({
-    venueId: v.id('venues'),
-    profileId: v.id('profiles'),
-    shiftId: v.optional(v.id('scheduleShifts')),
-    kind: v.union(v.literal('schedule_published'), v.literal('shift_changed')),
-    email: v.string(),
-    subject: v.string(),
-    sentAt: v.number(),
-  }).index('by_venue_and_sentAt', ['venueId', 'sentAt']).index('by_profile_and_sentAt', ['profileId', 'sentAt']),
   shiftSwaps: defineTable({
     venueId: v.id('venues'),
     requesterProfileId: v.id('profiles'),
@@ -193,6 +184,15 @@ export default defineSchema({
     readBy: v.array(v.id('profiles')),
     createdAt: v.number(),
   }).index('by_venue_and_createdAt', ['venueId', 'createdAt']).index('by_profile_and_createdAt', ['profileId', 'createdAt']),
+  scheduleEmailEvents: defineTable({
+    venueId: v.id('venues'),
+    profileId: v.id('profiles'),
+    shiftId: v.optional(v.id('scheduleShifts')),
+    kind: v.union(v.literal('schedule_published'), v.literal('shift_changed')),
+    email: v.string(),
+    subject: v.string(),
+    sentAt: v.number(),
+  }).index('by_venue_and_sentAt', ['venueId', 'sentAt']).index('by_profile_and_sentAt', ['profileId', 'sentAt']),
   pushTokens: defineTable({
     venueId: v.id('venues'),
     profileId: v.id('profiles'),

@@ -47,8 +47,8 @@ async function recentPinFailuresForHash(ctx: any, venueId: Id<'venues'>, pinHash
     .query('pinLoginAttempts')
     .withIndex('by_venue_and_createdAt', (q: any) => q.eq('venueId', venueId))
     .order('desc')
-    .take(PIN_MAX_FAILURES);
-  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => attempt.pinHash === pinHash && !attempt.success && attempt.createdAt >= cutoff).length;
+    .take(50);
+  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success && attempt.pinHash === pinHash && attempt.createdAt >= cutoff).length;
 }
 
 async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'profiles'> | undefined, pinHash: string, success: boolean) {
@@ -141,7 +141,7 @@ export const inviteStaff = mutation({
     if (!fullName) throw new Error('Enter a name');
     if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
 
-    const handle = `pin_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}@pin.venuewrangler`;
+    const handle = `pin_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}@pin.venueflow`;
     const pinHash = await hashPin(args.venueId, args.pin);
     await assertPinAvailable(ctx, args.venueId, pinHash);
 
@@ -203,17 +203,18 @@ export const resetStaffPin = mutation({
   },
 });
 
-// PIN-only login: no name selection. This app is deployed for one venue, so the
-// staffer enters only the manager-assigned PIN.
+// PIN-only login for a single-venue deployment. The app owner assigns unique
+// PINs, and failed attempts are tracked against the active venue + PIN hash.
 export const loginWithPin = mutation({
   args: { pin: v.string() },
   returns: v.object({ loginHandle: v.string() }),
   handler: async (ctx, args) => {
     if (!/^\d{4}$/.test(args.pin)) throw new Error('Enter your 4-digit PIN');
 
-    const [venue] = await ctx.db.query('venues').take(1);
+    const venue = await ctx.db.query('venues').take(1).then((rows: Doc<'venues'>[]) => rows[0] ?? null);
     if (!venue) throw new Error('Venue is not set up yet');
     const pinHash = await hashPin(venue._id, args.pin);
+
     if (await recentPinFailuresForHash(ctx, venue._id, pinHash) >= PIN_MAX_FAILURES) {
       throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
     }
