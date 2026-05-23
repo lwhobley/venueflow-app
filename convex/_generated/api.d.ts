@@ -9,6 +9,7 @@
  */
 
 import type * as app from "../app.js";
+import type * as approvals from "../approvals.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as barInventory from "../barInventory.js";
@@ -39,6 +40,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   app: typeof app;
+  approvals: typeof approvals;
   auth: typeof auth;
   authz: typeof authz;
   barInventory: typeof barInventory;
