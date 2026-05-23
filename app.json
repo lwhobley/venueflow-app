@@ -13,7 +13,14 @@
       "backgroundColor": "#F4FAFC"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.venuewrangler.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Venue Wrangler uses your location to verify clock-ins and clock-outs at your venue.",
+        "NSPhotoLibraryUsageDescription": "Venue Wrangler lets managers upload bar inventory photos from the photo library.",
+        "NSUserNotificationsUsageDescription": "Venue Wrangler sends schedule updates, shift changes, and important venue alerts."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -33,7 +40,20 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Venue Wrangler uses your location to verify clock-ins and clock-outs at your venue."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Venue Wrangler lets managers upload bar inventory photos from the photo library."
+        }
+      ],
+      "expo-notifications"
     ]
   }
 }
