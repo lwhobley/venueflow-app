@@ -12,7 +12,7 @@ export const seedDemoFloorPlan = mutation({
 
     const floorPlanId = await ctx.db.insert('floorPlans', {
       venueId: args.venueId,
-      name: 'Enish Floor Plan',
+      name: 'Main Floor Plan',
       width: 1440,
       height: 960,
       backgroundImageUrl: null,
