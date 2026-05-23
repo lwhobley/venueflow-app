@@ -126,9 +126,11 @@ export default function HomeScreen() {
       {canManage ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Manager command center</Text>
-              <Chip compact>{managerDashboard?.totalReservations ?? 0} recent reservations</Chip>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+              <Text variant="titleMedium" style={{ flexShrink: 1, minWidth: 180, fontWeight: '700' }}>Manager command center</Text>
+              <Chip compact style={{ maxWidth: '100%' }} textStyle={{ flexShrink: 1 }}>
+                {managerDashboard?.totalReservations ?? 0} recent reservations
+              </Chip>
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
               <Chip compact>{managerDashboard?.todayReservations ?? 0} today</Chip>

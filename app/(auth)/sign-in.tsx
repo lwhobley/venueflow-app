@@ -134,7 +134,7 @@ export default function SignInScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
-          <Image source={logoSource} style={{ width: 220, height: 120, resizeMode: 'contain' }} />
+          <Image source={logoSource} style={styles.logo} />
           <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, marginTop: 6 }}>Premium venue ops for clock-in, shifts, and floor control.</Text>
         </View>
@@ -195,7 +195,7 @@ export default function SignInScreen() {
                 playsInline: true,
                 style: webVideoStyle,
               })
-            : <Image source={logoSource} style={{ width: 280, height: 180, resizeMode: 'contain' }} />}
+            : <Image source={logoSource} style={styles.introLogo} />}
         </Animated.View>
       ) : null}
     </KeyboardAvoidingView>
@@ -203,11 +203,23 @@ export default function SignInScreen() {
 }
 
 const styles = StyleSheet.create({
+  logo: {
+    width: '100%',
+    maxWidth: 340,
+    aspectRatio: 1024 / 559,
+    resizeMode: 'contain',
+  },
   introOverlay: {
     zIndex: 20,
     backgroundColor: colors.charcoal,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  introLogo: {
+    width: '86%',
+    maxWidth: 360,
+    aspectRatio: 1024 / 559,
+    resizeMode: 'contain',
   },
 });
 
