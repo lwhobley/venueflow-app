@@ -185,9 +185,10 @@ export const resetStaffPin = mutation({
     await requireVenueManager(ctx, args.venueId);
     if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
     const profile = await ctx.db.get(args.profileId);
-    if (!profile || profile.venueId !== args.venueId || !profile.isPinUser || !profile.loginHandle) {
+    if (!profile || profile.venueId !== args.venueId) {
       throw new Error('Staff member not found');
     }
+    if (!profile.isPinUser || !profile.loginHandle) throw new Error('This staff member does not use PIN login');
 
     await modifyAccountCredentials(ctx as any, {
       provider: 'password',

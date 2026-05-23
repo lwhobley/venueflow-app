@@ -237,6 +237,33 @@ const staffValue = v.object({
   availability: v.array(availabilityRow),
 });
 
+const schedulePublishStateValue = v.object({
+  status: v.union(v.literal('draft'), v.literal('published'), v.literal('edited_after_publish')),
+  publishedAt: v.union(v.number(), v.null()),
+  updatedAfterPublishAt: v.union(v.number(), v.null()),
+});
+
+type VenueScheduleMeta = Doc<'venues'> & {
+  schedulePublishedAt?: number;
+  scheduleUpdatedAfterPublishAt?: number;
+};
+
+async function markScheduleEdited(ctx: any, venueId: Id<'venues'>) {
+  const venue = await ctx.db.get(venueId) as VenueScheduleMeta | null;
+  if (!venue?.schedulePublishedAt) return;
+  await ctx.db.patch(venueId, { scheduleUpdatedAfterPublishAt: Date.now() } as any);
+}
+
+function schedulePublishState(venue: VenueScheduleMeta | null) {
+  const publishedAt = venue?.schedulePublishedAt ?? null;
+  const updatedAfterPublishAt = venue?.scheduleUpdatedAfterPublishAt ?? null;
+  return {
+    status: !publishedAt ? 'draft' as const : updatedAfterPublishAt && updatedAfterPublishAt > publishedAt ? 'edited_after_publish' as const : 'published' as const,
+    publishedAt,
+    updatedAfterPublishAt,
+  };
+}
+
 export const getManagerSchedule = query({
   args: { venueId: v.id('venues') },
   returns: v.object({
@@ -244,6 +271,7 @@ export const getManagerSchedule = query({
     staff: v.array(staffValue),
     laborBudgetHours: v.union(v.number(), v.null()),
     totalScheduledHours: v.number(),
+    publishState: schedulePublishStateValue,
   }),
   handler: async (ctx, args) => {
     const venue = await ctx.db.get(args.venueId);
@@ -318,6 +346,7 @@ export const getManagerSchedule = query({
       }),
       laborBudgetHours: venue?.weeklyLaborBudgetHours ?? null,
       totalScheduledHours: Math.round((totalScheduledMinutes / 60) * 10) / 10,
+      publishState: schedulePublishState(venue as VenueScheduleMeta | null),
     };
   },
 });
@@ -336,6 +365,10 @@ export const createShift = mutation({
   handler: async (ctx, args) => {
     await requireVenueManager(ctx, args.venueId);
     if (args.endMinutes <= args.startMinutes) throw new Error('End time must be after start time');
+    if (args.profileId) {
+      const member = await ctx.db.get(args.profileId);
+      if (!member || member.venueId !== args.venueId) throw new Error('Staff member is not in this venue');
+    }
     const shiftId = await ctx.db.insert('scheduleShifts', {
       venueId: args.venueId,
       profileId: args.profileId,
@@ -346,6 +379,7 @@ export const createShift = mutation({
       station: args.station,
       status: args.profileId ? 'scheduled' : 'open',
     });
+    await markScheduleEdited(ctx, args.venueId);
     if (args.profileId) {
       await notifyProfile(ctx, {
         venueId: args.venueId,
@@ -391,6 +425,7 @@ export const updateShift = mutation({
       station: args.station.trim() || 'Floor',
       notes: args.notes?.trim() || undefined,
     });
+    await markScheduleEdited(ctx, args.venueId);
     return null;
   },
 });
@@ -405,6 +440,7 @@ export const assignShift = mutation({
     const member = await ctx.db.get(args.profileId);
     if (!member || member.venueId !== args.venueId) throw new Error('Staff member is not in this venue');
     await ctx.db.patch(shift._id, { profileId: args.profileId, status: 'scheduled' });
+    await markScheduleEdited(ctx, args.venueId);
     await notifyProfile(ctx, {
       venueId: args.venueId,
       profileId: args.profileId,
@@ -424,6 +460,7 @@ export const unassignShift = mutation({
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
     await ctx.db.patch(shift._id, { profileId: undefined, status: 'open' });
+    await markScheduleEdited(ctx, args.venueId);
     return null;
   },
 });
@@ -436,6 +473,7 @@ export const deleteShift = mutation({
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
     await ctx.db.delete(shift._id);
+    await markScheduleEdited(ctx, args.venueId);
     return null;
   },
 });
@@ -553,6 +591,7 @@ export const claimOpenShift = mutation({
     if (!shift || shift.venueId !== profile.venueId) throw new Error('Shift not found');
     if (shift.profileId || shift.status !== 'open') throw new Error('This shift is no longer open');
     await ctx.db.patch(shift._id, { profileId: profile._id, status: 'covered' });
+    await markScheduleEdited(ctx, profile.venueId);
     await notifyManagers(ctx, {
       venueId: profile.venueId,
       kind: 'shift_assigned',
@@ -600,10 +639,15 @@ export const publishSchedule = mutation({
   args: { venueId: v.id('venues') },
   returns: v.object({ notified: v.number() }),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
     const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     const assigned = shifts.filter((s: Doc<'scheduleShifts'>) => s.profileId).length;
     const open = shifts.filter((s: Doc<'scheduleShifts'>) => s.status === 'open').length;
+    await ctx.db.patch(args.venueId, {
+      schedulePublishedAt: Date.now(),
+      schedulePublishedBy: profile._id,
+      scheduleUpdatedAfterPublishAt: undefined,
+    } as any);
     await notifyStaffWithPush(ctx, {
       venueId: args.venueId,
       kind: 'schedule_published',
@@ -690,6 +734,7 @@ export const applyScheduleTemplate = mutation({
         status: 'open', // templates are unassigned slots
       });
     }
+    await markScheduleEdited(ctx, args.venueId);
     return { added: template.shifts.length };
   },
 });
@@ -729,6 +774,7 @@ export const copyDayShifts = mutation({
         added++;
       }
     }
+    await markScheduleEdited(ctx, args.venueId);
     return { added };
   },
 });
@@ -740,6 +786,7 @@ export const clearWeek = mutation({
     await requireVenueManager(ctx, args.venueId);
     const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     for (const s of shifts) await ctx.db.delete(s._id);
+    await markScheduleEdited(ctx, args.venueId);
     return { removed: shifts.length };
   },
 });
@@ -826,6 +873,7 @@ export const reviewShiftSwap = mutation({
         const tShift = await ctx.db.get(swap.targetShiftId);
         if (tShift) await ctx.db.patch(tShift._id, { profileId: swap.requesterProfileId, status: 'scheduled' });
       }
+      await markScheduleEdited(ctx, swap.venueId);
     }
     await ctx.db.patch(swap._id, { status: args.approve ? 'approved' : 'denied', updatedAt: Date.now() });
     await notifyProfile(ctx, { venueId: swap.venueId, profileId: swap.requesterProfileId, kind: 'swap_reviewed', title: `Swap ${args.approve ? 'approved' : 'denied'}`, body: `Your shift swap was ${args.approve ? 'approved' : 'denied'}.` });

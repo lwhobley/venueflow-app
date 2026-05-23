@@ -29,6 +29,40 @@ const billingValue = v.object({
 
 const stripeSessionValue = v.object({ url: v.string() });
 
+const billingPlans = {
+  venueflow_starter_15_monthly: {
+    name: 'Starter',
+    userLimit: 15,
+    priceCents: 14900,
+    stripePriceId: 'price_1Ta59DKFbgDlLMiECwHKrMhQ',
+    paymentLink: 'https://buy.stripe.com/3cIbJ27TObbu9Rs3Qscwg0d',
+  },
+  venueflow_growth_30_monthly: {
+    name: 'Growth',
+    userLimit: 30,
+    priceCents: 24900,
+    stripePriceId: 'price_1Ta59YKFbgDlLMiE0ikDDJyJ',
+    paymentLink: 'https://buy.stripe.com/dRmcN6a1W5RaaVwfzacwg0e',
+  },
+  venueflow_pro_50_monthly: {
+    name: 'Pro',
+    userLimit: 50,
+    priceCents: 39900,
+    stripePriceId: 'price_1Ta59rKFbgDlLMiEzhY0spmA',
+    paymentLink: 'https://buy.stripe.com/bJe7sM1vqdjC5BcgDecwg0f',
+  },
+} as const;
+
+type BillingPlanId = keyof typeof billingPlans;
+
+function planById(planId: string) {
+  return billingPlans[planId as BillingPlanId] ?? billingPlans.venueflow_starter_15_monthly;
+}
+
+function planByStripePrice(priceId: string | null | undefined) {
+  return Object.entries(billingPlans).find(([, plan]) => plan.stripePriceId === priceId)?.[0] ?? null;
+}
+
 function periodEndForPackage(packageRef: string, now: number) {
   if (packageRef.includes('annual')) {
     return now + 365 * 24 * 60 * 60 * 1000;
@@ -54,12 +88,6 @@ function stripeSecret() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY is not configured');
   return key;
-}
-
-function stripePriceId() {
-  const price = process.env.STRIPE_PRICE_ID;
-  if (!price) throw new Error('STRIPE_PRICE_ID is not configured');
-  return price;
 }
 
 async function stripePost(path: string, params: Record<string, string>) {
@@ -156,24 +184,30 @@ export const getStripeBillingContext = internalQuery({
 });
 
 export const createStripeCheckoutSession = action({
-  args: {},
+  args: { planId: v.optional(v.string()) },
   returns: stripeSessionValue,
-  handler: async (ctx): Promise<{ url: string }> => {
+  handler: async (ctx, args): Promise<{ url: string }> => {
     const context: { venueId: Id<'venues'>; venueName: string; email: string; externalCustomerId: string | null } | null = await ctx.runQuery(
       internal.billing.getStripeBillingContext,
       {},
     );
     if (!context) throw new Error('Only venue owners can start billing');
+    const selectedPlanId = (args.planId && args.planId in billingPlans ? args.planId : 'venueflow_starter_15_monthly') as BillingPlanId;
+    const selectedPlan = billingPlans[selectedPlanId];
     const params: Record<string, string> = {
       mode: 'subscription',
       success_url: `${appUrl()}/settings/billing?checkout=success`,
       cancel_url: `${appUrl()}/settings/billing?checkout=cancelled`,
       client_reference_id: context.venueId,
-      'line_items[0][price]': stripePriceId(),
+      'line_items[0][price]': selectedPlan.stripePriceId,
       'line_items[0][quantity]': '1',
       'metadata[venueId]': context.venueId,
+      'metadata[planId]': selectedPlanId,
       'subscription_data[metadata][venueId]': context.venueId,
       'subscription_data[metadata][venueName]': context.venueName,
+      'subscription_data[metadata][planId]': selectedPlanId,
+      'subscription_data[metadata][userLimit]': String(selectedPlan.userLimit),
+      'subscription_data[trial_period_days]': '14',
       allow_promotion_codes: 'true',
     };
     if (context.externalCustomerId) params.customer = context.externalCustomerId;
@@ -290,8 +324,20 @@ export const handleStripeWebhook = internalMutation({
     if (event.type === 'checkout.session.completed') {
       patch.externalCustomerId = object.customer ?? subscription.externalCustomerId;
       patch.externalSubscriptionId = object.subscription ?? subscription.externalSubscriptionId;
+      const planId = object.metadata?.planId;
+      if (planId && planId in billingPlans) {
+        const plan = planById(planId);
+        patch.planId = planId;
+        patch.priceCents = plan.priceCents;
+      }
     }
     if (String(event.type ?? '').startsWith('customer.subscription.')) {
+      const planId = object.metadata?.planId ?? planByStripePrice(object.items?.data?.[0]?.price?.id);
+      if (planId) {
+        const plan = planById(planId);
+        patch.planId = planId;
+        patch.priceCents = plan.priceCents;
+      }
       patch.status = mapStripeStatus(object.status);
       patch.externalCustomerId = object.customer ?? subscription.externalCustomerId;
       patch.externalSubscriptionId = object.id ?? subscription.externalSubscriptionId;

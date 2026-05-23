@@ -246,8 +246,8 @@ async function getOrCreateVenue(ctx: AnyCtx) {
     venueId,
     status: 'trialing',
     platform: null,
-    planId: 'venueflow_pro_monthly',
-    priceCents: 4900,
+    planId: 'venueflow_starter_15_monthly',
+    priceCents: 14900,
     currency: 'USD',
     trialStartedAt: now,
     trialEndsAt: now + 14 * 24 * 60 * 60 * 1000,
@@ -368,7 +368,7 @@ export const bootstrapProfile = mutation({
     // get-or-create for brand-new accounts (first admin signup).
     let venue = existing?.venueId ? await (ctx as AnyCtx).db.get(existing.venueId) : null;
     if (!venue) venue = await getOrCreateVenue(ctx as AnyCtx);
-    const email = identity.email ?? 'member@venueflow.test';
+    const email = identity.email ?? `${userId}@venueflow.local`;
     const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
     const roleName = isAllowlistedAdmin ? 'admin' : existing?.role ?? 'staff';
     let profile = existing;

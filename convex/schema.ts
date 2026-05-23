@@ -67,6 +67,9 @@ export default defineSchema({
     geofenceRadiusM: v.number(),
     code: v.optional(v.string()), // short join code for PIN staff login
     weeklyLaborBudgetHours: v.optional(v.number()), // for scheduling budget warnings
+    schedulePublishedAt: v.optional(v.number()),
+    schedulePublishedBy: v.optional(v.id('profiles')),
+    scheduleUpdatedAfterPublishAt: v.optional(v.number()),
     subscriptionStatus: v.optional(v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'))),
     subscriptionPlatform: v.optional(v.union(v.literal('stripe'), v.literal('apple'), v.null())),
   }).index('by_code', ['code']),
