@@ -3,7 +3,7 @@ name: Deploy Cloudflare Pages
 on:
   push:
     branches:
-      - main
+      - codex/desktop-layout
   workflow_dispatch:
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
           EXPO_PUBLIC_BILLING_ENABLED: "false"
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy dist --project-name venue-wrangler --branch main
+        run: npx wrangler pages deploy dist --project-name venue-wrangler --branch codex/desktop-layout
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
