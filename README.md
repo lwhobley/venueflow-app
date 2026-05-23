@@ -18,7 +18,7 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and 
 - Floor plan and table management with drag-and-drop editor for admins/managers
 - Staff management screen for admins/managers to add people and assign roles to a venue
 - Profile page shortcut to open staff management for privileged roles
-- Billing shell with automatic 14-day trial state for new venues
+- Billing shell with a 7-day trial and venue plans at $149/$249/$399 per month
 
 ## Local setup
 

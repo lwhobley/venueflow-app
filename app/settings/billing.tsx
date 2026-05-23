@@ -16,7 +16,7 @@ export default function BillingScreen() {
   const [loading, setLoading] = useState<'checkout' | 'portal' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 3;
+  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 7;
   const canManageBilling = user?.role === 'admin' || user?.role === 'owner';
 
   const openStripe = async (kind: 'checkout' | 'portal') => {
@@ -38,7 +38,7 @@ export default function BillingScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="headlineSmall">Billing</Text>
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
-          <Text style={{ color: colors.muted }}>Plan: $49/month per venue</Text>
+          <Text style={{ color: colors.muted }}>Plans: $149/month up to 15 users, $249 up to 30, $399 up to 50</Text>
           <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'trialing'}</Text>
           <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in trial</Text>
           <Text style={{ color: colors.muted }}>Stripe manages checkout, renewals, payment methods, invoices, and cancellations.</Text>

@@ -9,7 +9,7 @@ import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 const headlineByReason: Record<string, string> = {
-  trial_expired: 'Your 3-day trial has ended',
+  trial_expired: 'Your 7-day trial has ended',
   payment_failed: "Your payment didn't go through",
   cancelled: 'Your subscription has been cancelled',
   never_subscribed: 'Subscribe to access Venue Wrangler',
@@ -53,7 +53,7 @@ export default function BillingLockedScreen() {
 
             <Card style={{ backgroundColor: colors.background, marginTop: spacing.xs }}>
               <Card.Content style={{ gap: 4 }}>
-                <Text variant="titleMedium">3-day free trial, then $49/month</Text>
+                <Text variant="titleMedium">7-day free trial, then plans from $149/month</Text>
                 <Text style={{ color: colors.muted }}>Stripe manages subscriptions, renewals, invoices, and payment methods.</Text>
               </Card.Content>
             </Card>

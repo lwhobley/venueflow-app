@@ -207,7 +207,7 @@ export const createStripeCheckoutSession = action({
       'subscription_data[metadata][venueName]': context.venueName,
       'subscription_data[metadata][planId]': selectedPlanId,
       'subscription_data[metadata][userLimit]': String(selectedPlan.userLimit),
-      'subscription_data[trial_period_days]': '3',
+      'subscription_data[trial_period_days]': '7',
       allow_promotion_codes: 'true',
     };
     if (context.externalCustomerId) params.customer = context.externalCustomerId;
