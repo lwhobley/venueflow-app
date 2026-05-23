@@ -176,6 +176,37 @@ export const getVenueRoster = query({
   },
 });
 
+// Code-free staff directory for PIN login: staff just pick their name and enter
+// their PIN — no venue code needed. The venue is auto-provisioned when the owner
+// account is first created. The private auth handle is never exposed here; it is
+// only returned after a rate-limited PIN check in exchangePinForLogin.
+export const getStaffDirectory = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      profileId: v.id('profiles'),
+      fullName: v.string(),
+      jobTitle: v.string(),
+      venueName: v.string(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const profiles = await ctx.db.query('profiles').collect();
+    const venueNames = new Map<string, string>();
+    const result: Array<{ profileId: Id<'profiles'>; fullName: string; jobTitle: string; venueName: string }> = [];
+    for (const p of profiles) {
+      if (!p.isPinUser || !p.loginHandle || !p.venueId) continue;
+      const key = String(p.venueId);
+      if (!venueNames.has(key)) {
+        const venue = await ctx.db.get(p.venueId);
+        venueNames.set(key, venue?.name ?? 'Venue');
+      }
+      result.push({ profileId: p._id, fullName: p.fullName, jobTitle: p.jobTitle, venueName: venueNames.get(key) ?? 'Venue' });
+    }
+    return result.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  },
+});
+
 // Managers reset a staff PIN: updates BOTH the Convex Auth account secret and
 // the stored pinHash, and clears the lockout (recent failed attempts).
 export const resetStaffPin = mutation({
@@ -209,16 +240,15 @@ export const resetStaffPin = mutation({
 });
 
 export const exchangePinForLogin = mutation({
-  args: { code: v.string(), profileId: v.id('profiles'), pin: v.string() },
+  // No venue code required: the staffer's venue is derived from their profile.
+  args: { profileId: v.id('profiles'), pin: v.string() },
   returns: v.object({ loginHandle: v.string() }),
   handler: async (ctx, args) => {
-    const code = args.code.trim().toUpperCase();
-    if (!code || !/^\d{4}$/.test(args.pin)) throw new Error('Wrong PIN or code');
+    if (!/^\d{4}$/.test(args.pin)) throw new Error('Wrong PIN');
 
-    const venue = await ctx.db.query('venues').withIndex('by_code', (q: any) => q.eq('code', code)).first();
     const profile = await ctx.db.get(args.profileId);
-    if (!venue || !profile || profile.venueId !== venue._id || !profile.isPinUser || !profile.loginHandle) {
-      throw new Error('Wrong PIN or code');
+    if (!profile || !profile.venueId || !profile.isPinUser || !profile.loginHandle) {
+      throw new Error('Wrong PIN');
     }
 
     if (await recentPinFailures(ctx, profile._id) >= PIN_MAX_FAILURES) {
@@ -229,10 +259,10 @@ export const exchangePinForLogin = mutation({
       throw new Error('This PIN must be reset by a manager before sign-in.');
     }
 
-    const pinHash = await hashPin(venue._id, profile.loginHandle, args.pin);
+    const pinHash = await hashPin(profile.venueId, profile.loginHandle, args.pin);
     const success = pinHash === profile.pinHash;
-    await recordPinAttempt(ctx, venue._id, profile._id, success);
-    if (!success) throw new Error('Wrong PIN or code');
+    await recordPinAttempt(ctx, profile.venueId, profile._id, success);
+    if (!success) throw new Error('Wrong PIN');
     return { loginHandle: profile.loginHandle };
   },
 });

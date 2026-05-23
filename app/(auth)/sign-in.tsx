@@ -27,14 +27,13 @@ export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Staff (PIN)
-  const [code, setCode] = useState('');
+  // Staff (PIN) — no venue code needed; staff just pick their name and enter a PIN.
   const [pickedProfileId, setPickedProfileId] = useState<string | null>(null);
   const [pin, setPin] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
 
-  const roster = useQuery(api.staffAuth.getVenueRoster, code.trim().length >= 4 ? { code: code.trim().toUpperCase() } : 'skip');
+  const directory = useQuery(api.staffAuth.getStaffDirectory, {});
 
   // After signIn() resolves, the Convex client may briefly still be settling the
   // new auth token, so bootstrapProfile can throw "Unauthenticated" for a moment.
@@ -104,7 +103,6 @@ export default function SignInScreen() {
     setSubmitting(true);
     try {
       const { loginHandle } = await exchangePinForLogin({
-        code: code.trim().toUpperCase(),
         profileId: pickedProfileId as Id<'profiles'>,
         pin,
       });
@@ -112,7 +110,7 @@ export default function SignInScreen() {
       await signIn('password', { email: loginHandle, password: pin, flow: 'signIn' });
       await finishSession();
     } catch (e) {
-      Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Wrong PIN or code. Try again.');
+      Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Wrong PIN. Try again.');
       setPin('');
     } finally {
       setSubmitting(false);
@@ -155,51 +153,31 @@ export default function SignInScreen() {
         ) : (
           <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
             <Card.Content style={{ gap: spacing.md }}>
-              <TextInput
-                label="Venue code"
-                value={code}
-                onChangeText={(t) => {
-                  setCode(t.toUpperCase());
-                  setPickedProfileId(null);
-                }}
-                autoCapitalize="characters"
-                mode="outlined"
-              />
-              {code.trim().length >= 4 ? (
-                roster === undefined ? (
-                  <Text style={{ color: colors.muted }}>Looking up venue…</Text>
-                ) : roster === null ? (
-                  <Text style={{ color: colors.danger }}>No venue found for that code.</Text>
-                ) : (
-                  <View style={{ gap: spacing.sm }}>
-                    <Text style={{ color: colors.muted }}>{roster.venueName} · pick your name</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {roster.staff.length === 0 ? (
-                        <Text style={{ color: colors.muted }}>No staff invited yet. Ask your manager to invite you.</Text>
-                      ) : (
-                        roster.staff.map((s) => (
-                          <Pressable
-                            key={s.profileId}
-                            onPress={() => {
-                              setPickedProfileId(s.profileId);
-                              setPin('');
-                            }}
-                            style={{
-                              paddingVertical: 8,
-                              paddingHorizontal: 14,
-                              borderRadius: 999,
-                              backgroundColor: pickedProfileId === s.profileId ? colors.primary : colors.cream,
-                            }}
-                          >
-                            <Text style={{ color: pickedProfileId === s.profileId ? '#fff' : colors.charcoal, fontWeight: '600' }}>{s.fullName}</Text>
-                          </Pressable>
-                        ))
-                      )}
-                    </View>
-                  </View>
-                )
+              <Text style={{ color: colors.muted }}>Pick your name and enter your PIN.</Text>
+              {directory === undefined ? (
+                <Text style={{ color: colors.muted }}>Loading team…</Text>
+              ) : directory.length === 0 ? (
+                <Text style={{ color: colors.muted }}>No staff invited yet. Ask your manager to invite you.</Text>
               ) : (
-                <Text style={{ color: colors.muted }}>Ask your manager for the venue code.</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {directory.map((s) => (
+                    <Pressable
+                      key={s.profileId}
+                      onPress={() => {
+                        setPickedProfileId(s.profileId);
+                        setPin('');
+                      }}
+                      style={{
+                        paddingVertical: 8,
+                        paddingHorizontal: 14,
+                        borderRadius: 999,
+                        backgroundColor: pickedProfileId === s.profileId ? colors.primary : colors.cream,
+                      }}
+                    >
+                      <Text style={{ color: pickedProfileId === s.profileId ? '#fff' : colors.charcoal, fontWeight: '600' }}>{s.fullName}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               )}
 
               {pickedProfileId ? (

@@ -250,7 +250,7 @@ async function getOrCreateVenue(ctx: AnyCtx) {
     priceCents: 14900,
     currency: 'USD',
     trialStartedAt: now,
-    trialEndsAt: now + 14 * 24 * 60 * 60 * 1000,
+    trialEndsAt: now + 3 * 24 * 60 * 60 * 1000,
     currentPeriodStart: null,
     currentPeriodEnd: null,
     cancelAtPeriodEnd: false,

@@ -16,7 +16,7 @@ export default function BillingScreen() {
   const [loading, setLoading] = useState<'checkout' | 'portal' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 14;
+  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 3;
   const canManageBilling = user?.role === 'admin' || user?.role === 'owner';
 
   const openStripe = async (kind: 'checkout' | 'portal') => {
