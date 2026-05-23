@@ -8,6 +8,7 @@ import { A0PurchaseProvider } from '../lib/a0-purchases-stub';
 import { ConvexReactClient } from 'convex/react';
 import { ConvexAuthProvider } from '@convex-dev/auth/react';
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { lightTheme, darkTheme, colors } from '../lib/theme';
 import { SubscriptionGate } from '../components/SubscriptionGate';
@@ -15,6 +16,10 @@ import { useAuthStore, type AuthState } from '../lib/auth-store';
 
 const convexUrl =
   process.env.EXPO_PUBLIC_CONVEX_URL ??
+  // Fall back to the value baked into app.json -> expo.extra. This keeps web
+  // builds working even when a gitignored .env.local is absent (e.g. a fresh
+  // clone or git worktree), where EXPO_PUBLIC_* vars are not inlined.
+  (Constants.expoConfig?.extra?.EXPO_PUBLIC_CONVEX_URL as string | undefined) ??
   (globalThis as typeof globalThis & { EXPO_PUBLIC_CONVEX_URL?: string }).EXPO_PUBLIC_CONVEX_URL;
 
 if (!convexUrl) {
