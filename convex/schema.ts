@@ -70,9 +70,14 @@ export default defineSchema({
     schedulePublishedAt: v.optional(v.number()),
     schedulePublishedBy: v.optional(v.id('profiles')),
     scheduleUpdatedAfterPublishAt: v.optional(v.number()),
+    // New-venue approval workflow: the first owner signup is pending until the
+    // site creator approves via an emailed link.
+    approvalStatus: v.optional(v.union(v.literal('pending'), v.literal('approved'))),
+    approvalToken: v.optional(v.string()),
+    approvalRequestedAt: v.optional(v.number()),
     subscriptionStatus: v.optional(v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'))),
     subscriptionPlatform: v.optional(v.union(v.literal('stripe'), v.literal('apple'), v.null())),
-  }).index('by_code', ['code']),
+  }).index('by_code', ['code']).index('by_approvalToken', ['approvalToken']),
   venueRoles: defineTable({
     venueId: v.id('venues'),
     name: v.string(),

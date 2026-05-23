@@ -2,6 +2,7 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
+import { internal } from './_generated/api';
 import { requireActiveSubscription } from './billing/shared';
 
 type Identity = {
@@ -230,18 +231,31 @@ async function getProfile(ctx: AnyCtx) {
   return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
+function approvalToken() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function getOrCreateVenue(ctx: AnyCtx) {
   const existing = await ctx.db.query('venues').take(1);
   if (existing.length > 0) return existing[0];
   const now = Date.now();
+  const token = approvalToken();
   const venueId = await ctx.db.insert('venues', {
     name: 'Main Venue',
     latitude: 37.7749,
     longitude: -122.4194,
     geofenceRadiusM: 120,
+    // Brand-new venue starts pending until the site creator approves.
+    approvalStatus: 'pending',
+    approvalToken: token,
+    approvalRequestedAt: now,
     subscriptionStatus: 'trialing',
     subscriptionPlatform: null,
   });
+  // Email the site creator an approval link (best-effort; never blocks signup).
+  await ctx.scheduler.runAfter(0, internal.approvals.sendApprovalEmail, { venueId });
   await ctx.db.insert('subscriptions', {
     venueId,
     status: 'trialing',
@@ -370,7 +384,11 @@ export const bootstrapProfile = mutation({
     if (!venue) venue = await getOrCreateVenue(ctx as AnyCtx);
     const email = identity.email ?? `${userId}@venueflow.local`;
     const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
-    const roleName = isAllowlistedAdmin ? 'admin' : existing?.role ?? 'staff';
+    // The first person to join a venue (the email signup who created it) is the
+    // venue admin/owner. Everyone else defaults to staff unless already set.
+    const venueMembers = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).take(1);
+    const isFirstMember = venueMembers.length === 0;
+    const roleName = isAllowlistedAdmin || (isFirstMember && !existing) ? 'admin' : existing?.role ?? 'staff';
     let profile = existing;
 
     if (!profile) {
@@ -415,6 +433,23 @@ export const getMe = query({
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
     return { profile: mapProfile(profile), venue: mapVenue(venue) };
+  },
+});
+
+// Whether the signed-in user's venue has been approved by the site creator.
+// Legacy venues without the field are treated as approved.
+export const getMyVenueApprovalStatus = query({
+  args: {},
+  returns: v.union(v.null(), v.object({ status: v.union(v.literal('pending'), v.literal('approved')), venueName: v.string() })),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || !profile.venueId) return null;
+    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    if (!venue) return null;
+    const status: 'pending' | 'approved' = venue.approvalStatus === 'pending' ? 'pending' : 'approved';
+    return { status, venueName: String(venue.name) };
   },
 });
 

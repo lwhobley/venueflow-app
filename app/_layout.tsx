@@ -14,6 +14,7 @@ import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { lightTheme, darkTheme, colors } from '../lib/theme';
 import { SubscriptionGate } from '../components/SubscriptionGate';
+import { ApprovalGate } from '../components/ApprovalGate';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 
 const convexUrl =
@@ -99,9 +100,11 @@ export default function RootLayout() {
                 {/* Top inset keeps content below the status bar / notch; the tab
                     bar and screens handle the bottom inset. */}
                 <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'left', 'right']}>
-                  <SubscriptionGate>
-                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
-                  </SubscriptionGate>
+                  <ApprovalGate>
+                    <SubscriptionGate>
+                      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+                    </SubscriptionGate>
+                  </ApprovalGate>
                 </SafeAreaView>
               </A0PurchaseProvider>
             </PaperProvider>
