@@ -42,12 +42,19 @@ export default function HomeScreen() {
   const [eventTime, setEventTime] = useState('18:00');
   const [eventNotes, setEventNotes] = useState('');
 
-  const analytics = [
-    { label: 'Team members', value: dashboard ? String(dashboard.analytics.teamCount) : '—', icon: 'account-group' },
-    { label: 'Scheduled shifts', value: dashboard ? String(dashboard.analytics.scheduledCount) : '—', icon: 'calendar-week' },
-    { label: 'Open shifts', value: dashboard ? String(dashboard.analytics.openShiftCount) : '—', icon: 'calendar-remove' },
-    { label: 'Clocked in now', value: dashboard ? String(dashboard.analytics.clockedInCount) : '—', icon: 'clock-check' },
-  ];
+  // Team-wide headcount metrics (team size, who/how many are clocked in) are
+  // management-only. Staff just see their own scheduling context.
+  const analytics = canManage
+    ? [
+        { label: 'Team members', value: dashboard ? String(dashboard.analytics.teamCount) : '—', icon: 'account-group' },
+        { label: 'Scheduled shifts', value: dashboard ? String(dashboard.analytics.scheduledCount) : '—', icon: 'calendar-week' },
+        { label: 'Open shifts', value: dashboard ? String(dashboard.analytics.openShiftCount) : '—', icon: 'calendar-remove' },
+        { label: 'Clocked in now', value: dashboard ? String(dashboard.analytics.clockedInCount) : '—', icon: 'clock-check' },
+      ]
+    : [
+        { label: 'Scheduled shifts', value: dashboard ? String(dashboard.analytics.scheduledCount) : '—', icon: 'calendar-week' },
+        { label: 'Open shifts', value: dashboard ? String(dashboard.analytics.openShiftCount) : '—', icon: 'calendar-remove' },
+      ];
 
   const weeklyHighlights = dashboard
     ? dashboard.schedule.slice(0, 5).map((shift: any) => ({
@@ -264,6 +271,7 @@ export default function HomeScreen() {
         </Card.Content>
       </Card>
 
+      {canManage ? (
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Who's clocked in right now</Text>
@@ -297,6 +305,7 @@ export default function HomeScreen() {
           )}
         </Card.Content>
       </Card>
+      ) : null}
     </ScrollView>
   );
 }
