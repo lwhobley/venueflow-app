@@ -15,6 +15,8 @@ import type * as barInventory from "../barInventory.js";
 import type * as billing from "../billing.js";
 import type * as billing_shared from "../billing/shared.js";
 import type * as chat from "../chat.js";
+import type * as cosmicInsights from "../cosmicInsights.js";
+import type * as crons from "../crons.js";
 import type * as floor from "../floor.js";
 import type * as floorBinding from "../floorBinding.js";
 import type * as guests from "../guests.js";
@@ -46,6 +48,8 @@ declare const fullApi: ApiFromModules<{
   billing: typeof billing;
   "billing/shared": typeof billing_shared;
   chat: typeof chat;
+  cosmicInsights: typeof cosmicInsights;
+  crons: typeof crons;
   floor: typeof floor;
   floorBinding: typeof floorBinding;
   guests: typeof guests;

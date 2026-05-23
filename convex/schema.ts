@@ -535,4 +535,13 @@ export default defineSchema({
     createdAt: v.number(),
     paidAt: v.union(v.number(), v.null()),
   }).index('by_venue_time', ['venueId', 'createdAt']).index('by_stripe_id', ['stripeInvoiceId']),
+
+  // AI-generated "Cosmic Insights" for the dashboard. A cron regenerates a
+  // fresh batch every 8 hours; the dashboard shows the latest batch.
+  cosmicInsights: defineTable({
+    kind: v.string(),
+    title: v.string(),
+    body: v.string(),
+    batchAt: v.number(),
+  }).index('by_batchAt', ['batchAt']),
 });
