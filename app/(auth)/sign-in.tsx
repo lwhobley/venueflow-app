@@ -13,10 +13,11 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 type Mode = 'admin' | 'staff';
 
 export default function SignInScreen() {
-  const { signIn } = useAuthActions();
+  const { signIn, signOut } = useAuthActions();
   const bootstrapProfile = useMutation(api.app.bootstrapProfile);
   const exchangePinForLogin = useMutation(api.staffAuth.exchangePinForLogin);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
+  const clearSession = useAuthStore((state: AuthState) => state.clearSession);
 
   const [mode, setMode] = useState<Mode>('staff');
 
@@ -35,14 +36,47 @@ export default function SignInScreen() {
 
   const roster = useQuery(api.staffAuth.getVenueRoster, code.trim().length >= 4 ? { code: code.trim().toUpperCase() } : 'skip');
 
-  const finishSession = async () => {
-    const { profile, venue } = await bootstrapProfile({});
+  // After signIn() resolves, the Convex client may still carry the PREVIOUS
+  // session's auth token for a brief moment. If we bootstrap immediately, the
+  // stale (but still valid) token can return the wrong account — e.g. signing
+  // in as staff while an admin was logged in would return the admin profile.
+  // So we poll bootstrapProfile until the returned account matches the email we
+  // just authenticated with, tolerating transient unauthenticated errors.
+  const finishSessionFor = async (expectedEmail: string) => {
+    const target = expectedEmail.trim().toLowerCase();
+    let last: { profile: any; venue: any } | null = null;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      try {
+        const result = await bootstrapProfile({});
+        last = result;
+        if (result.profile.email.trim().toLowerCase() === target) break;
+      } catch (e) {
+        lastError = e;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    if (!last || last.profile.email.trim().toLowerCase() !== target) {
+      throw lastError instanceof Error ? lastError : new Error('Sign-in did not complete. Please try again.');
+    }
+    const { profile, venue } = last;
     setSession({
       user: { id: profile._id, email: profile.email, full_name: profile.fullName, role: profile.role, job_title: profile.jobTitle, venue_id: profile.venueId ?? null },
       venue: venue ? { id: venue._id, name: venue.name, latitude: venue.latitude, longitude: venue.longitude, geofence_radius_m: venue.geofenceRadiusM } : null,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     router.replace('/(tabs)/home');
+  };
+
+  // Drop any existing session (Convex Auth token + persisted store) before
+  // starting a new sign-in so a previous account can't leak through.
+  const resetExistingSession = async () => {
+    clearSession();
+    try {
+      await signOut();
+    } catch {
+      // No active session to clear — ignore.
+    }
   };
 
   const onAdminSubmit = async () => {
@@ -53,8 +87,9 @@ export default function SignInScreen() {
     }
     setSubmitting(true);
     try {
+      await resetExistingSession();
       await signIn('password', { email: trimmed, password, flow });
-      await finishSession();
+      await finishSessionFor(trimmed);
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Try again.');
     } finally {
@@ -74,8 +109,9 @@ export default function SignInScreen() {
         profileId: pickedProfileId as Id<'profiles'>,
         pin,
       });
+      await resetExistingSession();
       await signIn('password', { email: loginHandle, password: pin, flow: 'signIn' });
-      await finishSession();
+      await finishSessionFor(loginHandle);
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Wrong PIN or code. Try again.');
       setPin('');
