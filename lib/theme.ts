@@ -1,29 +1,29 @@
 import { MD3DarkTheme, MD3LightTheme } from 'react-native-paper';
 
+// "Cookies and cream" palette: creamy vanilla base with chocolate-cookie browns.
 export const colors = {
-  primary: '#173F78', // Venue Wrangler navy
-  secondary: '#0FA7A7', // compass teal
-  background: '#F4FAFC',
-  surface: '#FFFFFF',
-  charcoal: '#0F2238',
-  muted: '#607789',
-  border: '#DCE8EF',
-  success: '#16A34A',
-  danger: '#E11D48',
-  warning: '#B9853A',
-  info: '#0EA5E9',
-  cream: '#EAF4F7',
+  primary: '#5C4533', // dark cookie / chocolate
+  secondary: '#A9745B', // caramel
+  background: '#F5EFE3', // vanilla cream
+  surface: '#FFFCF5', // creamy white
+  charcoal: '#2E241C', // dark chocolate (text)
+  muted: '#8C7B68', // milk-coffee gray
+  border: '#E8DCC8',
+  success: '#5E8C61',
+  danger: '#B23A48',
+  warning: '#C8893F',
+  info: '#8A7B66',
+  cream: '#EDE3D2',
 };
 
-// Soft tinted backgrounds + matching foregrounds for cards/badges, so the UI
-// reads as colorful without sacrificing contrast.
+// Soft cream/cookie tinted backgrounds + matching foregrounds for cards/badges.
 export const accents = [
-  { bg: '#E6F1F8', fg: '#173F78', icon: '#173F78' }, // navy
-  { bg: '#DFF6F4', fg: '#087F83', icon: '#0FA7A7' }, // teal
-  { bg: '#E2F6EC', fg: '#118A53', icon: '#16A34A' }, // green
-  { bg: '#E1F3FE', fg: '#0B7EB5', icon: '#0EA5E9' }, // sky
-  { bg: '#F8EBD9', fg: '#8A5B20', icon: '#B9853A' }, // brass
-  { bg: '#FCE7F3', fg: '#BE1D62', icon: '#EC4899' }, // pink
+  { bg: '#F0E6D6', fg: '#6B4E37', icon: '#8B6F47' }, // cookie
+  { bg: '#EFE7DB', fg: '#4A3B2E', icon: '#5C4533' }, // chocolate
+  { bg: '#F3ECE0', fg: '#7A5C3E', icon: '#A9745B' }, // caramel
+  { bg: '#EDE9E2', fg: '#5A5246', icon: '#8A7B66' }, // cream / neutral
+  { bg: '#F6EFD9', fg: '#8A6A1E', icon: '#C8893F' }, // warm amber
+  { bg: '#F0E2DD', fg: '#9A4A3C', icon: '#B23A48' }, // critical warm
 ] as const;
 
 export const spacing = {
@@ -46,17 +46,17 @@ export const radius = {
 
 // Soft, diffuse shadow for floating/glassy surfaces (works on web + native).
 export const shadow = {
-  shadowColor: '#1A1A2E',
-  shadowOpacity: 0.08,
+  shadowColor: '#2E241C',
+  shadowOpacity: 0.1,
   shadowRadius: 24,
   shadowOffset: { width: 0, height: 12 },
   elevation: 6,
 } as const;
 
-// Translucent "frosted glass" surface. On web the backdrop blur is applied via
-// a passthrough CSS property (cast to any at the call site).
+// Translucent "frosted glass" surface — warm cream tint. The backdrop blur is
+// a web-only CSS passthrough.
 export const glass = {
-  backgroundColor: 'rgba(255, 255, 255, 0.72)',
+  backgroundColor: 'rgba(255, 252, 245, 0.74)',
   borderWidth: 1,
   borderColor: 'rgba(255, 255, 255, 0.6)',
   backdropFilter: 'blur(18px)',
@@ -78,7 +78,7 @@ export const lightTheme = {
     elevation: {
       ...MD3LightTheme.colors.elevation,
       level1: colors.surface,
-      level2: '#FBFBFE',
+      level2: '#F8FCFD',
     },
   },
 };
@@ -88,11 +88,12 @@ export const darkTheme = {
   roundness: 14,
   colors: {
     ...MD3DarkTheme.colors,
-    primary: '#B5C7B5',
-    background: '#151815',
-    surface: '#1B201B',
-    onSurface: '#F3EFE8',
-    onBackground: '#F3EFE8',
-    outline: '#3D443C',
+    primary: '#55D7B8',
+    secondary: '#17B7C8',
+    background: '#061827',
+    surface: '#0B2235',
+    onSurface: '#F4FAFC',
+    onBackground: '#F4FAFC',
+    outline: '#23465A',
   },
 };

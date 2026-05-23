@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Platform, useColorScheme } from 'react-native';
+import { Platform, useColorScheme, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -50,8 +50,10 @@ const shouldIgnoreWebError = (message: string) =>
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
-  // and the nav use it). Without this, web shows blank "tofu" squares.
-  useFonts(MaterialCommunityIcons.font);
+  // and the nav use it). We hold the first paint until it's loaded, otherwise
+  // web shows blank "tofu" squares. A load error still lets the app through.
+  const [fontsLoaded, fontError] = useFonts(MaterialCommunityIcons.font);
+  const fontsReady = fontsLoaded || !!fontError;
   const queryClient = useMemo(() => new QueryClient(), []);
   const userId = useAuthStore((state: AuthState) => state.user?.id ?? null);
   const debug = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__);
@@ -88,6 +90,10 @@ export default function RootLayout() {
       globalObject.removeEventListener?.('unhandledrejection', handleUnhandledRejection);
     };
   }, []);
+
+  if (!fontsReady) {
+    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
