@@ -12,7 +12,7 @@ const headlineByReason: Record<string, string> = {
   trial_expired: 'Your 3-day trial has ended',
   payment_failed: "Your payment didn't go through",
   cancelled: 'Your subscription has been cancelled',
-  never_subscribed: 'Subscribe to access VenueFlow',
+  never_subscribed: 'Subscribe to access Venue Wrangler',
 };
 
 export default function BillingLockedScreen() {
@@ -86,7 +86,7 @@ export default function BillingLockedScreen() {
             <Button mode="text" textColor={colors.primary} onPress={() => router.replace('/(auth)/sign-in')}>
               Sign out
             </Button>
-            <Button mode="text" textColor={colors.primary} onPress={() => Linking.openURL('mailto:support@venueflow.com')}>
+            <Button mode="text" textColor={colors.primary} onPress={() => Linking.openURL('mailto:support@venuewrangler.com')}>
               Need help? Contact support
             </Button>
           </Card.Content>

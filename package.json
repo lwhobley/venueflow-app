@@ -1,5 +1,5 @@
 {
-  "name": "venueflow",
+  "name": "venue-wrangler",
   "private": true,
   "main": "expo-router/entry",
   "workspaces": [

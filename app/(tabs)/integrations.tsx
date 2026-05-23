@@ -155,7 +155,7 @@ export default function IntegrationsScreen() {
             <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveConnection()}>Save connection</Button>
             <Button mode="outlined" textColor={colors.primary} loading={saving} onPress={() => void importSample()}>Import sample check</Button>
           </View>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: /pos/webhook with x-venueflow-pos-secret.</Text>
+          <Text style={{ color: colors.muted }}>Webhook endpoint: /pos/webhook with x-venue-wrangler-pos-secret.</Text>
         </Card.Content>
       </Card>
 
@@ -171,7 +171,7 @@ export default function IntegrationsScreen() {
           <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveReservationConnection()}>
             Save reservation connection
           </Button>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with x-venueflow-reservation-secret.</Text>
+          <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with x-venue-wrangler-reservation-secret.</Text>
         </Card.Content>
       </Card>
 

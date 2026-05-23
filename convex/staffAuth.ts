@@ -41,10 +41,21 @@ async function recentPinFailures(ctx: any, profileId: Id<'profiles'>) {
   return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success && attempt.createdAt >= cutoff).length;
 }
 
-async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'profiles'>, success: boolean) {
+async function recentPinFailuresForHash(ctx: any, venueId: Id<'venues'>, pinHash: string) {
+  const cutoff = Date.now() - PIN_LOCK_WINDOW_MS;
+  const attempts = await ctx.db
+    .query('pinLoginAttempts')
+    .withIndex('by_venue_and_createdAt', (q: any) => q.eq('venueId', venueId))
+    .order('desc')
+    .take(PIN_MAX_FAILURES);
+  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => attempt.pinHash === pinHash && !attempt.success && attempt.createdAt >= cutoff).length;
+}
+
+async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'profiles'> | undefined, pinHash: string, success: boolean) {
   await ctx.db.insert('pinLoginAttempts', {
     venueId,
     profileId,
+    pinHash,
     success,
     createdAt: Date.now(),
   });
@@ -130,7 +141,7 @@ export const inviteStaff = mutation({
     if (!fullName) throw new Error('Enter a name');
     if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
 
-    const handle = `pin_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}@pin.venueflow`;
+    const handle = `pin_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}@pin.venuewrangler`;
     const pinHash = await hashPin(args.venueId, args.pin);
     await assertPinAvailable(ctx, args.venueId, pinHash);
 
@@ -192,33 +203,33 @@ export const resetStaffPin = mutation({
   },
 });
 
-// PIN-only login: no name selection. The staffer just enters their 4-digit PIN
-// and we identify them by matching the venue-salted hash. PINs are unique per
-// venue (enforced at assignment), so a PIN maps to exactly one staffer.
+// PIN-only login: no name selection. This app is deployed for one venue, so the
+// staffer enters only the manager-assigned PIN.
 export const loginWithPin = mutation({
   args: { pin: v.string() },
   returns: v.object({ loginHandle: v.string() }),
   handler: async (ctx, args) => {
     if (!/^\d{4}$/.test(args.pin)) throw new Error('Enter your 4-digit PIN');
 
-    // Find the PIN staffer whose venue-salted hash matches.
-    const profiles = await ctx.db.query('profiles').collect();
-    let match: Doc<'profiles'> | null = null;
-    for (const p of profiles) {
-      if (!p.isPinUser || !p.loginHandle || !p.pinHash || !p.venueId) continue;
-      const candidate = await hashPin(p.venueId, args.pin);
-      if (candidate === p.pinHash) {
-        match = p;
-        break;
-      }
+    const [venue] = await ctx.db.query('venues').take(1);
+    if (!venue) throw new Error('Venue is not set up yet');
+    const pinHash = await hashPin(venue._id, args.pin);
+    if (await recentPinFailuresForHash(ctx, venue._id, pinHash) >= PIN_MAX_FAILURES) {
+      throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
     }
-    if (!match || !match.venueId || !match.loginHandle) throw new Error('Wrong PIN');
+
+    const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+    const match = profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.loginHandle && p.pinHash === pinHash) ?? null;
+    if (!match || !match.loginHandle) {
+      await recordPinAttempt(ctx, venue._id, undefined, pinHash, false);
+      throw new Error('Wrong PIN');
+    }
 
     if (await recentPinFailures(ctx, match._id) >= PIN_MAX_FAILURES) {
       throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
     }
 
-    await recordPinAttempt(ctx, match.venueId, match._id, true);
+    await recordPinAttempt(ctx, venue._id, match._id, pinHash, true);
     return { loginHandle: match.loginHandle };
   },
 });

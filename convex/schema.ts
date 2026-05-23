@@ -70,24 +70,20 @@ export default defineSchema({
     schedulePublishedAt: v.optional(v.number()),
     schedulePublishedBy: v.optional(v.id('profiles')),
     scheduleUpdatedAfterPublishAt: v.optional(v.number()),
-    // New-venue approval workflow: the first owner signup is pending until the
-    // site creator approves via an emailed link.
-    approvalStatus: v.optional(v.union(v.literal('pending'), v.literal('approved'))),
-    approvalToken: v.optional(v.string()),
-    approvalRequestedAt: v.optional(v.number()),
     subscriptionStatus: v.optional(v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'))),
     subscriptionPlatform: v.optional(v.union(v.literal('stripe'), v.literal('apple'), v.null())),
-  }).index('by_code', ['code']).index('by_approvalToken', ['approvalToken']),
+  }).index('by_code', ['code']),
   venueRoles: defineTable({
     venueId: v.id('venues'),
     name: v.string(),
   }).index('by_venue', ['venueId']),
   pinLoginAttempts: defineTable({
     venueId: v.id('venues'),
-    profileId: v.id('profiles'),
+    profileId: v.optional(v.id('profiles')),
+    pinHash: v.optional(v.string()),
     success: v.boolean(),
     createdAt: v.number(),
-  }).index('by_profile_and_createdAt', ['profileId', 'createdAt']),
+  }).index('by_profile_and_createdAt', ['profileId', 'createdAt']).index('by_venue_and_createdAt', ['venueId', 'createdAt']),
   teams: defineTable({
     venueId: v.id('venues'),
     name: v.string(),
@@ -118,6 +114,15 @@ export default defineSchema({
     ),
     createdAt: v.number(),
   }).index('by_venue', ['venueId']),
+  scheduleEmailEvents: defineTable({
+    venueId: v.id('venues'),
+    profileId: v.id('profiles'),
+    shiftId: v.optional(v.id('scheduleShifts')),
+    kind: v.union(v.literal('schedule_published'), v.literal('shift_changed')),
+    email: v.string(),
+    subject: v.string(),
+    sentAt: v.number(),
+  }).index('by_venue_and_sentAt', ['venueId', 'sentAt']).index('by_profile_and_sentAt', ['profileId', 'sentAt']),
   shiftSwaps: defineTable({
     venueId: v.id('venues'),
     requesterProfileId: v.id('profiles'),

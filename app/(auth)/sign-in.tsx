@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Alert, Animated, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, SegmentedButtons, Text, TextInput } from 'react-native-paper';
@@ -10,6 +10,9 @@ import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 type Mode = 'admin' | 'staff';
+
+const logoSource = require('../../assets/venue-wrangler-logo.jpg');
+const introVideoSource = require('../../assets/video.mp4');
 
 export default function SignInScreen() {
   const { signIn, signOut } = useAuthActions();
@@ -30,6 +33,22 @@ export default function SignInScreen() {
   const [pin, setPin] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
+  const [showIntro, setShowIntro] = useState(false);
+  const introOpacity = useRef(new Animated.Value(0)).current;
+  const introSlide = useRef(new Animated.Value(0)).current;
+
+  const playStaffIntro = async () => {
+    setShowIntro(true);
+    introOpacity.setValue(0);
+    introSlide.setValue(0);
+    await new Promise<void>((resolve) => {
+      Animated.sequence([
+        Animated.timing(introOpacity, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.delay(1100),
+        Animated.timing(introSlide, { toValue: -420, duration: 450, useNativeDriver: true }),
+      ]).start(() => resolve());
+    });
+  };
 
   // After signIn() resolves, the Convex client may briefly still be settling the
   // new auth token, so bootstrapProfile can throw "Unauthenticated" for a moment.
@@ -38,7 +57,7 @@ export default function SignInScreen() {
   // whose token carried no email and fell back to a placeholder). The wrong-account
   // risk is already handled by resetExistingSession() signing out first, so the
   // first successful bootstrap belongs to the account we just signed in as.
-  const finishSession = async () => {
+  const finishSession = async (options?: { staffIntro?: boolean }) => {
     let last: { profile: any; venue: any } | null = null;
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -59,6 +78,7 @@ export default function SignInScreen() {
       venue: venue ? { id: venue._id, name: venue.name, latitude: venue.latitude, longitude: venue.longitude, geofence_radius_m: venue.geofenceRadiusM } : null,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (options?.staffIntro) await playStaffIntro();
     router.replace('/(tabs)/home');
   };
 
@@ -101,7 +121,7 @@ export default function SignInScreen() {
       const { loginHandle } = await loginWithPin({ pin });
       await resetExistingSession();
       await signIn('password', { email: loginHandle, password: pin, flow: 'signIn' });
-      await finishSession();
+      await finishSession({ staffIntro: true });
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Wrong PIN. Try again.');
       setPin('');
@@ -113,8 +133,9 @@ export default function SignInScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
-        <View style={{ marginBottom: spacing.sm }}>
-          <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>VenueFlow</Text>
+        <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
+          <Image source={logoSource} style={{ width: 220, height: 120, resizeMode: 'contain' }} />
+          <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, marginTop: 6 }}>Premium venue ops for clock-in, shifts, and floor control.</Text>
         </View>
 
@@ -164,6 +185,34 @@ export default function SignInScreen() {
           </Card>
         )}
       </ScrollView>
+      {showIntro ? (
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.introOverlay, { opacity: introOpacity, transform: [{ translateX: introSlide }] }]}>
+          {Platform.OS === 'web'
+            ? React.createElement('video', {
+                src: introVideoSource,
+                autoPlay: true,
+                muted: true,
+                playsInline: true,
+                style: webVideoStyle,
+              })
+            : <Image source={logoSource} style={{ width: 280, height: 180, resizeMode: 'contain' }} />}
+        </Animated.View>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  introOverlay: {
+    zIndex: 20,
+    backgroundColor: colors.charcoal,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
+
+const webVideoStyle: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+};

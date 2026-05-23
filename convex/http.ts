@@ -57,11 +57,19 @@ function secretOk(expected: string | undefined, received: string | null) {
   return !!expected && !!received && timingSafeEqual(received, expected);
 }
 
+function firstHeader(req: Request, names: string[]) {
+  for (const name of names) {
+    const value = req.headers.get(name);
+    if (value) return value;
+  }
+  return null;
+}
+
 http.route({
   path: '/pos/webhook',
   method: 'POST',
   handler: httpAction(async (ctx, req) => {
-    if (!secretOk(process.env.POS_WEBHOOK_SECRET, req.headers.get('x-venueflow-pos-secret'))) {
+    if (!secretOk(process.env.POS_WEBHOOK_SECRET, firstHeader(req, ['x-venue-wrangler-pos-secret', 'x-venueflow-pos-secret']))) {
       return new Response('Unauthorized', { status: 401 });
     }
     let body: any;
@@ -84,7 +92,7 @@ http.route({
   path: '/reservations/webhook',
   method: 'POST',
   handler: httpAction(async (ctx, req) => {
-    if (!secretOk(process.env.RESERVATION_WEBHOOK_SECRET, req.headers.get('x-venueflow-reservation-secret'))) {
+    if (!secretOk(process.env.RESERVATION_WEBHOOK_SECRET, firstHeader(req, ['x-venue-wrangler-reservation-secret', 'x-venueflow-reservation-secret']))) {
       return new Response('Unauthorized', { status: 401 });
     }
     let body: any;
@@ -100,28 +108,6 @@ http.route({
       return new Response('Rejected', { status: 400 });
     }
     return new Response('ok', { status: 200 });
-  }),
-});
-
-// Site-creator approval link target. GET /approveVenue?token=...
-http.route({
-  path: '/approveVenue',
-  method: 'GET',
-  handler: httpAction(async (ctx, request) => {
-    const token = new URL(request.url).searchParams.get('token') ?? '';
-    const page = (title: string, body: string) =>
-      new Response(
-        `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${title}</title></head>
-         <body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#F4FAFC;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;">
-         <div style="background:#fff;border-radius:20px;padding:40px;max-width:440px;text-align:center;box-shadow:0 12px 40px rgba(8,35,63,0.12);">
-         <h2 style="color:#0B2B4C;margin-top:0;">${title}</h2>${body}</div></body></html>`,
-        { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
-      );
-
-    if (!token) return page('Invalid link', '<p style="color:#607789;">This approval link is missing its token.</p>');
-    const result = await ctx.runMutation(internal.approvals.approveByToken, { token });
-    if (!result) return page('Link expired', '<p style="color:#607789;">This venue is already approved or the link is no longer valid.</p>');
-    return page('Venue approved', `<p style="color:#607789;"><strong>${result.name}</strong> is now approved and can use VenueFlow.</p>`);
   }),
 });
 

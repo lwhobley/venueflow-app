@@ -388,6 +388,11 @@ export const createShift = mutation({
         title: 'New shift assigned',
         body: `${dayLabel(args.dayIndex)} ${minutesToTime(args.startMinutes)}-${minutesToTime(args.endMinutes)} · ${args.jobTitle}`,
       });
+      await ctx.scheduler.runAfter(0, internal.scheduleEmails.sendShiftChangedEmail, {
+        venueId: args.venueId,
+        profileId: args.profileId,
+        shiftId,
+      });
     } else {
       await notifyManagers(ctx, {
         venueId: args.venueId,
@@ -426,6 +431,13 @@ export const updateShift = mutation({
       notes: args.notes?.trim() || undefined,
     });
     await markScheduleEdited(ctx, args.venueId);
+    if (shift.profileId) {
+      await ctx.scheduler.runAfter(0, internal.scheduleEmails.sendShiftChangedEmail, {
+        venueId: args.venueId,
+        profileId: shift.profileId,
+        shiftId: shift._id,
+      });
+    }
     return null;
   },
 });
@@ -447,6 +459,11 @@ export const assignShift = mutation({
       kind: 'shift_assigned',
       title: 'Shift assigned',
       body: `${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)} · ${shift.jobTitle}`,
+    });
+    await ctx.scheduler.runAfter(0, internal.scheduleEmails.sendShiftChangedEmail, {
+      venueId: args.venueId,
+      profileId: args.profileId,
+      shiftId: shift._id,
     });
     return null;
   },
@@ -654,6 +671,7 @@ export const publishSchedule = mutation({
       title: 'Schedule posted',
       body: `${assigned} shift${assigned === 1 ? '' : 's'} scheduled${open > 0 ? `, ${open} open to pick up` : ''}. Check your shifts.`,
     });
+    await ctx.scheduler.runAfter(0, internal.scheduleEmails.sendSchedulePublishedEmails, { venueId: args.venueId });
     return { notified: assigned };
   },
 });

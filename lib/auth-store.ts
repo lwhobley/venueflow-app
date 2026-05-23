@@ -84,7 +84,7 @@ const createAuthStore = (set: (partial: Partial<AuthState>) => void): AuthState 
 
 export const useAuthStore = create<AuthState>()(
   persist(createAuthStore, {
-    name: 'venueflow-auth',
+    name: 'venuewrangler-auth',
     storage: createJSONStorage(() => storage),
     partialize: (state: AuthState): SessionState => ({
       user: state.user,

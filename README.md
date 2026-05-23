@@ -1,6 +1,6 @@
-# VenueFlow
+# Venue Wrangler
 
-VenueFlow is a native iOS/Android venue ops app built with Expo Router and Convex.
+Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and Convex.
 
 ## Role model
 

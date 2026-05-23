@@ -2,7 +2,6 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { internal } from './_generated/api';
 import { requireActiveSubscription } from './billing/shared';
 
 type Identity = {
@@ -151,7 +150,7 @@ function displayName(identity: Identity) {
 }
 
 function isBootstrapAdminEmail(email: string | null | undefined) {
-  const configured = process.env.VENUEFLOW_ADMIN_EMAILS;
+  const configured = process.env.VENUE_WRANGLER_ADMIN_EMAILS ?? process.env.VENUEFLOW_ADMIN_EMAILS;
   if (!configured || !email) return false;
   const allowlist = configured
     .split(',')
@@ -231,31 +230,18 @@ async function getProfile(ctx: AnyCtx) {
   return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
-function approvalToken() {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 async function getOrCreateVenue(ctx: AnyCtx) {
   const existing = await ctx.db.query('venues').take(1);
   if (existing.length > 0) return existing[0];
   const now = Date.now();
-  const token = approvalToken();
   const venueId = await ctx.db.insert('venues', {
-    name: 'Main Venue',
+    name: 'Venue Wrangler',
     latitude: 37.7749,
     longitude: -122.4194,
     geofenceRadiusM: 120,
-    // Brand-new venue starts pending until the site creator approves.
-    approvalStatus: 'pending',
-    approvalToken: token,
-    approvalRequestedAt: now,
     subscriptionStatus: 'trialing',
     subscriptionPlatform: null,
   });
-  // Email the site creator an approval link (best-effort; never blocks signup).
-  await ctx.scheduler.runAfter(0, internal.approvals.sendApprovalEmail, { venueId });
   await ctx.db.insert('subscriptions', {
     venueId,
     status: 'trialing',
@@ -264,7 +250,7 @@ async function getOrCreateVenue(ctx: AnyCtx) {
     priceCents: 14900,
     currency: 'USD',
     trialStartedAt: now,
-    trialEndsAt: now + 3 * 24 * 60 * 60 * 1000,
+    trialEndsAt: now + 7 * 24 * 60 * 60 * 1000,
     currentPeriodStart: null,
     currentPeriodEnd: null,
     cancelAtPeriodEnd: false,
@@ -382,7 +368,7 @@ export const bootstrapProfile = mutation({
     // get-or-create for brand-new accounts (first admin signup).
     let venue = existing?.venueId ? await (ctx as AnyCtx).db.get(existing.venueId) : null;
     if (!venue) venue = await getOrCreateVenue(ctx as AnyCtx);
-    const email = identity.email ?? `${userId}@venueflow.local`;
+    const email = identity.email ?? `${userId}@venuewrangler.local`;
     const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
     // The first person to join a venue (the email signup who created it) is the
     // venue admin/owner. Everyone else defaults to staff unless already set.
@@ -433,23 +419,6 @@ export const getMe = query({
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
     return { profile: mapProfile(profile), venue: mapVenue(venue) };
-  },
-});
-
-// Whether the signed-in user's venue has been approved by the site creator.
-// Legacy venues without the field are treated as approved.
-export const getMyVenueApprovalStatus = query({
-  args: {},
-  returns: v.union(v.null(), v.object({ status: v.union(v.literal('pending'), v.literal('approved')), venueName: v.string() })),
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || !profile.venueId) return null;
-    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
-    if (!venue) return null;
-    const status: 'pending' | 'approved' = venue.approvalStatus === 'pending' ? 'pending' : 'approved';
-    return { status, venueName: String(venue.name) };
   },
 });
 
@@ -1145,19 +1114,6 @@ export const upsertVenueStaff = mutation({
   },
 });
 
-export const listVenues = query({
-  args: {},
-  returns: v.array(venueValue),
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return [];
-    const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || !isAdminRole(profile.role)) return [];
-    const venues = await (ctx as AnyCtx).db.query('venues').collect();
-    return venues.map(mapVenue).sort((a: ReturnType<typeof mapVenue>, b: ReturnType<typeof mapVenue>) => a.name.localeCompare(b.name));
-  },
-});
-
 export const deactivateVenueStaff = mutation({
   args: { staffId: v.id('profiles') },
   returns: profileValue,
@@ -1172,28 +1128,6 @@ export const deactivateVenueStaff = mutation({
     await (ctx as AnyCtx).db.patch(staff._id, { venueId: undefined });
     const updated = await (ctx as AnyCtx).db.get(staff._id);
     if (!updated) throw new Error('Unable to deactivate staff member');
-    return mapProfile(updated);
-  },
-});
-
-export const transferVenueStaff = mutation({
-  args: { staffId: v.id('profiles'), targetVenueId: v.string() },
-  returns: profileValue,
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error('Unauthenticated');
-    const viewer = await getProfile(ctx as AnyCtx);
-    if (!viewer || !viewer.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
-    const staff = await (ctx as AnyCtx).db.get(args.staffId);
-    if (!staff) throw new Error('Staff member not found');
-    if (staff.venueId !== viewer.venueId) throw new Error('Staff member does not belong to this venue');
-    const venues = await (ctx as AnyCtx).db.query('venues').collect();
-    if (!venues.find((venue: Doc<'venues'>) => venue._id === args.targetVenueId)) {
-      throw new Error('Target venue not found');
-    }
-    await (ctx as AnyCtx).db.patch(staff._id, { venueId: args.targetVenueId });
-    const updated = await (ctx as AnyCtx).db.get(staff._id);
-    if (!updated) throw new Error('Unable to transfer staff member');
     return mapProfile(updated);
   },
 });

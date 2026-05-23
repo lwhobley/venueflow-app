@@ -9,7 +9,6 @@
  */
 
 import type * as app from "../app.js";
-import type * as approvals from "../approvals.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as barInventory from "../barInventory.js";
@@ -27,6 +26,7 @@ import type * as pos from "../pos.js";
 import type * as push from "../push.js";
 import type * as reservationIntegrations from "../reservationIntegrations.js";
 import type * as reservations from "../reservations.js";
+import type * as scheduleEmails from "../scheduleEmails.js";
 import type * as scheduling from "../scheduling.js";
 import type * as seed from "../seed.js";
 import type * as staffAuth from "../staffAuth.js";
@@ -40,7 +40,6 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   app: typeof app;
-  approvals: typeof approvals;
   auth: typeof auth;
   authz: typeof authz;
   barInventory: typeof barInventory;
@@ -58,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   push: typeof push;
   reservationIntegrations: typeof reservationIntegrations;
   reservations: typeof reservations;
+  scheduleEmails: typeof scheduleEmails;
   scheduling: typeof scheduling;
   seed: typeof seed;
   staffAuth: typeof staffAuth;

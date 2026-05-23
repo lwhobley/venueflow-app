@@ -14,7 +14,6 @@ import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { lightTheme, darkTheme, colors } from '../lib/theme';
 import { SubscriptionGate } from '../components/SubscriptionGate';
-import { ApprovalGate } from '../components/ApprovalGate';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 
 const convexUrl =
@@ -28,7 +27,7 @@ const convexUrl =
 if (!convexUrl) {
   // Surface a clear error rather than letting ConvexReactClient throw a less obvious one.
   // EXPO_PUBLIC_CONVEX_URL must be set in .env (or app.config).
-  console.warn('[VenueFlow] EXPO_PUBLIC_CONVEX_URL is not set — Convex queries will fail.');
+  console.warn('[Venue Wrangler] EXPO_PUBLIC_CONVEX_URL is not set; Convex queries will fail.');
 }
 
 const convexClient = new ConvexReactClient(convexUrl ?? 'https://missing-convex-url.invalid', {
@@ -100,11 +99,9 @@ export default function RootLayout() {
                 {/* Top inset keeps content below the status bar / notch; the tab
                     bar and screens handle the bottom inset. */}
                 <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'left', 'right']}>
-                  <ApprovalGate>
-                    <SubscriptionGate>
-                      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
-                    </SubscriptionGate>
-                  </ApprovalGate>
+                  <SubscriptionGate>
+                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+                  </SubscriptionGate>
                 </SafeAreaView>
               </A0PurchaseProvider>
             </PaperProvider>

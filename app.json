@@ -1,32 +1,33 @@
 {
   "expo": {
-    "name": "a0-project",
-    "slug": "snack-7e4dabd1-36f9-4f17-83af-1dfea16f2bbe",
+    "name": "Venue Wrangler",
+    "slug": "venue-wrangler",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/venue-wrangler-logo.jpg",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/venue-wrangler-logo.jpg",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F4FAFC"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/venue-wrangler-logo.jpg",
+        "backgroundColor": "#F4FAFC"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/venue-wrangler-logo.jpg"
     },
-    "description": "Quickly generate React Native components with AI",
+    "scheme": "venuewrangler",
+    "description": "Venue Wrangler restaurant operations and venue management.",
     "extra": {
       "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud"
     },

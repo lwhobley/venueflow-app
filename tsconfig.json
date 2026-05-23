@@ -6,8 +6,8 @@
     "lib": ["ES2022", "DOM"],
     "paths": {
       "@/*": ["./*"],
-      "@venueflow/shared": ["packages/shared/src"],
-      "@venueflow/shared/*": ["packages/shared/src/*"]
+      "@venuewrangler/shared": ["packages/shared/src"],
+      "@venuewrangler/shared/*": ["packages/shared/src/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"]
