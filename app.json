@@ -14,14 +14,15 @@
     },
     "ios": {
       "supportsTablet": true,
+      "icon": "./assets/app-icon.png",
       "bundleIdentifier": "com.venuewrangler.app",
       "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Venue Wrangler uses your location to verify clock-ins and clock-outs at your venue.",
         "NSPhotoLibraryUsageDescription": "Venue Wrangler lets managers upload bar inventory photos from the photo library.",
-        "NSUserNotificationsUsageDescription": "Venue Wrangler sends schedule updates, shift changes, and important venue alerts."
-      },
-      "icon": "./assets/app-icon.png"
+        "NSUserNotificationsUsageDescription": "Venue Wrangler sends schedule updates, shift changes, and important venue alerts.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +30,11 @@
         "backgroundColor": "#F4FAFC"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/venue-wrangler-logo.jpg"
@@ -37,7 +42,11 @@
     "scheme": "venuewrangler",
     "description": "Venue Wrangler restaurant operations and venue management.",
     "extra": {
-      "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud"
+      "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud",
+      "router": {},
+      "eas": {
+        "projectId": "5c2ebadb-d603-409f-bcfb-ec43df5e9697"
+      }
     },
     "plugins": [
       "expo-router",
@@ -55,6 +64,9 @@
         }
       ],
       "expo-notifications"
-    ]
+    ],
+    "updates": {
+      "enabled": false
+    }
   }
 }
