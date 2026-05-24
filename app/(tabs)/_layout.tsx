@@ -9,6 +9,7 @@ const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap) =>
 
 export default function TabsLayout() {
   const role = useAuthStore((state: AuthState) => state.user?.role ?? 'staff');
+  const fullName = useAuthStore((state: AuthState) => state.user?.full_name ?? 'Profile');
   const canManage = role === 'admin' || role === 'owner' || role === 'manager';
 
   return (
@@ -21,29 +22,33 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="home" options={{ title: 'Home', tabBarIcon: icon('view-dashboard') }} />
+      <Tabs.Screen name="clock" options={{ title: 'Clock IN/OUT', tabBarIcon: icon('clock-outline') }} />
       <Tabs.Screen name="schedule" options={{ title: 'Schedule', tabBarIcon: icon('calendar-week') }} />
       <Tabs.Screen
         name="availability"
         options={{
           title: 'Availability',
-          href: canManage ? null : '/availability',
+          href: null,
           tabBarIcon: icon('calendar-check'),
         }}
       />
       <Tabs.Screen name="floor" options={{ title: 'Floor', tabBarIcon: icon('floor-plan') }} />
-      <Tabs.Screen name="clock" options={{ title: 'Clock', tabBarIcon: icon('clock-outline') }} />
       <Tabs.Screen name="reservations" options={{ title: 'Reservations', tabBarIcon: icon('book-clock-outline') }} />
       <Tabs.Screen
         name="guests"
-        options={{ title: 'Guests', href: canManage ? '/guests' : null, tabBarIcon: icon('account-heart-outline') }}
+        options={{ title: 'Guests', href: null, tabBarIcon: icon('account-heart-outline') }}
       />
       <Tabs.Screen
         name="integrations"
-        options={{ title: 'Integrations', href: canManage ? '/integrations' : null, tabBarIcon: icon('connection') }}
+        options={{ title: 'Integrations', href: null, tabBarIcon: icon('connection') }}
+      />
+      <Tabs.Screen
+        name="chat"
+        options={{ title: 'Chat', tabBarIcon: icon('chat-outline') }}
       />
       <Tabs.Screen
         name="bar-stock"
-        options={{ title: 'Bar Stock', href: canManage ? '/bar-stock' : null, tabBarIcon: icon('glass-cocktail') }}
+        options={{ title: 'Inventory', href: canManage ? '/bar-stock' : null, tabBarIcon: icon('glass-cocktail') }}
       />
       <Tabs.Screen
         name="reports"
@@ -53,11 +58,7 @@ export default function TabsLayout() {
         name="staff"
         options={{ title: 'Staff', href: canManage ? '/staff' : null, tabBarIcon: icon('account-group') }}
       />
-      <Tabs.Screen
-        name="chat"
-        options={{ title: 'Chat', tabBarIcon: icon('chat-outline') }}
-      />
-      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: icon('account-circle') }} />
+      <Tabs.Screen name="profile" options={{ title: fullName, tabBarIcon: icon('account-circle') }} />
     </Tabs>
   );
 }

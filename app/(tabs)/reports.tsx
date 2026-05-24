@@ -1,5 +1,6 @@
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
+import { router } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
@@ -54,6 +55,16 @@ export default function ReportsScreen() {
         <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Reports</Text>
         <Text style={{ color: colors.muted }}>{venue?.name ?? 'Venue'} analytics and exports.</Text>
       </View>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Integrations</Text>
+          <Text style={{ color: colors.muted }}>Manage POS, reservation sync, payroll, and provider connections from the reporting hub.</Text>
+          <Button compact mode="contained" buttonColor={colors.primary} icon="connection" onPress={() => router.push('/integrations')}>
+            Open integrations
+          </Button>
+        </Card.Content>
+      </Card>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {metrics.map((metric) => (

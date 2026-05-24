@@ -67,6 +67,14 @@ export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarP
             </Pressable>
           );
         })}
+        <View style={{ paddingHorizontal: 14, alignItems: 'flex-start', justifyContent: 'center', minHeight: 54 }}>
+          <Text style={{ color: colors.muted, fontSize: 10, fontWeight: '600' }}>
+            VenueWrangler™
+          </Text>
+          <Text style={{ color: colors.muted, fontSize: 9 }}>
+            by Loungeability LLC
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );

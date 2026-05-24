@@ -184,6 +184,10 @@ export default function SignInScreen() {
             </Card.Content>
           </Card>
         )}
+        <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
+          <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>VenueWrangler™</Text>
+          <Text style={{ color: colors.muted, fontSize: 11 }}>by Loungeability LLC</Text>
+        </View>
       </ScrollView>
       {showIntro ? (
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.introOverlay, { opacity: introOpacity, transform: [{ translateX: introSlide }] }]}>

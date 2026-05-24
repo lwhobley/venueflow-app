@@ -216,7 +216,12 @@ export default function ReservationsScreen() {
           <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Reservations</Text>
           <Text style={{ color: colors.muted }}>Book guests and seat them on the floor at {venue?.name ?? 'your venue'}.</Text>
         </View>
-        <Button compact mode="text" textColor={colors.primary} icon="floor-plan" onPress={() => router.push('/floor')}>Floor</Button>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }}>
+          <Button compact mode="text" textColor={colors.primary} icon="floor-plan" onPress={() => router.push('/floor')}>Floor</Button>
+          {canManage ? (
+            <Button compact mode="text" textColor={colors.primary} icon="account-heart-outline" onPress={() => router.push('/guests')}>Guests</Button>
+          ) : null}
+        </View>
       </View>
 
       {/* Stats */}
