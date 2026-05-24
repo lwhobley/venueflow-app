@@ -16,7 +16,8 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_CONVEX_URL": "https://unique-egret-100.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://dashing-eel-31.convex.site",
         "EXPO_PUBLIC_BILLING_ENABLED": "false"
       },
       "ios": {
