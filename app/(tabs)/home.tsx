@@ -7,6 +7,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { Skeleton } from '../../components/Skeleton';
+import { CosmicInsights } from '../../components/CosmicInsights';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
 
@@ -26,7 +27,6 @@ export default function HomeScreen() {
   const notifications = useQuery(api.app.getNotifications);
   const markNotificationRead = useMutation(api.app.markNotificationRead);
   const upsertManagerGoal = useMutation(api.operations.upsertManagerGoal);
-  const upsertVenueEvent = useMutation(api.operations.upsertVenueEvent);
   const loading = dashboard === undefined;
 
   const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? 'there';
@@ -37,10 +37,6 @@ export default function HomeScreen() {
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [goalTitle, setGoalTitle] = useState('');
-  const [eventTitle, setEventTitle] = useState('');
-  const [eventDate, setEventDate] = useState(todayKey);
-  const [eventTime, setEventTime] = useState('18:00');
-  const [eventNotes, setEventNotes] = useState('');
 
   // Team-wide headcount metrics (team size, who/how many are clocked in) are
   // management-only. Staff just see their own scheduling context.
@@ -81,15 +77,6 @@ export default function HomeScreen() {
     if (!venue?.id || !goalTitle.trim()) return;
     await upsertManagerGoal({ venueId: venue.id, title: goalTitle.trim(), period: 'day', targetDate: todayKey, status: 'open' });
     setGoalTitle('');
-  };
-
-  const addEvent = async () => {
-    if (!venue?.id || !eventTitle.trim()) return;
-    const startsAt = new Date(`${eventDate}T${eventTime}:00`).getTime();
-    if (Number.isNaN(startsAt)) return;
-    await upsertVenueEvent({ venueId: venue.id, title: eventTitle.trim(), startsAt, notes: eventNotes.trim() || undefined });
-    setEventTitle('');
-    setEventNotes('');
   };
 
   return (
@@ -152,36 +139,26 @@ export default function HomeScreen() {
       {canManage ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Upcoming events</Text>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              <TextInput label="Event title" value={eventTitle} onChangeText={setEventTitle} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-            </View>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Operations analytics</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-              <TextInput label="Date" value={eventDate} onChangeText={setEventDate} mode="outlined" style={{ flexGrow: 1, flexBasis: 150, backgroundColor: colors.surface }} />
-              <TextInput label="Time" value={eventTime} onChangeText={setEventTime} mode="outlined" style={{ flexGrow: 1, flexBasis: 120, backgroundColor: colors.surface }} />
-            </View>
-            <TextInput label="Event notes" value={eventNotes} onChangeText={setEventNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
-            <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void addEvent()}>Add event</Button>
-            {(managerDashboard?.events ?? []).length === 0 ? (
-              <Text style={{ color: colors.muted }}>No upcoming events this week.</Text>
-            ) : (
-              managerDashboard.events.map((event: any) => (
-                <View key={event._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
-                  <Text style={{ fontWeight: '700' }}>{event.title}</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    <Chip compact>
-                      {new Date(event.startsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                    </Chip>
-                    {event.expectedGuests ? <Chip compact>{event.expectedGuests} guests</Chip> : null}
+              {analytics.map((item: any, i: number) => {
+                const accent = accents[i % accents.length];
+                return (
+                  <View key={item.label} style={{ backgroundColor: accent.bg, borderRadius: 12, flexGrow: 1, flexBasis: 140, padding: spacing.md, gap: spacing.xs }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                      <MaterialCommunityIcons name={item.icon as any} size={22} color={accent.icon} />
+                      <Text variant="headlineSmall" style={{ color: accent.fg, fontWeight: '800' }}>{item.value}</Text>
+                    </View>
+                    <Text style={{ color: colors.muted }}>{item.label}</Text>
                   </View>
-                  {event.notes ? <Text style={{ color: colors.charcoal }}>{event.notes}</Text> : null}
-                  {event.reservationNotes ? <Text style={{ color: colors.muted }}>Reservation: {event.reservationNotes}</Text> : null}
-                </View>
-              ))
-            )}
+                );
+              })}
+            </View>
           </Card.Content>
         </Card>
-      ) : null}
+      ) : (
+        <CosmicInsights />
+      )}
 
       {canManage && (managerDashboard?.vipOrLargeReservations ?? []).length > 0 ? (
         <Card style={{ backgroundColor: accents[5].bg, borderRadius: 16 }}>
@@ -221,25 +198,6 @@ export default function HomeScreen() {
           )}
         </Card.Content>
       </Card>
-
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        {analytics.map((item: any, i: number) => {
-          const accent = accents[i % accents.length];
-          return (
-            <Card key={item.label} style={{ backgroundColor: accent.bg, width: '48%', flexGrow: 1, borderRadius: 16 }}>
-              <Card.Content style={{ gap: spacing.sm }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <MaterialCommunityIcons name={item.icon as any} size={22} color={accent.icon} />
-                  <Text variant="headlineSmall" style={{ color: accent.fg, fontWeight: '800' }}>
-                    {item.value}
-                  </Text>
-                </View>
-                <Text style={{ color: colors.muted }}>{item.label}</Text>
-              </Card.Content>
-            </Card>
-          );
-        })}
-      </View>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
