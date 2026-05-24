@@ -80,6 +80,10 @@ function isBillingAdmin(role: string) {
   return role === 'admin' || role === 'owner';
 }
 
+function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
+  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real billing actions are disabled for this profile.');
+}
+
 function appUrl() {
   return process.env.APP_PUBLIC_URL || process.env.EXPO_PUBLIC_APP_URL || 'http://localhost:8081';
 }
@@ -170,6 +174,7 @@ export const getStripeBillingContext = internalQuery({
   handler: async (ctx) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId || !isBillingAdmin(profile.role)) return null;
+    assertNotDemo(profile);
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
     const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
@@ -407,6 +412,7 @@ export const syncVenueSubscription = mutation({
     if (!profile || profile.venueId !== args.venueId || (profile.role !== 'admin' && profile.role !== 'owner')) {
       throw new Error('Not authorized');
     }
+    assertNotDemo(profile);
     if (args.status === 'active' || args.status === 'trialing') {
       throw new Error('Paid subscription status must be reconciled by a verified billing provider');
     }

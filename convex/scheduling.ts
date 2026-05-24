@@ -2,7 +2,7 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireProfile, requireVenueManager, requireVenueMember } from './authz';
+import { assertNotDemoProfile, requireProfile, requireVenueManager, requireVenueMember } from './authz';
 
 const OVERTIME_MINUTES = 40 * 60; // weekly overtime threshold
 
@@ -129,6 +129,7 @@ export const setMyAvailability = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!profile.venueId) throw new Error('Your account is not assigned to a venue');
+    assertNotDemoProfile(profile);
     // Replace the full set for this profile.
     const existing = await ctx.db
       .query('availability')
@@ -181,6 +182,7 @@ export const addBlackout = mutation({
   returns: v.id('blackoutDates'),
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     const start = args.startDate.trim();
     const end = (args.endDate?.trim() || start);
     if (!isoDate.test(start) || !isoDate.test(end)) throw new Error('Dates must be in YYYY-MM-DD format');
@@ -200,7 +202,8 @@ export const removeBlackout = mutation({
   args: { venueId: v.id('venues'), blackoutId: v.id('blackoutDates') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const row = await ctx.db.get(args.blackoutId);
     if (!row || row.venueId !== args.venueId) throw new Error('Blackout not found');
     await ctx.db.delete(row._id);
@@ -363,7 +366,8 @@ export const createShift = mutation({
   },
   returns: v.id('scheduleShifts'),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     if (args.endMinutes <= args.startMinutes) throw new Error('End time must be after start time');
     if (args.profileId) {
       const member = await ctx.db.get(args.profileId);
@@ -413,7 +417,8 @@ export const updateShift = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     if (args.endMinutes <= args.startMinutes) throw new Error('End time must be after start time');
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
@@ -441,7 +446,8 @@ export const assignShift = mutation({
   args: { venueId: v.id('venues'), shiftId: v.id('scheduleShifts'), profileId: v.id('profiles') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
     const member = await ctx.db.get(args.profileId);
@@ -463,7 +469,8 @@ export const unassignShift = mutation({
   args: { venueId: v.id('venues'), shiftId: v.id('scheduleShifts') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
     await ctx.db.patch(shift._id, { profileId: undefined, status: 'open' });
@@ -476,7 +483,8 @@ export const deleteShift = mutation({
   args: { venueId: v.id('venues'), shiftId: v.id('scheduleShifts') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
     await ctx.db.delete(shift._id);
@@ -594,6 +602,7 @@ export const claimOpenShift = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!profile.venueId) throw new Error('Your account is not assigned to a venue');
+    assertNotDemoProfile(profile);
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== profile.venueId) throw new Error('Shift not found');
     if (shift.profileId || shift.status !== 'open') throw new Error('This shift is no longer open');
@@ -615,6 +624,7 @@ export const requestDropShift = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!profile.venueId) throw new Error('Your account is not assigned to a venue');
+    assertNotDemoProfile(profile);
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== profile.venueId) throw new Error('Shift not found');
     if (shift.profileId !== profile._id) throw new Error('You can only drop your own shifts');
@@ -647,6 +657,7 @@ export const publishSchedule = mutation({
   returns: v.object({ notified: v.number() }),
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     const assigned = shifts.filter((s: Doc<'scheduleShifts'>) => s.profileId).length;
     const open = shifts.filter((s: Doc<'scheduleShifts'>) => s.status === 'open').length;
@@ -670,7 +681,8 @@ export const setLaborBudget = mutation({
   args: { venueId: v.id('venues'), weeklyLaborBudgetHours: v.union(v.number(), v.null()) },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     await ctx.db.patch(args.venueId, { weeklyLaborBudgetHours: args.weeklyLaborBudgetHours ?? undefined });
     return null;
   },
@@ -701,7 +713,8 @@ export const saveScheduleTemplate = mutation({
   args: { venueId: v.id('venues'), name: v.string() },
   returns: v.id('scheduleTemplates'),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const name = args.name.trim();
     if (!name) throw new Error('Enter a template name');
     const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
@@ -724,7 +737,8 @@ export const applyScheduleTemplate = mutation({
   args: { venueId: v.id('venues'), templateId: v.id('scheduleTemplates'), replace: v.boolean() },
   returns: v.object({ added: v.number() }),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const template = await ctx.db.get(args.templateId);
     if (!template || template.venueId !== args.venueId) throw new Error('Template not found');
     if (args.replace) {
@@ -751,7 +765,8 @@ export const deleteScheduleTemplate = mutation({
   args: { venueId: v.id('venues'), templateId: v.id('scheduleTemplates') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const template = await ctx.db.get(args.templateId);
     if (!template || template.venueId !== args.venueId) throw new Error('Template not found');
     await ctx.db.delete(template._id);
@@ -763,7 +778,8 @@ export const copyDayShifts = mutation({
   args: { venueId: v.id('venues'), fromDay: v.number(), toDays: v.array(v.number()) },
   returns: v.object({ added: v.number() }),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     const source = shifts.filter((s: Doc<'scheduleShifts'>) => s.dayIndex === args.fromDay);
     let added = 0;
@@ -791,7 +807,8 @@ export const clearWeek = mutation({
   args: { venueId: v.id('venues') },
   returns: v.object({ removed: v.number() }),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const shifts = await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     for (const s of shifts) await ctx.db.delete(s._id);
     await markScheduleEdited(ctx, args.venueId);
@@ -824,6 +841,7 @@ export const proposeShiftSwap = mutation({
   handler: async (ctx, args) => {
     const me = await requireProfile(ctx);
     if (!me.venueId) throw new Error('Your account is not assigned to a venue');
+    assertNotDemoProfile(me);
     const myShift = await ctx.db.get(args.myShiftId);
     if (!myShift || myShift.venueId !== me.venueId || myShift.profileId !== me._id) throw new Error('That is not your shift');
     const target = await ctx.db.get(args.targetProfileId);
@@ -854,6 +872,7 @@ export const respondToShiftSwap = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireProfile(ctx);
+    assertNotDemoProfile(me);
     const swap = await ctx.db.get(args.swapId);
     if (!swap || swap.targetProfileId !== me._id) throw new Error('Not authorized');
     if (swap.status !== 'proposed') throw new Error('This swap is no longer open');
@@ -871,7 +890,8 @@ export const reviewShiftSwap = mutation({
   handler: async (ctx, args) => {
     const swap = await ctx.db.get(args.swapId);
     if (!swap) throw new Error('Swap not found');
-    await requireVenueManager(ctx, swap.venueId);
+    const manager = await requireVenueManager(ctx, swap.venueId);
+    assertNotDemoProfile(manager);
     if (swap.status !== 'accepted' && swap.status !== 'proposed') throw new Error('Swap is not pending');
 
     if (args.approve) {

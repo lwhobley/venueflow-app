@@ -22,6 +22,16 @@ export function isOperator(role: Role): boolean {
   return OPERATOR_ROLES.has(role);
 }
 
+export function isDemoProfile(profile: Profile | null | undefined): boolean {
+  return Boolean(profile?.isDemo);
+}
+
+export function assertNotDemoProfile(profile: Profile | null | undefined): void {
+  if (isDemoProfile(profile)) {
+    throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
+  }
+}
+
 /** Loads the authenticated profile or throws. Keyed by the stable Convex Auth
  * user id — NOT tokenIdentifier (which embeds the session id and rotates). */
 export async function requireProfile(ctx: any): Promise<Profile> {

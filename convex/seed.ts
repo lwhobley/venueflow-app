@@ -1,12 +1,13 @@
 import { mutation } from './_generated/server';
 import { v } from 'convex/values';
-import { requireVenueManager } from './authz';
+import { assertNotDemoProfile, requireVenueManager } from './authz';
 
 export const seedDemoFloorPlan = mutation({
   args: { venueId: v.id('venues') },
   returns: v.object({ floorPlanId: v.id('floorPlans') }),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     const existing = await ctx.db.query('floorPlans').withIndex('by_venue_active', (q: any) => q.eq('venueId', args.venueId).eq('isActive', true)).unique();
     if (existing) return { floorPlanId: existing._id };
 

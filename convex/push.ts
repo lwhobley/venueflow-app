@@ -25,6 +25,7 @@ export const registerPushToken = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId) throw new Error('Profile not initialized');
+    if (profile.isDemo) return { registered: false };
     const now = Date.now();
     const existing = await (ctx as AnyCtx).db.query('pushTokens').withIndex('by_token', (q: any) => q.eq('token', args.token)).unique();
     if (existing) {
@@ -58,6 +59,7 @@ export const disablePushToken = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId) throw new Error('Profile not initialized');
+    if (profile.isDemo) return null;
     const existing = await (ctx as AnyCtx).db.query('pushTokens').withIndex('by_token', (q: any) => q.eq('token', args.token)).unique();
     if (existing && existing.profileId === profile._id) {
       await (ctx as AnyCtx).db.patch(existing._id, { enabled: false, updatedAt: Date.now() });

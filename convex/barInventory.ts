@@ -38,6 +38,10 @@ function canManage(role: string) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
+function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
+  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
+}
+
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -123,6 +127,7 @@ export const upsertBarItem = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    assertNotDemo(profile);
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
     const payload = {
@@ -162,6 +167,7 @@ export const recordBarStockMovement = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    assertNotDemo(profile);
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     const item = await (ctx as AnyCtx).db.get(args.itemId);
     if (!item || item.venueId !== args.venueId) throw new Error('Item not found');
@@ -189,6 +195,7 @@ export const importParsedBarItems = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    assertNotDemo(profile);
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     let imported = 0;
     const existingRows = (await (ctx as AnyCtx).db.query('barInventoryItems').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(500)) as Doc<'barInventoryItems'>[];
@@ -230,6 +237,7 @@ export const authorizeAiParse = internalQuery({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return false;
+    if (profile.isDemo) return false;
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     return true;
   },

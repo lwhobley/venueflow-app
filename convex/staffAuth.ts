@@ -2,11 +2,13 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { createAccount, modifyAccountCredentials } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireVenueManager, requireVenueMember } from './authz';
+import { assertNotDemoProfile, requireVenueManager, requireVenueMember } from './authz';
 
 const accessRoleValue = v.union(v.literal('manager'), v.literal('staff'));
 const PIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
 const PIN_MAX_FAILURES = 5;
+const DEMO_PIN = '2445';
+const DEMO_LOGIN_HANDLE = 'demo_agent@pin.venuewrangler';
 
 function randomCode(len = 6) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -61,6 +63,67 @@ async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'
   });
 }
 
+async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string) {
+  const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
+  const existing =
+    profiles.find((p: Doc<'profiles'>) => p.isDemo) ??
+    profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.pinHash === pinHash) ??
+    profiles.find((p: Doc<'profiles'>) => p.fullName.toLowerCase() === 'liffort hobley');
+
+  if (existing?.loginHandle) {
+    await modifyAccountCredentials(ctx as any, {
+      provider: 'password',
+      account: { id: existing.loginHandle, secret: DEMO_PIN },
+    });
+  }
+
+  if (existing) {
+    let userId = existing.userId;
+    if (!existing.loginHandle) {
+      const created = await createAccount(ctx as any, {
+        provider: 'password',
+        account: { id: DEMO_LOGIN_HANDLE, secret: DEMO_PIN },
+        profile: { email: DEMO_LOGIN_HANDLE },
+      });
+      userId = created.user._id as Id<'users'>;
+    }
+    const patch = {
+      userId,
+      email: '',
+      fullName: 'Demo Agent',
+      role: 'owner',
+      jobTitle: 'Demo Owner',
+      venueId: venue._id,
+      isPinUser: true,
+      loginHandle: existing.loginHandle ?? DEMO_LOGIN_HANDLE,
+      pinHash,
+      isDemo: true,
+    };
+    await ctx.db.patch(existing._id, patch);
+    return (await ctx.db.get(existing._id)) as Doc<'profiles'>;
+  }
+
+  const created = await createAccount(ctx as any, {
+    provider: 'password',
+    account: { id: DEMO_LOGIN_HANDLE, secret: DEMO_PIN },
+    profile: { email: DEMO_LOGIN_HANDLE },
+  });
+
+  const profileId = await ctx.db.insert('profiles', {
+    userId: created.user._id as Id<'users'>,
+    email: '',
+    fullName: 'Demo Agent',
+    role: 'owner',
+    jobTitle: 'Demo Owner',
+    venueId: venue._id,
+    isPinUser: true,
+    loginHandle: DEMO_LOGIN_HANDLE,
+    pinHash,
+    isDemo: true,
+  });
+  return (await ctx.db.get(profileId)) as Doc<'profiles'>;
+}
+
 // ---------- Custom roles / positions ----------
 
 export const listVenueRoles = query({
@@ -79,7 +142,8 @@ export const addVenueRole = mutation({
   args: { venueId: v.id('venues'), name: v.string() },
   returns: v.id('venueRoles'),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     const name = args.name.trim();
     if (!name) throw new Error('Enter a role name');
     const existing = await ctx.db.query('venueRoles').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).collect();
@@ -94,7 +158,8 @@ export const removeVenueRole = mutation({
   args: { venueId: v.id('venues'), roleId: v.id('venueRoles') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     const row = await ctx.db.get(args.roleId);
     if (!row || row.venueId !== args.venueId) throw new Error('Role not found');
     await ctx.db.delete(row._id);
@@ -108,7 +173,8 @@ export const ensureVenueCode = mutation({
   args: { venueId: v.id('venues') },
   returns: v.string(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     const venue = await ctx.db.get(args.venueId);
     if (!venue) throw new Error('Venue not found');
     if (venue.code) return venue.code;
@@ -136,7 +202,8 @@ export const inviteStaff = mutation({
   },
   returns: v.object({ loginHandle: v.string() }),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     const fullName = args.fullName.trim();
     if (!fullName) throw new Error('Enter a name');
     if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
@@ -175,7 +242,8 @@ export const resetStaffPin = mutation({
   args: { venueId: v.id('venues'), profileId: v.id('profiles'), pin: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const manager = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(manager);
     if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
     const profile = await ctx.db.get(args.profileId);
     if (!profile || profile.venueId !== args.venueId) {
@@ -214,6 +282,13 @@ export const loginWithPin = mutation({
     const venue = await ctx.db.query('venues').take(1).then((rows: Doc<'venues'>[]) => rows[0] ?? null);
     if (!venue) throw new Error('Venue is not set up yet');
     const pinHash = await hashPin(venue._id, args.pin);
+
+    if (args.pin === DEMO_PIN) {
+      const demo = await ensureDemoProfile(ctx, venue, pinHash);
+      if (!demo.loginHandle) throw new Error('Demo profile is not ready');
+      await recordPinAttempt(ctx, venue._id, demo._id, pinHash, true);
+      return { loginHandle: demo.loginHandle };
+    }
 
     if (await recentPinFailuresForHash(ctx, venue._id, pinHash) >= PIN_MAX_FAILURES) {
       throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');

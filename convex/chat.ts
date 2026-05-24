@@ -1,7 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireProfile, requireVenueMember } from './authz';
+import { assertNotDemoProfile, requireProfile, requireVenueMember } from './authz';
 
 const GENERAL_GROUP_NAME = 'All Staff';
 
@@ -14,7 +14,8 @@ export const ensureChatSetup = mutation({
   args: { venueId: v.id('venues') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueMember(ctx, args.venueId);
+    const me = await requireVenueMember(ctx, args.venueId);
+    assertNotDemoProfile(me);
     const groups = await ctx.db
       .query('conversations')
       .withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId))
@@ -98,6 +99,7 @@ export const openDm = mutation({
   returns: v.id('conversations'),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
+    assertNotDemoProfile(me);
     const other = await ctx.db.get(args.otherProfileId);
     if (!other || other.venueId !== args.venueId) throw new Error('User is not in this venue');
 
@@ -145,6 +147,7 @@ export const getMessages = query({
   returns: v.object({ title: v.string(), messages: v.array(messageValue) }),
   handler: async (ctx, args) => {
     const me = await requireProfile(ctx);
+    assertNotDemoProfile(me);
     const conv = await assertConversationAccess(ctx, args.conversationId, me);
     const staff = me.venueId ? await venueProfiles(ctx, me.venueId) : [];
     const nameById = new Map(staff.map((s: Doc<'profiles'>) => [s._id, s.fullName]));

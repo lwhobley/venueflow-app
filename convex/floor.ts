@@ -106,6 +106,10 @@ function canManageFloor(role: Doc<'profiles'>['role']) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
+function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
+  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
+}
+
 async function requireProfile(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error('Unauthenticated');
@@ -301,6 +305,7 @@ export const saveFloorPlan = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canManageFloor(profile.role)) throw new Error('Admin access required');
+    assertNotDemo(profile);
 
     // Require active billing subscription
     await requireActiveSubscription(ctx as any, args.venueId);

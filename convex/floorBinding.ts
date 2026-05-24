@@ -1,7 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireVenueManager, requireVenueMember } from './authz';
+import { assertNotDemoProfile, requireVenueManager, requireVenueMember } from './authz';
 
 // Legacy validator kept only so older clients that still send `actorRole` pass
 // arg validation. The value is ignored — authorization is derived server-side
@@ -439,7 +439,8 @@ export const assignReservationToTables = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, reservationId: args.reservationId, sourceType: 'reservation' });
     return null;
   },
@@ -457,7 +458,8 @@ export const assignWaitlistToTables = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, waitlistId: args.waitlistId, sourceType: 'waitlist' });
     return null;
   },
@@ -467,7 +469,8 @@ export const releaseAssignment = mutation({
   args: { venueId: v.id('venues'), assignmentId: v.id('tableAssignments'), reason: v.string(), actorRole: v.optional(roleValue) },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueManager(ctx, args.venueId);
+    const profile = await requireVenueManager(ctx, args.venueId);
+    assertNotDemoProfile(profile);
     const assignment = await ctx.db.get(args.assignmentId);
     if (!assignment) throw new Error('Assignment not found');
     if (assignment.venueId !== args.venueId) throw new Error('Wrong venue');
