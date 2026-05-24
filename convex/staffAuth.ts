@@ -7,8 +7,29 @@ import { assertNotDemoProfile, requireVenueManager, requireVenueMember } from '.
 const accessRoleValue = v.union(v.literal('manager'), v.literal('staff'));
 const PIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
 const PIN_MAX_FAILURES = 5;
-const DEMO_PIN = '2445';
-const DEMO_LOGIN_HANDLE = 'demo_agent@pin.venuewrangler';
+const DEMO_OWNER_PIN = '2445';
+const DEMO_EMPLOYEE_PIN = '2446';
+const DEMO_OWNER_LOGIN_HANDLE = 'demo_owner@pin.venuewrangler';
+const DEMO_EMPLOYEE_LOGIN_HANDLE = 'demo_employee@pin.venuewrangler';
+
+type DemoKind = 'owner' | 'employee';
+
+const DEMO_CONFIG: Record<DemoKind, { pin: string; loginHandle: string; fullName: string; role: Doc<'profiles'>['role']; jobTitle: string }> = {
+  owner: {
+    pin: DEMO_OWNER_PIN,
+    loginHandle: DEMO_OWNER_LOGIN_HANDLE,
+    fullName: 'Demo Agent',
+    role: 'owner',
+    jobTitle: 'Demo Owner',
+  },
+  employee: {
+    pin: DEMO_EMPLOYEE_PIN,
+    loginHandle: DEMO_EMPLOYEE_LOGIN_HANDLE,
+    fullName: 'Demo Employee',
+    role: 'staff',
+    jobTitle: 'Demo Employee',
+  },
+};
 
 function randomCode(len = 6) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -63,17 +84,39 @@ async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'
   });
 }
 
-async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string) {
+async function resetDemoSession(ctx: any, profileId: Id<'profiles'>) {
+  const availability = await ctx.db.query('availability').withIndex('by_profile', (q: any) => q.eq('profileId', profileId)).collect();
+  for (const row of availability) await ctx.db.delete(row._id);
+
+  const requests = await ctx.db.query('staffRequests').withIndex('by_profileId', (q: any) => q.eq('profileId', profileId)).collect();
+  for (const row of requests) await ctx.db.delete(row._id);
+
+  const outgoingSwaps = await ctx.db.query('shiftSwaps').withIndex('by_requester', (q: any) => q.eq('requesterProfileId', profileId)).collect();
+  for (const row of outgoingSwaps) await ctx.db.delete(row._id);
+
+  const incomingSwaps = await ctx.db.query('shiftSwaps').withIndex('by_target', (q: any) => q.eq('targetProfileId', profileId)).collect();
+  for (const row of incomingSwaps) await ctx.db.delete(row._id);
+
+  const openEntries = await ctx.db.query('timeEntries').withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profileId).eq('isOpen', true)).collect();
+  for (const row of openEntries) await ctx.db.delete(row._id);
+
+  const pushTokens = await ctx.db.query('pushTokens').withIndex('by_profile', (q: any) => q.eq('profileId', profileId)).collect();
+  for (const row of pushTokens) await ctx.db.delete(row._id);
+}
+
+async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string, kind: DemoKind) {
+  const config = DEMO_CONFIG[kind];
   const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
   const existing =
-    profiles.find((p: Doc<'profiles'>) => p.isDemo) ??
+    profiles.find((p: Doc<'profiles'>) => p.isDemo && p.demoKind === kind) ??
+    profiles.find((p: Doc<'profiles'>) => p.loginHandle === config.loginHandle) ??
     profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.pinHash === pinHash) ??
-    profiles.find((p: Doc<'profiles'>) => p.fullName.toLowerCase() === 'liffort hobley');
+    (kind === 'owner' ? profiles.find((p: Doc<'profiles'>) => p.fullName.toLowerCase() === 'liffort hobley') : undefined);
 
   if (existing?.loginHandle) {
     await modifyAccountCredentials(ctx as any, {
       provider: 'password',
-      account: { id: existing.loginHandle, secret: DEMO_PIN },
+      account: { id: existing.loginHandle, secret: config.pin },
     });
   }
 
@@ -82,44 +125,47 @@ async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string
     if (!existing.loginHandle) {
       const created = await createAccount(ctx as any, {
         provider: 'password',
-        account: { id: DEMO_LOGIN_HANDLE, secret: DEMO_PIN },
-        profile: { email: DEMO_LOGIN_HANDLE },
+        account: { id: config.loginHandle, secret: config.pin },
+        profile: { email: config.loginHandle },
       });
       userId = created.user._id as Id<'users'>;
     }
     const patch = {
       userId,
       email: '',
-      fullName: 'Demo Agent',
-      role: 'owner',
-      jobTitle: 'Demo Owner',
+      fullName: config.fullName,
+      role: config.role,
+      jobTitle: config.jobTitle,
       venueId: venue._id,
       isPinUser: true,
-      loginHandle: existing.loginHandle ?? DEMO_LOGIN_HANDLE,
+      loginHandle: existing.loginHandle ?? config.loginHandle,
       pinHash,
       isDemo: true,
+      demoKind: kind,
     };
     await ctx.db.patch(existing._id, patch);
+    await resetDemoSession(ctx, existing._id);
     return (await ctx.db.get(existing._id)) as Doc<'profiles'>;
   }
 
   const created = await createAccount(ctx as any, {
     provider: 'password',
-    account: { id: DEMO_LOGIN_HANDLE, secret: DEMO_PIN },
-    profile: { email: DEMO_LOGIN_HANDLE },
+    account: { id: config.loginHandle, secret: config.pin },
+    profile: { email: config.loginHandle },
   });
 
   const profileId = await ctx.db.insert('profiles', {
     userId: created.user._id as Id<'users'>,
     email: '',
-    fullName: 'Demo Agent',
-    role: 'owner',
-    jobTitle: 'Demo Owner',
+    fullName: config.fullName,
+    role: config.role,
+    jobTitle: config.jobTitle,
     venueId: venue._id,
     isPinUser: true,
-    loginHandle: DEMO_LOGIN_HANDLE,
+    loginHandle: config.loginHandle,
     pinHash,
     isDemo: true,
+    demoKind: kind,
   });
   return (await ctx.db.get(profileId)) as Doc<'profiles'>;
 }
@@ -283,8 +329,10 @@ export const loginWithPin = mutation({
     if (!venue) throw new Error('Venue is not set up yet');
     const pinHash = await hashPin(venue._id, args.pin);
 
-    if (args.pin === DEMO_PIN) {
-      const demo = await ensureDemoProfile(ctx, venue, pinHash);
+    const demoKind: DemoKind | null =
+      args.pin === DEMO_OWNER_PIN ? 'owner' : args.pin === DEMO_EMPLOYEE_PIN ? 'employee' : null;
+    if (demoKind) {
+      const demo = await ensureDemoProfile(ctx, venue, pinHash, demoKind);
       if (!demo.loginHandle) throw new Error('Demo profile is not ready');
       await recordPinAttempt(ctx, venue._id, demo._id, pinHash, true);
       return { loginHandle: demo.loginHandle };

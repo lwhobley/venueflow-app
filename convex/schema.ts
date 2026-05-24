@@ -57,6 +57,7 @@ export default defineSchema({
     loginHandle: v.optional(v.string()),
     pinHash: v.optional(v.string()),
     isDemo: v.optional(v.boolean()),
+    demoKind: v.optional(v.union(v.literal('owner'), v.literal('employee'))),
   })
     .index('by_userId', ['userId'])
     .index('by_tokenIdentifier', ['tokenIdentifier'])
