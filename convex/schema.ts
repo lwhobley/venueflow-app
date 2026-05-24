@@ -259,6 +259,7 @@ export default defineSchema({
     notes: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
   }).index('by_venue', ['venueId']).index('by_phone', ['phone']).index('by_email', ['email']),
   posConnections: defineTable({
     venueId: v.id('venues'),
@@ -321,6 +322,7 @@ export default defineSchema({
     notes: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
   }).index('by_venue_time', ['venueId', 'reservationTime']).index('by_venue_status', ['venueId', 'status']).index('by_guest', ['guestId']).index('by_external_id', ['externalId']).index('by_venue_external_id', ['venueId', 'externalId']),
   reservationConnections: defineTable({
     venueId: v.id('venues'),

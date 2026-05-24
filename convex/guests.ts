@@ -76,7 +76,8 @@ function cleanTags(tags: string[]) {
 }
 
 async function summarizeGuest(ctx: AnyCtx, guest: Doc<'guests'>) {
-  const reservations = await ctx.db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).take(50);
+  const reservationRows = await ctx.db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).take(50);
+  const reservations = reservationRows.filter((reservation: Doc<'reservations'>) => !reservation.deletedAt);
   const checks = await ctx.db.query('posChecks').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).take(50);
   const now = Date.now();
   const completedReservations = reservations.filter((reservation: Doc<'reservations'>) => reservation.status === 'completed' || reservation.status === 'seated');
@@ -116,7 +117,7 @@ export const listGuests = query({
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     const guests = await (ctx as AnyCtx).db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(100);
     const summaries = [];
-    for (const guest of guests) summaries.push(await summarizeGuest(ctx as AnyCtx, guest));
+    for (const guest of guests.filter((row: Doc<'guests'>) => !row.deletedAt)) summaries.push(await summarizeGuest(ctx as AnyCtx, guest));
     return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
   },
 });
@@ -129,8 +130,9 @@ export const getGuestProfile = query({
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     const guest = await (ctx as AnyCtx).db.get(args.guestId);
-    if (!guest || guest.venueId !== args.venueId) return null;
-    const reservations = await (ctx as AnyCtx).db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', args.guestId)).order('desc').take(25);
+    if (!guest || guest.venueId !== args.venueId || guest.deletedAt) return null;
+    const reservationRows = await (ctx as AnyCtx).db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', args.guestId)).order('desc').take(25);
+    const reservations = reservationRows.filter((reservation: Doc<'reservations'>) => !reservation.deletedAt);
     const checks = await (ctx as AnyCtx).db.query('posChecks').withIndex('by_guest', (q: any) => q.eq('guestId', args.guestId)).order('desc').take(25);
     return {
       guest: await summarizeGuest(ctx as AnyCtx, guest),
@@ -214,19 +216,8 @@ export const removeGuest = mutation({
     const guest = await (ctx as AnyCtx).db.get(args.guestId);
     if (!guest) return null;
     if (guest.venueId !== args.venueId) throw new Error('Guest not found');
-
-    const reservations = await (ctx as AnyCtx).db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).collect();
-    for (const reservation of reservations) await (ctx as AnyCtx).db.patch(reservation._id, { guestId: undefined, updatedAt: Date.now() });
-
-    const checks = await (ctx as AnyCtx).db.query('posChecks').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).collect();
-    for (const check of checks) await (ctx as AnyCtx).db.patch(check._id, { guestId: undefined, updatedAt: Date.now() });
-
-    const waitlist = await (ctx as AnyCtx).db.query('waitlist').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
-    for (const item of waitlist.filter((row: Doc<'waitlist'>) => row.guestId === guest._id)) {
-      await (ctx as AnyCtx).db.patch(item._id, { guestId: undefined, updatedAt: Date.now() });
-    }
-
-    await (ctx as AnyCtx).db.delete(guest._id);
+    const now = Date.now();
+    await (ctx as AnyCtx).db.patch(guest._id, { deletedAt: now, updatedAt: now });
     return null;
   },
 });

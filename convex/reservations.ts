@@ -121,6 +121,7 @@ function csvCell(value: string | number | null | undefined) {
 async function listReservations(ctx: any, venueId: string) {
   const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', venueId)).collect();
   return reservations
+    .filter((reservation: Doc<'reservations'>) => !reservation.deletedAt)
     .sort((a: Doc<'reservations'>, b: Doc<'reservations'>) => b.reservationTime - a.reservationTime)
     .map((reservation: Doc<'reservations'>) => toReservationValue(reservation));
 }
@@ -403,13 +404,12 @@ export const removeReservation = mutation({
     const existing = await ctx.db.get(args.reservationId);
     if (!existing) return null;
     if (existing.venueId !== args.venueId) throw new Error('Wrong venue');
-    const assignments = await ctx.db.query('tableAssignments').withIndex('by_reservation', (q: any) => q.eq('reservationId', existing._id)).collect();
-    for (const assignment of assignments) await ctx.db.delete(assignment._id);
-
-    const events = await ctx.db.query('venueEvents').withIndex('by_reservation', (q: any) => q.eq('reservationId', existing._id)).collect();
-    for (const event of events) await ctx.db.patch(event._id, { reservationId: undefined, updatedAt: Date.now() });
-
-    await ctx.db.delete(existing._id);
+    const now = Date.now();
+    await ctx.db.patch(existing._id, {
+      status: 'cancelled',
+      deletedAt: now,
+      updatedAt: now,
+    });
     return null;
   },
 });
@@ -422,7 +422,7 @@ export const exportReservationsCsv = query({
     if (!canManage(profile.role) || profile.venueId !== args.venueId) return null;
     const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
     const rows = [['guestName', 'partySize', 'reservationTime', 'durationMinutes', 'source', 'status', 'phone', 'email', 'tags', 'notes']];
-    for (const reservation of reservations.sort((a: Doc<'reservations'>, b: Doc<'reservations'>) => b.reservationTime - a.reservationTime).slice(0, 500)) {
+    for (const reservation of reservations.filter((item: Doc<'reservations'>) => !item.deletedAt).sort((a: Doc<'reservations'>, b: Doc<'reservations'>) => b.reservationTime - a.reservationTime).slice(0, 500)) {
       rows.push([
         reservation.guestName,
         String(reservation.partySize),
