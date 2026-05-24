@@ -53,7 +53,10 @@ export default function RootLayout() {
   // and the nav use it). We hold the first paint until it's loaded, otherwise
   // web shows blank "tofu" squares. A load error still lets the app through.
   const [fontsLoaded, fontError] = useFonts(MaterialCommunityIcons.font);
-  const fontsReady = fontsLoaded || !!fontError;
+  // Only block the first paint on web (where an unloaded glyph font shows tofu
+  // squares). On native the icon font is bundled and renders fine, so never
+  // gate there — a gate could leave a blank screen if loading misbehaves.
+  const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
   const queryClient = useMemo(() => new QueryClient(), []);
   const userId = useAuthStore((state: AuthState) => state.user?.id ?? null);
   const debug = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__);
