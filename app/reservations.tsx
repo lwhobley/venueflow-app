@@ -133,6 +133,7 @@ export default function ReservationsScreen() {
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
@@ -194,9 +195,14 @@ export default function ReservationsScreen() {
     setAssigningId(null);
   };
 
-  const cancel = async (res: ReservationRow) => {
+  const deleteReservation = async (res: ReservationRow) => {
     if (!venue?.id) return;
-    await removeReservation({ venueId: venue.id, reservationId: res.id as Id<'reservations'> });
+    setDeleteError(null);
+    try {
+      await removeReservation({ venueId: venue.id, reservationId: res.id as Id<'reservations'> });
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Could not delete reservation.');
+    }
   };
 
   return (
@@ -326,6 +332,7 @@ export default function ReservationsScreen() {
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Bookings</Text>
+          {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
           {page === undefined ? (
             <Text style={{ color: colors.muted }}>Loading…</Text>
           ) : sorted.length === 0 ? (
@@ -353,14 +360,14 @@ export default function ReservationsScreen() {
                     </View>
                   ) : null}
 
-                  {canManage && !cancelled ? (
+                  {canManage ? (
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                      {!seated ? (
+                      {!seated && !cancelled ? (
                         <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => setAssigningId(assigningId === res.id ? null : res.id)}>
                           {assigningId === res.id ? 'Pick a table…' : 'Assign table'}
                         </Button>
                       ) : null}
-                      <Button compact mode="text" textColor={colors.danger} onPress={() => void cancel(res)}>Cancel</Button>
+                      <Button compact mode="text" textColor={colors.danger} icon="delete-outline" onPress={() => void deleteReservation(res)}>Delete</Button>
                     </View>
                   ) : null}
 

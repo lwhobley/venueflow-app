@@ -35,6 +35,7 @@ export default function GuestsScreen() {
   const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
   const guests = useQuery(api.guests.listGuests, canManage && venue?.id ? { venueId: venue.id } : 'skip') as GuestRow[] | undefined;
   const upsertGuest = useMutation(api.guests.upsertGuest);
+  const removeGuest = useMutation(api.guests.removeGuest);
 
   const [query, setQuery] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -44,6 +45,7 @@ export default function GuestsScreen() {
   const [tags, setTags] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -77,6 +79,16 @@ export default function GuestsScreen() {
       setShowForm(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save guest.');
+    }
+  };
+
+  const deleteGuest = async (guestId: Id<'guests'>) => {
+    if (!venue?.id) return;
+    setDeleteError(null);
+    try {
+      await removeGuest({ venueId: venue.id, guestId });
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Could not delete guest.');
     }
   };
 
@@ -123,6 +135,7 @@ export default function GuestsScreen() {
             </Button>
           </View>
           <TextInput label="Search guests" value={query} onChangeText={setQuery} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
           {showForm ? (
             <View style={{ gap: spacing.sm }}>
               <TextInput label="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
@@ -162,6 +175,11 @@ export default function GuestsScreen() {
               <Text style={{ color: colors.muted }}>Next: {dateText(guest.upcomingReservationAt)}</Text>
             </View>
             {guest.notes ? <Text style={{ color: colors.charcoal }}>{guest.notes}</Text> : null}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Button compact mode="text" icon="delete-outline" textColor={colors.danger} onPress={() => void deleteGuest(guest._id)}>
+                Delete
+              </Button>
+            </View>
           </Card.Content>
         </Card>
       ))}

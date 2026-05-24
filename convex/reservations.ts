@@ -403,7 +403,13 @@ export const removeReservation = mutation({
     const existing = await ctx.db.get(args.reservationId);
     if (!existing) return null;
     if (existing.venueId !== args.venueId) throw new Error('Wrong venue');
-    await ctx.db.patch(existing._id, { status: 'cancelled', updatedAt: Date.now(), notes: 'Removed by staff' });
+    const assignments = await ctx.db.query('tableAssignments').withIndex('by_reservation', (q: any) => q.eq('reservationId', existing._id)).collect();
+    for (const assignment of assignments) await ctx.db.delete(assignment._id);
+
+    const events = await ctx.db.query('venueEvents').withIndex('by_reservation', (q: any) => q.eq('reservationId', existing._id)).collect();
+    for (const event of events) await ctx.db.patch(event._id, { reservationId: undefined, updatedAt: Date.now() });
+
+    await ctx.db.delete(existing._id);
     return null;
   },
 });

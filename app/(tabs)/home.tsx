@@ -156,9 +156,9 @@ export default function HomeScreen() {
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <TextInput label="Event title" value={eventTitle} onChangeText={setEventTitle} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
             </View>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              <TextInput label="Date" value={eventDate} onChangeText={setEventDate} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-              <TextInput label="Time" value={eventTime} onChangeText={setEventTime} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <TextInput label="Date" value={eventDate} onChangeText={setEventDate} mode="outlined" style={{ flexGrow: 1, flexBasis: 150, backgroundColor: colors.surface }} />
+              <TextInput label="Time" value={eventTime} onChangeText={setEventTime} mode="outlined" style={{ flexGrow: 1, flexBasis: 120, backgroundColor: colors.surface }} />
             </View>
             <TextInput label="Event notes" value={eventNotes} onChangeText={setEventNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
             <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void addEvent()}>Add event</Button>
@@ -168,10 +168,12 @@ export default function HomeScreen() {
               managerDashboard.events.map((event: any) => (
                 <View key={event._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
                   <Text style={{ fontWeight: '700' }}>{event.title}</Text>
-                  <Text style={{ color: colors.muted }}>
-                    {new Date(event.startsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                    {event.expectedGuests ? ` · ${event.expectedGuests} guests` : ''}
-                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    <Chip compact>
+                      {new Date(event.startsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </Chip>
+                    {event.expectedGuests ? <Chip compact>{event.expectedGuests} guests</Chip> : null}
+                  </View>
                   {event.notes ? <Text style={{ color: colors.charcoal }}>{event.notes}</Text> : null}
                   {event.reservationNotes ? <Text style={{ color: colors.muted }}>Reservation: {event.reservationNotes}</Text> : null}
                 </View>

@@ -201,3 +201,32 @@ export const upsertGuest = mutation({
     return await summarizeGuest(ctx as AnyCtx, created);
   },
 });
+
+export const removeGuest = mutation({
+  args: { venueId: v.id('venues'), guestId: v.id('guests') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    assertNotDemo(profile);
+    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+
+    const guest = await (ctx as AnyCtx).db.get(args.guestId);
+    if (!guest) return null;
+    if (guest.venueId !== args.venueId) throw new Error('Guest not found');
+
+    const reservations = await (ctx as AnyCtx).db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).collect();
+    for (const reservation of reservations) await (ctx as AnyCtx).db.patch(reservation._id, { guestId: undefined, updatedAt: Date.now() });
+
+    const checks = await (ctx as AnyCtx).db.query('posChecks').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).collect();
+    for (const check of checks) await (ctx as AnyCtx).db.patch(check._id, { guestId: undefined, updatedAt: Date.now() });
+
+    const waitlist = await (ctx as AnyCtx).db.query('waitlist').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
+    for (const item of waitlist.filter((row: Doc<'waitlist'>) => row.guestId === guest._id)) {
+      await (ctx as AnyCtx).db.patch(item._id, { guestId: undefined, updatedAt: Date.now() });
+    }
+
+    await (ctx as AnyCtx).db.delete(guest._id);
+    return null;
+  },
+});
