@@ -1,9 +1,7 @@
 // Centralized runtime feature flags.
 //
-// Billing is OFF by default: the in-app purchase layer is not wired to a real
-// IAP provider yet (see lib/a0-purchases-stub.tsx). Until it is, the
-// SubscriptionGate must not hard-lock users out of the app. Flip this on by
-// setting EXPO_PUBLIC_BILLING_ENABLED=true once real purchases are connected.
+// Billing is OFF by default for local development. Production builds enable it
+// through EAS env so the subscription gate is active for App Store review.
 
 function readEnvFlag(value: string | undefined, fallback: boolean): boolean {
   if (value == null) return fallback;

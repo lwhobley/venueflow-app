@@ -82,9 +82,9 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
     });
   }, [me, user, setSession]);
   const billing = useQuery(api.app.getMyVenueBilling, me?.venue?._id ? {} : 'skip');
-  const { isPremium } = useA0Purchases();
-  // When billing is disabled (no real IAP wired yet), never hard-lock users.
-  const blocked = config.billingEnabled && billing ? blockedStatuses.has(billing.status) && !isPremium : false;
+  const { isPremium, isLoading: isPremiumLoading } = useA0Purchases();
+  // When billing is disabled for local/dev builds, never hard-lock users.
+  const blocked = config.billingEnabled && billing ? blockedStatuses.has(billing.status) && !isPremiumLoading && !isPremium : false;
   const reason = reasonFromStatus(billing?.status ?? null);
 
   useEffect(() => {

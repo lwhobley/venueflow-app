@@ -1,12 +1,15 @@
-// Local stub replacing the `a0-purchases` package, which dragged in
-// expo-iap, a0-config, and a stale Expo SDK as transitive deps.
-// Purchases now route through Convex/Stripe (see convex/billing) — this stub
-// keeps the existing component contracts intact so the UI compiles.
-//
-// If/when you wire RevenueCat or another IAP SDK directly, swap the
-// implementation inside this file rather than re-introducing a0-purchases.
+// Compatibility wrapper replacing the old `a0-purchases` package, which
+// dragged in stale Expo transitive deps. The public contract remains the same,
+// but native builds now use RevenueCat through lib/purchases.
 
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  configurePurchases,
+  getOfferingPackages,
+  isPremiumActive,
+  purchasePackageById,
+  restorePurchases,
+} from './purchases';
 
 export type A0PurchasePackage = {
   identifier: string;
@@ -32,16 +35,12 @@ export type A0PurchaseContextValue = {
   restore: () => Promise<void>;
 };
 
-const noop = async () => {
-  // No-op until a real IAP provider is wired up.
-};
-
 const defaultValue: A0PurchaseContextValue = {
   isPremium: false,
-  isLoading: false,
+  isLoading: true,
   offerings: { current: null },
-  purchase: noop,
-  restore: noop,
+  purchase: async () => undefined,
+  restore: async () => undefined,
 };
 
 const A0PurchaseContext = createContext<A0PurchaseContextValue>(defaultValue);
@@ -51,8 +50,62 @@ export type A0PurchaseProviderProps = {
   config?: { appUserId?: string; debug?: boolean };
 };
 
-export function A0PurchaseProvider({ children }: A0PurchaseProviderProps) {
-  const value = useMemo(() => defaultValue, []);
+function mapOfferings(packages: Awaited<ReturnType<typeof getOfferingPackages>>): A0PurchaseOfferings {
+  if (packages.length === 0) return { current: null };
+  return {
+    current: {
+      identifier: 'default',
+      availablePackages: packages.map((pkg) => ({
+        identifier: pkg.id,
+        product: {
+          identifier: pkg.productId,
+          priceString: pkg.priceString,
+          title: pkg.title,
+        },
+      })),
+    },
+  };
+}
+
+export function A0PurchaseProvider({ children, config }: A0PurchaseProviderProps) {
+  const [isPremium, setIsPremium] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [offerings, setOfferings] = useState<A0PurchaseOfferings | null>({ current: null });
+
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      await configurePurchases(config?.appUserId);
+      const [active, packages] = await Promise.all([isPremiumActive(), getOfferingPackages()]);
+      setIsPremium(active);
+      setOfferings(mapOfferings(packages));
+    } catch {
+      setIsPremium(false);
+      setOfferings({ current: null });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [config?.appUserId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const purchase = useCallback(async (packageId: string) => {
+    const active = await purchasePackageById(packageId);
+    setIsPremium(active);
+  }, []);
+
+  const restore = useCallback(async () => {
+    const active = await restorePurchases();
+    setIsPremium(active);
+  }, []);
+
+  const value = useMemo(
+    () => ({ isPremium, isLoading, offerings, purchase, restore }),
+    [isLoading, isPremium, offerings, purchase, restore],
+  );
+
   return <A0PurchaseContext.Provider value={value}>{children}</A0PurchaseContext.Provider>;
 }
 

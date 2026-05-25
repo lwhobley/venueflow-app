@@ -61,7 +61,6 @@ export default function RootLayout() {
   // gate there — a gate could leave a blank screen if loading misbehaves.
   const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
   const queryClient = useMemo(() => new QueryClient(), []);
-  const userId = useAuthStore((state: AuthState) => state.user?.id ?? null);
   const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
 
   // Initialize in-app purchases (RevenueCat) keyed to the venue so a purchase
@@ -114,7 +113,7 @@ export default function RootLayout() {
         <ConvexAuthProvider client={convexClient} storage={Platform.OS === 'web' ? undefined : secureStorage}>
           <QueryClientProvider client={queryClient}>
             <PaperProvider theme={makePaperTheme(themeMode)}>
-              <A0PurchaseProvider config={{ appUserId: userId ?? undefined, debug }}>
+              <A0PurchaseProvider config={{ appUserId: venueId ?? undefined, debug }}>
                 {/* Top inset keeps content below the status bar / notch; the tab
                     bar and screens handle the bottom inset. */}
                 <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={['top', 'left', 'right']}>
