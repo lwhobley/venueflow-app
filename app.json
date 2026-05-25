@@ -16,7 +16,6 @@
       "supportsTablet": true,
       "icon": "./assets/app-icon.png",
       "bundleIdentifier": "com.venuewrangler.app",
-      "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Venue Wrangler uses your location to verify clock-ins and clock-outs at your venue.",
         "NSPhotoLibraryUsageDescription": "Venue Wrangler lets managers upload bar inventory photos from the photo library.",
