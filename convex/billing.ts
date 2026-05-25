@@ -34,22 +34,22 @@ const billingPlans = {
     name: 'Starter',
     userLimit: 15,
     priceCents: 7999,
-    stripePriceId: 'price_1Ta59DKFbgDlLMiECwHKrMhQ',
-    paymentLink: 'https://buy.stripe.com/3cIbJ27TObbu9Rs3Qscwg0d',
+    stripePriceId: 'price_1Tb2ohKFbgDlLMiEDpsqy68E',
+    paymentLink: 'https://buy.stripe.com/5kQ14ofmg6Ve9RscmYcwg0g',
   },
   venueflow_growth_30_monthly: {
     name: 'Pro',
     userLimit: 30,
     priceCents: 14999,
-    stripePriceId: 'price_1Ta59YKFbgDlLMiE0ikDDJyJ',
-    paymentLink: 'https://buy.stripe.com/dRmcN6a1W5RaaVwfzacwg0e',
+    stripePriceId: 'price_1Tb2nOKFbgDlLMiEOVdsukaI',
+    paymentLink: 'https://buy.stripe.com/7sY4gA7TO5Ra7Jk1Ikcwg0h',
   },
   venueflow_pro_50_monthly: {
     name: 'Enterprise',
     userLimit: 50,
     priceCents: 29999,
-    stripePriceId: 'price_1Ta59rKFbgDlLMiEzhY0spmA',
-    paymentLink: 'https://buy.stripe.com/bJe7sM1vqdjC5BcgDecwg0f',
+    stripePriceId: 'price_1Tb2mqKFbgDlLMiEljolYOd5',
+    paymentLink: 'https://buy.stripe.com/bJe00k7TOdjCfbMbiUcwg0i',
   },
 } as const;
 
