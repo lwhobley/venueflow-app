@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Alert, Animated, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Button, Card, SegmentedButtons, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Menu, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -13,10 +13,65 @@ type Mode = 'admin' | 'staff';
 
 const logoSource = require('../../assets/venue-wrangler-logo.jpg');
 const introVideoSource = require('../../assets/video.mp4');
+const ADMIN_CONTACT_EMAIL = 'admin@venuewrangler.com';
+
+const VENUE_TYPES = ['Restaurant', 'Bar', 'Lounge', 'Café', 'Nightclub', 'Hotel', 'Catering', 'Food truck', 'Other'];
+const STAFF_RANGES = [
+  { value: '1-15', label: '1–15 staff (Starter)' },
+  { value: '16-30', label: '16–30 staff (Growth)' },
+  { value: '31-50', label: '31–50 staff (Pro)' },
+  { value: '50+', label: '50+ staff (contact admin)' },
+];
+
+function PickerDropdown({
+  label,
+  value,
+  placeholder,
+  options,
+  onSelect,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: Array<{ value: string; label: string }>;
+  onSelect: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.value === value);
+  return (
+    <View>
+      <Text style={{ color: colors.muted, marginBottom: 4 }}>{label}</Text>
+      <Menu
+        visible={open}
+        onDismiss={() => setOpen(false)}
+        anchor={
+          <Button
+            mode="outlined"
+            textColor={colors.charcoal}
+            onPress={() => setOpen(true)}
+            contentStyle={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}
+            icon={() => <Text style={{ color: colors.muted, fontSize: 16, lineHeight: 18 }}>▾</Text>}
+            style={{ borderColor: colors.border, justifyContent: 'flex-start' }}
+          >
+            {current?.label ?? placeholder}
+          </Button>
+        }
+        contentStyle={{ maxHeight: 280 }}
+      >
+        <ScrollView style={{ maxHeight: 280 }}>
+          {options.map((opt) => (
+            <Menu.Item key={opt.value} title={opt.label} onPress={() => { onSelect(opt.value); setOpen(false); }} />
+          ))}
+        </ScrollView>
+      </Menu>
+    </View>
+  );
+}
 
 export default function SignInScreen() {
   const { signIn, signOut } = useAuthActions();
   const bootstrapProfile = useMutation(api.app.bootstrapProfile);
+  const registerVenue = useMutation(api.app.registerVenue);
   const loginWithPin = useMutation(api.staffAuth.loginWithPin);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
@@ -28,8 +83,15 @@ export default function SignInScreen() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Owner signup — business details (creates this owner's own venue).
+  const [businessName, setBusinessName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [venueType, setVenueType] = useState('');
+  const [staffRange, setStaffRange] = useState('');
 
-  // Staff (PIN) — no name selection; the staffer just enters their assigned PIN.
+  // Staff (PIN) — enter the business name + assigned PIN.
+  const [pinBusiness, setPinBusiness] = useState('');
   const [pin, setPin] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -99,10 +161,34 @@ export default function SignInScreen() {
       Alert.alert('Sign in failed', 'Enter a valid email and a password with at least 6 characters.');
       return;
     }
+    if (flow === 'signUp') {
+      if (!businessName.trim()) {
+        Alert.alert('Business name required', 'Enter your business name — your staff use it to sign in.');
+        return;
+      }
+      if (!staffRange) {
+        Alert.alert('Team size required', 'Choose how many staff you have.');
+        return;
+      }
+      if (staffRange === '50+') {
+        Alert.alert('Contact us', `For 50+ staff we set your account up manually. Please contact ${ADMIN_CONTACT_EMAIL}.`);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       await resetExistingSession();
       await signIn('password', { email: trimmed, password, flow });
+      if (flow === 'signUp') {
+        await registerVenue({
+          businessName: businessName.trim(),
+          ownerName: fullName.trim() || undefined,
+          phone: phone.trim() || undefined,
+          address: address.trim() || undefined,
+          venueType: venueType || undefined,
+          staffRange,
+        });
+      }
       await finishSession();
     } catch (e) {
       Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Try again.');
@@ -112,13 +198,17 @@ export default function SignInScreen() {
   };
 
   const onPinSubmit = async () => {
+    if (!pinBusiness.trim()) {
+      Alert.alert('Business name required', 'Enter your venue’s business name.');
+      return;
+    }
     if (!/^\d{4}$/.test(pin)) {
       Alert.alert('Enter your PIN', 'Enter your 4-digit PIN.');
       return;
     }
     setSubmitting(true);
     try {
-      const { loginHandle } = await loginWithPin({ pin });
+      const { loginHandle } = await loginWithPin({ businessName: pinBusiness.trim(), pin });
       await resetExistingSession();
       await signIn('password', { email: loginHandle, password: pin, flow: 'signIn' });
       await finishSession({ staffIntro: true });
@@ -156,18 +246,32 @@ export default function SignInScreen() {
                 onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
                 buttons={[{ value: 'signIn', label: 'Sign in' }, { value: 'signUp', label: 'Create account' }]}
               />
-              {flow === 'signUp' ? <TextInput label="Full name" value={fullName} onChangeText={setFullName} mode="outlined" /> : null}
+              {flow === 'signUp' ? (
+                <>
+                  <TextInput label="Business name" value={businessName} onChangeText={setBusinessName} mode="outlined" />
+                  <Text style={{ color: colors.muted, marginTop: -6, fontSize: 12 }}>Your staff sign in with this name + their PIN.</Text>
+                  <TextInput label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
+                  <TextInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" />
+                  <TextInput label="Address" value={address} onChangeText={setAddress} mode="outlined" />
+                  <PickerDropdown label="Venue type" value={venueType} placeholder="Select type" options={VENUE_TYPES.map((t) => ({ value: t, label: t }))} onSelect={setVenueType} />
+                  <PickerDropdown label="Number of staff" value={staffRange} placeholder="Select team size" options={STAFF_RANGES} onSelect={setStaffRange} />
+                  {staffRange === '50+' ? (
+                    <Text style={{ color: colors.danger }}>50+ staff are set up manually — contact {ADMIN_CONTACT_EMAIL}.</Text>
+                  ) : null}
+                </>
+              ) : null}
               <TextInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
               <TextInput label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
-              <Button mode="contained" buttonColor={colors.primary} loading={submitting} onPress={() => void onAdminSubmit()}>
-                {flow === 'signUp' ? 'Create account' : 'Continue'}
+              <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={flow === 'signUp' && staffRange === '50+'} onPress={() => void onAdminSubmit()}>
+                {flow === 'signUp' ? 'Create venue account' : 'Continue'}
               </Button>
             </Card.Content>
           </Card>
         ) : (
           <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
             <Card.Content style={{ gap: spacing.md }}>
-              <Text style={{ color: colors.muted }}>Enter the 4-digit PIN your manager assigned you.</Text>
+              <Text style={{ color: colors.muted }}>Enter your venue’s business name and the 4-digit PIN your manager assigned you.</Text>
+              <TextInput label="Business name" value={pinBusiness} onChangeText={setPinBusiness} autoCapitalize="words" mode="outlined" />
               <TextInput
                 label="4-digit PIN"
                 value={pin}
@@ -178,7 +282,7 @@ export default function SignInScreen() {
                 maxLength={4}
                 mode="outlined"
               />
-              <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={pin.length !== 4} onPress={() => void onPinSubmit()}>
+              <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={pin.length !== 4 || !pinBusiness.trim()} onPress={() => void onPinSubmit()}>
                 Sign in
               </Button>
             </Card.Content>

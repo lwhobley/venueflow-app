@@ -231,41 +231,6 @@ async function getProfile(ctx: AnyCtx) {
   return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
-async function getOrCreateVenue(ctx: AnyCtx) {
-  const existing = await ctx.db.query('venues').take(1);
-  if (existing.length > 0) return existing[0];
-  const now = Date.now();
-  const venueId = await ctx.db.insert('venues', {
-    name: 'Venue Wrangler',
-    latitude: 37.7749,
-    longitude: -122.4194,
-    geofenceRadiusM: 120,
-    subscriptionStatus: 'trialing',
-    subscriptionPlatform: null,
-  });
-  await ctx.db.insert('subscriptions', {
-    venueId,
-    status: 'trialing',
-    platform: null,
-    planId: 'venueflow_starter_15_monthly',
-    priceCents: 14900,
-    currency: 'USD',
-    trialStartedAt: now,
-    trialEndsAt: now + 7 * 24 * 60 * 60 * 1000,
-    currentPeriodStart: null,
-    currentPeriodEnd: null,
-    cancelAtPeriodEnd: false,
-    cancelledAt: null,
-    externalSubscriptionId: null,
-    externalCustomerId: null,
-    createdAt: now,
-    updatedAt: now,
-    dataRetentionWarnedAt: undefined,
-  });
-  const venue = await ctx.db.get(venueId);
-  if (!venue) throw new Error('Unable to create venue');
-  return venue;
-}
 
 function mapProfile(profile: Doc<'profiles'>) {
   return {
@@ -363,27 +328,25 @@ function assertWithinGeofence(lat: number, lng: number, accuracy: number, mocked
 
 export const bootstrapProfile = mutation({
   args: { fullName: v.optional(v.string()) },
-  returns: v.object({ profile: profileValue, venue: venueValue }),
+  // Multitenant: a brand-new account has NO venue until it registers one
+  // (registerVenue) or is invited as staff. venue can therefore be null.
+  returns: v.object({ profile: profileValue, venue: v.union(venueValue, v.null()) }),
   handler: async (ctx, args) => {
     const identity = await requireIdentity(ctx as AnyCtx);
     const userId = await getAuthUserId(ctx as AnyCtx);
     if (!userId) throw new Error('Unauthenticated');
 
     const existing = await getProfile(ctx as AnyCtx);
-    // Use the profile's own venue when it has one; only fall back to
-    // get-or-create for brand-new accounts (first admin signup).
-    let venue = existing?.venueId ? await (ctx as AnyCtx).db.get(existing.venueId) : null;
-    if (!venue) venue = await getOrCreateVenue(ctx as AnyCtx);
-    const email = identity.email ?? `${userId}@venueflow.local`;
+    // Only ever use the profile's OWN venue — never auto-join another tenant's.
+    const venue = existing?.venueId ? await (ctx as AnyCtx).db.get(existing.venueId) : null;
+    const email = identity.email ?? `${userId}@venuewrangler.local`;
     const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
-    // The first person to join a venue (the email signup who created it) is the
-    // venue admin/owner. Everyone else defaults to staff unless already set.
-    const venueMembers = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).take(1);
-    const isFirstMember = venueMembers.length === 0;
-    const roleName = isAllowlistedAdmin || (isFirstMember && !existing) ? 'admin' : existing?.role ?? 'staff';
     let profile = existing;
 
     if (!profile) {
+      // New account with no venue yet — the owner-signup flow calls
+      // registerVenue next to create their venue and promote them to admin.
+      const roleName = isAllowlistedAdmin ? 'admin' : 'staff';
       const profileId = await (ctx as AnyCtx).db.insert('profiles', {
         userId,
         tokenIdentifier: identity.tokenIdentifier,
@@ -391,17 +354,15 @@ export const bootstrapProfile = mutation({
         fullName: args.fullName?.trim() || displayName(identity),
         role: roleName,
         jobTitle: defaultJobTitle(roleName),
-        venueId: venue._id,
+        venueId: undefined,
       });
       profile = await (ctx as AnyCtx).db.get(profileId);
     } else {
       const patch: Record<string, unknown> = {};
-      // Backfill userId on a profile created before the key migration.
       if (!existing.userId) {
         patch.userId = userId;
         patch.tokenIdentifier = identity.tokenIdentifier;
       }
-      // Promote allowlisted owners to admin if they aren't already.
       if (isAllowlistedAdmin && existing.role !== 'admin') patch.role = 'admin';
       if (Object.keys(patch).length > 0) {
         await (ctx as AnyCtx).db.patch(existing._id, patch);
@@ -410,6 +371,115 @@ export const bootstrapProfile = mutation({
     }
 
     if (!profile) throw new Error('Unable to load profile');
+    return { profile: mapProfile(profile), venue: venue ? mapVenue(venue) : null };
+  },
+});
+
+const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
+function planForStaffRange(range: string) {
+  if (range === '16-30') return { planId: 'venueflow_growth_30_monthly', priceCents: 24900 };
+  if (range === '31-50') return { planId: 'venueflow_pro_50_monthly', priceCents: 39900 };
+  return { planId: 'venueflow_starter_15_monthly', priceCents: 14900 };
+}
+
+// Multitenant signup: the authenticated owner creates THEIR OWN venue. The
+// business name becomes the venue's lookup key for staff PIN login.
+export const registerVenue = mutation({
+  args: {
+    businessName: v.string(),
+    ownerName: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    venueType: v.optional(v.string()),
+    staffRange: v.string(),
+  },
+  returns: v.object({ profile: profileValue, venue: venueValue }),
+  handler: async (ctx, args) => {
+    await requireIdentity(ctx as AnyCtx);
+    const userId = await getAuthUserId(ctx as AnyCtx);
+    if (!userId) throw new Error('Unauthenticated');
+
+    const businessName = args.businessName.trim();
+    if (!businessName) throw new Error('Enter your business name');
+    if (args.staffRange === '50+') {
+      throw new Error('For 50+ staff, please contact admin@venuewrangler.com to set up your account.');
+    }
+    if (!STAFF_RANGES.includes(args.staffRange as (typeof STAFF_RANGES)[number])) {
+      throw new Error('Choose a staff size range');
+    }
+    const nameKey = businessName.toLowerCase();
+
+    let profile = await getProfile(ctx as AnyCtx);
+    // Already has a venue → idempotent (return it).
+    if (profile?.venueId) {
+      const existingVenue = await (ctx as AnyCtx).db.get(profile.venueId);
+      if (existingVenue) return { profile: mapProfile(profile), venue: mapVenue(existingVenue) };
+    }
+
+    // Business names are the staff login key, so they must be unique.
+    const clash = await (ctx as AnyCtx).db.query('venues').withIndex('by_nameKey', (q: any) => q.eq('nameKey', nameKey)).first();
+    if (clash) throw new Error('That business name is already registered. Please choose another or contact support.');
+
+    const now = Date.now();
+    const plan = planForStaffRange(args.staffRange);
+    const venueId = await (ctx as AnyCtx).db.insert('venues', {
+      name: businessName,
+      nameKey,
+      latitude: 0,
+      longitude: 0,
+      geofenceRadiusM: 150,
+      phone: args.phone?.trim() || undefined,
+      address: args.address?.trim() || undefined,
+      venueType: args.venueType?.trim() || undefined,
+      staffRange: args.staffRange,
+      subscriptionStatus: 'trialing',
+      subscriptionPlatform: null,
+    });
+    await (ctx as AnyCtx).db.insert('subscriptions', {
+      venueId,
+      status: 'trialing',
+      platform: null,
+      planId: plan.planId,
+      priceCents: plan.priceCents,
+      currency: 'USD',
+      trialStartedAt: now,
+      trialEndsAt: now + 3 * 24 * 60 * 60 * 1000,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      cancelledAt: null,
+      externalSubscriptionId: null,
+      externalCustomerId: null,
+      createdAt: now,
+      updatedAt: now,
+      dataRetentionWarnedAt: undefined,
+    });
+
+    const ownerName = args.ownerName?.trim();
+    if (profile) {
+      await (ctx as AnyCtx).db.patch(profile._id, {
+        venueId,
+        role: 'admin',
+        jobTitle: 'Owner',
+        ...(ownerName ? { fullName: ownerName } : {}),
+      });
+      profile = await (ctx as AnyCtx).db.get(profile._id);
+    } else {
+      const identity = await requireIdentity(ctx as AnyCtx);
+      const profileId = await (ctx as AnyCtx).db.insert('profiles', {
+        userId,
+        tokenIdentifier: identity.tokenIdentifier,
+        email: identity.email ?? `${userId}@venuewrangler.local`,
+        fullName: ownerName || displayName(identity),
+        role: 'admin',
+        jobTitle: 'Owner',
+        venueId,
+      });
+      profile = await (ctx as AnyCtx).db.get(profileId);
+    }
+
+    const venue = await (ctx as AnyCtx).db.get(venueId);
+    if (!profile || !venue) throw new Error('Unable to create venue');
     return { profile: mapProfile(profile), venue: mapVenue(venue) };
   },
 });

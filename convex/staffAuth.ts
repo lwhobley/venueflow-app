@@ -331,20 +331,33 @@ export const resetStaffPin = mutation({
   },
 });
 
-// PIN-only login for a single-venue deployment. The app owner assigns unique
-// PINs, and failed attempts are tracked against the active venue + PIN hash.
+// Multitenant PIN login: staff enter their venue's BUSINESS NAME plus their
+// PIN. The business name resolves the venue; the PIN is matched within it.
+// Demo PINs fall back to the demo venue so reviewers only need the PIN.
 export const loginWithPin = mutation({
-  args: { pin: v.string() },
+  args: { businessName: v.optional(v.string()), pin: v.string() },
   returns: v.object({ loginHandle: v.string() }),
   handler: async (ctx, args) => {
     if (!/^\d{4}$/.test(args.pin)) throw new Error('Enter your 4-digit PIN');
 
-    const venue = await ctx.db.query('venues').take(1).then((rows: Doc<'venues'>[]) => rows[0] ?? null);
-    if (!venue) throw new Error('Venue is not set up yet');
-    const pinHash = await hashPin(venue._id, args.pin);
-
     const demoKind: DemoKind | null =
       args.pin === DEMO_OWNER_PIN ? 'owner' : args.pin === DEMO_EMPLOYEE_PIN ? 'employee' : null;
+
+    // Resolve the venue from the business name.
+    const nameKey = (args.businessName ?? '').trim().toLowerCase();
+    let venue: Doc<'venues'> | null = null;
+    if (nameKey) {
+      venue = await ctx.db.query('venues').withIndex('by_nameKey', (q: any) => q.eq('nameKey', nameKey)).first();
+    }
+    // Demo PINs don't require the exact business name — use the demo venue.
+    if (!venue && demoKind) {
+      const venues = await ctx.db.query('venues').collect();
+      venue = venues.find((v2: Doc<'venues'>) => v2.isDemoVenue) ?? venues[0] ?? null;
+    }
+    if (!venue) throw new Error('Business not found. Check the name with your manager.');
+
+    const pinHash = await hashPin(venue._id, args.pin);
+
     if (demoKind) {
       const demo = await ensureDemoProfile(ctx, venue, pinHash, demoKind);
       if (!demo.loginHandle) throw new Error('Demo profile is not ready');
