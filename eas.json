@@ -10,7 +10,6 @@
         "EXPO_PUBLIC_CONVEX_URL": "https://unique-egret-100.convex.cloud",
         "EXPO_PUBLIC_CONVEX_SITE_URL": "https://unique-egret-100.convex.site",
         "EXPO_PUBLIC_BILLING_ENABLED": "false",
-        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "",
         "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT": "pro"
       }
     },
@@ -20,7 +19,6 @@
         "EXPO_PUBLIC_CONVEX_URL": "https://unique-egret-100.convex.cloud",
         "EXPO_PUBLIC_CONVEX_SITE_URL": "https://unique-egret-100.convex.site",
         "EXPO_PUBLIC_BILLING_ENABLED": "false",
-        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "",
         "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT": "pro"
       },
       "ios": {
