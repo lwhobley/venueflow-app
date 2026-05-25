@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Platform, useColorScheme, View } from 'react-native';
+import { Platform, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -12,7 +12,7 @@ import { ConvexAuthProvider } from '@convex-dev/auth/react';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { lightTheme, darkTheme, colors } from '../lib/theme';
+import { makePaperTheme, useAppearanceStore, designPalettes } from '../lib/theme';
 import { SubscriptionGate } from '../components/SubscriptionGate';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { configurePurchases } from '../lib/purchases';
@@ -49,7 +49,8 @@ const shouldIgnoreWebError = (message: string) =>
   message.includes('ts.worker');
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  const themeMode = useAppearanceStore((state) => state.mode);
+  const palette = designPalettes[themeMode];
   // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
   // and the nav use it). We hold the first paint until it's loaded, otherwise
   // web shows blank "tofu" squares. A load error still lets the app through.
@@ -103,7 +104,7 @@ export default function RootLayout() {
   }, []);
 
   if (!fontsReady) {
-    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+    return <View style={{ flex: 1, backgroundColor: palette.background }} />;
   }
 
   return (
@@ -111,13 +112,13 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ConvexAuthProvider client={convexClient} storage={Platform.OS === 'web' ? undefined : secureStorage}>
           <QueryClientProvider client={queryClient}>
-            <PaperProvider theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
+            <PaperProvider theme={makePaperTheme(themeMode)}>
               <A0PurchaseProvider config={{ appUserId: userId ?? undefined, debug }}>
                 {/* Top inset keeps content below the status bar / notch; the tab
                     bar and screens handle the bottom inset. */}
-                <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'left', 'right']}>
+                <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={['top', 'left', 'right']}>
                   <SubscriptionGate>
-                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: palette.background } }} />
                   </SubscriptionGate>
                 </SafeAreaView>
               </A0PurchaseProvider>

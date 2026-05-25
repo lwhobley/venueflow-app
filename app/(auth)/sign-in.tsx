@@ -6,8 +6,9 @@ import { Button, Card, Menu, SegmentedButtons, Text, TextInput } from 'react-nat
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { colors, spacing } from '../../lib/theme';
+import { colors, spacing, useDesignTheme } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useI18n } from '../../lib/i18n';
 
 type Mode = 'admin' | 'staff';
 
@@ -75,6 +76,8 @@ export default function SignInScreen() {
   const loginWithPin = useMutation(api.staffAuth.loginWithPin);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
+  const palette = useDesignTheme();
+  const { t } = useI18n();
 
   const [mode, setMode] = useState<Mode>('staff');
 
@@ -221,7 +224,7 @@ export default function SignInScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
           <Image source={logoSource} style={styles.logo} />
@@ -289,8 +292,8 @@ export default function SignInScreen() {
           </Card>
         )}
         <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
-          <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700' }}>VenueWrangler™</Text>
-          <Text style={{ color: colors.muted, fontSize: 11 }}>by Loungeability LLC</Text>
+          <Text style={{ color: palette.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
+          <Text style={{ color: palette.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
         </View>
       </ScrollView>
       {showIntro ? (
