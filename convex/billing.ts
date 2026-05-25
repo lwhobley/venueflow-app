@@ -447,3 +447,27 @@ export const syncVenueSubscription = mutation({
     };
   },
 });
+
+// RevenueCat webhook handler (called from convex/http.ts). The RevenueCat
+// app_user_id is the venue id, so we map the event straight onto that venue.
+export const handleRevenueCatEvent = internalMutation({
+  args: { appUserId: v.string(), status: subscriptionStatusValue },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    // app_user_id is a venue id string; ignore anything that isn't a real venue.
+    const venue = await (ctx as AnyCtx).db.get(args.appUserId as Id<'venues'>).catch(() => null);
+    if (!venue || !('name' in venue)) return null;
+    await (ctx as AnyCtx).db.patch(venue._id, {
+      subscriptionStatus: args.status,
+      subscriptionPlatform: 'apple',
+    });
+    const subscription = await (ctx as AnyCtx).db
+      .query('subscriptions')
+      .withIndex('by_venue', (q: any) => q.eq('venueId', venue._id))
+      .unique();
+    if (subscription) {
+      await (ctx as AnyCtx).db.patch(subscription._id, { status: args.status, platform: 'apple', updatedAt: Date.now() });
+    }
+    return null;
+  },
+});

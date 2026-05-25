@@ -1,4 +1,4 @@
-import { ScrollView } from 'react-native';
+import { Platform, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { colors, spacing } from '../../lib/theme';
@@ -21,7 +21,8 @@ export default function ProfileScreen() {
   };
 
   const onOpenBilling = () => {
-    router.push('/billing');
+    // iOS/Android must use in-app purchases (App Store rules); web uses Stripe.
+    router.push(Platform.OS === 'web' ? '/billing' : '/billing/paywall');
   };
 
   return (

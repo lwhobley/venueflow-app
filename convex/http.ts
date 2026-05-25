@@ -103,4 +103,43 @@ http.route({
   }),
 });
 
+// RevenueCat server notifications. Configure this URL + an Authorization header
+// value (REVENUECAT_WEBHOOK_AUTH) in the RevenueCat dashboard. The app_user_id
+// is the venue id, so events map straight onto the venue's subscription.
+const REVENUECAT_ACTIVE_TYPES = new Set(['INITIAL_PURCHASE', 'RENEWAL', 'PRODUCT_CHANGE', 'UNCANCELLATION', 'NON_RENEWING_PURCHASE']);
+http.route({
+  path: '/revenuecat/webhook',
+  method: 'POST',
+  handler: httpAction(async (ctx, req) => {
+    const expected = process.env.REVENUECAT_WEBHOOK_AUTH;
+    const received = req.headers.get('authorization');
+    if (!secretOk(expected, received)) return new Response('Unauthorized', { status: 401 });
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response('Invalid JSON', { status: 400 });
+    }
+    const event = body?.event;
+    const appUserId: string | undefined = event?.app_user_id;
+    const type: string | undefined = event?.type;
+    if (!appUserId || !type) return new Response('ok', { status: 200 });
+    const status = REVENUECAT_ACTIVE_TYPES.has(type)
+      ? 'active'
+      : type === 'BILLING_ISSUE'
+        ? 'past_due'
+        : type === 'EXPIRATION'
+          ? 'expired'
+          : null;
+    if (status) {
+      try {
+        await ctx.runMutation(internal.billing.handleRevenueCatEvent, { appUserId, status: status as any });
+      } catch {
+        // Unknown app_user_id (not a venue) — ignore.
+      }
+    }
+    return new Response('ok', { status: 200 });
+  }),
+});
+
 export default http;
