@@ -53,7 +53,9 @@ export default function ChatScreen() {
   const directory = useQuery(api.chat.listDirectory, venue?.id ? { venueId: venue.id } : 'skip');
 
   useEffect(() => {
-    if (venue?.id) void ensureSetup({ venueId: venue.id });
+    // Fire-and-forget; swallow rejections (e.g. demo profiles are read-only)
+    // so an unhandled rejection never surfaces.
+    if (venue?.id) void ensureSetup({ venueId: venue.id }).catch(() => {});
   }, [venue?.id, ensureSetup]);
 
   const groups = conversations?.groups ?? [];

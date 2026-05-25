@@ -146,8 +146,11 @@ export const getMessages = query({
   args: { conversationId: v.id('conversations') },
   returns: v.object({ title: v.string(), messages: v.array(messageValue) }),
   handler: async (ctx, args) => {
+    // Reading messages is a read operation — demo (read-only) profiles may
+    // view chat. Do NOT assert non-demo here; that belongs on write
+    // mutations (sendMessage, ensureChatSetup, openDm). A thrown error from
+    // a query crashes the screen render.
     const me = await requireProfile(ctx);
-    assertNotDemoProfile(me);
     const conv = await assertConversationAccess(ctx, args.conversationId, me);
     const staff = me.venueId ? await venueProfiles(ctx, me.venueId) : [];
     const nameById = new Map(staff.map((s: Doc<'profiles'>) => [s._id, s.fullName]));

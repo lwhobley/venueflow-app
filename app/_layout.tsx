@@ -14,6 +14,7 @@ import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { makePaperTheme, useAppearanceStore, designPalettes } from '../lib/theme';
 import { SubscriptionGate } from '../components/SubscriptionGate';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { configurePurchases } from '../lib/purchases';
 
@@ -117,9 +118,11 @@ export default function RootLayout() {
                 {/* Top inset keeps content below the status bar / notch; the tab
                     bar and screens handle the bottom inset. */}
                 <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={['top', 'left', 'right']}>
-                  <SubscriptionGate>
-                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: palette.background } }} />
-                  </SubscriptionGate>
+                  <ErrorBoundary>
+                    <SubscriptionGate>
+                      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: palette.background } }} />
+                    </SubscriptionGate>
+                  </ErrorBoundary>
                 </SafeAreaView>
               </A0PurchaseProvider>
             </PaperProvider>
