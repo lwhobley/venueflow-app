@@ -9,7 +9,7 @@ entitlement unlocks the whole app.
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-W, H = 1242, 2688  # iPhone 6.5" — accepted IAP review screenshot size
+W, H = 1290, 2796  # iPhone 6.7" — current accepted App Store screenshot size
 
 # dark palette (lib/theme.ts designPalettes.dark)
 BG = (7, 16, 21)
