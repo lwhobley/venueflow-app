@@ -14,6 +14,16 @@ import {
 const TERMS_URL = 'https://venuewrangler.com/terms';
 const PRIVACY_URL = 'https://venuewrangler.com/privacy';
 
+// Shown when RevenueCat returns no live offering yet — e.g. Expo Go / dev
+// (no native key), or before the App Store subscriptions are approved. Keeps
+// the three tiers visible so the screen is never blank. Real packages from
+// getOfferingPackages() override this whenever they're available.
+const FALLBACK_TIERS: PurchasePackage[] = [
+  { id: 'starter', title: 'Starter', priceString: '$79.99', productId: 'com.venuewrangler.starter.monthly' },
+  { id: 'pro', title: 'Pro', priceString: '$149.99', productId: 'com.venuewrangler.pro.monthly' },
+  { id: 'enterprise', title: 'Enterprise', priceString: '$299.99', productId: 'com.venuewrangler.enterprise.monthly' },
+];
+
 export default function PaywallScreen() {
   const [packages, setPackages] = useState<PurchasePackage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,26 +91,29 @@ export default function PaywallScreen() {
         </Card>
       ) : loading ? (
         <Text style={{ color: colors.muted }}>Loading plans…</Text>
-      ) : packages.length === 0 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.lg }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text style={{ color: colors.muted }}>No plans are available right now. Please try again shortly.</Text>
-          </Card.Content>
-        </Card>
       ) : (
-        packages.map((pkg) => (
-          <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.lg, ...shadow }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
-              <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}</Text>
-              <Text style={{ color: colors.muted }}>Full access: scheduling, time clock, floor plan, reservations, bar stock, reports, and team chat.</Text>
-              <Button mode="contained" buttonColor={colors.primary} loading={busy === pkg.id} disabled={!!busy} onPress={() => void buy(pkg.id)}>
-                Start free trial
-              </Button>
-            </Card.Content>
-          </Card>
-        ))
+        (packages.length ? packages : FALLBACK_TIERS).map((pkg) => {
+          const live = packages.length > 0;
+          return (
+            <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.lg, ...shadow }}>
+              <Card.Content style={{ gap: spacing.sm }}>
+                <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
+                <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
+                <Text style={{ color: colors.muted }}>Full access: scheduling, time clock, floor plan, reservations, bar stock, reports, and team chat.</Text>
+                <Button mode="contained" buttonColor={colors.primary} loading={busy === pkg.id} disabled={!!busy || !live} onPress={() => void buy(pkg.id)}>
+                  Start free trial
+                </Button>
+              </Card.Content>
+            </Card>
+          );
+        })
       )}
+
+      {!loading && PURCHASES_SUPPORTED && packages.length === 0 ? (
+        <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
+          Purchasing activates in the App Store build. These plans are shown for preview.
+        </Text>
+      ) : null}
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
 
