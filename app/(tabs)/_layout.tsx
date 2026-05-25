@@ -1,5 +1,7 @@
 import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import { colors } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { CarouselTabBar } from '../../components/CarouselTabBar';
@@ -8,8 +10,13 @@ const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap) =>
   ({ color, size }: { color: string; size: number }) => <MaterialCommunityIcons name={name} size={size} color={color} />;
 
 export default function TabsLayout() {
-  const role = useAuthStore((state: AuthState) => state.user?.role ?? 'staff');
+  const storeRole = useAuthStore((state: AuthState) => state.user?.role ?? 'staff');
   const fullName = useAuthStore((state: AuthState) => state.user?.full_name ?? 'Profile');
+  // Server-authoritative role so a stale/incorrect persisted role can never
+  // expose manager-only tabs. While loading, fall back to the stored role;
+  // if not authenticated, treat as staff (hide everything gated).
+  const me = useQuery(api.app.getMe);
+  const role = me === undefined ? storeRole : me?.profile.role ?? 'staff';
   const canManage = role === 'admin' || role === 'owner' || role === 'manager';
 
   return (
