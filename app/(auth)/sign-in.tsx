@@ -19,8 +19,8 @@ const ADMIN_CONTACT_EMAIL = 'admin@venuewrangler.com';
 const VENUE_TYPES = ['Restaurant', 'Bar', 'Lounge', 'Café', 'Nightclub', 'Hotel', 'Catering', 'Food truck', 'Other'];
 const STAFF_RANGES = [
   { value: '1-15', label: '1–15 staff (Starter)' },
-  { value: '16-30', label: '16–30 staff (Growth)' },
-  { value: '31-50', label: '31–50 staff (Pro)' },
+  { value: '16-30', label: '16–30 staff (Pro)' },
+  { value: '31-50', label: '31–50 staff (Enterprise)' },
   { value: '50+', label: '50+ staff (contact admin)' },
 ];
 

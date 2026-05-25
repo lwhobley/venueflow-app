@@ -8,9 +8,9 @@ import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 const plans = [
-  { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$149' },
-  { id: 'venueflow_growth_30_monthly', name: 'Growth', users: 'Up to 30 users', price: '$249' },
-  { id: 'venueflow_pro_50_monthly', name: 'Pro', users: 'Up to 50 users', price: '$399' },
+  { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$79.99' },
+  { id: 'venueflow_growth_30_monthly', name: 'Pro', users: 'Up to 30 users', price: '$149.99' },
+  { id: 'venueflow_pro_50_monthly', name: 'Enterprise', users: 'Up to 50 users', price: '$299.99' },
 ] as const;
 
 type PlanId = (typeof plans)[number]['id'];
@@ -24,7 +24,7 @@ export default function BillingScreen() {
   const [loading, setLoading] = useState<PlanId | 'portal' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 7;
+  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 3;
   const canManageBilling = user?.role === 'admin' || user?.role === 'owner';
 
   const openCheckout = async (planId: PlanId) => {
@@ -59,10 +59,10 @@ export default function BillingScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="headlineSmall">Billing</Text>
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
-          <Text style={{ color: colors.muted }}>7-day free trial. Choose the user tier that fits this venue.</Text>
+          <Text style={{ color: colors.muted }}>3-day free trial. Choose the user tier that fits this venue.</Text>
           <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'trialing'}</Text>
           <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in trial</Text>
-          <Text style={{ color: colors.muted }}>Stripe manages checkout, renewals, payment methods, invoices, and cancellations.</Text>
+          <Text style={{ color: colors.muted }}>Subscriptions renew monthly and unlock the full app.</Text>
           <Text style={{ color: colors.muted }}>Current plan: {billing?.planId ?? 'Not subscribed'}</Text>
           <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
           {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}

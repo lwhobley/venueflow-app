@@ -377,9 +377,9 @@ export const bootstrapProfile = mutation({
 
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
 function planForStaffRange(range: string) {
-  if (range === '16-30') return { planId: 'venueflow_growth_30_monthly', priceCents: 24900 };
-  if (range === '31-50') return { planId: 'venueflow_pro_50_monthly', priceCents: 39900 };
-  return { planId: 'venueflow_starter_15_monthly', priceCents: 14900 };
+  if (range === '16-30') return { planId: 'venueflow_growth_30_monthly', priceCents: 14999 };
+  if (range === '31-50') return { planId: 'venueflow_pro_50_monthly', priceCents: 29999 };
+  return { planId: 'venueflow_starter_15_monthly', priceCents: 7999 };
 }
 
 // Multitenant signup: the authenticated owner creates THEIR OWN venue. The

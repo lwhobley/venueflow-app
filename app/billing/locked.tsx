@@ -9,15 +9,15 @@ import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 const plans = [
-  { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$149' },
-  { id: 'venueflow_growth_30_monthly', name: 'Growth', users: 'Up to 30 users', price: '$249' },
-  { id: 'venueflow_pro_50_monthly', name: 'Pro', users: 'Up to 50 users', price: '$399' },
+  { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$79.99' },
+  { id: 'venueflow_growth_30_monthly', name: 'Pro', users: 'Up to 30 users', price: '$149.99' },
+  { id: 'venueflow_pro_50_monthly', name: 'Enterprise', users: 'Up to 50 users', price: '$299.99' },
 ] as const;
 
 type PlanId = (typeof plans)[number]['id'];
 
 const headlineByReason: Record<string, string> = {
-  trial_expired: 'Your 7-day trial has ended',
+  trial_expired: 'Your 3-day trial has ended',
   payment_failed: "Your payment didn't go through",
   cancelled: 'Your subscription has been cancelled',
   never_subscribed: 'Subscribe to access Venue Wrangler',
@@ -72,8 +72,8 @@ export default function BillingLockedScreen() {
             <Text style={{ color: colors.muted }}>Venue: {venue?.name ?? 'No venue selected'}</Text>
             <Text style={{ color: colors.muted }}>Signed in as {user?.email ?? 'unknown'}</Text>
 
-            <Text variant="titleMedium">7-day free trial</Text>
-            <Text style={{ color: colors.muted }}>Choose the user tier that fits this venue. Stripe manages subscriptions, renewals, invoices, and payment methods.</Text>
+            <Text variant="titleMedium">3-day free trial</Text>
+            <Text style={{ color: colors.muted }}>Choose the user tier that fits this venue. Subscriptions renew monthly and unlock the full app.</Text>
 
             {plans.map((plan) => (
               <View key={plan.id} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: spacing.md, gap: spacing.xs, backgroundColor: colors.background }}>

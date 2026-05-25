@@ -33,21 +33,21 @@ const billingPlans = {
   venueflow_starter_15_monthly: {
     name: 'Starter',
     userLimit: 15,
-    priceCents: 14900,
+    priceCents: 7999,
     stripePriceId: 'price_1Ta59DKFbgDlLMiECwHKrMhQ',
     paymentLink: 'https://buy.stripe.com/3cIbJ27TObbu9Rs3Qscwg0d',
   },
   venueflow_growth_30_monthly: {
-    name: 'Growth',
+    name: 'Pro',
     userLimit: 30,
-    priceCents: 24900,
+    priceCents: 14999,
     stripePriceId: 'price_1Ta59YKFbgDlLMiE0ikDDJyJ',
     paymentLink: 'https://buy.stripe.com/dRmcN6a1W5RaaVwfzacwg0e',
   },
   venueflow_pro_50_monthly: {
-    name: 'Pro',
+    name: 'Enterprise',
     userLimit: 50,
-    priceCents: 39900,
+    priceCents: 29999,
     stripePriceId: 'price_1Ta59rKFbgDlLMiEzhY0spmA',
     paymentLink: 'https://buy.stripe.com/bJe7sM1vqdjC5BcgDecwg0f',
   },
@@ -212,7 +212,7 @@ export const createStripeCheckoutSession = action({
       'subscription_data[metadata][venueName]': context.venueName,
       'subscription_data[metadata][planId]': selectedPlanId,
       'subscription_data[metadata][userLimit]': String(selectedPlan.userLimit),
-      'subscription_data[trial_period_days]': '7',
+      'subscription_data[trial_period_days]': '3',
       allow_promotion_codes: 'true',
     };
     if (context.externalCustomerId) params.customer = context.externalCustomerId;
