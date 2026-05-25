@@ -42,7 +42,8 @@
     "scheme": "venuewrangler",
     "description": "Venue Wrangler restaurant operations and venue management.",
     "extra": {
-      "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud",
+      "EXPO_PUBLIC_CONVEX_URL": "https://unique-egret-100.convex.cloud",
+      "EXPO_PUBLIC_CONVEX_SITE_URL": "https://unique-egret-100.convex.site",
       "router": {},
       "eas": {
         "projectId": "5c2ebadb-d603-409f-bcfb-ec43df5e9697"
