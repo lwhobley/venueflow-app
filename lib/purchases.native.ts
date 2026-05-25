@@ -9,6 +9,16 @@ const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string | und
 const IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? extra.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
 const ENTITLEMENT = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? extra.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? 'pro';
 
+// RevenueCat Test Store keys (test_...) only work in development builds
+// (Expo Go / simulator). In a release/TestFlight build, Purchases.configure
+// crashes natively on a test key — which a JS try/catch can't catch. So we
+// only honor a test key when __DEV__ is true; release builds need a real
+// appl_ key. This keeps the app launchable even if a test key is shipped.
+const isTestKey = IOS_KEY.startsWith('test_');
+const isDev = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__);
+// The effective key the SDK may be configured with. Empty => purchases off.
+const EFFECTIVE_KEY = isTestKey && !isDev ? '' : IOS_KEY;
+
 export const PURCHASES_SUPPORTED = true;
 
 export type PurchasePackage = {
@@ -21,13 +31,17 @@ export type PurchasePackage = {
 let configured = false;
 
 export async function configurePurchases(appUserId?: string): Promise<void> {
-  if (!IOS_KEY) {
-    console.warn('[purchases] EXPO_PUBLIC_REVENUECAT_IOS_KEY not set — purchases disabled.');
+  if (!EFFECTIVE_KEY) {
+    if (isTestKey) {
+      console.warn('[purchases] Test Store key ignored in release build — purchases disabled. Use an appl_ key for TestFlight/production.');
+    } else {
+      console.warn('[purchases] EXPO_PUBLIC_REVENUECAT_IOS_KEY not set — purchases disabled.');
+    }
     return;
   }
   try {
     if (!configured) {
-      Purchases.configure({ apiKey: IOS_KEY, appUserID: appUserId ?? null });
+      Purchases.configure({ apiKey: EFFECTIVE_KEY, appUserID: appUserId ?? null });
       configured = true;
     } else if (appUserId) {
       await Purchases.logIn(appUserId);
@@ -38,7 +52,7 @@ export async function configurePurchases(appUserId?: string): Promise<void> {
 }
 
 export async function isPremiumActive(): Promise<boolean> {
-  if (!IOS_KEY) return false;
+  if (!configured) return false;
   try {
     const info = await Purchases.getCustomerInfo();
     return Boolean(info.entitlements.active[ENTITLEMENT]);
@@ -48,7 +62,7 @@ export async function isPremiumActive(): Promise<boolean> {
 }
 
 export async function getOfferingPackages(): Promise<PurchasePackage[]> {
-  if (!IOS_KEY) return [];
+  if (!configured) return [];
   const offerings = await Purchases.getOfferings();
   const current = offerings.current;
   if (!current) return [];
@@ -61,6 +75,7 @@ export async function getOfferingPackages(): Promise<PurchasePackage[]> {
 }
 
 export async function purchasePackageById(id: string): Promise<boolean> {
+  if (!configured) throw new Error('Purchases are not available right now.');
   const offerings = await Purchases.getOfferings();
   const pkg = offerings.current?.availablePackages.find((p) => p.identifier === id);
   if (!pkg) throw new Error('That plan is not available right now.');
@@ -69,6 +84,7 @@ export async function purchasePackageById(id: string): Promise<boolean> {
 }
 
 export async function restorePurchases(): Promise<boolean> {
+  if (!configured) return false;
   const info = await Purchases.restorePurchases();
   return Boolean(info.entitlements.active[ENTITLEMENT]);
 }
