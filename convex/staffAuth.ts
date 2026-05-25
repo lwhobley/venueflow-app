@@ -74,6 +74,20 @@ async function recentPinFailuresForHash(ctx: any, venueId: Id<'venues'>, pinHash
   return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success && attempt.pinHash === pinHash && attempt.createdAt >= cutoff).length;
 }
 
+// Global brute-force guard: caps total failed PIN attempts across the whole
+// deployment in the lock window, so an attacker can't sweep many distinct PINs
+// (each a different hash) without being slowed. Generous cap so legitimate
+// fat-finger failures never lock out staff.
+const PIN_GLOBAL_MAX_FAILURES = 30;
+async function recentGlobalPinFailures(ctx: any) {
+  const cutoff = Date.now() - PIN_LOCK_WINDOW_MS;
+  const attempts = await ctx.db
+    .query('pinLoginAttempts')
+    .withIndex('by_createdAt', (q: any) => q.gte('createdAt', cutoff))
+    .collect();
+  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success).length;
+}
+
 async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'profiles'> | undefined, pinHash: string, success: boolean) {
   await ctx.db.insert('pinLoginAttempts', {
     venueId,
@@ -340,6 +354,9 @@ export const loginWithPin = mutation({
 
     if (await recentPinFailuresForHash(ctx, venue._id, pinHash) >= PIN_MAX_FAILURES) {
       throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
+    }
+    if (await recentGlobalPinFailures(ctx) >= PIN_GLOBAL_MAX_FAILURES) {
+      throw new Error('Too many sign-in attempts right now. Please try again shortly.');
     }
 
     const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();

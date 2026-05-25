@@ -85,7 +85,7 @@ export default defineSchema({
     pinHash: v.optional(v.string()),
     success: v.boolean(),
     createdAt: v.number(),
-  }).index('by_profile_and_createdAt', ['profileId', 'createdAt']).index('by_venue_and_createdAt', ['venueId', 'createdAt']),
+  }).index('by_profile_and_createdAt', ['profileId', 'createdAt']).index('by_venue_and_createdAt', ['venueId', 'createdAt']).index('by_createdAt', ['createdAt']),
   teams: defineTable({
     venueId: v.id('venues'),
     name: v.string(),

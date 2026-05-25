@@ -6,14 +6,12 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "channel": "preview",
       "env": {
         "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud",
         "EXPO_PUBLIC_BILLING_ENABLED": "false"
       }
     },
     "production": {
-      "channel": "production",
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_CONVEX_URL": "https://dashing-eel-31.convex.cloud",
