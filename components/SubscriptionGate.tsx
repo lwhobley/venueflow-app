@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { router, useSegments } from 'expo-router';
+import { useAuthActions } from '@convex-dev/auth/react';
 import { useQuery } from 'convex/react';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { api } from '../convex/_generated/api';
@@ -28,10 +29,38 @@ function isSubscriptionRequiredError(error: unknown): error is Error & { reason?
 
 export function SubscriptionGate({ children }: { children?: unknown }) {
   const segments = useSegments();
+  const { signOut } = useAuthActions();
   const hydrated = useAuthStore((state: AuthState) => state.hydrated);
   const user = useAuthStore((state: AuthState) => state.user);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
+  const clearSession = useAuthStore((state: AuthState) => state.clearSession);
+  const staleSessionResetRef = useRef(false);
   const me = useQuery(api.app.getMe, hydrated && user ? {} : 'skip');
+  const route = `/${segments.join('/')}`;
+  const profileMissing = hydrated && Boolean(user) && me === null;
+
+  useEffect(() => {
+    if (!user || me?.profile) {
+      staleSessionResetRef.current = false;
+    }
+  }, [me?.profile, user]);
+
+  useEffect(() => {
+    if (!profileMissing || staleSessionResetRef.current) return undefined;
+
+    const timeout = setTimeout(() => {
+      staleSessionResetRef.current = true;
+      clearSession();
+      void signOut().catch(() => {
+        // The persisted app session is already cleared; ignore auth cleanup failures.
+      });
+      if (!route.startsWith('/(auth)/')) {
+        router.replace('/(auth)/sign-in');
+      }
+    }, 800);
+
+    return () => clearTimeout(timeout);
+  }, [clearSession, profileMissing, route, signOut]);
 
   // Keep the local session in sync with the server profile (role, name, venue)
   // so changes like an admin promotion reflect without re-login.
@@ -54,7 +83,6 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   }, [me, user, setSession]);
   const billing = useQuery(api.app.getMyVenueBilling, me?.venue?._id ? {} : 'skip');
   const { isPremium } = useA0Purchases();
-  const route = `/${segments.join('/')}`;
   // When billing is disabled (no real IAP wired yet), never hard-lock users.
   const blocked = config.billingEnabled && billing ? blockedStatuses.has(billing.status) && !isPremium : false;
   const reason = reasonFromStatus(billing?.status ?? null);
@@ -95,6 +123,8 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
       globalObject.removeEventListener?.('error', handleError);
     };
   }, [reason]);
+
+  if (profileMissing) return null;
 
   return children as never;
 }
