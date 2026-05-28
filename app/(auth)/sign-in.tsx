@@ -79,10 +79,14 @@ export default function SignInScreen() {
   const palette = useDesignTheme();
   const { t } = useI18n();
 
-  const [mode, setMode] = useState<Mode>('staff');
+  // Default to the public "create account" path so anyone — a business or a
+  // solo operator — can sign up without an invitation. The PIN path is a
+  // secondary option for joining an existing team. (App Review 3.2.0: the app
+  // must be openly available to the general public, not invite-only.)
+  const [mode, setMode] = useState<Mode>('admin');
 
-  // Admin (email)
-  const [flow, setFlow] = useState<'signIn' | 'signUp'>('signIn');
+  // Admin (email) — default to Create account so the public sign-up is primary.
+  const [flow, setFlow] = useState<'signIn' | 'signUp'>('signUp');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -229,15 +233,15 @@ export default function SignInScreen() {
         <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
           <Image source={logoSource} style={styles.logo} />
           <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
-          <Text variant="bodyMedium" style={{ color: colors.muted, marginTop: 6 }}>Premium venue ops for clock-in, shifts, and floor control.</Text>
+          <Text variant="bodyMedium" style={{ color: colors.muted, marginTop: 6, textAlign: 'center' }}>Time tracking, scheduling, reservations, and team chat — for any business or solo operator. Create a free account to get started.</Text>
         </View>
 
         <SegmentedButtons
           value={mode}
           onValueChange={(v) => setMode(v as Mode)}
           buttons={[
-            { value: 'staff', label: 'Staff PIN' },
-            { value: 'admin', label: 'Owner email' },
+            { value: 'admin', label: 'Create account / Sign in' },
+            { value: 'staff', label: 'Join with PIN' },
           ]}
         />
 
@@ -273,7 +277,7 @@ export default function SignInScreen() {
         ) : (
           <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
             <Card.Content style={{ gap: spacing.md }}>
-              <Text style={{ color: colors.muted }}>Enter your venue’s business name and the 4-digit PIN your manager assigned you.</Text>
+              <Text style={{ color: colors.muted }}>Already part of a team? Enter your business name and your 4-digit PIN to join. New here? Tap “Create account / Sign in” to make your own account.</Text>
               <TextInput label="Business name" value={pinBusiness} onChangeText={setPinBusiness} autoCapitalize="words" mode="outlined" />
               <TextInput
                 label="4-digit PIN"
