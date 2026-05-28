@@ -99,7 +99,8 @@ export default function PaywallScreen() {
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-                <Text style={{ color: colors.muted }}>Invite your staff and share scheduling, the live floor plan, time clock, reservations, and team chat across your team.</Text>
+                <Text style={{ color: colors.success, fontWeight: '600' }}>Includes 14-day free trial</Text>
+                <Text style={{ color: colors.muted }}>Solo use is free. Subscribe to add team members and unlock scheduling, reservations, and team chat.</Text>
                 <Button mode="contained" buttonColor={colors.primary} loading={busy === pkg.id} disabled={!!busy || !live} onPress={() => void buy(pkg.id)}>
                   Subscribe
                 </Button>
