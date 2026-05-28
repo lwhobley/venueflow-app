@@ -79,8 +79,8 @@ export default function PaywallScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Choose your plan</Text>
-        <Text style={{ color: colors.muted }}>Start a 3‑day free trial. Cancel anytime in your Apple account settings.</Text>
+        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Add your team</Text>
+        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Subscribe to invite staff and share scheduling, the live floor, time clock, and team chat across your whole team.</Text>
       </View>
 
       {!PURCHASES_SUPPORTED ? (
@@ -99,9 +99,9 @@ export default function PaywallScreen() {
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-                <Text style={{ color: colors.muted }}>Full access: scheduling, time clock, floor plan, reservations, bar stock, reports, and team chat.</Text>
+                <Text style={{ color: colors.muted }}>Invite your staff and share scheduling, the live floor plan, time clock, reservations, and team chat across your team.</Text>
                 <Button mode="contained" buttonColor={colors.primary} loading={busy === pkg.id} disabled={!!busy || !live} onPress={() => void buy(pkg.id)}>
-                  Start free trial
+                  Subscribe
                 </Button>
               </Card.Content>
             </Card>
