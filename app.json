@@ -63,7 +63,8 @@
           "photosPermission": "Venue Wrangler lets managers upload bar inventory photos from the photo library."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-font"
     ],
     "updates": {
       "enabled": false

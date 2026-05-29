@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
+import { router } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useA0Purchases } from '../../lib/a0-purchases-stub';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
@@ -96,6 +98,9 @@ export default function StaffScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  // Freemium: the app is free for an individual; adding teammates requires a
+  // subscription. `isPremium` reflects the active entitlement.
+  const { isPremium } = useA0Purchases();
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -169,6 +174,11 @@ export default function StaffScreen() {
     setInviteMsg(null);
     setInviteErr(null);
     if (!venue?.id) return;
+    // Adding a teammate is a paid feature — send free users to upgrade.
+    if (!isPremium) {
+      router.push('/billing/paywall');
+      return;
+    }
     if (!inviteName.trim()) {
       setInviteErr('Enter a name.');
       return;
@@ -214,6 +224,11 @@ export default function StaffScreen() {
 
   const onSubmit = async () => {
     if (!venue?.id || !canManage) return;
+    // Adding a NEW teammate is paid; editing an existing one stays available.
+    if (!selectedStaffId && !isPremium) {
+      router.push('/billing/paywall');
+      return;
+    }
     await upsertStaff({
       venueId: venue.id,
       fullName,
