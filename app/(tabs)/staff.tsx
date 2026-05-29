@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, Share, View } from 'react-native';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
@@ -131,6 +131,33 @@ export default function StaffScreen() {
   const removeVenueRole = useMutation(api.staffAuth.removeVenueRole);
   const inviteStaff = useMutation(api.staffAuth.inviteStaff);
   const resetStaffPin = useMutation(api.staffAuth.resetStaffPin);
+
+  const createInvite = useMutation(api.invites.createInvite);
+  const [inviteLinkRole, setInviteLinkRole] = useState<'manager' | 'staff'>('staff');
+  const [inviteLinkPosition, setInviteLinkPosition] = useState('');
+  const [inviteLinkMsg, setInviteLinkMsg] = useState<string | null>(null);
+  const [inviteLinkErr, setInviteLinkErr] = useState<string | null>(null);
+  const [generatingLink, setGeneratingLink] = useState(false);
+
+  const onGenerateInviteLink = async () => {
+    if (!venue?.id) return;
+    setInviteLinkErr(null);
+    setInviteLinkMsg(null);
+    setGeneratingLink(true);
+    try {
+      const { inviteUrl } = await createInvite({
+        venueId: venue.id,
+        role: inviteLinkRole,
+        jobTitle: inviteLinkPosition.trim() || 'Team Member',
+      });
+      await Share.share({ message: `Join ${venue.name} on Venue Wrangler: ${inviteUrl}` });
+      setInviteLinkMsg('Invite link generated and ready to share. It expires in 7 days.');
+    } catch (e) {
+      setInviteLinkErr(e instanceof Error ? e.message : 'Could not generate link.');
+    } finally {
+      setGeneratingLink(false);
+    }
+  };
 
   const [resetTargetId, setResetTargetId] = useState<string | null>(null);
   const [resetPinValue, setResetPinValue] = useState('');
@@ -292,6 +319,32 @@ export default function StaffScreen() {
             <PaperTextInput placeholder="New role name" value={newRole} onChangeText={setNewRole} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
             <Button mode="contained" buttonColor={colors.primary} onPress={() => void onAddRole()}>Add role</Button>
           </View>
+        </Card.Content>
+      </Card>
+
+      {/* Invite staff via link (primary) */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Invite staff via link</Text>
+          <Text style={{ color: colors.muted }}>Generate a 7-day invite link. Staff tap it, create an account or sign in, and are automatically added to {venue?.name ?? 'your venue'}.</Text>
+          <Dropdown
+            label="Access level"
+            value={inviteLinkRole}
+            options={PIN_ACCESS_LEVELS}
+            onSelect={(v) => setInviteLinkRole(v as 'manager' | 'staff')}
+          />
+          <Dropdown
+            label="Role / position"
+            value={inviteLinkPosition}
+            placeholder="Select a role"
+            options={jobRoleOptions}
+            onSelect={setInviteLinkPosition}
+          />
+          {inviteLinkErr ? <Text style={{ color: colors.danger }}>{inviteLinkErr}</Text> : null}
+          {inviteLinkMsg ? <Text style={{ color: accents[2].fg }}>{inviteLinkMsg}</Text> : null}
+          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()}>
+            Generate & share invite link
+          </Button>
         </Card.Content>
       </Card>
 

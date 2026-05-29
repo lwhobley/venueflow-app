@@ -1294,6 +1294,38 @@ export const getManagerInsights = query({
   },
 });
 
+export const deleteMyAccount = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx as AnyCtx);
+    if (!userId) throw new Error('Unauthenticated');
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile) throw new Error('Profile not found');
+
+    // Release assigned shifts back to open
+    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_profileId', (q: any) => q.eq('profileId', profile._id)).take(100);
+    for (const shift of shifts) {
+      await (ctx as AnyCtx).db.patch(shift._id, { profileId: undefined, status: 'open' as const });
+    }
+
+    // Delete push tokens
+    const tokens = await (ctx as AnyCtx).db.query('pushTokens').withIndex('by_profile', (q: any) => q.eq('profileId', profile._id)).take(100);
+    for (const token of tokens) {
+      await (ctx as AnyCtx).db.delete(token._id);
+    }
+
+    // Delete availability entries
+    const avail = await (ctx as AnyCtx).db.query('availability').withIndex('by_profile', (q: any) => q.eq('profileId', profile._id)).take(100);
+    for (const a of avail) {
+      await (ctx as AnyCtx).db.delete(a._id);
+    }
+
+    await (ctx as AnyCtx).db.delete(profile._id);
+    return null;
+  },
+});
+
 export const exportTimeEntriesCsv = query({
   args: {},
   returns: v.union(v.null(), v.string()),

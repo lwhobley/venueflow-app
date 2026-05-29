@@ -19,7 +19,7 @@ const en = {
     profileFallback: 'Profile',
   },
   common: {
-    venueWrangler: 'VenueWrangler\u2122',
+    venueWrangler: 'Venue Wrangler',
     loungeability: 'by Loungeability LLC',
     loading: 'Loading...',
     unread: 'unread',

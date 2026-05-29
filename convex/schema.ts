@@ -549,6 +549,17 @@ export default defineSchema({
     paidAt: v.union(v.number(), v.null()),
   }).index('by_venue_time', ['venueId', 'createdAt']).index('by_stripe_id', ['stripeInvoiceId']),
 
+  invites: defineTable({
+    venueId: v.id('venues'),
+    token: v.string(),
+    role,
+    jobTitle: v.string(),
+    createdBy: v.id('profiles'),
+    usedBy: v.optional(v.id('profiles')),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  }).index('by_token', ['token']).index('by_venue', ['venueId']),
+
   // AI-generated "Cosmic Insights" for the dashboard. A cron regenerates a
   // fresh batch every 8 hours; the dashboard shows the latest batch.
   cosmicInsights: defineTable({
