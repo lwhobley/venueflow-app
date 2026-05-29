@@ -1,6 +1,9 @@
-import { Platform, ScrollView } from 'react-native';
+import { Alert, Platform, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
+import { useMutation } from 'convex/react';
+import { useAuthActions } from '@convex-dev/auth/react';
+import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
@@ -10,6 +13,8 @@ export default function ProfileScreen() {
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
   const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
   const canViewBilling = user?.role === 'admin' || user?.role === 'owner';
+  const { signOut } = useAuthActions();
+  const deleteAccount = useMutation(api.app.deleteMyAccount);
 
   const onLogout = async () => {
     clearSession();
@@ -21,8 +26,31 @@ export default function ProfileScreen() {
   };
 
   const onOpenBilling = () => {
-    // iOS/Android must use in-app purchases (App Store rules); web uses Stripe.
     router.push(Platform.OS === 'web' ? '/billing' : '/billing/paywall');
+  };
+
+  const onDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This permanently deletes your profile and all personal data from Venue Wrangler. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete permanently',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAccount({});
+              clearSession();
+              try { await signOut(); } catch { /* already signed out */ }
+              router.replace('/(auth)/sign-in');
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Could not delete account. Try again.');
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -55,8 +83,12 @@ export default function ProfileScreen() {
         </Button>
       ) : null}
 
-      <Button mode="outlined" textColor={colors.primary} onPress={onLogout}>
+      <Button mode="outlined" textColor={colors.primary} onPress={onLogout} style={{ marginBottom: spacing.sm }}>
         Sign out
+      </Button>
+
+      <Button mode="text" textColor={colors.danger} onPress={onDeleteAccount}>
+        Delete account
       </Button>
     </ScrollView>
   );

@@ -1,10 +1,10 @@
 import React, { useRef, useState } from 'react';
 import { Alert, Animated, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Button, Card, Menu, SegmentedButtons, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Chip, Menu, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { useAuthActions } from '@convex-dev/auth/react';
-import { useMutation } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing, useDesignTheme } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -74,10 +74,21 @@ export default function SignInScreen() {
   const bootstrapProfile = useMutation(api.app.bootstrapProfile);
   const registerVenue = useMutation(api.app.registerVenue);
   const loginWithPin = useMutation(api.staffAuth.loginWithPin);
+  const redeemInvite = useMutation(api.invites.redeemInvite);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
   const palette = useDesignTheme();
   const { t } = useI18n();
+
+  // Read invite token from URL params (deep link: venuewrangler://join?invite=TOKEN)
+  const { invite: inviteParam } = useLocalSearchParams<{ invite?: string }>();
+  const inviteToken = typeof inviteParam === 'string' ? inviteParam : undefined;
+
+  // Look up the invite preview so we can show the venue name before sign-in
+  const invitePreview = useQuery(
+    api.invites.getInvitePreview,
+    inviteToken ? { token: inviteToken } : 'skip',
+  );
 
   // Default to the public "create account" path so anyone — a business or a
   // solo operator — can sign up without an invitation. The PIN path is a
@@ -119,14 +130,7 @@ export default function SignInScreen() {
     });
   };
 
-  // After signIn() resolves, the Convex client may briefly still be settling the
-  // new auth token, so bootstrapProfile can throw "Unauthenticated" for a moment.
-  // We retry until it succeeds. We deliberately do NOT match on email: the stored
-  // profile email can differ from the typed login (e.g. PIN handles, or an admin
-  // whose token carried no email and fell back to a placeholder). The wrong-account
-  // risk is already handled by resetExistingSession() signing out first, so the
-  // first successful bootstrap belongs to the account we just signed in as.
-  const finishSession = async (options?: { staffIntro?: boolean }) => {
+  const finishSession = async (options?: { staffIntro?: boolean; inviteToken?: string }) => {
     let last: { profile: any; venue: any } | null = null;
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -141,6 +145,20 @@ export default function SignInScreen() {
     if (!last) {
       throw lastError instanceof Error ? lastError : new Error('Sign-in did not complete. Please try again.');
     }
+
+    // If an invite token is present and the user has no venue yet, redeem it.
+    if (options?.inviteToken && !last.venue) {
+      try {
+        last = await redeemInvite({ token: options.inviteToken });
+      } catch (e) {
+        Alert.alert(
+          'Invite error',
+          e instanceof Error ? e.message : 'Could not redeem invite. You can join manually via the staff screen.',
+        );
+        // Continue sign-in without venue
+      }
+    }
+
     const { profile, venue } = last;
     setSession({
       user: { id: profile._id, email: profile.email, full_name: profile.fullName, role: profile.role, job_title: profile.jobTitle, venue_id: profile.venueId ?? null, is_demo: profile.isDemo },
@@ -151,14 +169,32 @@ export default function SignInScreen() {
     router.replace('/(tabs)/home');
   };
 
-  // Drop any existing session (Convex Auth token + persisted store) before
-  // starting a new sign-in so a previous account can't leak through.
   const resetExistingSession = async () => {
     clearSession();
     try {
       await signOut();
     } catch {
       // No active session to clear — ignore.
+    }
+  };
+
+  // Invite-mode: user arrived via an invite link. We skip the business-setup fields
+  // and automatically redeem the invite after sign-in or sign-up.
+  const onInviteSubmit = async () => {
+    const trimmed = email.trim();
+    if (!trimmed.includes('@') || password.trim().length < 6) {
+      Alert.alert('Sign in failed', 'Enter a valid email and a password with at least 6 characters.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await resetExistingSession();
+      await signIn('password', { email: trimmed, password, flow });
+      await finishSession({ inviteToken });
+    } catch (e) {
+      Alert.alert('Sign in failed', e instanceof Error ? e.message : 'Try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -206,7 +242,7 @@ export default function SignInScreen() {
 
   const onPinSubmit = async () => {
     if (!pinBusiness.trim()) {
-      Alert.alert('Business name required', 'Enter your venue’s business name.');
+      Alert.alert('Business name required', "Enter your venue's business name.");
       return;
     }
     if (!/^\d{4}$/.test(pin)) {
@@ -227,6 +263,67 @@ export default function SignInScreen() {
     }
   };
 
+  // When the app is opened via an invite link, show a dedicated invite-join UI.
+  if (inviteToken) {
+    const isExpired = invitePreview?.expired === true;
+    const isLoading = invitePreview === undefined;
+
+    return (
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
+          <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
+            <Image source={logoSource} style={styles.logo} />
+            <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
+          </View>
+
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              {isLoading ? (
+                <Text style={{ color: colors.muted, textAlign: 'center' }}>Loading invite…</Text>
+              ) : invitePreview === null ? (
+                <Text style={{ color: colors.danger, textAlign: 'center' }}>This invite link is invalid.</Text>
+              ) : isExpired ? (
+                <Text style={{ color: colors.danger, textAlign: 'center' }}>This invite link has expired or already been used. Ask your manager for a new one.</Text>
+              ) : (
+                <>
+                  <View style={{ alignItems: 'center', gap: 6, marginBottom: spacing.sm }}>
+                    <Text variant="titleLarge" style={{ fontWeight: '700', color: colors.primary, textAlign: 'center' }}>
+                      You're invited to join
+                    </Text>
+                    <Text variant="headlineSmall" style={{ fontWeight: '800', textAlign: 'center' }}>
+                      {invitePreview.venueName}
+                    </Text>
+                    <Chip compact>{invitePreview.jobTitle}</Chip>
+                  </View>
+
+                  <SegmentedButtons
+                    value={flow}
+                    onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
+                    buttons={[{ value: 'signUp', label: 'Create account' }, { value: 'signIn', label: 'Sign in' }]}
+                  />
+
+                  {flow === 'signUp' ? (
+                    <TextInput label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
+                  ) : null}
+                  <TextInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
+                  <TextInput label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
+                  <Button mode="contained" buttonColor={colors.primary} loading={submitting} onPress={() => void onInviteSubmit()}>
+                    {flow === 'signUp' ? `Join ${invitePreview.venueName}` : 'Sign in & join'}
+                  </Button>
+                </>
+              )}
+            </Card.Content>
+          </Card>
+
+          <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
+            <Text style={{ color: palette.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
+            <Text style={{ color: palette.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
+
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
@@ -241,7 +338,7 @@ export default function SignInScreen() {
           onValueChange={(v) => setMode(v as Mode)}
           buttons={[
             { value: 'admin', label: 'Create account / Sign in' },
-            { value: 'staff', label: 'Join with PIN' },
+            { value: 'staff', label: 'Join a team' },
           ]}
         />
 
@@ -256,7 +353,7 @@ export default function SignInScreen() {
               {flow === 'signUp' ? (
                 <>
                   <TextInput label="Business name" value={businessName} onChangeText={setBusinessName} mode="outlined" />
-                  <Text style={{ color: colors.muted, marginTop: -6, fontSize: 12 }}>Your staff sign in with this name + their PIN.</Text>
+                  <Text style={{ color: colors.muted, marginTop: -6, fontSize: 12 }}>Your staff receive an invite link to join your venue.</Text>
                   <TextInput label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
                   <TextInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" />
                   <TextInput label="Address" value={address} onChangeText={setAddress} mode="outlined" />
@@ -277,21 +374,29 @@ export default function SignInScreen() {
         ) : (
           <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
             <Card.Content style={{ gap: spacing.md }}>
-              <Text style={{ color: colors.muted }}>Already part of a team? Enter your business name and your 4-digit PIN to join. New here? Tap “Create account / Sign in” to make your own account.</Text>
-              <TextInput label="Business name" value={pinBusiness} onChangeText={setPinBusiness} autoCapitalize="words" mode="outlined" />
-              <TextInput
-                label="4-digit PIN"
-                value={pin}
-                onChangeText={(t) => setPin(t.replace(/\D/g, '').slice(0, 4))}
-                onSubmitEditing={() => void onPinSubmit()}
-                keyboardType="number-pad"
-                secureTextEntry
-                maxLength={4}
-                mode="outlined"
-              />
-              <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={pin.length !== 4 || !pinBusiness.trim()} onPress={() => void onPinSubmit()}>
-                Sign in
-              </Button>
+              <View style={{ gap: 6 }}>
+                <Text variant="titleSmall" style={{ fontWeight: '700' }}>Joining via invite link</Text>
+                <Text style={{ color: colors.muted }}>Ask your manager to send you an invite link from the Staff screen. Tap the link and you'll be joined automatically.</Text>
+              </View>
+
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.sm }}>
+                <Text variant="titleSmall" style={{ fontWeight: '700' }}>Or sign in with PIN</Text>
+                <Text style={{ color: colors.muted }}>Enter your venue name and 4-digit PIN if your manager set one up for you.</Text>
+                <TextInput label="Business name" value={pinBusiness} onChangeText={setPinBusiness} autoCapitalize="words" mode="outlined" />
+                <TextInput
+                  label="4-digit PIN"
+                  value={pin}
+                  onChangeText={(t) => setPin(t.replace(/\D/g, '').slice(0, 4))}
+                  onSubmitEditing={() => void onPinSubmit()}
+                  keyboardType="number-pad"
+                  secureTextEntry
+                  maxLength={4}
+                  mode="outlined"
+                />
+                <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={pin.length !== 4 || !pinBusiness.trim()} onPress={() => void onPinSubmit()}>
+                  Sign in with PIN
+                </Button>
+              </View>
             </Card.Content>
           </Card>
         )}
