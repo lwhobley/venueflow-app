@@ -6,7 +6,7 @@ import { Button, Card, Chip, Menu, SegmentedButtons, Text, TextInput } from 'rea
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { colors, spacing, useDesignTheme } from '../../lib/theme';
+import { spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
 
@@ -16,6 +16,16 @@ type SessionPayload = { profile: any; venue: any | null };
 const logoSource = require('../../assets/venue-wrangler-logo.jpg');
 const introVideoSource = require('../../assets/video.mp4');
 const ADMIN_CONTACT_EMAIL = 'admin@venuewrangler.com';
+const authColors = {
+  background: '#FFFFFF',
+  surface: '#FFFFFF',
+  primary: '#2F7D46',
+  text: '#1F241E',
+  muted: '#6F766B',
+  border: '#E8E2D8',
+  danger: '#B85047',
+  buttonText: '#FFFFFF',
+};
 
 const VENUE_TYPES = ['Restaurant', 'Bar', 'Lounge', 'Café', 'Nightclub', 'Hotel', 'Catering', 'Food truck', 'Other'];
 const STAFF_RANGES = [
@@ -42,18 +52,18 @@ function PickerDropdown({
   const current = options.find((o) => o.value === value);
   return (
     <View>
-      <Text style={{ color: colors.muted, marginBottom: 4 }}>{label}</Text>
+      <Text style={{ color: authColors.muted, marginBottom: 4 }}>{label}</Text>
       <Menu
         visible={open}
         onDismiss={() => setOpen(false)}
         anchor={
           <Button
             mode="outlined"
-            textColor={colors.charcoal}
+            textColor={authColors.text}
             onPress={() => setOpen(true)}
             contentStyle={{ flexDirection: 'row-reverse', justifyContent: 'space-between' }}
-            icon={() => <Text style={{ color: colors.muted, fontSize: 16, lineHeight: 18 }}>▾</Text>}
-            style={{ borderColor: colors.border, justifyContent: 'flex-start' }}
+            icon={() => <Text style={{ color: authColors.muted, fontSize: 16, lineHeight: 18 }}>▾</Text>}
+            style={{ borderColor: authColors.border, backgroundColor: authColors.surface, justifyContent: 'flex-start' }}
           >
             {current?.label ?? placeholder}
           </Button>
@@ -78,8 +88,23 @@ export default function SignInScreen() {
   const redeemInvite = useMutation(api.invites.redeemInvite);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
-  const palette = useDesignTheme();
   const { t } = useI18n();
+  const authInputProps = {
+    outlineColor: authColors.border,
+    activeOutlineColor: authColors.primary,
+    textColor: authColors.text,
+    placeholderTextColor: authColors.muted,
+    style: { backgroundColor: authColors.surface },
+  };
+  const authControlTheme = {
+    colors: {
+      primary: authColors.primary,
+      secondaryContainer: '#E5F1E7',
+      onSecondaryContainer: authColors.text,
+      onSurface: authColors.text,
+      outline: authColors.border,
+    },
+  };
 
   // Read invite token from URL params (deep link: venuewrangler://join?invite=TOKEN)
   const { invite: inviteParam } = useLocalSearchParams<{ invite?: string }>();
@@ -271,45 +296,46 @@ export default function SignInScreen() {
     const isLoading = invitePreview === undefined;
 
     return (
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: authColors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
           <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
             <Image source={logoSource} style={styles.logo} />
-            <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
+            <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
           </View>
 
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={styles.authCard}>
             <Card.Content style={{ gap: spacing.sm }}>
               {isLoading ? (
-                <Text style={{ color: colors.muted, textAlign: 'center' }}>Loading invite…</Text>
+                <Text style={{ color: authColors.muted, textAlign: 'center' }}>Loading invite…</Text>
               ) : invitePreview === null ? (
-                <Text style={{ color: colors.danger, textAlign: 'center' }}>This invite link is invalid.</Text>
+                <Text style={{ color: authColors.danger, textAlign: 'center' }}>This invite link is invalid.</Text>
               ) : isExpired ? (
-                <Text style={{ color: colors.danger, textAlign: 'center' }}>This invite link has expired or already been used. Ask your manager for a new one.</Text>
+                <Text style={{ color: authColors.danger, textAlign: 'center' }}>This invite link has expired or already been used. Ask your manager for a new one.</Text>
               ) : (
                 <>
                   <View style={{ alignItems: 'center', gap: 6, marginBottom: spacing.sm }}>
-                    <Text variant="titleLarge" style={{ fontWeight: '700', color: colors.primary, textAlign: 'center' }}>
+                    <Text variant="titleLarge" style={{ fontWeight: '700', color: authColors.primary, textAlign: 'center' }}>
                       You're invited to join
                     </Text>
-                    <Text variant="headlineSmall" style={{ fontWeight: '800', textAlign: 'center' }}>
+                    <Text variant="headlineSmall" style={{ fontWeight: '800', textAlign: 'center', color: authColors.text }}>
                       {invitePreview.venueName}
                     </Text>
                     <Chip compact>{invitePreview.jobTitle}</Chip>
                   </View>
 
                   <SegmentedButtons
+                    theme={authControlTheme}
                     value={flow}
                     onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
                     buttons={[{ value: 'signUp', label: 'Create account' }, { value: 'signIn', label: 'Sign in' }]}
                   />
 
                   {flow === 'signUp' ? (
-                    <TextInput label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
+                    <TextInput {...authInputProps} label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
                   ) : null}
-                  <TextInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
-                  <TextInput label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
-                  <Button mode="contained" buttonColor={colors.primary} loading={submitting} onPress={() => void onInviteSubmit()}>
+                  <TextInput {...authInputProps} label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
+                  <TextInput {...authInputProps} label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
+                  <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void onInviteSubmit()}>
                     {flow === 'signUp' ? `Join ${invitePreview.venueName}` : 'Sign in & join'}
                   </Button>
                 </>
@@ -318,8 +344,8 @@ export default function SignInScreen() {
           </Card>
 
           <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
-            <Text style={{ color: palette.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
-            <Text style={{ color: palette.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
+            <Text style={{ color: authColors.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
+            <Text style={{ color: authColors.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -327,15 +353,16 @@ export default function SignInScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: palette.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: authColors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
           <Image source={logoSource} style={styles.logo} />
-          <Text variant="headlineLarge" style={{ color: colors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
-          <Text variant="bodyMedium" style={{ color: colors.muted, marginTop: 6, textAlign: 'center' }}>Time tracking, scheduling, reservations, and team chat — for any business or solo operator. Create a free account to get started.</Text>
+          <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
+          <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>Time tracking, scheduling, reservations, and team chat — for any business or solo operator. Create a free account to get started.</Text>
         </View>
 
         <SegmentedButtons
+          theme={authControlTheme}
           value={mode}
           onValueChange={(v) => setMode(v as Mode)}
           buttons={[
@@ -345,47 +372,49 @@ export default function SignInScreen() {
         />
 
         {mode === 'admin' ? (
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={styles.authCard}>
             <Card.Content style={{ gap: spacing.md }}>
               <SegmentedButtons
+                theme={authControlTheme}
                 value={flow}
                 onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
                 buttons={[{ value: 'signIn', label: 'Sign in' }, { value: 'signUp', label: 'Create account' }]}
               />
               {flow === 'signUp' ? (
                 <>
-                  <TextInput label="Business name" value={businessName} onChangeText={setBusinessName} mode="outlined" />
-                  <Text style={{ color: colors.muted, marginTop: -6, fontSize: 12 }}>Your staff receive an invite link to join your venue.</Text>
-                  <TextInput label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
-                  <TextInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" />
-                  <TextInput label="Address" value={address} onChangeText={setAddress} mode="outlined" />
+                  <TextInput {...authInputProps} label="Business name" value={businessName} onChangeText={setBusinessName} mode="outlined" />
+                  <Text style={{ color: authColors.muted, marginTop: -6, fontSize: 12 }}>Your staff receive an invite link to join your venue.</Text>
+                  <TextInput {...authInputProps} label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
+                  <TextInput {...authInputProps} label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" />
+                  <TextInput {...authInputProps} label="Address" value={address} onChangeText={setAddress} mode="outlined" />
                   <PickerDropdown label="Venue type" value={venueType} placeholder="Select type" options={VENUE_TYPES.map((t) => ({ value: t, label: t }))} onSelect={setVenueType} />
                   <PickerDropdown label="Number of staff" value={staffRange} placeholder="Select team size" options={STAFF_RANGES} onSelect={setStaffRange} />
                   {staffRange === '50+' ? (
-                    <Text style={{ color: colors.danger }}>50+ staff are set up manually — contact {ADMIN_CONTACT_EMAIL}.</Text>
+                    <Text style={{ color: authColors.danger }}>50+ staff are set up manually — contact {ADMIN_CONTACT_EMAIL}.</Text>
                   ) : null}
                 </>
               ) : null}
-              <TextInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
-              <TextInput label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
-              <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={flow === 'signUp' && staffRange === '50+'} onPress={() => void onAdminSubmit()}>
+              <TextInput {...authInputProps} label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
+              <TextInput {...authInputProps} label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
+              <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} disabled={flow === 'signUp' && staffRange === '50+'} onPress={() => void onAdminSubmit()}>
                 {flow === 'signUp' ? 'Create venue account' : 'Continue'}
               </Button>
             </Card.Content>
           </Card>
         ) : (
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={styles.authCard}>
             <Card.Content style={{ gap: spacing.md }}>
               <View style={{ gap: 6 }}>
-                <Text variant="titleSmall" style={{ fontWeight: '700' }}>Joining via invite link</Text>
-                <Text style={{ color: colors.muted }}>Ask your manager to send you an invite link from the Staff screen. Tap the link and you'll be joined automatically.</Text>
+                <Text variant="titleSmall" style={{ fontWeight: '700', color: authColors.text }}>Joining via invite link</Text>
+                <Text style={{ color: authColors.muted }}>Ask your manager to send you an invite link from the Staff screen. Tap the link and you'll be joined automatically.</Text>
               </View>
 
-              <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.sm }}>
-                <Text variant="titleSmall" style={{ fontWeight: '700' }}>Or sign in with PIN</Text>
-                <Text style={{ color: colors.muted }}>Enter your venue name and 4-digit PIN if your manager set one up for you.</Text>
-                <TextInput label="Business name" value={pinBusiness} onChangeText={setPinBusiness} autoCapitalize="words" mode="outlined" />
+              <View style={{ borderTopWidth: 1, borderTopColor: authColors.border, paddingTop: spacing.md, gap: spacing.sm }}>
+                <Text variant="titleSmall" style={{ fontWeight: '700', color: authColors.text }}>Or sign in with PIN</Text>
+                <Text style={{ color: authColors.muted }}>Enter your venue name and 4-digit PIN if your manager set one up for you.</Text>
+                <TextInput {...authInputProps} label="Business name" value={pinBusiness} onChangeText={setPinBusiness} autoCapitalize="words" mode="outlined" />
                 <TextInput
+                  {...authInputProps}
                   label="4-digit PIN"
                   value={pin}
                   onChangeText={(t) => setPin(t.replace(/\D/g, '').slice(0, 4))}
@@ -395,7 +424,7 @@ export default function SignInScreen() {
                   maxLength={4}
                   mode="outlined"
                 />
-                <Button mode="contained" buttonColor={colors.primary} loading={submitting} disabled={pin.length !== 4 || !pinBusiness.trim()} onPress={() => void onPinSubmit()}>
+                <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} disabled={pin.length !== 4 || !pinBusiness.trim()} onPress={() => void onPinSubmit()}>
                   Sign in with PIN
                 </Button>
               </View>
@@ -403,8 +432,8 @@ export default function SignInScreen() {
           </Card>
         )}
         <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
-          <Text style={{ color: palette.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
-          <Text style={{ color: palette.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
+          <Text style={{ color: authColors.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
+          <Text style={{ color: authColors.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
         </View>
       </ScrollView>
       {showIntro ? (
@@ -431,9 +460,19 @@ const styles = StyleSheet.create({
     aspectRatio: 1024 / 559,
     resizeMode: 'contain',
   },
+  authCard: {
+    backgroundColor: authColors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: authColors.border,
+    shadowColor: '#817B6B',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
   introOverlay: {
     zIndex: 20,
-    backgroundColor: colors.charcoal,
+    backgroundColor: authColors.text,
     alignItems: 'center',
     justifyContent: 'center',
   },
