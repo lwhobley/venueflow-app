@@ -1,5 +1,5 @@
 """Generate App Store product-page screenshots (1290x2796, RGB, no alpha)
-matching Venue Wrangler's dark teal theme (lib/theme.ts designPalettes.dark).
+matching Venue Wrangler's current clean white theme.
 Each is a caption headline + a stylized feature panel. Output to
 screenshots/appstore/.
 """
@@ -7,18 +7,18 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 
 W, H = 1290, 2796
-BG = (7, 16, 21)
-SURF = (16, 30, 39)
-SURF2 = (22, 39, 49)
-BORDER = (30, 58, 64)
-PRIMARY = (85, 240, 222)
-SECOND = (123, 140, 255)
-CHAR = (242, 250, 249)
-MUTED = (157, 179, 184)
-SUCCESS = (97, 242, 161)
-WARN = (248, 199, 106)
-DANGER = (255, 107, 122)
-DKTEXT = (5, 28, 26)
+BG = (255, 255, 255)
+SURF = (255, 255, 255)
+SURF2 = (247, 249, 245)
+BORDER = (229, 224, 214)
+PRIMARY = (49, 132, 75)
+SECOND = (189, 126, 43)
+CHAR = (31, 36, 30)
+MUTED = (107, 115, 104)
+SUCCESS = (48, 145, 80)
+WARN = (183, 122, 40)
+DANGER = (195, 74, 67)
+DKTEXT = (255, 255, 255)
 
 F = "C:/Windows/Fonts/"
 def fnt(n, s): return ImageFont.truetype(os.path.join(F, n), s)
@@ -108,7 +108,7 @@ for col, pat in rows:
             d.text((cx+28, ry+30), "5:00p", font=f_sm, fill=CHAR)
             d.text((cx+28, ry+78), "Close", font=f_sm, fill=MUTED)
         else:
-            card(d, cx, ry, colw-24, 150, r=20, fill=(11,22,28), outline=(20,36,44), ow=2)
+            card(d, cx, ry, colw-24, 150, r=20, fill=SURF2, outline=BORDER, ow=2)
     ry += 170
 paths.append(save(img, "02-schedule.png"))
 
@@ -123,7 +123,7 @@ d.text((W//2 - d.textlength(big, font=f_big)/2, y0+130), big, font=f_big, fill=C
 d.text((W//2 - d.textlength("Today, since 5:00 PM", font=f_body)/2, y0+260), "Today, since 5:00 PM", font=f_body, fill=MUTED)
 bw = W-2*PAD-160
 d.rounded_rectangle([PAD+80, y0+360, PAD+80+bw, y0+470], radius=26, fill=DANGER)
-d.text((W//2 - d.textlength("Clock Out", font=f_card)/2, y0+390), "Clock Out", font=f_card, fill=(40,8,10))
+d.text((W//2 - d.textlength("Clock Out", font=f_card)/2, y0+390), "Clock Out", font=f_card, fill=DKTEXT)
 # recent punches
 py = y0+700
 d.text((PAD, py), "Recent punches", font=f_bodyb, fill=CHAR); py += 70
@@ -139,7 +139,7 @@ paths.append(save(img, "03-timeclock.png"))
 img, d = new()
 header(d, "Live floor &\nreservations", "See every table, party, and open seat update in real time.")
 y0 = 500
-card(d, PAD, y0, W-2*PAD, 1500, r=36, fill=(10,20,26))
+card(d, PAD, y0, W-2*PAD, 1500, r=36, fill=(250, 251, 248))
 tables = [(0.2,0.12,"T1",SUCCESS,"o"),(0.55,0.12,"T2",PRIMARY,"o"),(0.8,0.2,"T3",MUTED,"o"),
           (0.18,0.4,"T4",WARN,"s"),(0.5,0.42,"T5",SUCCESS,"s"),(0.8,0.45,"T6",PRIMARY,"o"),
           (0.25,0.68,"T7",MUTED,"o"),(0.55,0.7,"VIP",SECOND,"s"),(0.82,0.72,"T9",SUCCESS,"o")]
@@ -161,10 +161,10 @@ paths.append(save(img, "04-floorplan.png"))
 
 # 5. Team chat
 img, d = new()
-header(d, "Keep the team\nin sync", "Shift notes, swaps, and announcements in one place — no group texts.")
+header(d, "Keep the team\nin sync", "Shift notes, swaps, and announcements in one place - no group texts.")
 y0 = 500
 msgs = [("Maria (Manager)","Patio section needs one more for the 8pm rush.",False),
-        ("You","On it — moving Devon over.",True),
+        ("You","On it - moving Devon over.",True),
         ("Devon","Clocked in, heading to patio now.",False),
         ("Maria (Manager)","Thanks team. 12-top just confirmed for 8:30.",False),
         ("You","Got table 5 prepped and ready.",True)]

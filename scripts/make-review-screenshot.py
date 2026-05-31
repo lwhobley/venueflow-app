@@ -1,24 +1,22 @@
-"""Generate a placeholder paywall review screenshot for App Store Connect.
-Matches the app's actual paywall UI (app/billing/paywall.tsx, dark teal
-theme) and uses an App-Store-accepted iPhone 6.5" resolution (1242x2688)
-so ASC accepts the upload.
+"""Generate a paywall review screenshot for App Store Connect.
+Matches the app's clean white theme and uses an App-Store-accepted iPhone
+portrait resolution (1290x2796) so ASC accepts the upload.
 
-Products: Starter $79.99 / Pro $149.99 / Enterprise $299.99 — one 'pro'
+Products: Starter $79.99 / Pro $149.99 / Enterprise $299.99 - one 'pro'
 entitlement unlocks the whole app.
 """
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-W, H = 1290, 2796  # iPhone 6.7" — current accepted App Store screenshot size
+W, H = 1290, 2796  # iPhone portrait, current accepted App Store screenshot size
 
-# dark palette (lib/theme.ts designPalettes.dark)
-BG = (7, 16, 21)
-SURFACE = (16, 30, 39)
-BORDER = (30, 58, 64)
-PRIMARY = (85, 240, 222)
-CHARCOAL = (242, 250, 249)
-MUTED = (157, 179, 184)
-BTN_TEXT = (5, 28, 26)
+BG = (255, 255, 255)
+SURFACE = (255, 255, 255)
+BORDER = (229, 224, 214)
+PRIMARY = (49, 132, 75)
+CHARCOAL = (31, 36, 30)
+MUTED = (107, 115, 104)
+BTN_TEXT = (255, 255, 255)
 
 FONTS = "C:/Windows/Fonts/"
 def font(name, size):
@@ -57,7 +55,7 @@ def ctext(y, text, fnt, fill):
     d.text((W/2 - w/2, y), text, font=fnt, fill=fill)
 
 # Header
-d.text((PAD, 96), "Choose your plan", font=f_head, fill=PRIMARY)
+d.text((PAD, 96), "Choose your plan", font=f_head, fill=CHARCOAL)
 sy = 224
 for line in wrap("Start a 3-day free trial. Cancel anytime in your Apple account settings.", f_sub, W - 2*PAD):
     d.text((PAD, sy), line, font=f_sub, fill=MUTED); sy += 50
