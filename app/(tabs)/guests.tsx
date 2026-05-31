@@ -6,6 +6,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { canManageVenue } from '../../lib/permissions';
 
 type GuestRow = {
   _id: Id<'guests'>;
@@ -31,8 +32,8 @@ function dateText(value: number | null) {
 
 export default function GuestsScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const user = useAuthStore((state: AuthState) => state.user);
-  const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const me = useQuery(api.app.getMe);
+  const canManage = canManageVenue(me?.profile.role);
   const guests = useQuery(api.guests.listGuests, canManage && venue?.id ? { venueId: venue.id } : 'skip') as GuestRow[] | undefined;
   const upsertGuest = useMutation(api.guests.upsertGuest);
   const removeGuest = useMutation(api.guests.removeGuest);

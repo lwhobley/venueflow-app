@@ -27,7 +27,6 @@ export default function HomeScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const dashboard = useQuery(api.app.getDashboard);
-  const managerDashboard = useQuery(api.operations.getManagerDashboard, venue?.id ? { venueId: venue.id } : 'skip') as any;
   const notifications = useQuery(api.app.getNotifications);
   const markNotificationRead = useMutation(api.app.markNotificationRead);
   const upsertManagerGoal = useMutation(api.operations.upsertManagerGoal);
@@ -39,11 +38,12 @@ export default function HomeScreen() {
   const loading = dashboard === undefined;
 
   const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? '';
-  const role = dashboard?.profile.role ?? user?.role ?? 'staff';
+  const role = dashboard?.profile.role ?? 'staff';
   const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
   const venueName = dashboard?.venue.name ?? venue?.name ?? '';
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
   const canManage = role === 'admin' || role === 'owner' || role === 'manager';
+  const managerDashboard = useQuery(api.operations.getManagerDashboard, canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [goalTitle, setGoalTitle] = useState('');

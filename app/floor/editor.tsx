@@ -6,6 +6,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { canManageVenue } from '../../lib/permissions';
 
 type Shape = 'round' | 'square' | 'rect' | 'booth';
 type Section = 'main' | 'patio' | 'bar' | 'vip';
@@ -329,11 +330,11 @@ function ChairNode({
 
 export default function FloorEditorScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const user = useAuthStore((state: AuthState) => state.user);
+  const me = useQuery(api.app.getMe);
   const floor = useQuery(api.floor.getActiveFloorPlan, venue?.id ? { venueId: venue.id } : 'skip') as any;
   const saveFloorPlan = useMutation(api.floor.saveFloorPlan);
 
-  const canEdit = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const canEdit = canManageVenue(me?.profile.role);
 
   const [tables, setTables] = useState<DraftTable[]>([]);
   const [chairs, setChairs] = useState<DraftChair[]>([]);
@@ -484,7 +485,6 @@ export default function FloorEditorScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
         <Text style={{ color: colors.muted }}>Only managers and admins can edit the floor plan.</Text>
-        <Button mode="text" onPress={() => router.back()}>Back</Button>
       </View>
     );
   }

@@ -2,19 +2,20 @@ import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, IconButton, Text, TextInput } from 'react-native-paper';
-import { useMutation } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { getPreciseLocation } from '../../lib/location';
+import { canManageVenue } from '../../lib/permissions';
 
 export default function VenueSettingsScreen() {
-  const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const setVenue = useAuthStore((state: AuthState) => state.setVenue);
   const updateVenue = useMutation(api.app.updateVenue);
 
-  const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const me = useQuery(api.app.getMe);
+  const canManage = canManageVenue(me?.profile.role);
 
   const [name, setName] = useState(venue?.name ?? '');
   const [lat, setLat] = useState(venue ? String(venue.latitude) : '');
@@ -83,7 +84,6 @@ export default function VenueSettingsScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
         <Text style={{ color: colors.muted }}>Only managers and admins can edit venue settings.</Text>
-        <Button mode="text" onPress={() => router.back()}>Back</Button>
       </View>
     );
   }

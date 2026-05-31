@@ -6,6 +6,7 @@ import { useAction, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { canManageBilling } from '../../lib/permissions';
 
 const plans = [
   { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$79.99' },
@@ -18,6 +19,7 @@ type PlanId = (typeof plans)[number]['id'];
 export default function BillingScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
+  const me = useQuery(api.app.getMe);
   const billing = useQuery(api.app.getMyVenueBilling, user && venue?.id ? {} : 'skip');
   const createCheckout = useAction(api.billing.createStripeCheckoutSession);
   const createPortal = useAction(api.billing.createStripeBillingPortalSession);
@@ -25,7 +27,7 @@ export default function BillingScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 3;
-  const canManageBilling = user?.role === 'admin' || user?.role === 'owner';
+  const canEditBilling = canManageBilling(me?.profile.role);
 
   const openCheckout = async (planId: PlanId) => {
     setLoading(planId);
@@ -53,6 +55,22 @@ export default function BillingScreen() {
     }
   };
 
+  if (me === undefined) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
+        <Text style={{ color: colors.muted }}>Loading billing access...</Text>
+      </View>
+    );
+  }
+
+  if (!canEditBilling) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
+        <Text style={{ color: colors.muted }}>Billing is available to venue owners and admins.</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
       <Card style={{ backgroundColor: colors.surface }}>
@@ -75,23 +93,15 @@ export default function BillingScreen() {
                 <Text style={{ color: colors.muted }}>{plan.users}</Text>
                 <Text style={{ color: colors.muted }}>Scheduling, time clock, reservations, floor plan, bar stock, reports, and integrations.</Text>
                 {current ? <Text style={{ color: colors.success, fontWeight: '700' }}>Current plan</Text> : null}
-                {canManageBilling ? (
-                  <Button mode="contained" buttonColor={colors.primary} loading={loading === plan.id} onPress={() => void openCheckout(plan.id)}>
-                    Choose {plan.name}
-                  </Button>
-                ) : null}
+                <Button mode="contained" buttonColor={colors.primary} loading={loading === plan.id} onPress={() => void openCheckout(plan.id)}>
+                  Choose {plan.name}
+                </Button>
               </View>
             );
           })}
-          {canManageBilling ? (
-            <>
-              <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openPortal()}>
-                Manage billing portal
-              </Button>
-            </>
-          ) : (
-            <Text style={{ color: colors.muted }}>Only venue owners and admins can manage billing.</Text>
-          )}
+          <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openPortal()}>
+            Manage billing portal
+          </Button>
           <Button mode="contained" buttonColor={colors.primary} onPress={() => router.push('/(tabs)/profile')}>
             Back to profile
           </Button>

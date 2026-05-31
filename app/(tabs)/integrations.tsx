@@ -5,6 +5,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { canManageVenue } from '../../lib/permissions';
 
 const providers = ['toast', 'square', 'clover', 'generic'] as const;
 type Provider = (typeof providers)[number];
@@ -22,7 +23,8 @@ function dateTime(value: number | null | undefined) {
 export default function IntegrationsScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
-  const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const me = useQuery(api.app.getMe);
+  const canManage = canManageVenue(me?.profile.role);
   const overview = useQuery(api.pos.getPosOverview, canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const reservationOverview = useQuery(
     api.reservationIntegrations.getReservationIntegrationOverview,

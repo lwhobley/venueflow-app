@@ -8,6 +8,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useA0Purchases } from '../../lib/a0-purchases-stub';
+import { canManageVenue } from '../../lib/permissions';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
@@ -95,9 +96,9 @@ type StaffMember = {
 };
 
 export default function StaffScreen() {
-  const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const canManage = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const me = useQuery(api.app.getMe);
+  const canManage = canManageVenue(me?.profile.role);
   // Freemium: the app is free for an individual; adding teammates requires a
   // subscription. `isPremium` reflects the active entitlement.
   const { isPremium } = useA0Purchases();

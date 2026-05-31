@@ -6,6 +6,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { canManageVenue } from '../../lib/permissions';
 import { router } from 'expo-router';
 
 const sectionFilters = ['all', 'main', 'patio', 'bar', 'vip'] as const;
@@ -157,7 +158,8 @@ export default function FloorScreen() {
   const [mergeSel, setMergeSel] = useState<string[]>([]);
   const [mergeParty, setMergeParty] = useState(6);
 
-  const canEdit = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const me = useQuery(api.app.getMe);
+  const canEdit = canManageVenue(me?.profile.role);
   const activeFloor = floor ?? null;
   const reservationQueue = unassignedReservations ?? [];
   const waitlistQueue = openWaitlist ?? [];
