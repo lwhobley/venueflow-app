@@ -11,44 +11,36 @@ export function CommandSurface({
   children,
   style,
   strong,
+  inset,
 }: {
   palette: DesignPalette;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   strong?: boolean;
+  inset?: boolean;
 }) {
   return (
     <View
       style={[
         {
-          backgroundColor: strong ? palette.surfaceStrong : palette.glass,
-          borderWidth: 1,
-          borderColor: palette.border,
+          backgroundColor: strong ? palette.surfaceStrong : inset ? palette.surfaceSoft : palette.surface,
+          borderWidth: strong ? 1 : 0,
+          borderColor: strong ? palette.border : 'transparent',
           borderRadius: radius.lg,
-          padding: spacing.lg,
+          padding: inset ? spacing.md : spacing.lg,
           overflow: 'hidden',
           ...(Platform.OS === 'web'
-            ? ({ backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)' } as ViewStyle)
+            ? ({ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as ViewStyle)
             : {}),
-          ...shadow,
           shadowColor: palette.shadow,
-          shadowOpacity: palette.mode === 'dark' ? 0.24 : 0.12,
+          shadowOpacity: strong ? (palette.mode === 'dark' ? 0.18 : 0.08) : 0.06,
+          shadowRadius: strong ? 22 : 12,
+          shadowOffset: { width: 0, height: strong ? 12 : 5 },
+          elevation: strong ? shadow.elevation : 2,
         },
         style,
       ]}
     >
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 18,
-          right: 18,
-          height: 1,
-          backgroundColor: palette.primary,
-          opacity: palette.mode === 'dark' ? 0.32 : 0.22,
-        }}
-      />
       {children}
     </View>
   );
@@ -66,12 +58,12 @@ export function CommandText({
   style?: StyleProp<TextStyle>;
 }) {
   const styles: Record<CommandTextVariant, TextStyle> = {
-    hero: { color: palette.charcoal, fontSize: 28, lineHeight: 34, fontWeight: '800' },
-    title: { color: palette.charcoal, fontSize: 16, lineHeight: 22, fontWeight: '800' },
+    hero: { color: palette.charcoal, fontSize: 30, lineHeight: 36, fontWeight: '700' },
+    title: { color: palette.charcoal, fontSize: 17, lineHeight: 23, fontWeight: '700' },
     label: { color: palette.muted, fontSize: 11, lineHeight: 15, fontWeight: '700', textTransform: 'uppercase' },
     body: { color: palette.charcoal, fontSize: 14, lineHeight: 20, fontWeight: '500' },
     caption: { color: palette.muted, fontSize: 12, lineHeight: 17, fontWeight: '500' },
-    metric: { color: palette.charcoal, fontSize: 26, lineHeight: 31, fontWeight: '900' },
+    metric: { color: palette.charcoal, fontSize: 27, lineHeight: 32, fontWeight: '700' },
   };
 
   return <Text style={[styles[variant], { letterSpacing: 0 }, style]}>{children}</Text>;
@@ -102,33 +94,28 @@ export function CommandButton({
       onPress={onPress}
       style={({ pressed }) => [
         {
-          minHeight: 38,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-          borderRadius: radius.md,
-          borderWidth: 1,
-          borderColor: selected ? palette.primary : palette.border,
-          backgroundColor: selected ? palette.cream : palette.surfaceSoft,
+          minHeight: 34,
+          paddingHorizontal: 11,
+          paddingVertical: 7,
+          borderRadius: radius.pill,
+          borderWidth: 0,
+          backgroundColor: selected ? palette.primary : palette.surfaceSoft,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
           opacity: pressed ? 0.82 : 1,
-          shadowColor: palette.primary,
-          shadowOpacity: selected ? 0.22 : 0,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 0 },
         },
         style,
       ]}
     >
-      {icon ? <MaterialCommunityIcons name={icon} size={16} color={selected ? palette.primary : palette.muted} /> : null}
+      {icon ? <MaterialCommunityIcons name={icon} size={16} color={selected ? palette.backgroundAlt : palette.muted} /> : null}
       <Text
         numberOfLines={1}
         style={{
-          color: selected ? palette.primary : palette.charcoal,
+          color: selected ? palette.backgroundAlt : palette.charcoal,
           fontSize: 12,
-          fontWeight: '800',
+          fontWeight: '700',
         }}
       >
         {children}
@@ -151,9 +138,8 @@ export function StatusPill({
     <View
       style={{
         borderRadius: radius.pill,
-        borderWidth: 1,
-        borderColor: `${toneColor}55`,
-        backgroundColor: `${toneColor}1F`,
+        borderWidth: 0,
+        backgroundColor: `${toneColor}24`,
         paddingHorizontal: 10,
         paddingVertical: 5,
         alignSelf: 'flex-start',
@@ -177,7 +163,7 @@ export function MiniTrend({ palette, values }: { palette: DesignPalette; values:
             width: 5,
             height: Math.max(6, (value / max) * 34),
             borderRadius: 999,
-            backgroundColor: index === values.length - 1 ? palette.primary : `${palette.primary}55`,
+            backgroundColor: index === values.length - 1 ? palette.primary : `${palette.primary}44`,
           }}
         />
       ))}

@@ -10,7 +10,7 @@ import { CosmicInsights } from '../../components/CosmicInsights';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
-import { designPalettes, spacing, useAppearanceStore, useDesignTheme } from '../../lib/theme';
+import { spacing, useAppearanceStore, useDesignTheme } from '../../lib/theme';
 import { LocaleCode, useI18n, useLocaleStore } from '../../lib/i18n';
 
 type NotificationItem = {
@@ -102,7 +102,7 @@ export default function HomeScreen() {
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <CommandSurface palette={palette} style={{ gap: spacing.md }}>
+      <View style={{ gap: spacing.md, paddingTop: spacing.sm }}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
           <View style={{ minWidth: 220, flex: 1 }}>
             <CommandText palette={palette} variant="label">{t('common.venueWrangler')}</CommandText>
@@ -148,7 +148,7 @@ export default function HomeScreen() {
             </CommandButton>
           ))}
         </View>
-      </CommandSurface>
+      </View>
 
       {openShifts > 0 ? (
         <CommandSurface palette={palette} strong style={{ gap: spacing.sm, borderColor: palette.warning }}>
@@ -159,7 +159,7 @@ export default function HomeScreen() {
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {kpis.map((item) => (
-          <CommandSurface key={item.label} palette={palette} style={{ flexGrow: 1, flexBasis: 150, gap: spacing.sm, minHeight: 142 }}>
+          <CommandSurface key={item.label} palette={palette} inset style={{ flexGrow: 1, flexBasis: 150, gap: spacing.sm, minHeight: 136 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
               <MaterialCommunityIcons name={item.icon} size={19} color={palette.primary} />
               <MiniTrend palette={palette} values={item.trend} />
@@ -340,7 +340,6 @@ export default function HomeScreen() {
         </CommandSurface>
       ) : null}
 
-      <View pointerEvents="none" style={{ position: 'absolute', top: 120, right: -40, width: 140, height: 140, borderRadius: 999, backgroundColor: designPalettes[themeMode].glow, opacity: 0.28 }} />
     </ScrollView>
   );
 }
