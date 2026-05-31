@@ -21,6 +21,7 @@ import type * as floor from "../floor.js";
 import type * as floorBinding from "../floorBinding.js";
 import type * as guests from "../guests.js";
 import type * as http from "../http.js";
+import type * as invites from "../invites.js";
 import type * as notifications from "../notifications.js";
 import type * as operations from "../operations.js";
 import type * as payroll from "../payroll.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   floorBinding: typeof floorBinding;
   guests: typeof guests;
   http: typeof http;
+  invites: typeof invites;
   notifications: typeof notifications;
   operations: typeof operations;
   payroll: typeof payroll;

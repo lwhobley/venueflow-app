@@ -4,8 +4,10 @@ import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc } from './_generated/dataModel';
 
 type AnyCtx = any;
+type InviteRole = 'manager' | 'staff';
 
-const role = v.union(v.literal('admin'), v.literal('owner'), v.literal('manager'), v.literal('server'), v.literal('staff'));
+const profileRole = v.union(v.literal('admin'), v.literal('owner'), v.literal('manager'), v.literal('server'), v.literal('staff'));
+const inviteRole = v.union(v.literal('manager'), v.literal('staff'));
 
 const profileValue = v.object({
   _id: v.id('profiles'),
@@ -13,7 +15,7 @@ const profileValue = v.object({
   tokenIdentifier: v.union(v.string(), v.null()),
   email: v.string(),
   fullName: v.string(),
-  role,
+  role: profileRole,
   jobTitle: v.string(),
   venueId: v.union(v.id('venues'), v.null()),
   isPinUser: v.boolean(),
@@ -44,11 +46,17 @@ function isManager(roleName: string) {
   return roleName === 'admin' || roleName === 'owner' || roleName === 'manager';
 }
 
+function isInviteRole(roleName: string): roleName is InviteRole {
+  return roleName === 'manager' || roleName === 'staff';
+}
+
 function generateToken(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
   let result = '';
-  for (let i = 0; i < 32; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (const byte of bytes) {
+    result += chars.charAt(byte % chars.length);
   }
   return result;
 }
@@ -84,7 +92,7 @@ function mapVenue(venue: Doc<'venues'>) {
 export const createInvite = mutation({
   args: {
     venueId: v.id('venues'),
-    role,
+    role: inviteRole,
     jobTitle: v.string(),
   },
   returns: v.object({ token: v.string(), inviteUrl: v.string() }),
@@ -114,7 +122,7 @@ export const getInvitePreview = query({
     v.null(),
     v.object({
       venueName: v.string(),
-      role,
+      role: inviteRole,
       jobTitle: v.string(),
       expired: v.boolean(),
     }),
@@ -124,6 +132,7 @@ export const getInvitePreview = query({
     if (!invite) return null;
     const venue = await (ctx as AnyCtx).db.get(invite.venueId);
     if (!venue) return null;
+    if (!isInviteRole(invite.role)) return null;
     return {
       venueName: venue.name,
       role: invite.role,
@@ -144,6 +153,7 @@ export const redeemInvite = mutation({
     if (!invite) throw new Error('Invite not found or invalid');
     if (invite.expiresAt < Date.now()) throw new Error('This invite link has expired. Ask your manager for a new one.');
     if (invite.usedBy) throw new Error('This invite link has already been used.');
+    if (!isInviteRole(invite.role)) throw new Error('This invite role is no longer supported. Ask your manager for a new invite.');
 
     const venue = await (ctx as AnyCtx).db.get(invite.venueId);
     if (!venue) throw new Error('Venue not found');

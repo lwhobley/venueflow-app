@@ -11,6 +11,7 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
 
 type Mode = 'admin' | 'staff';
+type SessionPayload = { profile: any; venue: any | null };
 
 const logoSource = require('../../assets/venue-wrangler-logo.jpg');
 const introVideoSource = require('../../assets/video.mp4');
@@ -131,7 +132,7 @@ export default function SignInScreen() {
   };
 
   const finishSession = async (options?: { staffIntro?: boolean; inviteToken?: string }) => {
-    let last: { profile: any; venue: any } | null = null;
+    let last: SessionPayload | null = null;
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 25; attempt += 1) {
       try {
@@ -159,7 +160,8 @@ export default function SignInScreen() {
       }
     }
 
-    const { profile, venue } = last;
+    const session = last;
+    const { profile, venue } = session;
     setSession({
       user: { id: profile._id, email: profile.email, full_name: profile.fullName, role: profile.role, job_title: profile.jobTitle, venue_id: profile.venueId ?? null, is_demo: profile.isDemo },
       venue: venue ? { id: venue._id, name: venue.name, latitude: venue.latitude, longitude: venue.longitude, geofence_radius_m: venue.geofenceRadiusM } : null,
