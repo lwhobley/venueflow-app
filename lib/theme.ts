@@ -10,7 +10,7 @@ type AppearanceState = {
 };
 
 export const useAppearanceStore = create<AppearanceState>((set) => ({
-  mode: 'dark',
+  mode: 'light',
   setMode: (mode) => set({ mode }),
   toggleMode: () => set((state) => ({ mode: state.mode === 'dark' ? 'light' : 'dark' })),
 }));
@@ -40,17 +40,17 @@ export const designPalettes = {
   },
   light: {
     mode: 'light' as const,
-    background: '#F5F2EA',
-    backgroundAlt: '#FBFAF5',
-    surface: 'rgba(255, 253, 247, 0.94)',
-    surfaceStrong: '#FFFDF7',
-    surfaceSoft: 'rgba(241, 236, 224, 0.9)',
-    glass: 'rgba(255, 253, 247, 0.94)',
+    background: '#FFFFFF',
+    backgroundAlt: '#FFFFFF',
+    surface: '#FFFFFF',
+    surfaceStrong: '#FFFFFF',
+    surfaceSoft: '#F7F8F5',
+    glass: '#FFFFFF',
     primary: '#2F7D46',
     secondary: '#B7752A',
     charcoal: '#23241F',
     muted: '#6F6A5F',
-    border: 'rgba(35, 36, 31, 0.09)',
+    border: 'rgba(35, 36, 31, 0.1)',
     divider: 'rgba(35, 36, 31, 0.08)',
     success: '#2F7D46',
     danger: '#B85047',
@@ -69,7 +69,7 @@ export const useDesignTheme = () => {
   return designPalettes[mode];
 };
 
-export const colors = designPalettes.dark;
+export const colors = designPalettes.light;
 
 export const accents = [
   { bg: 'rgba(123, 199, 126, 0.14)', fg: '#7BC77E', icon: '#7BC77E' },
@@ -98,17 +98,17 @@ export const radius = {
 };
 
 export const shadow = {
-  shadowColor: designPalettes.dark.shadow,
-  shadowOpacity: 0.24,
-  shadowRadius: 28,
-  shadowOffset: { width: 0, height: 18 },
-  elevation: 8,
+  shadowColor: designPalettes.light.shadow,
+  shadowOpacity: 0.08,
+  shadowRadius: 16,
+  shadowOffset: { width: 0, height: 8 },
+  elevation: 2,
 } as const;
 
 export const glass = {
-  backgroundColor: designPalettes.dark.glass,
+  backgroundColor: designPalettes.light.glass,
   borderWidth: 1,
-  borderColor: designPalettes.dark.border,
+  borderColor: designPalettes.light.border,
   backdropFilter: 'blur(20px)',
   WebkitBackdropFilter: 'blur(20px)',
 } as const;
