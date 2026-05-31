@@ -1,4 +1,4 @@
-"""Generate App Store product-page screenshots (1290x2796, RGB, no alpha)
+"""Generate App Store product-page screenshots (1284x2778, RGB, no alpha)
 matching Venue Wrangler's current clean white theme.
 Each is a caption headline + a stylized feature panel. Output to
 screenshots/appstore/.
@@ -6,7 +6,7 @@ screenshots/appstore/.
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-W, H = 1290, 2796
+W, H = 1284, 2778
 BG = (255, 255, 255)
 SURF = (255, 255, 255)
 SURF2 = (247, 249, 245)

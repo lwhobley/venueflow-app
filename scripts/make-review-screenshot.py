@@ -1,6 +1,6 @@
 """Generate a paywall review screenshot for App Store Connect.
 Matches the app's clean white theme and uses an App-Store-accepted iPhone
-portrait resolution (1290x2796) so ASC accepts the upload.
+6.5" portrait resolution (1284x2778) so ASC accepts the upload.
 
 Products: Starter $79.99 / Pro $149.99 / Enterprise $299.99 - one 'pro'
 entitlement unlocks the whole app.
@@ -8,7 +8,7 @@ entitlement unlocks the whole app.
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-W, H = 1290, 2796  # iPhone portrait, current accepted App Store screenshot size
+W, H = 1284, 2778  # iPhone 6.5" accepted App Store screenshot size
 
 BG = (255, 255, 255)
 SURFACE = (255, 255, 255)
