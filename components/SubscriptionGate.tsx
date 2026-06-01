@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { router, useSegments } from 'expo-router';
 import { useAuthActions } from '@convex-dev/auth/react';
-import { useQuery } from 'convex/react';
+import { useConvexAuth, useQuery } from 'convex/react';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { api } from '../convex/_generated/api';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
@@ -35,9 +35,14 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
   const staleSessionResetRef = useRef(false);
-  const me = useQuery(api.app.getMe, hydrated && user ? {} : 'skip');
+  // Convex auth settles asynchronously after the persisted session rehydrates.
+  // Only query (and judge the profile "missing") once the token is actually
+  // established — otherwise a fresh login races the token handshake, getMe
+  // briefly returns null, and we sign the user out into an infinite login loop.
+  const { isAuthenticated } = useConvexAuth();
+  const me = useQuery(api.app.getMe, hydrated && user && isAuthenticated ? {} : 'skip');
   const route = `/${segments.join('/')}`;
-  const profileMissing = hydrated && Boolean(user) && me === null;
+  const profileMissing = hydrated && Boolean(user) && isAuthenticated && me === null;
 
   useEffect(() => {
     if (!user || me?.profile) {

@@ -486,15 +486,18 @@ export const registerVenue = mutation({
 
 export const getMe = query({
   args: {},
-  returns: v.union(v.null(), v.object({ profile: profileValue, venue: venueValue })),
+  returns: v.union(v.null(), v.object({ profile: profileValue, venue: v.union(venueValue, v.null()) })),
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || !profile.venueId) return null;
-    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
-    if (!venue) return null;
-    return { profile: mapProfile(profile), venue: mapVenue(venue) };
+    // Return null ONLY when the profile genuinely doesn't exist (a deleted /
+    // stale session). A profile WITHOUT a venue is still a valid logged-in
+    // user — they simply haven't created or joined a venue yet — and must NOT
+    // be signed out, otherwise the app bounces them back to login in a loop.
+    if (!profile) return null;
+    const venue = profile.venueId ? await (ctx as AnyCtx).db.get(profile.venueId) : null;
+    return { profile: mapProfile(profile), venue: venue ? mapVenue(venue) : null };
   },
 });
 
