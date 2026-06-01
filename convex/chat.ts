@@ -33,6 +33,25 @@ export const ensureChatSetup = mutation({
   },
 });
 
+// Creates an additional named group chat for the venue. Any venue member can
+// start one (memberIds empty = visible to the whole venue, like All Staff).
+export const createGroup = mutation({
+  args: { venueId: v.id('venues'), name: v.string() },
+  returns: v.id('conversations'),
+  handler: async (ctx, args) => {
+    const me = await requireVenueMember(ctx, args.venueId);
+    assertNotDemoProfile(me);
+    const name = args.name.trim();
+    if (!name) throw new Error('Enter a group name');
+    return await ctx.db.insert('conversations', {
+      venueId: args.venueId,
+      type: 'group',
+      name,
+      memberIds: [],
+    });
+  },
+});
+
 const conversationValue = v.object({
   _id: v.id('conversations'),
   type: v.union(v.literal('group'), v.literal('dm')),

@@ -19,6 +19,9 @@ type Identity = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyCtx = any;
 
+// Every new account (and new venue) gets a 14-day free trial.
+const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+
 const subscriptionStatusValue = v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'));
 const subscriptionPlatformValue = v.union(v.literal('stripe'), v.literal('apple'), v.null());
 
@@ -36,6 +39,7 @@ const profileValue = v.object({
   jobTitle: v.string(),
   venueId: v.union(v.id('venues'), v.null()),
   isPinUser: v.boolean(),
+  trialEndsAt: v.union(v.number(), v.null()),
   isDemo: v.boolean(),
 });
 
@@ -243,6 +247,7 @@ function mapProfile(profile: Doc<'profiles'>) {
     jobTitle: profile.jobTitle,
     venueId: profile.venueId ?? null,
     isPinUser: Boolean(profile.isPinUser),
+    trialEndsAt: profile.trialEndsAt ?? null,
     isDemo: Boolean(profile.isDemo),
   };
 }
@@ -344,8 +349,9 @@ export const bootstrapProfile = mutation({
     let profile = existing;
 
     if (!profile) {
-      // New account with no venue yet — the owner-signup flow calls
-      // registerVenue next to create their venue and promote them to admin.
+      // New standalone account — no venue until an admin/manager adds this
+      // user's email to a venue roster. Every new account starts a 14-day free
+      // trial so they can browse the app immediately.
       const roleName = isAllowlistedAdmin ? 'admin' : 'staff';
       const profileId = await (ctx as AnyCtx).db.insert('profiles', {
         userId,
@@ -355,6 +361,7 @@ export const bootstrapProfile = mutation({
         role: roleName,
         jobTitle: defaultJobTitle(roleName),
         venueId: undefined,
+        trialEndsAt: Date.now() + TRIAL_DURATION_MS,
       });
       profile = await (ctx as AnyCtx).db.get(profileId);
     } else {
@@ -363,6 +370,8 @@ export const bootstrapProfile = mutation({
         patch.userId = userId;
         patch.tokenIdentifier = identity.tokenIdentifier;
       }
+      // Backfill the trial for accounts created before per-user trials existed.
+      if (existing.trialEndsAt == null) patch.trialEndsAt = Date.now() + TRIAL_DURATION_MS;
       if (isAllowlistedAdmin && existing.role !== 'admin') patch.role = 'admin';
       if (Object.keys(patch).length > 0) {
         await (ctx as AnyCtx).db.patch(existing._id, patch);
@@ -443,7 +452,7 @@ export const registerVenue = mutation({
       priceCents: plan.priceCents,
       currency: 'USD',
       trialStartedAt: now,
-      trialEndsAt: now + 3 * 24 * 60 * 60 * 1000,
+      trialEndsAt: now + TRIAL_DURATION_MS,
       currentPeriodStart: null,
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,

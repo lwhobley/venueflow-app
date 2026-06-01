@@ -1,19 +1,17 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, Share, View } from 'react-native';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
-import { router } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useA0Purchases } from '../../lib/a0-purchases-stub';
 import { canManageVenue } from '../../lib/permissions';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
-// Access level = permission tier. PIN-invited staff can be manager or staff;
-// admins are provisioned through the email form (they sign in by email).
+// Access level = the permission tier an admin/manager assigns when adding a
+// teammate. Roles are never self-selected — they are set here on the roster.
 type AccessRole = 'manager' | 'staff';
 
 const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
@@ -21,7 +19,7 @@ const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string
   { value: 'manager', label: 'Manager' },
   { value: 'staff', label: 'Staff' },
 ];
-const PIN_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
+const LINK_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
   { value: 'manager', label: 'Manager' },
   { value: 'staff', label: 'Staff' },
 ];
@@ -99,9 +97,6 @@ export default function StaffScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const me = useQuery(api.app.getMe);
   const canManage = canManageVenue(me?.profile.role);
-  // Freemium: the app is free for an individual; adding teammates requires a
-  // subscription. `isPremium` reflects the active entitlement.
-  const { isPremium } = useA0Purchases();
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -130,8 +125,6 @@ export default function StaffScreen() {
   }, [customRoles]);
   const addVenueRole = useMutation(api.staffAuth.addVenueRole);
   const removeVenueRole = useMutation(api.staffAuth.removeVenueRole);
-  const inviteStaff = useMutation(api.staffAuth.inviteStaff);
-  const resetStaffPin = useMutation(api.staffAuth.resetStaffPin);
 
   const createInvite = useMutation(api.invites.createInvite);
   const [inviteLinkRole, setInviteLinkRole] = useState<'manager' | 'staff'>('staff');
@@ -160,33 +153,7 @@ export default function StaffScreen() {
     }
   };
 
-  const [resetTargetId, setResetTargetId] = useState<string | null>(null);
-  const [resetPinValue, setResetPinValue] = useState('');
-  const [resetMsg, setResetMsg] = useState<string | null>(null);
-
-  const onResetPin = async (member: StaffMember) => {
-    setResetMsg(null);
-    if (!venue?.id || !/^\d{4}$/.test(resetPinValue)) {
-      setResetMsg('Enter a 4-digit PIN.');
-      return;
-    }
-    try {
-      await resetStaffPin({ venueId: venue.id, profileId: member._id as Id<'profiles'>, pin: resetPinValue });
-      setResetMsg(`PIN reset for ${member.fullName}.`);
-      setResetTargetId(null);
-      setResetPinValue('');
-    } catch (e) {
-      setResetMsg(e instanceof Error ? e.message : 'Could not reset PIN.');
-    }
-  };
-
   const [newRole, setNewRole] = useState('');
-  const [inviteName, setInviteName] = useState('');
-  const [inviteAccess, setInviteAccess] = useState<AccessRole>('staff');
-  const [invitePosition, setInvitePosition] = useState('');
-  const [invitePin, setInvitePin] = useState('');
-  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
-  const [inviteErr, setInviteErr] = useState<string | null>(null);
 
   const onAddRole = async () => {
     if (!venue?.id || !newRole.trim()) return;
@@ -195,40 +162,6 @@ export default function StaffScreen() {
       setNewRole('');
     } catch {
       // ignore (duplicate)
-    }
-  };
-
-  const onInvite = async () => {
-    setInviteMsg(null);
-    setInviteErr(null);
-    if (!venue?.id) return;
-    // Adding a teammate is a paid feature — send free users to upgrade.
-    if (!isPremium) {
-      router.push('/billing/paywall');
-      return;
-    }
-    if (!inviteName.trim()) {
-      setInviteErr('Enter a name.');
-      return;
-    }
-    if (!/^\d{4}$/.test(invitePin)) {
-      setInviteErr('PIN must be exactly 4 digits.');
-      return;
-    }
-    try {
-      await inviteStaff({
-        venueId: venue.id,
-        fullName: inviteName.trim(),
-        accessRole: inviteAccess,
-        jobTitle: invitePosition.trim() || 'Team Member',
-        pin: invitePin,
-      });
-      setInviteMsg(`${inviteName.trim()} invited. They sign in with PIN ${invitePin}.`);
-      setInviteName('');
-      setInvitePin('');
-      setInvitePosition('');
-    } catch (e) {
-      setInviteErr(e instanceof Error ? e.message : 'Could not invite.');
     }
   };
 
@@ -252,11 +185,6 @@ export default function StaffScreen() {
 
   const onSubmit = async () => {
     if (!venue?.id || !canManage) return;
-    // Adding a NEW teammate is paid; editing an existing one stays available.
-    if (!selectedStaffId && !isPremium) {
-      router.push('/billing/paywall');
-      return;
-    }
     await upsertStaff({
       venueId: venue.id,
       fullName,
@@ -331,7 +259,7 @@ export default function StaffScreen() {
           <Dropdown
             label="Access level"
             value={inviteLinkRole}
-            options={PIN_ACCESS_LEVELS}
+            options={LINK_ACCESS_LEVELS}
             onSelect={(v) => setInviteLinkRole(v as 'manager' | 'staff')}
           />
           <Dropdown
@@ -349,36 +277,11 @@ export default function StaffScreen() {
         </Card.Content>
       </Card>
 
-      {/* Invite staff with PIN */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Invite staff (PIN login)</Text>
-          <PaperTextInput placeholder="Full name" value={inviteName} onChangeText={setInviteName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <Dropdown
-            label="Access level"
-            value={inviteAccess}
-            options={PIN_ACCESS_LEVELS}
-            onSelect={(v) => setInviteAccess(v as AccessRole)}
-          />
-          <Dropdown
-            label="Role"
-            value={invitePosition}
-            placeholder="Select a role"
-            options={jobRoleOptions}
-            onSelect={setInvitePosition}
-          />
-          <PaperTextInput placeholder="4-digit PIN" value={invitePin} onChangeText={(t) => setInvitePin(t.replace(/\D/g, '').slice(0, 4))} keyboardType="number-pad" maxLength={4} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          {inviteErr ? <Text style={{ color: colors.danger }}>{inviteErr}</Text> : null}
-          {inviteMsg ? <Text style={{ color: accents[2].fg }}>{inviteMsg}</Text> : null}
-          <Button mode="contained" buttonColor={colors.primary} icon="account-plus" onPress={() => void onInvite()}>Invite staff</Button>
-        </Card.Content>
-      </Card>
-
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Add or update staff (email)</Text>
+          <Text variant="titleMedium">Add staff by email</Text>
           <Text style={{ color: colors.muted }}>
-            Staff members are scoped to this venue and can be assigned admin, owner, manager, server, or staff roles.
+            Add a teammate's email to your roster and assign their role. They sign in with their own email and password — once added, they gain access to {venue?.name ?? 'your venue'}.
           </Text>
           <PaperTextInput placeholder="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <PaperTextInput placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
@@ -448,30 +351,12 @@ export default function StaffScreen() {
                     <Button mode="outlined" onPress={() => void onDeactivate(member)}>
                       Deactivate
                     </Button>
-                    <Button mode="outlined" textColor={colors.primary} onPress={() => { setResetTargetId(resetTargetId === member._id ? null : member._id); setResetPinValue(''); setResetMsg(null); }}>
-                      Reset PIN
-                    </Button>
                     {selectedStaffId === member._id ? (
                       <Button mode="text" textColor={colors.primary} onPress={clearForm}>
                         Deselect
                       </Button>
                     ) : null}
                   </View>
-                  {resetTargetId === member._id ? (
-                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                      <PaperTextInput
-                        placeholder="New 4-digit PIN"
-                        value={resetPinValue}
-                        onChangeText={(t) => setResetPinValue(t.replace(/\D/g, '').slice(0, 4))}
-                        keyboardType="number-pad"
-                        maxLength={4}
-                        mode="outlined"
-                        style={{ flex: 1, backgroundColor: colors.surface }}
-                      />
-                      <Button mode="contained" buttonColor={colors.primary} onPress={() => void onResetPin(member)}>Save PIN</Button>
-                    </View>
-                  ) : null}
-                  {resetMsg && resetTargetId === member._id ? <Text style={{ color: colors.muted }}>{resetMsg}</Text> : null}
                 </Card.Content>
               </Card>
             ))

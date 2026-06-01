@@ -89,14 +89,22 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const billing = useQuery(api.app.getMyVenueBilling, me?.venue?._id ? {} : 'skip');
   const { isPremium, isLoading: isPremiumLoading } = useA0Purchases();
   // When billing is disabled for local/dev builds, never hard-lock users.
-  const blocked = config.billingEnabled && billing ? blockedStatuses.has(billing.status) && !isPremiumLoading && !isPremium : false;
-  const reason = reasonFromStatus(billing?.status ?? null);
+  const venueBlocked = config.billingEnabled && billing ? blockedStatuses.has(billing.status) && !isPremiumLoading && !isPremium : false;
+  // Per-user trial: once a standalone account's 14-day trial expires, every
+  // feature is locked until they upgrade. Venue members with an active/trialing
+  // venue subscription are governed by the venue billing status above instead.
+  const venueActive = billing ? billing.status === 'active' || billing.status === 'trialing' : false;
+  const trialEndsAt = me?.profile?.trialEndsAt ?? null;
+  const trialExpired = trialEndsAt != null && trialEndsAt <= Date.now();
+  const trialBlocked = config.billingEnabled && trialExpired && !venueActive && !isPremiumLoading && !isPremium;
+  const blocked = venueBlocked || trialBlocked;
+  const reason = trialBlocked ? 'trial_expired' : reasonFromStatus(billing?.status ?? null);
 
   useEffect(() => {
-    if (!hydrated || !user || !billing || !blocked) return;
+    if (!hydrated || !user || !blocked) return;
     if (isAllowedRoute(route)) return;
     router.replace(`/billing/locked?reason=${reason}`);
-  }, [billing, blocked, hydrated, reason, route, user]);
+  }, [blocked, hydrated, reason, route, user]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;

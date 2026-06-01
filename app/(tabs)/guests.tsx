@@ -7,6 +7,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { canManageVenue } from '../../lib/permissions';
+import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 
 type GuestRow = {
   _id: Id<'guests'>;
@@ -31,6 +32,14 @@ function dateText(value: number | null) {
 }
 
 export default function GuestsScreen() {
+  return (
+    <PremiumFeatureGate feature="CRM">
+      <GuestsScreenInner />
+    </PremiumFeatureGate>
+  );
+}
+
+function GuestsScreenInner() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const me = useQuery(api.app.getMe);
   const canManage = canManageVenue(me?.profile.role);

@@ -56,6 +56,9 @@ export default defineSchema({
     isPinUser: v.optional(v.boolean()),
     loginHandle: v.optional(v.string()),
     pinHash: v.optional(v.string()),
+    // Per-user 14-day free trial, started at sign up. Standalone accounts (no
+    // venue) rely on this; once a venue is joined the venue subscription governs.
+    trialEndsAt: v.optional(v.number()),
     isDemo: v.optional(v.boolean()),
     demoKind: v.optional(v.union(v.literal('owner'), v.literal('employee'))),
   })

@@ -6,6 +6,7 @@ import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { canManageVenue } from '../../lib/permissions';
+import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 
 const providers = ['toast', 'square', 'clover', 'generic'] as const;
 type Provider = (typeof providers)[number];
@@ -21,6 +22,14 @@ function dateTime(value: number | null | undefined) {
 }
 
 export default function IntegrationsScreen() {
+  return (
+    <PremiumFeatureGate feature="Integrations">
+      <IntegrationsScreenInner />
+    </PremiumFeatureGate>
+  );
+}
+
+function IntegrationsScreenInner() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
   const me = useQuery(api.app.getMe);
