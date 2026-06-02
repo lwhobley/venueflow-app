@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Divider, Menu, Searchbar, Text, TextInput } from 'react-native-paper';
+import { router } from 'expo-router';
+import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -126,6 +127,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const copyDayShifts = useMutation(api.scheduling.copyDayShifts);
   const clearWeek = useMutation(api.scheduling.clearWeek);
   const setLaborBudget = useMutation(api.scheduling.setLaborBudget);
+  const openDm = useMutation(api.chat.openDm);
 
   const [selectedShiftId, setSelectedShiftId] = useState<Id<'scheduleShifts'> | null>(null);
   const [panelMode, setPanelMode] = useState<PanelMode>('create');
@@ -188,6 +190,23 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     setTimeout(() => setActionMsg(null), 2600);
   };
 
+  // Runs a mutation and surfaces thrown errors (e.g. double-booking) as a
+  // toast instead of an unhandled rejection.
+  const safe = async (action: () => Promise<unknown>, ok?: string) => {
+    try {
+      await action();
+      if (ok) flash(ok);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : 'Action failed.');
+    }
+  };
+
+  const messageStaff = (profileId: Id<'profiles'>) =>
+    safe(async () => {
+      const id = await openDm({ venueId, otherProfileId: profileId });
+      router.push(`/chat/${id}`);
+    });
+
   const markEdited = () => setStatus((current) => (current === 'Published' ? 'Edited after publish' : current));
 
   const openCreatePanel = (nextDay = day, nextStart = parseTime(start) ?? 600) => {
@@ -221,25 +240,29 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
       flash('Shift updated.');
       return;
     }
-    const shiftId = await createShift({
-      venueId,
-      dayIndex: day,
-      startMinutes,
-      endMinutes,
-      jobTitle: jobTitle.trim() || 'Staff',
-      station: station.trim() || 'Floor',
-      profileId: pickedStaff ?? undefined,
+    await safe(async () => {
+      const shiftId = await createShift({
+        venueId,
+        dayIndex: day,
+        startMinutes,
+        endMinutes,
+        jobTitle: jobTitle.trim() || 'Staff',
+        station: station.trim() || 'Floor',
+        profileId: pickedStaff ?? undefined,
+      });
+      setSelectedShiftId(shiftId);
+      markEdited();
+      flash(pickedStaff ? 'Assigned shift created.' : 'Open shift created.');
     });
-    setSelectedShiftId(shiftId);
-    markEdited();
-    flash(pickedStaff ? 'Assigned shift created.' : 'Open shift created.');
   };
 
   const assignSelected = async (profileId: Id<'profiles'>) => {
     if (!selectedShift) return;
-    await assignShift({ venueId, shiftId: selectedShift._id, profileId });
-    setPickedStaff(profileId);
-    markEdited();
+    await safe(async () => {
+      await assignShift({ venueId, shiftId: selectedShift._id, profileId });
+      setPickedStaff(profileId);
+      markEdited();
+    });
   };
 
   const moveDraggedShift = async (targetDay: number, targetStart: number) => {
@@ -432,10 +455,11 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                         event.preventDefault();
                         const shiftId = (event.dataTransfer?.getData('text/plain') || dragShiftId) as Id<'scheduleShifts'> | null;
                         if (!shiftId) return;
-                        await assignShift({ venueId, shiftId, profileId: row._id });
-                        setDragShiftId(null);
-                        markEdited();
-                        flash(`Assigned to ${row.fullName}.`);
+                        await safe(async () => {
+                          await assignShift({ venueId, shiftId, profileId: row._id });
+                          setDragShiftId(null);
+                          markEdited();
+                        }, `Assigned to ${row.fullName}.`);
                       },
                     } as any)}
                     style={{
@@ -447,9 +471,17 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       gap: 4,
                     }}
                   >
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
                       <Text style={{ color: colors.charcoal, fontWeight: '800', flex: 1 }}>{row.fullName}</Text>
                       <Text style={{ color: row.overtime ? colors.danger : colors.muted, fontWeight: '700' }}>{row.weeklyHours}h</Text>
+                      <IconButton
+                        icon="message-outline"
+                        size={16}
+                        iconColor={colors.primary}
+                        style={{ margin: 0 }}
+                        accessibilityLabel={`Message ${row.fullName}`}
+                        onPress={() => void messageStaff(row._id)}
+                      />
                     </View>
                     <Text style={{ color: accent.fg, fontSize: 12 }}>{row.jobTitle || row.role}</Text>
                     <Text style={{ color: colors.muted, fontSize: 11 }}>{availabilityLabel(row.availability, day)}</Text>

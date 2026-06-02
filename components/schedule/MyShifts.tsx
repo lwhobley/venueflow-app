@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
+import { router } from 'expo-router';
+import { Button, Card, Chip, Snackbar, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -22,7 +23,7 @@ type Shift = {
 };
 
 type Blackout = { _id: Id<'blackoutDates'>; startDate: string; endDate: string; reason: string };
-type Coworker = { name: string; jobTitle: string; startTime: string; endTime: string; withMe: boolean };
+type Coworker = { profileId: Id<'profiles'>; name: string; jobTitle: string; startTime: string; endTime: string; withMe: boolean };
 type RosterDay = { dayIndex: number; dayLabel: string; coworkers: Coworker[] };
 
 export function MyShifts() {
@@ -34,6 +35,7 @@ export function MyShifts() {
   const createRequest = useMutation(api.app.createStaffRequest);
   const proposeSwap = useMutation(api.scheduling.proposeShiftSwap);
   const respondToSwap = useMutation(api.scheduling.respondToShiftSwap);
+  const openDm = useMutation(api.chat.openDm);
   const directory = useQuery(api.chat.listDirectory, venue?.id ? { venueId: venue.id } : 'skip');
   const swaps = useQuery(api.scheduling.getMyShiftSwaps);
 
@@ -43,17 +45,37 @@ export function MyShifts() {
   const [offError, setOffError] = useState<string | null>(null);
   const [offOk, setOffOk] = useState(false);
   const [swapShiftId, setSwapShiftId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Surfaces mutation errors (e.g. double-booking, claim races) as a toast
+  // instead of an unhandled rejection, and confirms successful actions.
+  const run = async (action: () => Promise<unknown>, ok?: string) => {
+    try {
+      await action();
+      if (ok) setToast(ok);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+    }
+  };
+
+  const messageTeammate = (profileId: Id<'profiles'>) =>
+    run(async () => {
+      if (!venue?.id) return;
+      const id = await openDm({ venueId: venue.id, otherProfileId: profileId });
+      router.push(`/chat/${id}`);
+    });
 
   const teammates = useMemo(() => (directory ?? []) as { _id: Id<'profiles'>; fullName: string; jobTitle: string }[], [directory]);
   const mySwaps = useMemo(() => (swaps ?? []) as Array<{ _id: Id<'shiftSwaps'>; status: string; requesterName: string; targetName: string; requesterShift: string; targetShift: string | null; direction: string }>, [swaps]);
   const incomingSwaps = mySwaps.filter((s) => s.direction === 'incoming' && s.status === 'proposed');
   const otherSwaps = mySwaps.filter((s) => !(s.direction === 'incoming' && s.status === 'proposed'));
 
-  const offerSwap = async (shiftId: string, targetProfileId: Id<'profiles'>) => {
-    if (!venue?.id) return;
-    await proposeSwap({ myShiftId: shiftId as Id<'scheduleShifts'>, targetProfileId });
-    setSwapShiftId(null);
-  };
+  const offerSwap = (shiftId: string, targetProfileId: Id<'profiles'>) =>
+    run(async () => {
+      if (!venue?.id) return;
+      await proposeSwap({ myShiftId: shiftId as Id<'scheduleShifts'>, targetProfileId });
+      setSwapShiftId(null);
+    }, 'Swap offered.');
 
   const mine = useMemo(() => (data?.mine ?? []) as Shift[], [data]);
   const open = useMemo(() => (data?.open ?? []) as Shift[], [data]);
@@ -122,7 +144,7 @@ export function MyShifts() {
                 </View>
                 <Text>{s.jobTitle} · {s.station}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void requestDropShift({ shiftId: s._id })}>
+                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void run(() => requestDropShift({ shiftId: s._id }), 'Drop request sent.')}>
                     Request to drop
                   </Button>
                   <Button compact mode={swapShiftId === s._id ? 'contained' : 'outlined'} buttonColor={swapShiftId === s._id ? colors.primary : undefined} textColor={swapShiftId === s._id ? '#fff' : colors.primary} onPress={() => setSwapShiftId(swapShiftId === s._id ? null : s._id)}>
@@ -155,8 +177,8 @@ export function MyShifts() {
               <View key={sw._id} style={{ padding: 10, borderRadius: 12, backgroundColor: accents[0].bg, gap: 6 }}>
                 <Text>{sw.requesterName} wants you to take {sw.requesterShift}{sw.targetShift ? ` (for your ${sw.targetShift})` : ''}.</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void respondToSwap({ swapId: sw._id, accept: true })}>Accept</Button>
-                  <Button compact mode="text" textColor={colors.danger} onPress={() => void respondToSwap({ swapId: sw._id, accept: false })}>Decline</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: true }), 'Swap accepted — pending manager approval.')}>Accept</Button>
+                  <Button compact mode="text" textColor={colors.danger} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: false }), 'Swap declined.')}>Decline</Button>
                 </View>
               </View>
             ))}
@@ -190,6 +212,16 @@ export function MyShifts() {
                         <Text>{c.name}</Text>
                         <Text style={{ color: colors.muted }}>{c.jobTitle} · {c.startTime} – {c.endTime}</Text>
                       </View>
+                      <Button
+                        compact
+                        mode="text"
+                        icon="message-outline"
+                        textColor={colors.primary}
+                        accessibilityLabel={`Message ${c.name}`}
+                        onPress={() => void messageTeammate(c.profileId)}
+                      >
+                        Message
+                      </Button>
                       <Chip compact style={{ backgroundColor: c.withMe ? accents[2].bg : colors.cream }} textStyle={{ color: c.withMe ? accents[2].fg : colors.muted }}>
                         {c.withMe ? 'On with you' : 'Same day'}
                       </Chip>
@@ -215,7 +247,7 @@ export function MyShifts() {
                   {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Outside your availability</Chip> : null}
                 </View>
                 <Text>{s.jobTitle} · {s.station}</Text>
-                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void claimOpenShift({ shiftId: s._id })}>
+                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => claimOpenShift({ shiftId: s._id }), 'Shift picked up.')}>
                   Pick up shift
                 </Button>
               </View>
@@ -251,6 +283,10 @@ export function MyShifts() {
           </Button>
         </Card.Content>
       </Card>
+
+      <Snackbar visible={Boolean(toast)} onDismiss={() => setToast(null)} duration={3000} action={{ label: 'Dismiss', onPress: () => setToast(null) }}>
+        {toast ?? ''}
+      </Snackbar>
     </View>
   );
 }

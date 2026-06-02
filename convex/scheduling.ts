@@ -688,6 +688,7 @@ const myShiftValue = v.object({
 });
 
 const coworkerValue = v.object({
+  profileId: v.id('profiles'),
   name: v.string(),
   jobTitle: v.string(),
   startTime: v.string(),
@@ -756,6 +757,7 @@ export const getMySchedule = query({
             s.dayIndex === dayIndex && s.profileId && s.profileId !== profile._id,
         )
         .map((s: Doc<'scheduleShifts'>) => ({
+          profileId: s.profileId as Doc<'profiles'>['_id'],
           name: nameById.get(s.profileId as Doc<'profiles'>['_id']) ?? 'Teammate',
           jobTitle: s.jobTitle,
           startTime: minutesToTime(s.startMinutes),
