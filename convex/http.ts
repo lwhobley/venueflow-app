@@ -30,6 +30,8 @@ async function verifyStripeSignature(payload: string, signatureHeader: string | 
     .filter((part) => part.startsWith('v1='))
     .map((part) => part.slice(3));
   if (!timestamp || signatures.length === 0) return false;
+  // Reject payloads older than 5 minutes to prevent replay attacks.
+  if (Math.abs(Date.now() / 1000 - parseInt(timestamp, 10)) > 300) return false;
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const digest = hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${timestamp}.${payload}`)));
   return signatures.some((signature) => timingSafeEqual(signature, digest));

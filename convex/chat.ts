@@ -205,6 +205,7 @@ export const sendMessage = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireProfile(ctx);
+    assertNotDemoProfile(me);
     const conv = await assertConversationAccess(ctx, args.conversationId, me);
     const text = args.text.trim();
     if (!text) return null;

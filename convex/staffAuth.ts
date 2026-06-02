@@ -7,23 +7,26 @@ import { assertNotDemoProfile, requireVenueManager, requireVenueMember } from '.
 const accessRoleValue = v.union(v.literal('manager'), v.literal('staff'));
 const PIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
 const PIN_MAX_FAILURES = 5;
-const DEMO_OWNER_PIN = '2445';
-const DEMO_EMPLOYEE_PIN = '2446';
 const DEMO_OWNER_LOGIN_HANDLE = 'demo_owner@pin.venuewrangler';
 const DEMO_EMPLOYEE_LOGIN_HANDLE = 'demo_employee@pin.venuewrangler';
 
 type DemoKind = 'owner' | 'employee';
 
-const DEMO_CONFIG: Record<DemoKind, { pin: string; loginHandle: string; fullName: string; role: Doc<'profiles'>['role']; jobTitle: string }> = {
+// Demo PINs are read from env vars so they are never committed to source.
+// If neither var is set, demo login is completely disabled (fail closed).
+function getDemoPin(kind: DemoKind): string | null {
+  const val = kind === 'owner' ? process.env.DEMO_OWNER_PIN : process.env.DEMO_EMPLOYEE_PIN;
+  return val ?? null;
+}
+
+const DEMO_CONFIG: Record<DemoKind, { loginHandle: string; fullName: string; role: Doc<'profiles'>['role']; jobTitle: string }> = {
   owner: {
-    pin: DEMO_OWNER_PIN,
     loginHandle: DEMO_OWNER_LOGIN_HANDLE,
     fullName: 'Demo Agent',
     role: 'owner',
     jobTitle: 'Demo Owner',
   },
   employee: {
-    pin: DEMO_EMPLOYEE_PIN,
     loginHandle: DEMO_EMPLOYEE_LOGIN_HANDLE,
     fullName: 'Demo Employee',
     role: 'staff',
@@ -41,8 +44,13 @@ function randomCode(len = 6) {
 // PIN hash is salted by venue only (not the login handle), so the same PIN
 // always hashes the same way within a venue. That lets us (a) enforce unique
 // PINs per venue and (b) identify a staffer from their PIN alone at login.
+// PIN_HASH_PEPPER adds a server-side secret to the pre-image; setting it
+// requires a one-time PIN reset for all staff (admins re-issue PINs via the
+// staff screen). If unset, falls back to the original format for compatibility.
 async function hashPin(venueId: Id<'venues'>, pin: string) {
-  const bytes = new TextEncoder().encode(`${venueId}:${pin}`);
+  const pepper = process.env.PIN_HASH_PEPPER;
+  const preimage = pepper ? `${venueId}:${pepper}:${pin}` : `${venueId}:${pin}`;
+  const bytes = new TextEncoder().encode(preimage);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -120,17 +128,18 @@ async function resetDemoSession(ctx: any, profileId: Id<'profiles'>) {
 
 async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string, kind: DemoKind) {
   const config = DEMO_CONFIG[kind];
+  const pin = getDemoPin(kind);
+  if (!pin) throw new Error('Demo mode is not configured for this deployment.');
   const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
   const existing =
     profiles.find((p: Doc<'profiles'>) => p.isDemo && p.demoKind === kind) ??
     profiles.find((p: Doc<'profiles'>) => p.loginHandle === config.loginHandle) ??
-    profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.pinHash === pinHash) ??
-    (kind === 'owner' ? profiles.find((p: Doc<'profiles'>) => p.fullName.toLowerCase() === 'liffort hobley') : undefined);
+    profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.pinHash === pinHash);
 
   if (existing?.loginHandle) {
     await modifyAccountCredentials(ctx as any, {
       provider: 'password',
-      account: { id: existing.loginHandle, secret: config.pin },
+      account: { id: existing.loginHandle, secret: pin },
     });
   }
 
@@ -139,7 +148,7 @@ async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string
     if (!existing.loginHandle) {
       const created = await createAccount(ctx as any, {
         provider: 'password',
-        account: { id: config.loginHandle, secret: config.pin },
+        account: { id: config.loginHandle, secret: pin },
         profile: { email: config.loginHandle },
       });
       userId = created.user._id as Id<'users'>;
@@ -164,7 +173,7 @@ async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string
 
   const created = await createAccount(ctx as any, {
     provider: 'password',
-    account: { id: config.loginHandle, secret: config.pin },
+    account: { id: config.loginHandle, secret: pin },
     profile: { email: config.loginHandle },
   });
 
@@ -340,8 +349,12 @@ export const loginWithPin = mutation({
   handler: async (ctx, args) => {
     if (!/^\d{4}$/.test(args.pin)) throw new Error('Enter your 4-digit PIN');
 
+    const ownerPin = getDemoPin('owner');
+    const employeePin = getDemoPin('employee');
     const demoKind: DemoKind | null =
-      args.pin === DEMO_OWNER_PIN ? 'owner' : args.pin === DEMO_EMPLOYEE_PIN ? 'employee' : null;
+      ownerPin && args.pin === ownerPin ? 'owner'
+      : employeePin && args.pin === employeePin ? 'employee'
+      : null;
 
     // Resolve the venue from the business name.
     const nameKey = (args.businessName ?? '').trim().toLowerCase();
@@ -349,10 +362,11 @@ export const loginWithPin = mutation({
     if (nameKey) {
       venue = await ctx.db.query('venues').withIndex('by_nameKey', (q: any) => q.eq('nameKey', nameKey)).first();
     }
-    // Demo PINs don't require the exact business name — use the demo venue.
+    // Demo PINs don't require the exact business name — use the dedicated demo
+    // venue. Fail closed: never fall back to a real venue if none is marked.
     if (!venue && demoKind) {
-      const venues = await ctx.db.query('venues').collect();
-      venue = venues.find((v2: Doc<'venues'>) => v2.isDemoVenue) ?? venues[0] ?? null;
+      venue = await ctx.db.query('venues').filter((q: any) => q.eq(q.field('isDemoVenue'), true)).first();
+      if (!venue) throw new Error('Demo mode is not configured for this deployment.');
     }
     if (!venue) throw new Error('Business not found. Check the name with your manager.');
 

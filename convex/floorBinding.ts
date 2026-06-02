@@ -382,7 +382,8 @@ export const addToWaitlist = mutation({
   },
   returns: v.id('waitlist'),
   handler: async (ctx, args) => {
-    await requireVenueMember(ctx, args.venueId);
+    const me = await requireVenueMember(ctx, args.venueId);
+    assertNotDemoProfile(me);
     const name = args.guestName.trim();
     if (!name) throw new Error('Enter a guest name');
     const now = Date.now();
@@ -405,7 +406,8 @@ export const markWaitlistReady = mutation({
   args: { venueId: v.id('venues'), waitlistId: v.id('waitlist') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueMember(ctx, args.venueId);
+    const me = await requireVenueMember(ctx, args.venueId);
+    assertNotDemoProfile(me);
     const entry = await ctx.db.get(args.waitlistId);
     if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
     await ctx.db.patch(entry._id, { readyAt: Date.now(), updatedAt: Date.now() });
@@ -417,7 +419,8 @@ export const removeFromWaitlist = mutation({
   args: { venueId: v.id('venues'), waitlistId: v.id('waitlist') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireVenueMember(ctx, args.venueId);
+    const me = await requireVenueMember(ctx, args.venueId);
+    assertNotDemoProfile(me);
     const entry = await ctx.db.get(args.waitlistId);
     if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
     await ctx.db.patch(entry._id, { status: 'removed', updatedAt: Date.now() });

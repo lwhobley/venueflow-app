@@ -29,38 +29,46 @@ const billingValue = v.object({
 
 const stripeSessionValue = v.object({ url: v.string() });
 
-const billingPlans = {
-  venueflow_starter_15_monthly: {
-    name: 'Starter',
-    userLimit: 15,
-    priceCents: 7999,
-    stripePriceId: 'price_1Tb2ohKFbgDlLMiEDpsqy68E',
-    paymentLink: 'https://buy.stripe.com/5kQ14ofmg6Ve9RscmYcwg0g',
-  },
-  venueflow_growth_30_monthly: {
-    name: 'Pro',
-    userLimit: 30,
-    priceCents: 14999,
-    stripePriceId: 'price_1Tb2nOKFbgDlLMiEOVdsukaI',
-    paymentLink: 'https://buy.stripe.com/7sY4gA7TO5Ra7Jk1Ikcwg0h',
-  },
-  venueflow_pro_50_monthly: {
-    name: 'Enterprise',
-    userLimit: 50,
-    priceCents: 29999,
-    stripePriceId: 'price_1Tb2mqKFbgDlLMiEljolYOd5',
-    paymentLink: 'https://buy.stripe.com/bJe00k7TOdjCfbMbiUcwg0i',
-  },
-} as const;
+type BillingPlanId = 'venueflow_starter_15_monthly' | 'venueflow_growth_30_monthly' | 'venueflow_pro_50_monthly';
 
-type BillingPlanId = keyof typeof billingPlans;
+// Price IDs and payment links are read from Convex env vars so they are never
+// committed to source. Set STRIPE_STARTER_PRICE_ID, STRIPE_GROWTH_PRICE_ID,
+// and STRIPE_PRO_PRICE_ID in the Convex dashboard (Settings → Environment).
+function getBillingPlans() {
+  return {
+    venueflow_starter_15_monthly: {
+      name: 'Starter',
+      userLimit: 15,
+      priceCents: 7999,
+      stripePriceId: process.env.STRIPE_STARTER_PRICE_ID ?? '',
+      paymentLink: process.env.STRIPE_STARTER_PAYMENT_LINK ?? '',
+    },
+    venueflow_growth_30_monthly: {
+      name: 'Pro',
+      userLimit: 30,
+      priceCents: 14999,
+      stripePriceId: process.env.STRIPE_GROWTH_PRICE_ID ?? '',
+      paymentLink: process.env.STRIPE_GROWTH_PAYMENT_LINK ?? '',
+    },
+    venueflow_pro_50_monthly: {
+      name: 'Enterprise',
+      userLimit: 50,
+      priceCents: 29999,
+      stripePriceId: process.env.STRIPE_PRO_PRICE_ID ?? '',
+      paymentLink: process.env.STRIPE_PRO_PAYMENT_LINK ?? '',
+    },
+  };
+}
 
 function planById(planId: string) {
-  return billingPlans[planId as BillingPlanId] ?? billingPlans.venueflow_starter_15_monthly;
+  const plans = getBillingPlans();
+  return plans[planId as BillingPlanId] ?? plans.venueflow_starter_15_monthly;
 }
 
 function planByStripePrice(priceId: string | null | undefined) {
-  return Object.entries(billingPlans).find(([, plan]) => plan.stripePriceId === priceId)?.[0] ?? null;
+  if (!priceId) return null;
+  const plans = getBillingPlans();
+  return Object.entries(plans).find(([, plan]) => plan.stripePriceId === priceId)?.[0] ?? null;
 }
 
 function periodEndForPackage(packageRef: string, now: number) {
@@ -197,8 +205,9 @@ export const createStripeCheckoutSession = action({
       {},
     );
     if (!context) throw new Error('Only venue owners can start billing');
-    const selectedPlanId = (args.planId && args.planId in billingPlans ? args.planId : 'venueflow_starter_15_monthly') as BillingPlanId;
-    const selectedPlan = billingPlans[selectedPlanId];
+    const plans = getBillingPlans();
+    const selectedPlanId = (args.planId && args.planId in plans ? args.planId : 'venueflow_starter_15_monthly') as BillingPlanId;
+    const selectedPlan = plans[selectedPlanId];
     const params: Record<string, string> = {
       mode: 'subscription',
       success_url: `${appUrl()}/settings/billing?checkout=success`,
@@ -330,7 +339,7 @@ export const handleStripeWebhook = internalMutation({
       patch.externalCustomerId = object.customer ?? subscription.externalCustomerId;
       patch.externalSubscriptionId = object.subscription ?? subscription.externalSubscriptionId;
       const planId = object.metadata?.planId;
-      if (planId && planId in billingPlans) {
+      if (planId && planId in getBillingPlans()) {
         const plan = planById(planId);
         patch.planId = planId;
         patch.priceCents = plan.priceCents;
