@@ -7,6 +7,7 @@ import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { canManageBilling } from '../../lib/permissions';
 
 const plans = [
   { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$79.99' },
@@ -28,7 +29,7 @@ export default function BillingLockedScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const reason = Array.isArray(params.reason) ? params.reason[0] : params.reason ?? 'never_subscribed';
-  const canPay = user?.role === 'admin' || user?.role === 'owner';
+  const canPay = canManageBilling(user?.role, user?.email);
   const createCheckout = useAction(api.billing.createStripeCheckoutSession);
   const createPortal = useAction(api.billing.createStripeBillingPortalSession);
   const [loading, setLoading] = useState<PlanId | 'portal' | null>(null);
@@ -111,7 +112,7 @@ export default function BillingLockedScreen() {
               </Text>
             )}
 
-            <Button mode="text" textColor={colors.primary} onPress={() => router.replace('/(auth)/sign-in')}>
+            <Button mode="text" textColor={colors.primary} onPress={() => router.replace('/sign-in')}>
               Sign out
             </Button>
             <Button mode="text" textColor={colors.primary} onPress={() => Linking.openURL('mailto:support@venuewrangler.com')}>

@@ -4,6 +4,7 @@ import { Button, Card, Switch, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -26,7 +27,8 @@ type DayState = { available: boolean; start: string; end: string };
 const defaultDay = (): DayState => ({ available: true, start: '09:00', end: '17:00' });
 
 export function AvailabilityEditor() {
-  const saved = useQuery(api.scheduling.getMyAvailability);
+  const { isReady } = useAuthenticatedSession();
+  const saved = useQuery(api.scheduling.getMyAvailability, isReady ? {} : 'skip');
   const setAvailability = useMutation(api.scheduling.setMyAvailability);
   const [days, setDays] = useState<DayState[]>(dayLabels.map(defaultDay));
   const [savedNote, setSavedNote] = useState(false);

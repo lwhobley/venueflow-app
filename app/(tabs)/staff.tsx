@@ -6,6 +6,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import type { Role } from '../../lib/types';
 
@@ -95,21 +96,22 @@ type StaffMember = {
 
 export default function StaffScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const me = useQuery(api.app.getMe);
-  const canManage = canManageVenue(me?.profile.role);
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('staff');
   const [jobTitle, setJobTitle] = useState('Team Member');
 
-  const staffQuery = useQuery(api.app.listVenueStaff, venue?.id && canManage ? { venueId: venue.id } : 'skip');
+  const staffQuery = useQuery(api.app.listVenueStaff, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
   const staff = useMemo(() => (staffQuery ?? []) as StaffMember[], [staffQuery]);
   const upsertStaff = useMutation(api.app.upsertVenueStaff);
   const deactivateStaff = useMutation(api.app.deactivateVenueStaff);
 
   // Custom roles + PIN invite
-  const rolesQuery = useQuery(api.staffAuth.listVenueRoles, venue?.id && canManage ? { venueId: venue.id } : 'skip');
+  const rolesQuery = useQuery(api.staffAuth.listVenueRoles, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
   const customRoles = useMemo(() => (rolesQuery ?? []) as VenueRole[], [rolesQuery]);
   // Dropdown options: the standard job titles plus any custom roles the venue added.
   const jobRoleOptions = useMemo(() => {

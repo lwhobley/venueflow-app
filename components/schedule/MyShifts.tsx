@@ -7,6 +7,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
 
 type Shift = {
@@ -29,16 +30,17 @@ type RosterDay = { dayIndex: number; dayLabel: string; coworkers: Coworker[] };
 
 export function MyShifts() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const data = useQuery(api.scheduling.getMySchedule);
-  const blackoutData = useQuery(api.scheduling.listBlackouts, venue?.id ? { venueId: venue.id } : 'skip');
+  const { isReady } = useAuthenticatedSession();
+  const data = useQuery(api.scheduling.getMySchedule, isReady ? {} : 'skip');
+  const blackoutData = useQuery(api.scheduling.listBlackouts, isReady && venue?.id ? { venueId: venue.id } : 'skip');
   const claimOpenShift = useMutation(api.scheduling.claimOpenShift);
   const requestDropShift = useMutation(api.scheduling.requestDropShift);
   const createRequest = useMutation(api.app.createStaffRequest);
   const proposeSwap = useMutation(api.scheduling.proposeShiftSwap);
   const respondToSwap = useMutation(api.scheduling.respondToShiftSwap);
   const openDm = useMutation(api.chat.openDm);
-  const directory = useQuery(api.chat.listDirectory, venue?.id ? { venueId: venue.id } : 'skip');
-  const swaps = useQuery(api.scheduling.getMyShiftSwaps);
+  const directory = useQuery(api.chat.listDirectory, isReady && venue?.id ? { venueId: venue.id } : 'skip');
+  const swaps = useQuery(api.scheduling.getMyShiftSwaps, isReady ? {} : 'skip');
 
   const [offStart, setOffStart] = useState('');
   const [offEnd, setOffEnd] = useState('');

@@ -1,12 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
-import { router, useSegments } from 'expo-router';
+import { router, useRootNavigationState, useSegments } from 'expo-router';
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useConvexAuth, useQuery } from 'convex/react';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { api } from '../convex/_generated/api';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { config } from '../lib/config';
+import { isAllAccessAccount } from '../lib/permissions';
 import type { SubscriptionRequiredReason } from '../convex/billing/shared';
 
 const blockedStatuses = new Set(['past_due', 'cancelled', 'expired', 'paused']);
@@ -29,6 +30,7 @@ function isSubscriptionRequiredError(error: unknown): error is Error & { reason?
 
 export function SubscriptionGate({ children }: { children?: unknown }) {
   const segments = useSegments();
+  const rootNavigationState = useRootNavigationState();
   const { signOut } = useAuthActions();
   const hydrated = useAuthStore((state: AuthState) => state.hydrated);
   const user = useAuthStore((state: AuthState) => state.user);
@@ -39,9 +41,14 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   // Only query (and judge the profile "missing") once the token is actually
   // established — otherwise a fresh login races the token handshake, getMe
   // briefly returns null, and we sign the user out into an infinite login loop.
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const me = useQuery(api.app.getMe, hydrated && user && isAuthenticated ? {} : 'skip');
   const route = `/${segments.join('/')}`;
+  const navigationReady = Boolean(rootNavigationState?.key);
+  const authRoute = route.startsWith('/(auth)/');
+  const signedOutProtectedRoute = hydrated && !user && !authRoute;
+  const authPending = hydrated && Boolean(user) && authLoading;
+  const staleSignedOutSession = hydrated && Boolean(user) && !authLoading && !isAuthenticated;
   const profileMissing = hydrated && Boolean(user) && isAuthenticated && me === null;
 
   useEffect(() => {
@@ -59,13 +66,35 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
       void signOut().catch(() => {
         // The persisted app session is already cleared; ignore auth cleanup failures.
       });
-      if (!route.startsWith('/(auth)/')) {
-        router.replace('/(auth)/sign-in');
+      if (navigationReady && !route.startsWith('/(auth)/')) {
+        router.replace('/sign-in');
       }
     }, 800);
 
     return () => clearTimeout(timeout);
-  }, [clearSession, profileMissing, route, signOut]);
+  }, [clearSession, navigationReady, profileMissing, route, signOut]);
+
+  useEffect(() => {
+    if (!navigationReady || !signedOutProtectedRoute) return;
+    router.replace('/sign-in');
+  }, [navigationReady, signedOutProtectedRoute]);
+
+  useEffect(() => {
+    if (!staleSignedOutSession || staleSessionResetRef.current) return undefined;
+
+    const timeout = setTimeout(() => {
+      staleSessionResetRef.current = true;
+      clearSession();
+      void signOut().catch(() => {
+        // The persisted app session is already cleared; ignore auth cleanup failures.
+      });
+      if (navigationReady && !authRoute) {
+        router.replace('/sign-in');
+      }
+    }, 800);
+
+    return () => clearTimeout(timeout);
+  }, [authRoute, clearSession, navigationReady, signOut, staleSignedOutSession]);
 
   // Keep the local session in sync with the server profile (role, name, venue)
   // so changes like an admin promotion reflect without re-login.
@@ -87,15 +116,16 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   }, [me, user, setSession]);
   const billing = useQuery(api.app.getMyVenueBilling, me?.venue?._id ? {} : 'skip');
   const { isPremium, isLoading: isPremiumLoading } = useA0Purchases();
+  const allAccess = isAllAccessAccount(me?.profile.email ?? user?.email);
   // When billing is disabled for local/dev builds, never hard-lock users.
-  const venueBlocked = config.billingEnabled && billing ? blockedStatuses.has(billing.status) && !isPremiumLoading && !isPremium : false;
+  const venueBlocked = config.billingEnabled && !allAccess && billing ? blockedStatuses.has(billing.status) && !isPremiumLoading && !isPremium : false;
   // Per-user trial: once a standalone account's 14-day trial expires, every
   // feature is locked until they upgrade. Venue members with an active/trialing
   // venue subscription are governed by the venue billing status above instead.
   const venueActive = billing ? billing.status === 'active' || billing.status === 'trialing' : false;
   const trialEndsAt = me?.profile?.trialEndsAt ?? null;
   const trialExpired = trialEndsAt != null && trialEndsAt <= Date.now();
-  const trialBlocked = config.billingEnabled && trialExpired && !venueActive && !isPremiumLoading && !isPremium;
+  const trialBlocked = config.billingEnabled && !allAccess && trialExpired && !venueActive && !isPremiumLoading && !isPremium;
   const blocked = venueBlocked || trialBlocked;
   const reason = trialBlocked ? 'trial_expired' : reasonFromStatus(billing?.status ?? null);
 
@@ -135,8 +165,6 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
       globalObject.removeEventListener?.('error', handleError);
     };
   }, [reason]);
-
-  if (profileMissing) return null;
 
   return children as never;
 }

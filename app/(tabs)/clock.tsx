@@ -7,6 +7,8 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { canManageVenue } from '../../lib/permissions';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 
 type ActiveClockEntry = {
@@ -42,17 +44,18 @@ function fmtTime(at: number) {
 export default function ClockScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
+  const { isReady } = useAuthenticatedSession();
   // Admin/owner/manager are salaried: they don't punch a time clock.
-  const salaried = user?.role === 'admin' || user?.role === 'owner' || user?.role === 'manager';
+  const salaried = canManageVenue(user?.role, user?.email);
   const isAdmin = salaried;
   const [location, setLocation] = useState<CurrentLocation | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState(false);
 
-  const clockBoard = useQuery(api.app.getClockBoard);
-  const dashboard = useQuery(api.app.getDashboard);
-  const timeClock = useQuery(api.app.getMyTimeClock);
+  const clockBoard = useQuery(api.app.getClockBoard, isReady ? {} : 'skip');
+  const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
+  const timeClock = useQuery(api.app.getMyTimeClock, isReady ? {} : 'skip');
   const clockIn = useMutation(api.app.clockIn);
   const clockOut = useMutation(api.app.clockOut);
 

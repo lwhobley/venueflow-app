@@ -7,19 +7,22 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { CarouselTabBar } from '../../components/CarouselTabBar';
 import { useI18n } from '../../lib/i18n';
 import { canManageVenue } from '../../lib/permissions';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap) =>
   ({ color, size }: { color: string; size: number }) => <MaterialCommunityIcons name={name} size={size} color={color} />;
 
 export default function TabsLayout() {
-  const fullName = useAuthStore((state: AuthState) => state.user?.full_name ?? 'Profile');
+  const localUser = useAuthStore((state: AuthState) => state.user);
+  const fullName = localUser?.full_name ?? 'Profile';
   const { t } = useI18n();
   const palette = useDesignTheme();
   // Server-authoritative role so a stale/incorrect persisted role can never
   // expose manager-only tabs. While loading, hide gated tabs.
-  const me = useQuery(api.app.getMe);
+  const { isReady } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const role = me?.profile.role ?? null;
-  const canManage = canManageVenue(role);
+  const canManage = canManageVenue(role ?? localUser?.role, me?.profile.email ?? localUser?.email);
 
   return (
     <Tabs

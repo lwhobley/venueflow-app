@@ -6,6 +6,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { getPreciseLocation } from '../../lib/location';
 import { canManageVenue } from '../../lib/permissions';
 
@@ -14,8 +15,9 @@ export default function VenueSettingsScreen() {
   const setVenue = useAuthStore((state: AuthState) => state.setVenue);
   const updateVenue = useMutation(api.app.updateVenue);
 
-  const me = useQuery(api.app.getMe);
-  const canManage = canManageVenue(me?.profile.role);
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
 
   const [name, setName] = useState(venue?.name ?? '');
   const [lat, setLat] = useState(venue ? String(venue.latitude) : '');

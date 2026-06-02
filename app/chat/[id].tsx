@@ -6,6 +6,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 function fmtTime(at: number) {
   return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -17,9 +18,10 @@ function isValidId(id: string): id is Id<'conversations'> {
 
 export default function ConversationScreen() {
   const params = useLocalSearchParams<{ id: string }>();
+  const { isReady } = useAuthenticatedSession();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
   const conversationId: Id<'conversations'> | null = rawId && isValidId(rawId) ? rawId as Id<'conversations'> : null;
-  const data = useQuery(api.chat.getMessages, conversationId ? { conversationId } : 'skip');
+  const data = useQuery(api.chat.getMessages, isReady && conversationId ? { conversationId } : 'skip');
   const sendMessage = useMutation(api.chat.sendMessage);
   const [text, setText] = useState('');
   const scrollRef = useRef<ScrollView>(null);

@@ -10,8 +10,10 @@ import { CosmicInsights } from '../../components/CosmicInsights';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { spacing, useAppearanceStore, useDesignTheme } from '../../lib/theme';
 import { LocaleCode, useI18n, useLocaleStore } from '../../lib/i18n';
+import { canManageVenue } from '../../lib/permissions';
 
 type NotificationItem = {
   _id: Id<'notificationEvents'>;
@@ -26,8 +28,9 @@ export default function HomeScreen() {
   usePushNotifications();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const dashboard = useQuery(api.app.getDashboard);
-  const notifications = useQuery(api.app.getNotifications);
+  const { isReady } = useAuthenticatedSession();
+  const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
+  const notifications = useQuery(api.app.getNotifications, isReady ? {} : 'skip');
   const markNotificationRead = useMutation(api.app.markNotificationRead);
   const upsertManagerGoal = useMutation(api.operations.upsertManagerGoal);
   const palette = useDesignTheme();
@@ -42,8 +45,8 @@ export default function HomeScreen() {
   const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
   const venueName = dashboard?.venue.name ?? venue?.name ?? '';
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
-  const canManage = role === 'admin' || role === 'owner' || role === 'manager';
-  const managerDashboard = useQuery(api.operations.getManagerDashboard, canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const canManage = canManageVenue(role, dashboard?.profile.email ?? user?.email);
+  const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [goalTitle, setGoalTitle] = useState('');

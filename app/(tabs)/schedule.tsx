@@ -6,6 +6,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { ManagerCalendar } from '../../components/schedule/ManagerCalendar';
 import { MyShifts } from '../../components/schedule/MyShifts';
@@ -92,8 +93,9 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
 
 export default function ScheduleScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const me = useQuery(api.app.getMe);
-  const canManage = canManageVenue(me?.profile.role);
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
 
   const [managerTab, setManagerTab] = useState<'calendar' | 'requests' | 'blackouts'>('calendar');
   const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');

@@ -5,6 +5,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 
 type Insight = {
@@ -19,13 +20,14 @@ type Insight = {
 
 export default function ReportsScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const me = useQuery(api.app.getMe);
-  const canManage = canManageVenue(me?.profile.role);
-  const insights = useQuery(api.app.getManagerInsights, canManage ? {} : 'skip') as Insight | null | undefined;
-  const timeCsv = useQuery(api.app.exportTimeEntriesCsv, canManage ? {} : 'skip') as string | null | undefined;
-  const reservationCsv = useQuery(api.reservations.exportReservationsCsv, canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
-  const payroll = useQuery(api.payroll.getPayrollSummary, canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
-  const payrollCsv = useQuery(api.payroll.exportPayrollCsv, canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
+  const insights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip') as Insight | null | undefined;
+  const timeCsv = useQuery(api.app.exportTimeEntriesCsv, isReady && canManage ? {} : 'skip') as string | null | undefined;
+  const reservationCsv = useQuery(api.reservations.exportReservationsCsv, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  const payroll = useQuery(api.payroll.getPayrollSummary, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const payrollCsv = useQuery(api.payroll.exportPayrollCsv, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
   const recordPayrollExport = useMutation(api.payroll.recordPayrollExport);
 
   if (!canManage) {

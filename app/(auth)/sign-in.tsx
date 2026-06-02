@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { useAuthActions } from '@convex-dev/auth/react';
-import { useMutation, useQuery } from 'convex/react';
+import { useConvexAuth, useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -26,6 +26,8 @@ const authColors = {
 
 export default function SignInScreen() {
   const { signIn, signOut } = useAuthActions();
+  const { isAuthenticated } = useConvexAuth();
+  const isAuthenticatedRef = useRef(isAuthenticated);
   const bootstrapProfile = useMutation(api.app.bootstrapProfile);
   const redeemInvite = useMutation(api.invites.redeemInvite);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
@@ -69,6 +71,18 @@ export default function SignInScreen() {
   const showError = (title: string, message: string) => {
     setFormError(message);
     Alert.alert(title, message);
+  };
+
+  useEffect(() => {
+    isAuthenticatedRef.current = isAuthenticated;
+  }, [isAuthenticated]);
+
+  const waitForConvexAuth = async () => {
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      if (isAuthenticatedRef.current) return;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error('Sign-in did not complete. Please try again.');
   };
 
   const finishSession = async (options?: { inviteToken?: string }) => {
@@ -132,6 +146,7 @@ export default function SignInScreen() {
     try {
       await resetExistingSession();
       await signIn('password', { email: trimmed, password, flow });
+      await waitForConvexAuth();
       await finishSession({ inviteToken });
     } catch (e) {
       showError(flow === 'signUp' ? 'Could not create account' : 'Sign in failed', e instanceof Error ? e.message : 'Try again.');

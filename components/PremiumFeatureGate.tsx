@@ -7,15 +7,19 @@ import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { getTrialState } from '../lib/trial';
 import { colors, spacing } from '../lib/theme';
 import { config } from '../lib/config';
+import { useAuthenticatedSession } from '../lib/auth-readiness';
+import { isAllAccessAccount } from '../lib/permissions';
 
 // Wraps premium-only features (Integrations, CRM). These are locked during the
 // free trial and after it expires — the user must upgrade to use them. When
 // billing is disabled (local/dev builds) the feature is always unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
-  const me = useQuery(api.app.getMe);
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const { isPremium, isLoading } = useA0Purchases();
+  const allAccess = isAllAccessAccount(me?.profile.email ?? user?.email);
 
-  if (!config.billingEnabled || isPremium) {
+  if (!config.billingEnabled || allAccess || isPremium) {
     return <>{children}</>;
   }
   // Avoid flashing the upsell while entitlement is still resolving.

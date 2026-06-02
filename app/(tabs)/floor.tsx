@@ -6,6 +6,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { router } from 'expo-router';
 
@@ -139,13 +140,14 @@ function formatMinutes(minutes: number) {
 export default function FloorScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
+  const { isReady } = useAuthenticatedSession();
   const [section, setSection] = useState<(typeof sectionFilters)[number]>('all');
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
-  const floor = useQuery(api.floorBinding.getActiveFloorPlan, venue?.id ? { venueId: venue.id } : 'skip') as FloorData | null | undefined;
-  const stats = useQuery(api.floor.getFloorStats, venue?.id ? { venueId: venue.id } : 'skip');
-  const unassignedReservations = useQuery(api.floorBinding.getUnassignedReservations, venue?.id ? { venueId: venue.id, withinMinutes: 120 } : 'skip') as ReservationQueueItem[] | null | undefined;
-  const openWaitlist = useQuery(api.floorBinding.getOpenWaitlist, venue?.id ? { venueId: venue.id } : 'skip') as WaitlistItem[] | null | undefined;
+  const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as FloorData | null | undefined;
+  const stats = useQuery(api.floor.getFloorStats, isReady && venue?.id ? { venueId: venue.id } : 'skip');
+  const unassignedReservations = useQuery(api.floorBinding.getUnassignedReservations, isReady && venue?.id ? { venueId: venue.id, withinMinutes: 120 } : 'skip') as ReservationQueueItem[] | null | undefined;
+  const openWaitlist = useQuery(api.floorBinding.getOpenWaitlist, isReady && venue?.id ? { venueId: venue.id } : 'skip') as WaitlistItem[] | null | undefined;
 
   const seedFloor = useMutation(api.seed.seedDemoFloorPlan);
   const releaseAssignment = useMutation(api.floorBinding.releaseAssignment);
@@ -158,8 +160,8 @@ export default function FloorScreen() {
   const [mergeSel, setMergeSel] = useState<string[]>([]);
   const [mergeParty, setMergeParty] = useState(6);
 
-  const me = useQuery(api.app.getMe);
-  const canEdit = canManageVenue(me?.profile.role);
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
   const activeFloor = floor ?? null;
   const reservationQueue = unassignedReservations ?? [];
   const waitlistQueue = openWaitlist ?? [];

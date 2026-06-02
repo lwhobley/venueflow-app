@@ -8,6 +8,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 function initials(name: string) {
   return name
@@ -49,11 +50,12 @@ type DirectoryEntry = { _id: string; fullName: string; role: string; jobTitle: s
 
 export default function ChatScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
+  const { isReady } = useAuthenticatedSession();
   const ensureSetup = useMutation(api.chat.ensureChatSetup);
   const openDm = useMutation(api.chat.openDm);
   const createGroup = useMutation(api.chat.createGroup);
-  const conversations = useQuery(api.chat.listConversations, venue?.id ? { venueId: venue.id } : 'skip');
-  const directory = useQuery(api.chat.listDirectory, venue?.id ? { venueId: venue.id } : 'skip');
+  const conversations = useQuery(api.chat.listConversations, isReady && venue?.id ? { venueId: venue.id } : 'skip');
+  const directory = useQuery(api.chat.listDirectory, isReady && venue?.id ? { venueId: venue.id } : 'skip');
 
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
@@ -61,8 +63,8 @@ export default function ChatScreen() {
 
   useEffect(() => {
     // Fire-and-forget; a missing or inactive venue should not block rendering.
-    if (venue?.id) void ensureSetup({ venueId: venue.id }).catch(() => {});
-  }, [venue?.id, ensureSetup]);
+    if (isReady && venue?.id) void ensureSetup({ venueId: venue.id }).catch(() => {});
+  }, [isReady, venue?.id, ensureSetup]);
 
   const groups = conversations?.groups ?? [];
   const dms = conversations?.dms ?? [];
