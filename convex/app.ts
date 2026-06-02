@@ -38,6 +38,7 @@ const profileValue = v.object({
   role,
   jobTitle: v.string(),
   venueId: v.union(v.id('venues'), v.null()),
+  allAccess: v.boolean(),
   trialEndsAt: v.union(v.number(), v.null()),
 });
 
@@ -152,16 +153,6 @@ function displayName(identity: Identity) {
   return identity.name?.trim() || identity.email?.split('@')[0] || 'Team member';
 }
 
-function isBootstrapAdminEmail(email: string | null | undefined) {
-  const configured = process.env.VENUEFLOW_ADMIN_EMAILS;
-  if (!configured || !email) return false;
-  const allowlist = configured
-    .split(',')
-    .map((item: string) => item.trim().toLowerCase())
-    .filter(Boolean);
-  return allowlist.includes(email.toLowerCase());
-}
-
 function defaultJobTitle(roleName: string) {
   switch (roleName) {
     case 'admin':
@@ -242,6 +233,7 @@ function mapProfile(profile: Doc<'profiles'>) {
     role: profile.role,
     jobTitle: profile.jobTitle,
     venueId: profile.venueId ?? null,
+    allAccess: profile.allAccess === true,
     trialEndsAt: profile.trialEndsAt ?? null,
   };
 }
@@ -335,7 +327,6 @@ export const bootstrapProfile = mutation({
     // Only ever use the profile's OWN venue — never auto-join another tenant's.
     const venue = existing?.venueId ? await (ctx as AnyCtx).db.get(existing.venueId) : null;
     const email = identity.email ?? `${userId}@venuewrangler.local`;
-    const isAllowlistedAdmin = isBootstrapAdminEmail(identity.email);
     let profile = existing;
 
     if (!profile) {
@@ -357,14 +348,13 @@ export const bootstrapProfile = mutation({
           trialEndsAt: Date.now() + TRIAL_DURATION_MS,
         };
         if (args.fullName?.trim()) patch.fullName = args.fullName.trim();
-        if (isAllowlistedAdmin && invited.role !== 'admin') patch.role = 'admin';
         await (ctx as AnyCtx).db.patch(invited._id, patch);
         profile = await (ctx as AnyCtx).db.get(invited._id);
       } else {
         // New standalone account — no venue until an admin/manager adds this
         // user's email to a venue roster. Every new account starts a 14-day free
         // trial so they can browse the app immediately.
-        const roleName = isAllowlistedAdmin ? 'admin' : 'staff';
+        const roleName = 'staff';
         const profileId = await (ctx as AnyCtx).db.insert('profiles', {
           userId,
           tokenIdentifier: identity.tokenIdentifier,
@@ -385,7 +375,6 @@ export const bootstrapProfile = mutation({
       }
       // Backfill the trial for accounts created before per-user trials existed.
       if (existing.trialEndsAt == null) patch.trialEndsAt = Date.now() + TRIAL_DURATION_MS;
-      if (isAllowlistedAdmin && existing.role !== 'admin') patch.role = 'admin';
       if (Object.keys(patch).length > 0) {
         await (ctx as AnyCtx).db.patch(existing._id, patch);
         profile = await (ctx as AnyCtx).db.get(existing._id);

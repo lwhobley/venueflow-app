@@ -1,18 +1,24 @@
 import { Alert, Platform, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { useMutation } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { useAuthActions } from '@convex-dev/auth/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { canManageBilling, canManageVenue } from '../../lib/permissions';
 
 export default function ProfileScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
-  const { canManage, canManageBilling: canViewBilling } = useAuthenticatedSession();
+  const { isReady } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const serverRole = me?.profile.role ?? null;
+  const allAccess = me?.profile.allAccess ?? user?.all_access;
+  const canManage = canManageVenue(serverRole ?? user?.role, allAccess);
+  const canViewBilling = canManageBilling(serverRole ?? user?.role, allAccess);
   const { signOut } = useAuthActions();
   const deleteAccount = useMutation(api.app.deleteMyAccount);
 

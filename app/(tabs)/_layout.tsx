@@ -1,9 +1,12 @@
 import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import { useDesignTheme } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { CarouselTabBar } from '../../components/CarouselTabBar';
 import { useI18n } from '../../lib/i18n';
+import { canManageVenue } from '../../lib/permissions';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap) =>
@@ -16,7 +19,10 @@ export default function TabsLayout() {
   const palette = useDesignTheme();
   // Server-authoritative role so a stale/incorrect persisted role can never
   // expose manager-only tabs. While loading, hide gated tabs.
-  const { canManage } = useAuthenticatedSession();
+  const { isReady } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const role = me?.profile.role ?? null;
+  const canManage = canManageVenue(role ?? localUser?.role, me?.profile.allAccess ?? localUser?.all_access);
 
   return (
     <Tabs

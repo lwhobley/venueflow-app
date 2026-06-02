@@ -10,6 +10,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { canManageVenue } from '../../lib/permissions';
 
 const categories = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
 type Category = (typeof categories)[number];
@@ -40,7 +41,9 @@ function money(cents: number | null | undefined) {
 
 export default function BarStockScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, canManage } = useAuthenticatedSession();
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
   const stock = useQuery(api.barInventory.getBarStock, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const upsertBarItem = useMutation(api.barInventory.upsertBarItem);
   const recordMovement = useMutation(api.barInventory.recordBarStockMovement);

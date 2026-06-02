@@ -1,16 +1,13 @@
 type RoleName = string | null | undefined;
-type Email = string | null | undefined;
 
-const allAccessEmails = new Set(['user@venuewrangler.com']);
-
-export function isAllAccessAccount(email: Email) {
-  return Boolean(email && allAccessEmails.has(email.trim().toLowerCase()));
+export function hasAllAccess(allAccess: boolean | null | undefined) {
+  return allAccess === true;
 }
 
-export function canManageVenue(role: RoleName, email?: Email) {
-  return isAllAccessAccount(email) || role === 'admin' || role === 'owner' || role === 'manager';
+export function canManageVenue(role: RoleName, allAccess?: boolean | null) {
+  return hasAllAccess(allAccess) || role === 'admin' || role === 'owner' || role === 'manager';
 }
 
-export function canManageBilling(role: RoleName, email?: Email) {
-  return isAllAccessAccount(email) || role === 'admin' || role === 'owner';
+export function canManageBilling(role: RoleName, allAccess?: boolean | null) {
+  return hasAllAccess(allAccess) || role === 'admin' || role === 'owner';
 }

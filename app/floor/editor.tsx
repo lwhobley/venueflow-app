@@ -7,6 +7,7 @@ import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { canManageVenue } from '../../lib/permissions';
 
 type Shape = 'round' | 'square' | 'rect' | 'booth';
 type Section = 'main' | 'patio' | 'bar' | 'vip';
@@ -330,9 +331,12 @@ function ChairNode({
 
 export default function FloorEditorScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, canManage: canEdit } = useAuthenticatedSession();
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const floor = useQuery(api.floor.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const saveFloorPlan = useMutation(api.floor.saveFloorPlan);
+
+  const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
   const [tables, setTables] = useState<DraftTable[]>([]);
   const [chairs, setChairs] = useState<DraftChair[]>([]);

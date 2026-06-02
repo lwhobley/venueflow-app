@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isManager, isOperator } from './authz';
+import { hasAllAccess, isManager, isOperator } from './authz';
 import { reasonFromStatus } from './billing/shared';
 
 describe('isManager', () => {
@@ -24,6 +24,14 @@ describe('isOperator', () => {
 
   it('denies staff', () => {
     expect(isOperator('staff')).toBe(false);
+  });
+});
+
+describe('hasAllAccess', () => {
+  it('only trusts the server-set profile flag', () => {
+    expect(hasAllAccess({ allAccess: true } as any)).toBe(true);
+    expect(hasAllAccess({ allAccess: false, email: 'user@venuewrangler.com' } as any)).toBe(false);
+    expect(hasAllAccess({ email: 'user@venuewrangler.com' } as any)).toBe(false);
   });
 });
 

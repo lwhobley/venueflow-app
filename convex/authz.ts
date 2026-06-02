@@ -1,6 +1,5 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc } from './_generated/dataModel';
-import { isAllAccessAccount } from './permissions';
 
 // Shared authorization helpers. Every mutation/query that touches venue-scoped
 // data should derive the caller's identity, role, and venue from the
@@ -21,6 +20,10 @@ export function isManager(role: Role): boolean {
 
 export function isOperator(role: Role): boolean {
   return OPERATOR_ROLES.has(role);
+}
+
+export function hasAllAccess(profile: Profile): boolean {
+  return profile.allAccess === true;
 }
 
 /** Loads the authenticated profile or throws. Keyed by the stable Convex Auth
@@ -48,17 +51,16 @@ export async function requireVenueMember(ctx: any, venueId: string): Promise<Pro
   return profile;
 }
 
-/** Caller must be a manager (admin/owner/manager) of `venueId`. The all-access
- * QA account is treated as a manager once it is a member of the venue. */
+/** Caller must be a manager (admin/owner/manager) of `venueId`. */
 export async function requireVenueManager(ctx: any, venueId: string): Promise<Profile> {
   const profile = await requireVenueMember(ctx, venueId);
-  if (!isManager(profile.role) && !isAllAccessAccount(profile.email)) throw new Error('Not authorized');
+  if (!hasAllAccess(profile) && !isManager(profile.role)) throw new Error('Not authorized');
   return profile;
 }
 
 /** Caller must be an operator (manager or server) of `venueId`. */
 export async function requireVenueOperator(ctx: any, venueId: string): Promise<Profile> {
   const profile = await requireVenueMember(ctx, venueId);
-  if (!isOperator(profile.role) && !isAllAccessAccount(profile.email)) throw new Error('Not authorized');
+  if (!hasAllAccess(profile) && !isOperator(profile.role)) throw new Error('Not authorized');
   return profile;
 }

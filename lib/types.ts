@@ -17,6 +17,7 @@ export type UserSummary = {
   role: Role;
   job_title: string;
   venue_id: Id<'venues'> | null;
+  all_access: boolean;
 };
 
 export type TeamMember = {

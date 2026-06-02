@@ -6,6 +6,7 @@ import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { canManageVenue } from '../../lib/permissions';
 import { ScheduleSkeleton } from '../../components/schedule/ScheduleSkeleton';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 
@@ -343,7 +344,9 @@ function LaborTab({ venueId, days }: { venueId: string; days: number }) {
 
 export default function SalesScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, canManage } = useAuthenticatedSession();
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
   const [tab, setTab] = useState<'summary' | 'servers' | 'items' | 'labor'>('summary');
   const [windowIdx, setWindowIdx] = useState(0);

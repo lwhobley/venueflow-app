@@ -50,6 +50,8 @@ export default defineSchema({
     role,
     jobTitle: v.string(),
     venueId: v.optional(v.id('venues')),
+    // Server-owned privileged access flag. Never derived from email or client input.
+    allAccess: v.optional(v.boolean()),
     // Per-user 14-day free trial, started at sign up. Standalone accounts (no
     // venue) rely on this; once a venue is joined the venue subscription governs.
     trialEndsAt: v.optional(v.number()),

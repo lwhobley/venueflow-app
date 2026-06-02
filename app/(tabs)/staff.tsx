@@ -7,6 +7,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { canManageVenue } from '../../lib/permissions';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
@@ -95,7 +96,9 @@ type StaffMember = {
 
 export default function StaffScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, canManage } = useAuthenticatedSession();
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');

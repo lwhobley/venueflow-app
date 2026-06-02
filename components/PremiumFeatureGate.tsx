@@ -1,20 +1,23 @@
 import { Platform, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { getTrialState } from '../lib/trial';
 import { colors, spacing } from '../lib/theme';
 import { config } from '../lib/config';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
-import { isAllAccessAccount } from '../lib/permissions';
+import { hasAllAccess } from '../lib/permissions';
 
 // Wraps premium-only features (Integrations, CRM). These are locked during the
 // free trial and after it expires — the user must upgrade to use them. When
 // billing is disabled (local/dev builds) the feature is always unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
-  const { me, email } = useAuthenticatedSession();
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const { isPremium, isLoading } = useA0Purchases();
-  const allAccess = isAllAccessAccount(email);
+  const allAccess = hasAllAccess(me?.profile.allAccess ?? user?.all_access);
 
   if (!config.billingEnabled || allAccess || isPremium) {
     return <>{children}</>;

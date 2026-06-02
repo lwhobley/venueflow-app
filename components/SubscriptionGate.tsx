@@ -7,7 +7,7 @@ import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { api } from '../convex/_generated/api';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { config } from '../lib/config';
-import { isAllAccessAccount } from '../lib/permissions';
+import { hasAllAccess } from '../lib/permissions';
 import type { SubscriptionRequiredReason } from '../convex/billing/shared';
 
 const blockedStatuses = new Set(['past_due', 'cancelled', 'expired', 'paused']);
@@ -104,10 +104,11 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
       user.role === p.role &&
       user.full_name === p.fullName &&
       user.job_title === p.jobTitle &&
+      user.all_access === (p.allAccess === true) &&
       user.venue_id === (p.venueId ?? null);
     if (same) return;
     setSession({
-      user: { id: p._id, email: p.email, full_name: p.fullName, role: p.role, job_title: p.jobTitle, venue_id: p.venueId ?? null },
+      user: { id: p._id, email: p.email, full_name: p.fullName, role: p.role, job_title: p.jobTitle, venue_id: p.venueId ?? null, all_access: p.allAccess === true },
       venue: me.venue
         ? { id: me.venue._id, name: me.venue.name, latitude: me.venue.latitude, longitude: me.venue.longitude, geofence_radius_m: me.venue.geofenceRadiusM }
         : null,
@@ -115,7 +116,7 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   }, [me, user, setSession]);
   const billing = useQuery(api.app.getMyVenueBilling, me?.venue?._id ? {} : 'skip');
   const { isPremium, isLoading: isPremiumLoading } = useA0Purchases();
-  const allAccess = isAllAccessAccount(me?.profile.email ?? user?.email);
+  const allAccess = hasAllAccess(me?.profile.allAccess ?? user?.all_access);
   // When billing is disabled for local/dev builds, never hard-lock users.
   const venueBlocked = config.billingEnabled && !allAccess && billing ? blockedStatuses.has(billing.status) && !isPremiumLoading && !isPremium : false;
   // Per-user trial: once a standalone account's 14-day trial expires, every

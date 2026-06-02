@@ -8,6 +8,7 @@ import type { Id } from '../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../lib/theme';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
+import { canManageVenue } from '../lib/permissions';
 
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
@@ -52,7 +53,9 @@ function pad(n: number) {
 
 export default function ReservationsScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, canManage } = useAuthenticatedSession();
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
   const page = useQuery(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
