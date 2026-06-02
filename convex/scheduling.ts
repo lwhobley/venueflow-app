@@ -1061,6 +1061,22 @@ export const restoreShifts = mutation({
     await requireVenueManager(ctx, args.venueId);
     let restored = 0;
     for (const s of args.shifts) {
+      if (s.dayIndex < 0 || s.dayIndex > 6 || !Number.isInteger(s.dayIndex)) {
+        throw new Error(`Invalid dayIndex: ${s.dayIndex}`);
+      }
+      if (s.startMinutes < 0 || s.startMinutes > 1440 || !Number.isInteger(s.startMinutes)) {
+        throw new Error(`Invalid startMinutes: ${s.startMinutes}`);
+      }
+      if (s.endMinutes < 0 || s.endMinutes > 1440 || !Number.isInteger(s.endMinutes)) {
+        throw new Error(`Invalid endMinutes: ${s.endMinutes}`);
+      }
+      if (s.endMinutes <= s.startMinutes) {
+        throw new Error('endMinutes must be greater than startMinutes');
+      }
+      const jobTitle = s.jobTitle.trim().slice(0, 100);
+      const station = s.station.trim().slice(0, 100);
+      const notes = s.notes != null ? s.notes.trim().slice(0, 500) : undefined;
+
       let profileId = s.profileId ?? undefined;
       if (profileId) {
         const member = await ctx.db.get(profileId);
@@ -1072,10 +1088,10 @@ export const restoreShifts = mutation({
         dayIndex: s.dayIndex,
         startMinutes: s.startMinutes,
         endMinutes: s.endMinutes,
-        jobTitle: s.jobTitle,
-        station: s.station,
+        jobTitle,
+        station,
         status: profileId ? s.status : 'open',
-        notes: s.notes ?? undefined,
+        notes,
       });
       restored += 1;
     }

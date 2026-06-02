@@ -3,13 +3,17 @@ import { v } from 'convex/values';
 import { createAccount } from '@convex-dev/auth/server';
 import type { Id } from './_generated/dataModel';
 
-const DEMO_EMAIL = 'demo@venueflow.app';
-const DEMO_PASSWORD = 'demopass1';
-
 export const bootstrapDemo = mutation({
   args: {},
   returns: v.object({ email: v.string(), password: v.string() }),
   handler: async (ctx) => {
+    if (process.env.DEMO_ENABLED !== 'true') {
+      throw new Error('Demo mode is not enabled on this deployment.');
+    }
+
+    const DEMO_EMAIL = process.env.DEMO_EMAIL ?? 'demo@venueflow.app';
+    const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'demopass1';
+
     // Check if demo profile already exists (idempotent)
     const existing = await ctx.db
       .query('profiles')
