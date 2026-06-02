@@ -56,10 +56,6 @@ function canManage(role: string) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
-function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
-  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
-}
-
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -193,7 +189,7 @@ export const upsertPosConnection = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
     const existing = await (ctx as AnyCtx).db
@@ -226,7 +222,7 @@ export const importPosCheck = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const check = await upsertCheck(ctx as AnyCtx, args);
     const connection = await (ctx as AnyCtx).db

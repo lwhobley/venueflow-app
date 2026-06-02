@@ -17,7 +17,6 @@ export type UserSummary = {
   role: Role;
   job_title: string;
   venue_id: Id<'venues'> | null;
-  is_demo?: boolean;
 };
 
 export type TeamMember = {

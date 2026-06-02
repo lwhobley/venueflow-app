@@ -1,7 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import { assertNotDemoProfile, requireVenueManager, requireVenueMember } from './authz';
+import { requireVenueManager, requireVenueMember } from './authz';
 
 // Legacy validator kept only so older clients that still send `actorRole` pass
 // arg validation. The value is ignored — authorization is derived server-side
@@ -383,7 +383,7 @@ export const addToWaitlist = mutation({
   returns: v.id('waitlist'),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
-    assertNotDemoProfile(me);
+
     const name = args.guestName.trim();
     if (!name) throw new Error('Enter a guest name');
     const now = Date.now();
@@ -407,7 +407,7 @@ export const markWaitlistReady = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
-    assertNotDemoProfile(me);
+
     const entry = await ctx.db.get(args.waitlistId);
     if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
     await ctx.db.patch(entry._id, { readyAt: Date.now(), updatedAt: Date.now() });
@@ -420,7 +420,7 @@ export const removeFromWaitlist = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
-    assertNotDemoProfile(me);
+
     const entry = await ctx.db.get(args.waitlistId);
     if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
     await ctx.db.patch(entry._id, { status: 'removed', updatedAt: Date.now() });
@@ -443,7 +443,7 @@ export const assignReservationToTables = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(profile);
+
     await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, reservationId: args.reservationId, sourceType: 'reservation' });
     return null;
   },
@@ -462,7 +462,7 @@ export const assignWaitlistToTables = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(profile);
+
     await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, waitlistId: args.waitlistId, sourceType: 'waitlist' });
     return null;
   },
@@ -473,7 +473,7 @@ export const releaseAssignment = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(profile);
+
     const assignment = await ctx.db.get(args.assignmentId);
     if (!assignment) throw new Error('Assignment not found');
     if (assignment.venueId !== args.venueId) throw new Error('Wrong venue');

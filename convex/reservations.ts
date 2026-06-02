@@ -68,10 +68,6 @@ function canManage(role: string) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
-function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
-  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
-}
-
 async function requireProfile(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error('Unauthenticated');
@@ -228,7 +224,7 @@ export const saveReservationSettings = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canManage(profile.role) || profile.venueId !== args.venueId) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as any, args.venueId);
     const existing = await loadSettings(ctx, args.venueId);
     const payload = {
@@ -290,7 +286,7 @@ export const saveReservation = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canManage(profile.role) || profile.venueId !== args.venueId) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as any, args.venueId);
     const now = Date.now();
     if (args.reservationId) {
@@ -399,7 +395,7 @@ export const removeReservation = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canManage(profile.role) || profile.venueId !== args.venueId) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as any, args.venueId);
     const existing = await ctx.db.get(args.reservationId);
     if (!existing) return null;

@@ -18,8 +18,6 @@ const profileValue = v.object({
   role: profileRole,
   jobTitle: v.string(),
   venueId: v.union(v.id('venues'), v.null()),
-  isPinUser: v.boolean(),
-  isDemo: v.boolean(),
 });
 
 const venueValue = v.object({
@@ -71,8 +69,6 @@ function mapProfile(profile: Doc<'profiles'>) {
     role: profile.role,
     jobTitle: profile.jobTitle,
     venueId: profile.venueId ?? null,
-    isPinUser: Boolean(profile.isPinUser),
-    isDemo: Boolean(profile.isDemo),
   };
 }
 

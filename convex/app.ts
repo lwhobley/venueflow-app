@@ -38,9 +38,7 @@ const profileValue = v.object({
   role,
   jobTitle: v.string(),
   venueId: v.union(v.id('venues'), v.null()),
-  isPinUser: v.boolean(),
   trialEndsAt: v.union(v.number(), v.null()),
-  isDemo: v.boolean(),
 });
 
 const venueValue = v.object({
@@ -246,9 +244,7 @@ function mapProfile(profile: Doc<'profiles'>) {
     role: profile.role,
     jobTitle: profile.jobTitle,
     venueId: profile.venueId ?? null,
-    isPinUser: Boolean(profile.isPinUser),
     trialEndsAt: profile.trialEndsAt ?? null,
-    isDemo: Boolean(profile.isDemo),
   };
 }
 
@@ -311,10 +307,6 @@ function mapClockEntry(entry: Doc<'timeEntries'>, profile: Doc<'profiles'>, venu
 
 function isAdminRole(roleName: string) {
   return roleName === 'admin' || roleName === 'owner' || roleName === 'manager';
-}
-
-function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
-  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
 }
 
 function assertWithinGeofence(lat: number, lng: number, accuracy: number, mocked: boolean, venue: Doc<'venues'>) {
@@ -439,7 +431,6 @@ export const registerVenue = mutation({
     if (!STAFF_RANGES.includes(args.staffRange as (typeof STAFF_RANGES)[number])) {
       throw new Error('Choose a staff size range');
     }
-    const nameKey = businessName.toLowerCase();
 
     let profile = await getProfile(ctx as AnyCtx);
     // Already has a venue → idempotent (return it).
@@ -448,15 +439,10 @@ export const registerVenue = mutation({
       if (existingVenue) return { profile: mapProfile(profile), venue: mapVenue(existingVenue) };
     }
 
-    // Business names are the staff login key, so they must be unique.
-    const clash = await (ctx as AnyCtx).db.query('venues').withIndex('by_nameKey', (q: any) => q.eq('nameKey', nameKey)).first();
-    if (clash) throw new Error('That business name is already registered. Please choose another or contact support.');
-
     const now = Date.now();
     const plan = planForStaffRange(args.staffRange);
     const venueId = await (ctx as AnyCtx).db.insert('venues', {
       name: businessName,
-      nameKey,
       latitude: 0,
       longitude: 0,
       geofenceRadiusM: 150,
@@ -547,7 +533,7 @@ export const updateVenue = mutation({
     if (!profile || profile.venueId !== args.venueId || !isAdminRole(profile.role)) {
       throw new Error('Not authorized');
     }
-    assertNotDemo(profile);
+
     const venue = await (ctx as AnyCtx).db.get(args.venueId);
     if (!venue) throw new Error('Venue not found');
 
@@ -829,7 +815,7 @@ export const clockIn = mutation({
     const identity = await requireIdentity(ctx as AnyCtx);
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) throw new Error('Profile is not initialized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as any, profile.venueId);
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) throw new Error('Assigned venue not found');
@@ -864,7 +850,7 @@ export const clockOut = mutation({
     const identity = await requireIdentity(ctx as AnyCtx);
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) throw new Error('Profile is not initialized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as any, profile.venueId);
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) throw new Error('Assigned venue not found');
@@ -966,7 +952,7 @@ export const createStaffRequest = mutation({
     const identity = await requireIdentity(ctx as AnyCtx);
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId) throw new Error('Profile does not belong to this venue');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as any, args.venueId);
 
     // Block time-off requests that overlap a manager-defined blackout window.
@@ -1048,7 +1034,7 @@ export const reviewStaffRequest = mutation({
     if (!reviewer || !reviewer.venueId || !(reviewer.role === 'admin' || reviewer.role === 'owner' || reviewer.role === 'manager')) {
       throw new Error('Not authorized');
     }
-    assertNotDemo(reviewer);
+
     await requireActiveSubscription(ctx as any, reviewer.venueId);
     const request = await (ctx as AnyCtx).db.get(args.requestId);
     if (!request) throw new Error('Request not found');
@@ -1198,7 +1184,7 @@ export const upsertVenueStaff = mutation({
     if (!identity) throw new Error('Unauthenticated');
     const viewer = await getProfile(ctx as AnyCtx);
     if (!viewer || viewer.venueId !== args.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
-    assertNotDemo(viewer);
+
 
     const existing = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     const member = existing.find((item: Doc<'profiles'>) => item.email.toLowerCase() === args.email.toLowerCase()) ?? null;
@@ -1239,7 +1225,7 @@ export const deactivateVenueStaff = mutation({
     if (!identity) throw new Error('Unauthenticated');
     const viewer = await getProfile(ctx as AnyCtx);
     if (!viewer || !viewer.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
-    assertNotDemo(viewer);
+
     const staff = await (ctx as AnyCtx).db.get(args.staffId);
     if (!staff) throw new Error('Staff member not found');
     if (staff.venueId !== viewer.venueId) throw new Error('Staff member does not belong to this venue');
@@ -1281,7 +1267,7 @@ export const markNotificationRead = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId) throw new Error('Profile is not initialized');
-    assertNotDemo(profile);
+
     const row = await (ctx as AnyCtx).db.get(args.notificationId);
     if (!row || row.venueId !== profile.venueId) throw new Error('Notification not found');
     const canRead = row.audience === 'staff' || (row.audience === 'managers' && isAdminRole(profile.role)) || row.profileId === profile._id;

@@ -27,6 +27,7 @@ const authColors = {
 export default function SignInScreen() {
   const { signIn, signOut } = useAuthActions();
   const bootstrapProfile = useMutation(api.app.bootstrapProfile);
+  const bootstrapDemo = useMutation(api.demo.bootstrapDemo);
   const redeemInvite = useMutation(api.invites.redeemInvite);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
@@ -93,7 +94,7 @@ export default function SignInScreen() {
 
     const { profile, venue } = last;
     setSession({
-      user: { id: profile._id, email: profile.email, full_name: profile.fullName, role: profile.role, job_title: profile.jobTitle, venue_id: profile.venueId ?? null, is_demo: profile.isDemo },
+      user: { id: profile._id, email: profile.email, full_name: profile.fullName, role: profile.role, job_title: profile.jobTitle, venue_id: profile.venueId ?? null },
       venue: venue ? { id: venue._id, name: venue.name, latitude: venue.latitude, longitude: venue.longitude, geofence_radius_m: venue.geofenceRadiusM } : null,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -106,6 +107,20 @@ export default function SignInScreen() {
       await signOut();
     } catch {
       // No active session to clear — ignore.
+    }
+  };
+
+  const handleDemoLogin = async () => {
+    setSubmitting(true);
+    try {
+      await resetExistingSession();
+      const { email, password } = await bootstrapDemo();
+      await signIn('password', { email, password, flow: 'signIn' });
+      await finishSession();
+    } catch (e) {
+      Alert.alert('Demo unavailable', e instanceof Error ? e.message : 'Could not start demo. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -195,6 +210,18 @@ export default function SignInScreen() {
             ) : null}
           </Card.Content>
         </Card>
+
+        {!inviteToken ? (
+          <Button
+            mode="outlined"
+            textColor={authColors.muted}
+            style={{ borderColor: authColors.border }}
+            loading={submitting}
+            onPress={() => void handleDemoLogin()}
+          >
+            Try demo
+          </Button>
+        ) : null}
 
         <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
           <Text style={{ color: authColors.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>

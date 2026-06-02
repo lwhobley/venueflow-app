@@ -76,11 +76,10 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
       user.role === p.role &&
       user.full_name === p.fullName &&
       user.job_title === p.jobTitle &&
-      user.venue_id === (p.venueId ?? null) &&
-      user.is_demo === p.isDemo;
+      user.venue_id === (p.venueId ?? null);
     if (same) return;
     setSession({
-      user: { id: p._id, email: p.email, full_name: p.fullName, role: p.role, job_title: p.jobTitle, venue_id: p.venueId ?? null, is_demo: p.isDemo },
+      user: { id: p._id, email: p.email, full_name: p.fullName, role: p.role, job_title: p.jobTitle, venue_id: p.venueId ?? null },
       venue: me.venue
         ? { id: me.venue._id, name: me.venue.name, latitude: me.venue.latitude, longitude: me.venue.longitude, geofence_radius_m: me.venue.geofenceRadiusM }
         : null,

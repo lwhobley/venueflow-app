@@ -24,10 +24,6 @@ function canManage(role: string) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
-function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
-  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
-}
-
 async function getProfile(ctx: AnyCtx) {
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
@@ -152,7 +148,7 @@ export const recordPayrollExport = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     const rows = await buildPayrollRows(ctx as AnyCtx, args.venueId, args.periodStart, args.periodEnd);
     const totalHours = Math.round(rows.reduce((sum: number, row: { hours: number }) => sum + row.hours, 0) * 100) / 100;

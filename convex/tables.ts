@@ -29,10 +29,6 @@ function canTransfer(role: Doc<'profiles'>['role']) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
-function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
-  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
-}
-
 async function loadState(ctx: any, tableId: Id<'tables'>) {
   return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).unique();
 }
@@ -132,7 +128,7 @@ export const updateTableState = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canOperate(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as any, (await loadTableAndPlan(ctx, args.tableId)).floorPlan.venueId);
     await applyUpdate(ctx, profile, args.tableId, args);
     return null;
@@ -145,7 +141,7 @@ export const seatParty = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canOperate(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     const { floorPlan } = await loadTableAndPlan(ctx, args.tableId);
     await requireActiveSubscription(ctx as any, floorPlan.venueId);
     await applyUpdate(ctx, profile, args.tableId, { status: 'seated', partySize: args.partySize, serverId: args.serverId ?? profile._id });
@@ -159,7 +155,7 @@ export const markDirty = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canOperate(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     const { floorPlan } = await loadTableAndPlan(ctx, args.tableId);
     await requireActiveSubscription(ctx as any, floorPlan.venueId);
     await applyUpdate(ctx, profile, args.tableId, { status: 'dirty' });
@@ -173,7 +169,7 @@ export const markClean = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canOperate(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     const { floorPlan } = await loadTableAndPlan(ctx, args.tableId);
     await requireActiveSubscription(ctx as any, floorPlan.venueId);
     await applyUpdate(ctx, profile, args.tableId, {
@@ -271,10 +267,10 @@ export const splitMergedTables = mutation({
   handler: async (ctx, args) => {
     const profile = await requireProfile(ctx);
     if (!canTransfer(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
-    assertNotDemo(profile);
-    assertNotDemo(profile);
-    assertNotDemo(profile);
+
+
+
+
     if (profile.venueId !== args.venueId) throw new Error('Table is outside your venue');
     await requireActiveSubscription(ctx as any, args.venueId);
     const group = await ctx.db

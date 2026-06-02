@@ -19,10 +19,6 @@ function canManage(role: string) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
-function assertNotDemo(profile: Doc<'profiles'> | null | undefined) {
-  if (profile?.isDemo) throw new Error('Demo mode is read-only. Real changes are disabled for this profile.');
-}
-
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -172,7 +168,7 @@ export const upsertManagerGoal = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
     const payload = {
@@ -211,7 +207,7 @@ export const upsertVenueEvent = mutation({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
-    assertNotDemo(profile);
+
     await requireActiveSubscription(ctx as AnyCtx, args.venueId);
     if (args.reservationId) {
       const reservation = await (ctx as AnyCtx).db.get(args.reservationId);

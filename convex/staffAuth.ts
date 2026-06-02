@@ -1,196 +1,13 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
-import { createAccount, modifyAccountCredentials } from '@convex-dev/auth/server';
-import type { Doc, Id } from './_generated/dataModel';
-import { assertNotDemoProfile, requireVenueManager, requireVenueMember } from './authz';
-
-const accessRoleValue = v.union(v.literal('manager'), v.literal('staff'));
-const PIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
-const PIN_MAX_FAILURES = 5;
-const DEMO_OWNER_LOGIN_HANDLE = 'demo_owner@pin.venuewrangler';
-const DEMO_EMPLOYEE_LOGIN_HANDLE = 'demo_employee@pin.venuewrangler';
-
-type DemoKind = 'owner' | 'employee';
-
-// Demo PINs are read from env vars so they are never committed to source.
-// If neither var is set, demo login is completely disabled (fail closed).
-function getDemoPin(kind: DemoKind): string | null {
-  const val = kind === 'owner' ? process.env.DEMO_OWNER_PIN : process.env.DEMO_EMPLOYEE_PIN;
-  return val ?? null;
-}
-
-const DEMO_CONFIG: Record<DemoKind, { loginHandle: string; fullName: string; role: Doc<'profiles'>['role']; jobTitle: string }> = {
-  owner: {
-    loginHandle: DEMO_OWNER_LOGIN_HANDLE,
-    fullName: 'Demo Agent',
-    role: 'owner',
-    jobTitle: 'Demo Owner',
-  },
-  employee: {
-    loginHandle: DEMO_EMPLOYEE_LOGIN_HANDLE,
-    fullName: 'Demo Employee',
-    role: 'staff',
-    jobTitle: 'Demo Employee',
-  },
-};
+import type { Doc } from './_generated/dataModel';
+import { requireVenueManager, requireVenueMember } from './authz';
 
 function randomCode(len = 6) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let out = '';
   for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
   return out;
-}
-
-// PIN hash is salted by venue only (not the login handle), so the same PIN
-// always hashes the same way within a venue. That lets us (a) enforce unique
-// PINs per venue and (b) identify a staffer from their PIN alone at login.
-// PIN_HASH_PEPPER adds a server-side secret to the pre-image; setting it
-// requires a one-time PIN reset for all staff (admins re-issue PINs via the
-// staff screen). If unset, falls back to the original format for compatibility.
-async function hashPin(venueId: Id<'venues'>, pin: string) {
-  const pepper = process.env.PIN_HASH_PEPPER;
-  const preimage = pepper ? `${venueId}:${pepper}:${pin}` : `${venueId}:${pin}`;
-  const bytes = new TextEncoder().encode(preimage);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-// Reject a PIN that is already assigned to another staffer in the same venue.
-async function assertPinAvailable(ctx: any, venueId: Id<'venues'>, pinHash: string, excludeProfileId?: Id<'profiles'>) {
-  const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).collect();
-  const clash = profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.pinHash === pinHash && p._id !== excludeProfileId);
-  if (clash) throw new Error('That PIN is already in use. Choose a different 4-digit PIN.');
-}
-
-async function recentPinFailures(ctx: any, profileId: Id<'profiles'>) {
-  const cutoff = Date.now() - PIN_LOCK_WINDOW_MS;
-  const attempts = await ctx.db
-    .query('pinLoginAttempts')
-    .withIndex('by_profile_and_createdAt', (q: any) => q.eq('profileId', profileId))
-    .order('desc')
-    .take(PIN_MAX_FAILURES);
-  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success && attempt.createdAt >= cutoff).length;
-}
-
-async function recentPinFailuresForHash(ctx: any, venueId: Id<'venues'>, pinHash: string) {
-  const cutoff = Date.now() - PIN_LOCK_WINDOW_MS;
-  const attempts = await ctx.db
-    .query('pinLoginAttempts')
-    .withIndex('by_venue_and_createdAt', (q: any) => q.eq('venueId', venueId))
-    .order('desc')
-    .take(50);
-  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success && attempt.pinHash === pinHash && attempt.createdAt >= cutoff).length;
-}
-
-// Global brute-force guard: caps total failed PIN attempts across the whole
-// deployment in the lock window, so an attacker can't sweep many distinct PINs
-// (each a different hash) without being slowed. Generous cap so legitimate
-// fat-finger failures never lock out staff.
-const PIN_GLOBAL_MAX_FAILURES = 30;
-async function recentGlobalPinFailures(ctx: any) {
-  const cutoff = Date.now() - PIN_LOCK_WINDOW_MS;
-  const attempts = await ctx.db
-    .query('pinLoginAttempts')
-    .withIndex('by_createdAt', (q: any) => q.gte('createdAt', cutoff))
-    .collect();
-  return attempts.filter((attempt: Doc<'pinLoginAttempts'>) => !attempt.success).length;
-}
-
-async function recordPinAttempt(ctx: any, venueId: Id<'venues'>, profileId: Id<'profiles'> | undefined, pinHash: string, success: boolean) {
-  await ctx.db.insert('pinLoginAttempts', {
-    venueId,
-    profileId,
-    pinHash,
-    success,
-    createdAt: Date.now(),
-  });
-}
-
-async function resetDemoSession(ctx: any, profileId: Id<'profiles'>) {
-  const availability = await ctx.db.query('availability').withIndex('by_profile', (q: any) => q.eq('profileId', profileId)).collect();
-  for (const row of availability) await ctx.db.delete(row._id);
-
-  const requests = await ctx.db.query('staffRequests').withIndex('by_profileId', (q: any) => q.eq('profileId', profileId)).collect();
-  for (const row of requests) await ctx.db.delete(row._id);
-
-  const outgoingSwaps = await ctx.db.query('shiftSwaps').withIndex('by_requester', (q: any) => q.eq('requesterProfileId', profileId)).collect();
-  for (const row of outgoingSwaps) await ctx.db.delete(row._id);
-
-  const incomingSwaps = await ctx.db.query('shiftSwaps').withIndex('by_target', (q: any) => q.eq('targetProfileId', profileId)).collect();
-  for (const row of incomingSwaps) await ctx.db.delete(row._id);
-
-  const openEntries = await ctx.db.query('timeEntries').withIndex('by_profileId_and_isOpen', (q: any) => q.eq('profileId', profileId).eq('isOpen', true)).collect();
-  for (const row of openEntries) await ctx.db.delete(row._id);
-
-  const pushTokens = await ctx.db.query('pushTokens').withIndex('by_profile', (q: any) => q.eq('profileId', profileId)).collect();
-  for (const row of pushTokens) await ctx.db.delete(row._id);
-}
-
-async function ensureDemoProfile(ctx: any, venue: Doc<'venues'>, pinHash: string, kind: DemoKind) {
-  const config = DEMO_CONFIG[kind];
-  const pin = getDemoPin(kind);
-  if (!pin) throw new Error('Demo mode is not configured for this deployment.');
-  const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
-  const existing =
-    profiles.find((p: Doc<'profiles'>) => p.isDemo && p.demoKind === kind) ??
-    profiles.find((p: Doc<'profiles'>) => p.loginHandle === config.loginHandle) ??
-    profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.pinHash === pinHash);
-
-  if (existing?.loginHandle) {
-    await modifyAccountCredentials(ctx as any, {
-      provider: 'password',
-      account: { id: existing.loginHandle, secret: pin },
-    });
-  }
-
-  if (existing) {
-    let userId = existing.userId;
-    if (!existing.loginHandle) {
-      const created = await createAccount(ctx as any, {
-        provider: 'password',
-        account: { id: config.loginHandle, secret: pin },
-        profile: { email: config.loginHandle },
-      });
-      userId = created.user._id as Id<'users'>;
-    }
-    const patch = {
-      userId,
-      email: '',
-      fullName: config.fullName,
-      role: config.role,
-      jobTitle: config.jobTitle,
-      venueId: venue._id,
-      isPinUser: true,
-      loginHandle: existing.loginHandle ?? config.loginHandle,
-      pinHash,
-      isDemo: true,
-      demoKind: kind,
-    };
-    await ctx.db.patch(existing._id, patch);
-    await resetDemoSession(ctx, existing._id);
-    return (await ctx.db.get(existing._id)) as Doc<'profiles'>;
-  }
-
-  const created = await createAccount(ctx as any, {
-    provider: 'password',
-    account: { id: config.loginHandle, secret: pin },
-    profile: { email: config.loginHandle },
-  });
-
-  const profileId = await ctx.db.insert('profiles', {
-    userId: created.user._id as Id<'users'>,
-    email: '',
-    fullName: config.fullName,
-    role: config.role,
-    jobTitle: config.jobTitle,
-    venueId: venue._id,
-    isPinUser: true,
-    loginHandle: config.loginHandle,
-    pinHash,
-    isDemo: true,
-    demoKind: kind,
-  });
-  return (await ctx.db.get(profileId)) as Doc<'profiles'>;
 }
 
 // ---------- Custom roles / positions ----------
@@ -211,8 +28,7 @@ export const addVenueRole = mutation({
   args: { venueId: v.id('venues'), name: v.string() },
   returns: v.id('venueRoles'),
   handler: async (ctx, args) => {
-    const profile = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(profile);
+    await requireVenueManager(ctx, args.venueId);
     const name = args.name.trim();
     if (!name) throw new Error('Enter a role name');
     const existing = await ctx.db.query('venueRoles').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).collect();
@@ -227,8 +43,7 @@ export const removeVenueRole = mutation({
   args: { venueId: v.id('venues'), roleId: v.id('venueRoles') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const profile = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(profile);
+    await requireVenueManager(ctx, args.venueId);
     const row = await ctx.db.get(args.roleId);
     if (!row || row.venueId !== args.venueId) throw new Error('Role not found');
     await ctx.db.delete(row._id);
@@ -242,12 +57,10 @@ export const ensureVenueCode = mutation({
   args: { venueId: v.id('venues') },
   returns: v.string(),
   handler: async (ctx, args) => {
-    const profile = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(profile);
+    await requireVenueManager(ctx, args.venueId);
     const venue = await ctx.db.get(args.venueId);
     if (!venue) throw new Error('Venue not found');
     if (venue.code) return venue.code;
-    // ensure uniqueness
     let code = randomCode();
     for (let i = 0; i < 5; i++) {
       const clash = await ctx.db.query('venues').withIndex('by_code', (q: any) => q.eq('code', code)).first();
@@ -256,148 +69,5 @@ export const ensureVenueCode = mutation({
     }
     await ctx.db.patch(venue._id, { code });
     return code;
-  },
-});
-
-// ---------- Invite PIN staff ----------
-
-export const inviteStaff = mutation({
-  args: {
-    venueId: v.id('venues'),
-    fullName: v.string(),
-    accessRole: accessRoleValue,
-    jobTitle: v.string(),
-    pin: v.string(),
-  },
-  returns: v.object({ loginHandle: v.string() }),
-  handler: async (ctx, args) => {
-    const manager = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(manager);
-    const fullName = args.fullName.trim();
-    if (!fullName) throw new Error('Enter a name');
-    if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
-
-    const handle = `pin_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}@pin.venueflow`;
-    const pinHash = await hashPin(args.venueId, args.pin);
-    await assertPinAvailable(ctx, args.venueId, pinHash);
-
-    // Provision a Convex Auth password account so the staff member can sign in
-    // with their PIN as the password.
-    const created = await createAccount(ctx as any, {
-      provider: 'password',
-      account: { id: handle, secret: args.pin },
-      profile: { email: handle },
-    });
-
-    await ctx.db.insert('profiles', {
-      userId: created.user._id as Id<'users'>,
-      email: handle,
-      fullName,
-      role: args.accessRole,
-      jobTitle: args.jobTitle.trim() || 'Team Member',
-      venueId: args.venueId,
-      isPinUser: true,
-      loginHandle: handle,
-      pinHash,
-    });
-
-    return { loginHandle: handle };
-  },
-});
-
-// Managers reset a staff PIN: updates BOTH the Convex Auth account secret and
-// the stored pinHash, and clears the lockout (recent failed attempts).
-export const resetStaffPin = mutation({
-  args: { venueId: v.id('venues'), profileId: v.id('profiles'), pin: v.string() },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    const manager = await requireVenueManager(ctx, args.venueId);
-    assertNotDemoProfile(manager);
-    if (!/^\d{4}$/.test(args.pin)) throw new Error('PIN must be exactly 4 digits');
-    const profile = await ctx.db.get(args.profileId);
-    if (!profile || profile.venueId !== args.venueId) {
-      throw new Error('Staff member not found');
-    }
-    if (!profile.isPinUser || !profile.loginHandle) throw new Error('This staff member does not use PIN login');
-
-    const pinHash = await hashPin(args.venueId, args.pin);
-    await assertPinAvailable(ctx, args.venueId, pinHash, profile._id);
-
-    await modifyAccountCredentials(ctx as any, {
-      provider: 'password',
-      account: { id: profile.loginHandle, secret: args.pin },
-    });
-    await ctx.db.patch(profile._id, { pinHash });
-
-    // Clear lockout history so the staffer can sign in immediately.
-    const attempts = await ctx.db
-      .query('pinLoginAttempts')
-      .withIndex('by_profile_and_createdAt', (q: any) => q.eq('profileId', profile._id))
-      .collect();
-    for (const attempt of attempts) await ctx.db.delete(attempt._id);
-
-    return null;
-  },
-});
-
-// Multitenant PIN login: staff enter their venue's BUSINESS NAME plus their
-// PIN. The business name resolves the venue; the PIN is matched within it.
-// Demo PINs fall back to the demo venue so reviewers only need the PIN.
-export const loginWithPin = mutation({
-  args: { businessName: v.optional(v.string()), pin: v.string() },
-  returns: v.object({ loginHandle: v.string() }),
-  handler: async (ctx, args) => {
-    if (!/^\d{4}$/.test(args.pin)) throw new Error('Enter your 4-digit PIN');
-
-    const ownerPin = getDemoPin('owner');
-    const employeePin = getDemoPin('employee');
-    const demoKind: DemoKind | null =
-      ownerPin && args.pin === ownerPin ? 'owner'
-      : employeePin && args.pin === employeePin ? 'employee'
-      : null;
-
-    // Resolve the venue from the business name.
-    const nameKey = (args.businessName ?? '').trim().toLowerCase();
-    let venue: Doc<'venues'> | null = null;
-    if (nameKey) {
-      venue = await ctx.db.query('venues').withIndex('by_nameKey', (q: any) => q.eq('nameKey', nameKey)).first();
-    }
-    // Demo PINs don't require the exact business name — use the dedicated demo
-    // venue. Fail closed: never fall back to a real venue if none is marked.
-    if (!venue && demoKind) {
-      venue = await ctx.db.query('venues').filter((q: any) => q.eq(q.field('isDemoVenue'), true)).first();
-      if (!venue) throw new Error('Demo mode is not configured for this deployment.');
-    }
-    if (!venue) throw new Error('Business not found. Check the name with your manager.');
-
-    const pinHash = await hashPin(venue._id, args.pin);
-
-    if (demoKind) {
-      const demo = await ensureDemoProfile(ctx, venue, pinHash, demoKind);
-      if (!demo.loginHandle) throw new Error('Demo profile is not ready');
-      await recordPinAttempt(ctx, venue._id, demo._id, pinHash, true);
-      return { loginHandle: demo.loginHandle };
-    }
-
-    if (await recentPinFailuresForHash(ctx, venue._id, pinHash) >= PIN_MAX_FAILURES) {
-      throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
-    }
-    if (await recentGlobalPinFailures(ctx) >= PIN_GLOBAL_MAX_FAILURES) {
-      throw new Error('Too many sign-in attempts right now. Please try again shortly.');
-    }
-
-    const profiles = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venue._id)).collect();
-    const match = profiles.find((p: Doc<'profiles'>) => p.isPinUser && p.loginHandle && p.pinHash === pinHash) ?? null;
-    if (!match || !match.loginHandle) {
-      await recordPinAttempt(ctx, venue._id, undefined, pinHash, false);
-      throw new Error('Wrong PIN');
-    }
-
-    if (await recentPinFailures(ctx, match._id) >= PIN_MAX_FAILURES) {
-      throw new Error('Too many PIN attempts. Ask a manager to reset your PIN.');
-    }
-
-    await recordPinAttempt(ctx, venue._id, match._id, pinHash, true);
-    return { loginHandle: match.loginHandle };
   },
 });

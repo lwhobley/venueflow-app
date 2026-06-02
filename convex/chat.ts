@@ -1,7 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import { assertNotDemoProfile, requireProfile, requireVenueMember } from './authz';
+import { requireProfile, requireVenueMember } from './authz';
 
 const GENERAL_GROUP_NAME = 'All Staff';
 
@@ -15,7 +15,7 @@ export const ensureChatSetup = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
-    assertNotDemoProfile(me);
+
     const groups = await ctx.db
       .query('conversations')
       .withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId))
@@ -40,7 +40,7 @@ export const createGroup = mutation({
   returns: v.id('conversations'),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
-    assertNotDemoProfile(me);
+
     const name = args.name.trim();
     if (!name) throw new Error('Enter a group name');
     if (name.length > 100) throw new Error('Group name must be 100 characters or fewer');
@@ -119,7 +119,7 @@ export const openDm = mutation({
   returns: v.id('conversations'),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
-    assertNotDemoProfile(me);
+
     const other = await ctx.db.get(args.otherProfileId);
     if (!other || other.venueId !== args.venueId) throw new Error('User is not in this venue');
 
@@ -205,7 +205,7 @@ export const sendMessage = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireProfile(ctx);
-    assertNotDemoProfile(me);
+
     const conv = await assertConversationAccess(ctx, args.conversationId, me);
     const text = args.text.trim();
     if (!text) return null;

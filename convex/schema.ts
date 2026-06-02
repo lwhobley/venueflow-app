@@ -50,17 +50,9 @@ export default defineSchema({
     role,
     jobTitle: v.string(),
     venueId: v.optional(v.id('venues')),
-    // PIN-login staff (managers + hourly) are provisioned by an admin. The
-    // auth handle is never returned in the public roster; it is exchanged only
-    // after a rate-limited PIN check.
-    isPinUser: v.optional(v.boolean()),
-    loginHandle: v.optional(v.string()),
-    pinHash: v.optional(v.string()),
     // Per-user 14-day free trial, started at sign up. Standalone accounts (no
     // venue) rely on this; once a venue is joined the venue subscription governs.
     trialEndsAt: v.optional(v.number()),
-    isDemo: v.optional(v.boolean()),
-    demoKind: v.optional(v.union(v.literal('owner'), v.literal('employee'))),
   })
     .index('by_userId', ['userId'])
     .index('by_tokenIdentifier', ['tokenIdentifier'])
@@ -68,9 +60,6 @@ export default defineSchema({
     .index('by_email', ['email']),
   venues: defineTable({
     name: v.string(),
-    // Normalized business name (lowercased/trimmed) — staff enter the business
-    // name instead of a numeric code to find their venue for PIN login. Unique.
-    nameKey: v.optional(v.string()),
     latitude: v.number(),
     longitude: v.number(),
     geofenceRadiusM: v.number(),
@@ -80,25 +69,17 @@ export default defineSchema({
     address: v.optional(v.string()),
     venueType: v.optional(v.string()),
     staffRange: v.optional(v.string()),
-    isDemoVenue: v.optional(v.boolean()),
     weeklyLaborBudgetHours: v.optional(v.number()), // for scheduling budget warnings
     schedulePublishedAt: v.optional(v.number()),
     schedulePublishedBy: v.optional(v.id('profiles')),
     scheduleUpdatedAfterPublishAt: v.optional(v.number()),
     subscriptionStatus: v.optional(v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'))),
     subscriptionPlatform: v.optional(v.union(v.literal('stripe'), v.literal('apple'), v.null())),
-  }).index('by_code', ['code']).index('by_nameKey', ['nameKey']),
+  }).index('by_code', ['code']),
   venueRoles: defineTable({
     venueId: v.id('venues'),
     name: v.string(),
   }).index('by_venue', ['venueId']),
-  pinLoginAttempts: defineTable({
-    venueId: v.id('venues'),
-    profileId: v.optional(v.id('profiles')),
-    pinHash: v.optional(v.string()),
-    success: v.boolean(),
-    createdAt: v.number(),
-  }).index('by_profile_and_createdAt', ['profileId', 'createdAt']).index('by_venue_and_createdAt', ['venueId', 'createdAt']).index('by_createdAt', ['createdAt']),
   teams: defineTable({
     venueId: v.id('venues'),
     name: v.string(),
