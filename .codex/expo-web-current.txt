@@ -1,0 +1,3 @@
+PID=26440
+OUT=C:\Users\lwhob\Downloads\a0-project\.codex\expo-web-8083-20260602-120609.out.log
+ERR=C:\Users\lwhob\Downloads\a0-project\.codex\expo-web-8083-20260602-120609.err.log

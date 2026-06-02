@@ -32,6 +32,8 @@ export function AvailabilityEditor() {
   const setAvailability = useMutation(api.scheduling.setMyAvailability);
   const [days, setDays] = useState<DayState[]>(dayLabels.map(defaultDay));
   const [savedNote, setSavedNote] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!saved) return;
@@ -50,14 +52,22 @@ export function AvailabilityEditor() {
     setDays((prev) => prev.map((d, idx) => (idx === i ? { ...d, ...patch } : d)));
 
   const onSave = async () => {
+    setSaving(true);
+    setError(null);
     const rows = days.map((d, dayIndex) => {
       const s = parseTime(d.start) ?? 540;
       const e = parseTime(d.end) ?? 1020;
       return { dayIndex, startMinutes: s, endMinutes: Math.max(e, s + 30), available: d.available };
     });
-    await setAvailability({ rows });
-    setSavedNote(true);
-    setTimeout(() => setSavedNote(false), 2500);
+    try {
+      await setAvailability({ rows });
+      setSavedNote(true);
+      setTimeout(() => setSavedNote(false), 2500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save availability.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -91,9 +101,10 @@ export function AvailabilityEditor() {
         </Card>
       ))}
 
-      <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSave()}>
+      <Button mode="contained" buttonColor={colors.primary} loading={saving} disabled={saving} onPress={() => void onSave()}>
         Save availability
       </Button>
+      {error ? <Text style={{ color: colors.danger, textAlign: 'center' }}>{error}</Text> : null}
       {savedNote ? <Text style={{ color: accents[2].fg, textAlign: 'center' }}>Saved ✓</Text> : null}
     </View>
   );

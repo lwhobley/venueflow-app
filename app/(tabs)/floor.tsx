@@ -159,6 +159,7 @@ export default function FloorScreen() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeSel, setMergeSel] = useState<string[]>([]);
   const [mergeParty, setMergeParty] = useState(6);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
@@ -185,9 +186,14 @@ export default function FloorScreen() {
   const toggleMerge = (id: string) => setMergeSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   const doMerge = async () => {
     if (!venue?.id || mergeSel.length < 2) return;
-    await mergeTablesForParty({ venueId: venue.id, tableIds: mergeSel as Id<'tables'>[], partySize: mergeParty });
-    setMergeSel([]);
-    setMergeOpen(false);
+    setActionError(null);
+    try {
+      await mergeTablesForParty({ venueId: venue.id, tableIds: mergeSel as Id<'tables'>[], partySize: mergeParty });
+      setMergeSel([]);
+      setMergeOpen(false);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not merge tables.');
+    }
   };
 
   const filteredTables = useMemo(() => {
@@ -203,17 +209,55 @@ export default function FloorScreen() {
 
   const onSeed = async () => {
     if (!venue?.id) return;
-    await seedFloor({ venueId: venue.id });
+    setActionError(null);
+    try {
+      await seedFloor({ venueId: venue.id });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not seed floor plan.');
+    }
   };
 
   const onRelease = async (assignmentId: string) => {
     if (!venue?.id) return;
-    await releaseAssignment({
-      venueId: venue.id,
-      assignmentId: assignmentId as Id<'tableAssignments'>,
-      reason: 'Released from floor screen',
-      actorRole: user?.role ?? 'staff',
-    });
+    setActionError(null);
+    try {
+      await releaseAssignment({
+        venueId: venue.id,
+        assignmentId: assignmentId as Id<'tableAssignments'>,
+        reason: 'Released from floor screen',
+        actorRole: user?.role ?? 'staff',
+      });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not release assignment.');
+    }
+  };
+
+  const onMarkDirty = async (tableId: Id<'tables'>) => {
+    setActionError(null);
+    try {
+      await markDirty({ tableId });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not mark table dirty.');
+    }
+  };
+
+  const onMarkClean = async (tableId: Id<'tables'>) => {
+    setActionError(null);
+    try {
+      await markClean({ tableId });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not mark table clean.');
+    }
+  };
+
+  const onSplitMerge = async (mergeGroupId: string) => {
+    if (!venue?.id) return;
+    setActionError(null);
+    try {
+      await splitMergedTables({ venueId: venue.id, mergeGroupId });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not split merged tables.');
+    }
   };
 
   return (
@@ -226,6 +270,7 @@ export default function FloorScreen() {
           Live tables for {venue?.name ?? 'your venue'}.
         </Text>
       </View>
+      {actionError ? <Text style={{ color: colors.danger }}>{actionError}</Text> : null}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {([
@@ -421,7 +466,7 @@ export default function FloorScreen() {
                     <Text style={{ flex: 1, color: colors.muted }}>
                       {tables.map((table) => table.table.label).join(' + ')}
                     </Text>
-                    <Button compact mode="outlined" onPress={() => venue?.id && void splitMergedTables({ venueId: venue.id, mergeGroupId: groupId })}>
+                    <Button compact mode="outlined" onPress={() => void onSplitMerge(groupId)}>
                       Split
                     </Button>
                   </View>
@@ -514,10 +559,10 @@ export default function FloorScreen() {
 
             {canEdit ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                <Button mode="outlined" onPress={() => void markDirty({ tableId: selected.table._id as Id<'tables'> })}>
+                <Button mode="outlined" onPress={() => void onMarkDirty(selected.table._id as Id<'tables'>)}>
                   Mark dirty
                 </Button>
-                <Button mode="outlined" onPress={() => void markClean({ tableId: selected.table._id as Id<'tables'> })}>
+                <Button mode="outlined" onPress={() => void onMarkClean(selected.table._id as Id<'tables'>)}>
                   Mark clean
                 </Button>
               </View>

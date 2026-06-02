@@ -330,43 +330,22 @@ export const bootstrapProfile = mutation({
     let profile = existing;
 
     if (!profile) {
-      // Check whether an admin pre-created a profile for this email via the
-      // staff roster (upsertVenueStaff). Those profiles have no userId yet.
-      // Claim the pre-created profile so the user inherits their venue/role.
-      const invited = identity.email
-        ? await (ctx as AnyCtx).db
-            .query('profiles')
-            .withIndex('by_email', (q: any) => q.eq('email', identity.email!.toLowerCase()))
-            .filter((q: any) => q.eq(q.field('userId'), undefined))
-            .first()
-        : null;
-
-      if (invited) {
-        const patch: Record<string, unknown> = {
-          userId,
-          tokenIdentifier: identity.tokenIdentifier,
-          trialEndsAt: Date.now() + TRIAL_DURATION_MS,
-        };
-        if (args.fullName?.trim()) patch.fullName = args.fullName.trim();
-        await (ctx as AnyCtx).db.patch(invited._id, patch);
-        profile = await (ctx as AnyCtx).db.get(invited._id);
-      } else {
-        // New standalone account — no venue until an admin/manager adds this
-        // user's email to a venue roster. Every new account starts a 14-day free
-        // trial so they can browse the app immediately.
-        const roleName = 'staff';
-        const profileId = await (ctx as AnyCtx).db.insert('profiles', {
-          userId,
-          tokenIdentifier: identity.tokenIdentifier,
-          email,
-          fullName: args.fullName?.trim() || displayName(identity),
-          role: roleName,
-          jobTitle: defaultJobTitle(roleName),
-          venueId: undefined,
-          trialEndsAt: Date.now() + TRIAL_DURATION_MS,
-        });
-        profile = await (ctx as AnyCtx).db.get(profileId);
-      }
+      // New standalone account: no venue until they create one or redeem a
+      // server-created invite token. Do not auto-claim roster profiles by email:
+      // Password-provider emails are self-asserted until an email verification
+      // provider is configured, so email alone cannot authorize venue access.
+      const roleName = 'staff';
+      const profileId = await (ctx as AnyCtx).db.insert('profiles', {
+        userId,
+        tokenIdentifier: identity.tokenIdentifier,
+        email,
+        fullName: args.fullName?.trim() || displayName(identity),
+        role: roleName,
+        jobTitle: defaultJobTitle(roleName),
+        venueId: undefined,
+        trialEndsAt: Date.now() + TRIAL_DURATION_MS,
+      });
+      profile = await (ctx as AnyCtx).db.get(profileId);
     } else {
       const patch: Record<string, unknown> = {};
       if (!existing.userId) {
@@ -1362,9 +1341,13 @@ export const exportTimeEntriesCsv = query({
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId || !isAdminRole(profile.role)) return null;
     await requireActiveSubscription(ctx as any, profile.venueId);
-    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    const entries = await (ctx as AnyCtx).db
+      .query('timeEntries')
+      .withIndex('by_venue_clockInAt', (q: any) => q.eq('venueId', profile.venueId))
+      .order('desc')
+      .take(500);
     const rows = [['member', 'jobTitle', 'clockInAt', 'clockOutAt', 'hours', 'clockInAccuracyM', 'clockInMocked']];
-    for (const entry of entries.sort((a: Doc<'timeEntries'>, b: Doc<'timeEntries'>) => b.clockInAt - a.clockInAt).slice(0, 500)) {
+    for (const entry of entries) {
       const staff = await (ctx as AnyCtx).db.get(entry.profileId);
       const hours = entry.clockOutAt ? Math.round(((entry.clockOutAt - entry.clockInAt) / 3600000) * 100) / 100 : '';
       rows.push([

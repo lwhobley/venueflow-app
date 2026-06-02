@@ -42,6 +42,15 @@ export function BlackoutManager({ venueId }: { venueId: Id<'venues'> }) {
     }
   };
 
+  const onRemove = async (blackoutId: Id<'blackoutDates'>) => {
+    setError(null);
+    try {
+      await removeBlackout({ venueId, blackoutId });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not remove blackout.');
+    }
+  };
+
   return (
     <View style={{ gap: spacing.md }}>
       <Card style={{ backgroundColor: accents[4].bg, borderRadius: 16 }}>
@@ -84,7 +93,7 @@ export function BlackoutManager({ venueId }: { venueId: Id<'venues'> }) {
                   </Text>
                   <Text style={{ color: colors.muted }}>{b.reason}</Text>
                 </View>
-                <Button compact mode="text" textColor={colors.danger} onPress={() => void removeBlackout({ venueId, blackoutId: b._id })}>
+                <Button compact mode="text" textColor={colors.danger} onPress={() => void onRemove(b._id)}>
                   Remove
                 </Button>
               </View>

@@ -37,7 +37,11 @@ function csvCell(value: string | number | null | undefined) {
 
 async function buildPayrollRows(ctx: AnyCtx, venueId: Id<'venues'>, periodStart: number, periodEnd: number) {
   const staff = await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).take(200);
-  const entries = await ctx.db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).take(1000);
+  const entries = await ctx.db
+    .query('timeEntries')
+    .withIndex('by_venue_clockInAt', (q: any) => q.eq('venueId', venueId).lte('clockInAt', periodEnd))
+    .order('desc')
+    .take(1000);
   return staff
     .map((member: Doc<'profiles'>) => {
       const memberEntries = entries.filter((entry: Doc<'timeEntries'>) => {

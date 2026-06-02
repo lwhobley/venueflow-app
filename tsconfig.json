@@ -5,9 +5,7 @@
     "baseUrl": ".",
     "lib": ["ES2022", "DOM"],
     "paths": {
-      "@/*": ["./*"],
-      "@venuewrangler/shared": ["packages/shared/src"],
-      "@venuewrangler/shared/*": ["packages/shared/src/*"]
+      "@/*": ["./*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"]

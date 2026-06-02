@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type ComponentProps, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Text, TextInput } from 'react-native-paper';
+import { Button, HelperText, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -28,12 +28,14 @@ function Avatar({ name, color }: { name: string; color: string }) {
   );
 }
 
-function Row({ name, subtitle, color, icon, onPress }: { name: string; subtitle?: string | null; color: string; icon?: string; onPress: () => void }) {
+type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+function Row({ name, subtitle, color, icon, onPress }: { name: string; subtitle?: string | null; color: string; icon?: MaterialIconName; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
       {icon ? (
         <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
-          <MaterialCommunityIcons name={icon as any} size={22} color="#fff" />
+          <MaterialCommunityIcons name={icon} size={22} color="#fff" />
         </View>
       ) : (
         <Avatar name={name} color={color} />
@@ -60,10 +62,14 @@ export default function ChatScreen() {
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fire-and-forget; a missing or inactive venue should not block rendering.
-    if (isReady && venue?.id) void ensureSetup({ venueId: venue.id }).catch(() => {});
+    if (!isReady || !venue?.id) return;
+    setError(null);
+    void ensureSetup({ venueId: venue.id }).catch((e) => {
+      setError(e instanceof Error ? e.message : 'Could not prepare chat.');
+    });
   }, [isReady, venue?.id, ensureSetup]);
 
   const groups = conversations?.groups ?? [];
@@ -87,20 +93,26 @@ export default function ChatScreen() {
 
   const startDm = async (otherId: string) => {
     if (!venue?.id) return;
-    const id = await openDm({ venueId: venue.id, otherProfileId: otherId as Id<'profiles'> });
-    router.push(`/chat/${id}`);
+    setError(null);
+    try {
+      const id = await openDm({ venueId: venue.id, otherProfileId: otherId as Id<'profiles'> });
+      router.push(`/chat/${id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open direct message.');
+    }
   };
 
   const onCreateGroup = async () => {
     if (!venue?.id || !groupName.trim()) return;
     setCreating(true);
+    setError(null);
     try {
       const id = await createGroup({ venueId: venue.id, name: groupName.trim() });
       setGroupName('');
       setShowNewGroup(false);
       router.push(`/chat/${id}`);
-    } catch {
-      // Keep the current screen stable if group creation is rejected.
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create group.');
     } finally {
       setCreating(false);
     }
@@ -121,6 +133,7 @@ export default function ChatScreen() {
       showsVerticalScrollIndicator={false}
     >
       <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Chat</Text>
+      {error ? <HelperText type="error" visible>{error}</HelperText> : null}
 
       {/* Group chats: All Staff + any custom groups, plus a way to create more. */}
       <View>

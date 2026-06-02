@@ -28,12 +28,20 @@ type BarItem = {
   notes: string | null;
 };
 
+type BarStock = {
+  items: BarItem[];
+  lowStockCount: number;
+  totalValueCents: number;
+};
+
 type ParsedItem = Omit<BarItem, '_id' | 'area' | 'unitCostCents' | 'supplier' | 'notes'> & {
   area?: string;
   unitCostCents?: number;
   supplier?: string;
   notes?: string;
 };
+
+type MovementType = 'count' | 'received' | 'waste' | 'transfer';
 
 function money(cents: number | null | undefined) {
   return `$${((cents ?? 0) / 100).toFixed(2)}`;
@@ -44,7 +52,7 @@ export default function BarStockScreen() {
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
-  const stock = useQuery(api.barInventory.getBarStock, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const stock = useQuery(api.barInventory.getBarStock, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
   const upsertBarItem = useMutation(api.barInventory.upsertBarItem);
   const recordMovement = useMutation(api.barInventory.recordBarStockMovement);
   const importParsed = useMutation(api.barInventory.importParsedBarItems);
@@ -136,26 +144,42 @@ export default function BarStockScreen() {
   };
 
   const pickCsv = async () => {
-    const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
-    if (doc.canceled || !doc.assets[0]?.uri) return;
-    const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
-    setParseText(text);
-    setMessage(`Loaded ${doc.assets[0].name ?? 'upload'} for parsing.`);
+    setBusy(true);
+    setMessage(null);
+    try {
+      const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
+      if (doc.canceled || !doc.assets[0]?.uri) return;
+      const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
+      setParseText(text);
+      setMessage(`Loaded ${doc.assets[0].name ?? 'upload'} for parsing.`);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not load CSV.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const pickPhoto = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permission.status !== 'granted') {
-      setMessage('Photo permission is required to parse an invoice image.');
-      return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permission.status !== 'granted') {
+        setMessage('Photo permission is required to parse an invoice image.');
+        return;
+      }
+      const image = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        base64: true,
+        quality: 0.8,
+      });
+      if (image.canceled || !image.assets[0]?.base64) return;
+      await parseWithAi({ base64: image.assets[0].base64, mimeType: image.assets[0].mimeType });
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not load photo.');
+    } finally {
+      setBusy(false);
     }
-    const image = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      base64: true,
-      quality: 0.8,
-    });
-    if (image.canceled || !image.assets[0]?.base64) return;
-    await parseWithAi({ base64: image.assets[0].base64, mimeType: image.assets[0].mimeType });
   };
 
   const importItems = async () => {
@@ -170,6 +194,19 @@ export default function BarStockScreen() {
       setMessage(e instanceof Error ? e.message : 'Could not import parsed items.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const recordInventoryMovement = async (itemId: Id<'barInventoryItems'>, movementType: MovementType, quantity: number) => {
+    if (!venue?.id) {
+      setMessage('No venue assigned to your account yet.');
+      return;
+    }
+    setMessage(null);
+    try {
+      await recordMovement({ venueId: venue.id, itemId, movementType, quantity });
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not update stock count.');
     }
   };
 
@@ -286,9 +323,9 @@ export default function BarStockScreen() {
                   </Chip>
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordMovement({ venueId: venue!.id, itemId: item._id, movementType: 'count', quantity: item.onHand })}>Count</Button>
-                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordMovement({ venueId: venue!.id, itemId: item._id, movementType: 'received', quantity: 1 })}>+1</Button>
-                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordMovement({ venueId: venue!.id, itemId: item._id, movementType: 'waste', quantity: -1 })}>-1</Button>
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordInventoryMovement(item._id, 'count', item.onHand)}>Count</Button>
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordInventoryMovement(item._id, 'received', 1)}>+1</Button>
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordInventoryMovement(item._id, 'waste', -1)}>-1</Button>
                 </View>
               </View>
             ))

@@ -238,7 +238,7 @@ export default defineSchema({
     clockOutAccuracyM: v.optional(v.number()),
     clockOutMocked: v.optional(v.boolean()),
     isOpen: v.boolean(),
-  }).index('by_profileId_and_isOpen', ['profileId', 'isOpen']).index('by_venueId', ['venueId']).index('by_isOpen', ['isOpen']),
+  }).index('by_profileId_and_isOpen', ['profileId', 'isOpen']).index('by_venueId', ['venueId']).index('by_venue_clockInAt', ['venueId', 'clockInAt']).index('by_isOpen', ['isOpen']),
   staffRequests: defineTable({
     venueId: v.id('venues'),
     profileId: v.id('profiles'),

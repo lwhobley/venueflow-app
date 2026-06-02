@@ -425,9 +425,9 @@ export const exportReservationsCsv = query({
     const profile = await requireProfile(ctx);
     if (!canManage(profile.role) || profile.venueId !== args.venueId) return null;
     await requireActiveSubscription(ctx as any, args.venueId);
-    const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
+    const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(500);
     const rows = [['guestName', 'partySize', 'reservationTime', 'durationMinutes', 'source', 'status', 'phone', 'email', 'tags', 'notes']];
-    for (const reservation of reservations.filter((item: Doc<'reservations'>) => !item.deletedAt).sort((a: Doc<'reservations'>, b: Doc<'reservations'>) => b.reservationTime - a.reservationTime).slice(0, 500)) {
+    for (const reservation of reservations.filter((item: Doc<'reservations'>) => !item.deletedAt)) {
       rows.push([
         reservation.guestName,
         String(reservation.partySize),

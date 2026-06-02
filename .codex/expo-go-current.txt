@@ -1,0 +1,3 @@
+PID=14744
+OUT=C:\Users\lwhob\Downloads\a0-project\.codex\expo-go-8084-20260602-142422.out.log
+ERR=C:\Users\lwhob\Downloads\a0-project\.codex\expo-go-8084-20260602-142422.err.log

@@ -3,6 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, SegmentedButtons, Text } from 'react-native-paper';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
@@ -59,15 +60,14 @@ function KpiTile({ label, value, sub, accent }: { label: string; value: string; 
   );
 }
 
-function SummaryTab({ venueId, days }: { venueId: string; days: number }) {
-  const summary = useQuery(api.pos.getSalesSummary, { venueId: venueId as any, windowDays: days });
-  const byDay = useQuery(api.pos.getSalesByDay, { venueId: venueId as any, windowDays: days });
-  const byTender = useQuery(api.pos.getSalesByTender, { venueId: venueId as any, windowDays: days });
-  const byRC = useQuery(api.pos.getSalesByRevenueCenter, { venueId: venueId as any, windowDays: days });
+type SalesTabProps = { venueId: Id<'venues'>; days: number };
 
-  if (summary === undefined) return <ScheduleSkeleton rows={5} />;
+function SummaryTab({ venueId, days }: SalesTabProps) {
+  const dashboard = useQuery(api.pos.getSalesSummaryDashboard, { venueId, windowDays: days });
 
-  if (!summary || summary.checkCount === 0) {
+  if (dashboard === undefined) return <ScheduleSkeleton rows={5} />;
+
+  if (!dashboard || dashboard.summary.checkCount === 0) {
     return (
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content>
@@ -77,8 +77,9 @@ function SummaryTab({ venueId, days }: { venueId: string; days: number }) {
     );
   }
 
+  const { summary, byDay, byTender, byRevenueCenter } = dashboard;
   const netSales = summary.salesCents - (summary.discountCents + summary.compCents + summary.promoCents);
-  const maxDay = Math.max(...(byDay ?? []).map((d) => d.salesCents), 1);
+  const maxDay = Math.max(...byDay.map((d) => d.salesCents), 1);
 
   return (
     <View style={{ gap: spacing.md }}>
@@ -116,7 +117,7 @@ function SummaryTab({ venueId, days }: { venueId: string; days: number }) {
       ) : null}
 
       {/* Daily sparkline */}
-      {byDay && byDay.length > 1 ? (
+      {byDay.length > 1 ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Sales by day</Text>
@@ -134,7 +135,7 @@ function SummaryTab({ venueId, days }: { venueId: string; days: number }) {
       ) : null}
 
       {/* Tender mix */}
-      {byTender && byTender.length > 0 ? (
+      {byTender.length > 0 ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Tender mix</Text>
@@ -152,11 +153,11 @@ function SummaryTab({ venueId, days }: { venueId: string; days: number }) {
       ) : null}
 
       {/* Revenue centers */}
-      {byRC && byRC.length > 1 ? (
+      {byRevenueCenter.length > 1 ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Revenue centers</Text>
-            {byRC.map((r, i) => (
+            {byRevenueCenter.map((r, i) => (
               <View key={r.revenueCenter} style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.charcoal }}>{r.revenueCenter}</Text>
@@ -183,8 +184,8 @@ function SummaryTab({ venueId, days }: { venueId: string; days: number }) {
   );
 }
 
-function ServersTab({ venueId, days }: { venueId: string; days: number }) {
-  const data = useQuery(api.pos.getSalesByServer, { venueId: venueId as any, windowDays: days });
+function ServersTab({ venueId, days }: SalesTabProps) {
+  const data = useQuery(api.pos.getSalesByServer, { venueId, windowDays: days });
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
@@ -236,8 +237,8 @@ function ServersTab({ venueId, days }: { venueId: string; days: number }) {
   );
 }
 
-function ItemsTab({ venueId, days }: { venueId: string; days: number }) {
-  const data = useQuery(api.pos.getTopMenuItems, { venueId: venueId as any, windowDays: days, limit: 30 });
+function ItemsTab({ venueId, days }: SalesTabProps) {
+  const data = useQuery(api.pos.getTopMenuItems, { venueId, windowDays: days, limit: 30 });
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
@@ -284,8 +285,8 @@ function ItemRow({ r, i, maxSales }: { r: { name: string; category: string | nul
   );
 }
 
-function LaborTab({ venueId, days }: { venueId: string; days: number }) {
-  const data = useQuery(api.pos.getLaborSummary, { venueId: venueId as any, windowDays: days });
+function LaborTab({ venueId, days }: SalesTabProps) {
+  const data = useQuery(api.pos.getLaborSummary, { venueId, windowDays: days });
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.byEmployee.length === 0) {
@@ -295,8 +296,6 @@ function LaborTab({ venueId, days }: { venueId: string; days: number }) {
       </Card>
     );
   }
-
-  const laborPct = data.totalPayCents > 0 ? null : null; // requires sales cross-reference; show raw for now
 
   return (
     <View style={{ gap: spacing.md }}>

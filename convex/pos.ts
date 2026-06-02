@@ -311,6 +311,33 @@ const salesSummaryValue = v.object({
   avgCheckTimeMins: v.union(v.number(), v.null()),
 });
 
+const salesByDayValue = v.object({
+  date: v.string(),
+  salesCents: v.number(),
+  checkCount: v.number(),
+  coverCount: v.number(),
+});
+
+const salesByRevenueCenterValue = v.object({
+  revenueCenter: v.string(),
+  salesCents: v.number(),
+  checkCount: v.number(),
+  coverCount: v.number(),
+});
+
+const salesByTenderValue = v.object({
+  tenderType: v.string(),
+  salesCents: v.number(),
+  checkCount: v.number(),
+});
+
+const salesSummaryDashboardValue = v.object({
+  summary: salesSummaryValue,
+  byDay: v.array(salesByDayValue),
+  byTender: v.array(salesByTenderValue),
+  byRevenueCenter: v.array(salesByRevenueCenterValue),
+});
+
 export const getSalesSummary = query({
   args: {
     venueId: v.id('venues'),
@@ -348,6 +375,82 @@ export const getSalesSummary = query({
       ...acc,
       avgCheckCents: acc.checkCount ? Math.round(acc.salesCents / acc.checkCount) : 0,
       avgCheckTimeMins: timedChecks ? Math.round(totalTimeMins / timedChecks) : null,
+    };
+  },
+});
+
+export const getSalesSummaryDashboard = query({
+  args: {
+    venueId: v.id('venues'),
+    windowDays: v.number(),
+  },
+  returns: v.union(v.null(), salesSummaryDashboardValue),
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+
+    const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
+    const { start } = dayBounds(-window + 1);
+    const end = dayBounds(1).start;
+
+    const checks = (await (ctx as AnyCtx).db
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
+      .take(5000)) as Doc<'posChecks'>[];
+
+    const acc = { salesCents: 0, taxCents: 0, tipCents: 0, discountCents: 0, compCents: 0, promoCents: 0, checkCount: 0, coverCount: 0 };
+    const byDay = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
+    const byTender = new Map<string, { salesCents: number; checkCount: number }>();
+    const byRevenueCenter = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
+    let totalTimeMins = 0;
+    let timedChecks = 0;
+
+    for (const check of checks) {
+      if (check.status === 'void') continue;
+      accumulateCheck(acc, check);
+      if (check.closedAt) {
+        totalTimeMins += (check.closedAt - check.openedAt) / 60_000;
+        timedChecks += 1;
+      }
+
+      const date = isoDate(check.openedAt);
+      const dayRow = byDay.get(date) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
+      dayRow.salesCents += check.totalCents;
+      dayRow.checkCount += 1;
+      dayRow.coverCount += check.guestCount ?? 1;
+      byDay.set(date, dayRow);
+
+      const tender = check.tenderType?.trim() || 'Unknown';
+      const tenderRow = byTender.get(tender) ?? { salesCents: 0, checkCount: 0 };
+      tenderRow.salesCents += check.totalCents;
+      tenderRow.checkCount += 1;
+      byTender.set(tender, tenderRow);
+
+      const revenueCenter = check.revenueCenter?.trim() || 'Default';
+      const revenueCenterRow = byRevenueCenter.get(revenueCenter) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
+      revenueCenterRow.salesCents += check.totalCents;
+      revenueCenterRow.checkCount += 1;
+      revenueCenterRow.coverCount += check.guestCount ?? 1;
+      byRevenueCenter.set(revenueCenter, revenueCenterRow);
+    }
+
+    return {
+      summary: {
+        ...acc,
+        avgCheckCents: acc.checkCount ? Math.round(acc.salesCents / acc.checkCount) : 0,
+        avgCheckTimeMins: timedChecks ? Math.round(totalTimeMins / timedChecks) : null,
+      },
+      byDay: Array.from(byDay.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, value]) => ({ date, ...value })),
+      byTender: Array.from(byTender.entries())
+        .map(([tenderType, value]) => ({ tenderType, ...value }))
+        .sort((a, b) => b.salesCents - a.salesCents),
+      byRevenueCenter: Array.from(byRevenueCenter.entries())
+        .map(([revenueCenter, value]) => ({ revenueCenter, ...value }))
+        .sort((a, b) => b.salesCents - a.salesCents),
     };
   },
 });

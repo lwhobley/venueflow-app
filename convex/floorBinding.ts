@@ -325,13 +325,24 @@ export const getUnassignedReservations = query({
     await requireVenueMember(ctx, args.venueId);
     const now = Date.now();
     const windowEnd = now + Math.max(15, args.withinMinutes) * 60 * 1000;
-    const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
+    const reservations = await ctx.db
+      .query('reservations')
+      .withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId).gte('reservationTime', now).lte('reservationTime', windowEnd))
+      .order('asc')
+      .take(200);
+    const assignments = await ctx.db
+      .query('tableAssignments')
+      .withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId).gte('startsAt', now).lte('startsAt', windowEnd))
+      .order('asc')
+      .take(500);
+    const assignedReservationIds = new Set(
+      assignments
+        .filter((assignment: Doc<'tableAssignments'>) => !assignment.releasedAt && assignment.reservationId)
+        .map((assignment: Doc<'tableAssignments'>) => assignment.reservationId),
+    );
     const queue = [] as Array<any>;
     for (const reservation of reservations) {
-      if (reservation.status !== 'confirmed' || reservation.reservationTime < now || reservation.reservationTime > windowEnd) continue;
-      const assignments = await ctx.db.query('tableAssignments').withIndex('by_reservation', (q: any) => q.eq('reservationId', reservation._id)).collect();
-      const active = assignments.some((assignment: Doc<'tableAssignments'>) => !assignment.releasedAt);
-      if (active) continue;
+      if (reservation.status !== 'confirmed' || assignedReservationIds.has(reservation._id)) continue;
       queue.push({
         id: reservation._id,
         guestName: reservation.guestName,
@@ -354,9 +365,9 @@ export const getOpenWaitlist = query({
   returns: v.any(),
   handler: async (ctx, args) => {
     await requireVenueMember(ctx, args.venueId);
-    const waitlist = await ctx.db.query('waitlist').withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId)).collect();
-    return waitlist
-      .filter((item: Doc<'waitlist'>) => item.status === 'waiting' || item.status === 'assigned')
+    const waiting = await ctx.db.query('waitlist').withIndex('by_venue_status', (q: any) => q.eq('venueId', args.venueId).eq('status', 'waiting')).take(100);
+    const assigned = await ctx.db.query('waitlist').withIndex('by_venue_status', (q: any) => q.eq('venueId', args.venueId).eq('status', 'assigned')).take(100);
+    return [...waiting, ...assigned]
       .sort((a: Doc<'waitlist'>, b: Doc<'waitlist'>) => a.requestedAt - b.requestedAt)
       .map((item: Doc<'waitlist'>) => ({
         id: item._id,

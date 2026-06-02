@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { router } from 'expo-router';
@@ -23,11 +24,14 @@ export default function ReportsScreen() {
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const [showTimeCsv, setShowTimeCsv] = useState(false);
+  const [showPayrollCsv, setShowPayrollCsv] = useState(false);
+  const [showReservationCsv, setShowReservationCsv] = useState(false);
   const insights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip') as Insight | null | undefined;
-  const timeCsv = useQuery(api.app.exportTimeEntriesCsv, isReady && canManage ? {} : 'skip') as string | null | undefined;
-  const reservationCsv = useQuery(api.reservations.exportReservationsCsv, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  const timeCsv = useQuery(api.app.exportTimeEntriesCsv, isReady && canManage && showTimeCsv ? {} : 'skip') as string | null | undefined;
+  const reservationCsv = useQuery(api.reservations.exportReservationsCsv, isReady && canManage && showReservationCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
   const payroll = useQuery(api.payroll.getPayrollSummary, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
-  const payrollCsv = useQuery(api.payroll.exportPayrollCsv, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  const payrollCsv = useQuery(api.payroll.exportPayrollCsv, isReady && canManage && showPayrollCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
   const recordPayrollExport = useMutation(api.payroll.recordPayrollExport);
 
   if (!canManage) {
@@ -83,9 +87,14 @@ export default function ReportsScreen() {
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Time entries CSV</Text>
-          <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
-            {timeCsv ?? 'Loading export...'}
-          </Text>
+          <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowTimeCsv((value) => !value)}>
+            {showTimeCsv ? 'Hide export' : 'Load export'}
+          </Button>
+          {showTimeCsv ? (
+            <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
+              {timeCsv ?? 'Loading export...'}
+            </Text>
+          ) : null}
         </Card.Content>
       </Card>
 
@@ -111,18 +120,28 @@ export default function ReportsScreen() {
               Record export
             </Button>
           </View>
-          <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
-            {payrollCsv ?? 'Loading payroll export...'}
-          </Text>
+          <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowPayrollCsv((value) => !value)}>
+            {showPayrollCsv ? 'Hide payroll export' : 'Load payroll export'}
+          </Button>
+          {showPayrollCsv ? (
+            <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
+              {payrollCsv ?? 'Loading payroll export...'}
+            </Text>
+          ) : null}
         </Card.Content>
       </Card>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservations CSV</Text>
-          <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
-            {reservationCsv ?? 'Loading export...'}
-          </Text>
+          <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowReservationCsv((value) => !value)}>
+            {showReservationCsv ? 'Hide export' : 'Load export'}
+          </Button>
+          {showReservationCsv ? (
+            <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
+              {reservationCsv ?? 'Loading export...'}
+            </Text>
+          ) : null}
         </Card.Content>
       </Card>
     </ScrollView>

@@ -1,0 +1,13 @@
+
+> web
+> expo start --web --port 8083
+
+env: load .env.local .env
+env: export EXPO_PUBLIC_CONVEX_URL CONVEX_DEPLOYMENT EXPO_PUBLIC_CONVEX_SITE_URL
+Starting project at C:\Users\lwhob\Downloads\a0-project
+Starting Metro Bundler
+Waiting on http://localhost:8083
+Logs for your project will appear below.
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓░░░░░░░░░░ 40.9% (528/862)
+Web Bundled 5150ms node_modules\expo-router\entry.js (1479 modules)
+ LOG  [web] Logs will appear in the browser console

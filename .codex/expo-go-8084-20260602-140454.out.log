@@ -1,0 +1,5 @@
+env: load .env.local .env
+env: export EXPO_PUBLIC_CONVEX_URL CONVEX_DEPLOYMENT EXPO_PUBLIC_CONVEX_SITE_URL
+Starting project at C:\Users\lwhob\Downloads\a0-project
+› Port 8084 is being used by another process
+› Skipping dev server
