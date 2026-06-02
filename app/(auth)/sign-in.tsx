@@ -119,12 +119,22 @@ export default function SignInScreen() {
   };
 
   const handleDemoLogin = async () => {
+    const DEMO_EMAIL = 'demo@venueflow.app';
+    const DEMO_PASSWORD = 'demopass1';
     setSubmitting(true);
     setFormError(null);
     try {
       await resetExistingSession();
-      const { email, password } = await bootstrapDemo();
-      await signIn('password', { email, password, flow: 'signIn' });
+      // Try sign-in first; fall back to sign-up on first run when the account
+      // doesn't exist yet. Convex Auth's password flow hashes the secret
+      // correctly — createAccount would not.
+      try {
+        await signIn('password', { email: DEMO_EMAIL, password: DEMO_PASSWORD, flow: 'signIn' });
+      } catch {
+        await signIn('password', { email: DEMO_EMAIL, password: DEMO_PASSWORD, flow: 'signUp' });
+      }
+      // Ensure the demo venue + owner profile exist for this user.
+      await bootstrapDemo();
       await finishSession();
     } catch (e) {
       showError('Demo unavailable', e instanceof Error ? e.message : 'Could not start demo. Please try again.');
