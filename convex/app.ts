@@ -627,6 +627,7 @@ export const getDashboard = query({
     if (!profile || !profile.venueId) return null;
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
+    await requireActiveSubscription(ctx as any, profile.venueId);
 
     // Team-wide headcount, live clock-in roster, and coworker schedule names
     // are management-only. Staff receive only their own shifts plus open shifts.
@@ -1353,6 +1354,7 @@ export const exportTimeEntriesCsv = query({
   handler: async (ctx) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile?.venueId || !isAdminRole(profile.role)) return null;
+    await requireActiveSubscription(ctx as any, profile.venueId);
     const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
     const rows = [['member', 'jobTitle', 'clockInAt', 'clockOutAt', 'hours', 'clockInAccuracyM', 'clockInMocked']];
     for (const entry of entries.sort((a: Doc<'timeEntries'>, b: Doc<'timeEntries'>) => b.clockInAt - a.clockInAt).slice(0, 500)) {
