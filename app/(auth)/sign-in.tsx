@@ -63,6 +63,14 @@ export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Inline error surface. On React Native Web, Alert.alert is a no-op, so an
+  // alert-only failure path looks like "nothing happened". Mirror errors here.
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const showError = (title: string, message: string) => {
+    setFormError(message);
+    Alert.alert(title, message);
+  };
 
   const finishSession = async (options?: { inviteToken?: string }) => {
     let last: SessionPayload | null = null;
@@ -112,13 +120,14 @@ export default function SignInScreen() {
 
   const handleDemoLogin = async () => {
     setSubmitting(true);
+    setFormError(null);
     try {
       await resetExistingSession();
       const { email, password } = await bootstrapDemo();
       await signIn('password', { email, password, flow: 'signIn' });
       await finishSession();
     } catch (e) {
-      Alert.alert('Demo unavailable', e instanceof Error ? e.message : 'Could not start demo. Please try again.');
+      showError('Demo unavailable', e instanceof Error ? e.message : 'Could not start demo. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -135,12 +144,13 @@ export default function SignInScreen() {
       return;
     }
     setSubmitting(true);
+    setFormError(null);
     try {
       await resetExistingSession();
       await signIn('password', { email: trimmed, password, flow });
       await finishSession({ inviteToken });
     } catch (e) {
-      Alert.alert(flow === 'signUp' ? 'Could not create account' : 'Sign in failed', e instanceof Error ? e.message : 'Try again.');
+      showError(flow === 'signUp' ? 'Could not create account' : 'Sign in failed', e instanceof Error ? e.message : 'Try again.');
     } finally {
       setSubmitting(false);
     }
@@ -183,6 +193,9 @@ export default function SignInScreen() {
           <Card.Content style={{ gap: spacing.md }}>
             {inviteBanner}
             {inviteError}
+            {formError ? (
+              <Text style={{ color: authColors.danger, textAlign: 'center' }}>{formError}</Text>
+            ) : null}
 
             <SegmentedButtons
               theme={authControlTheme}

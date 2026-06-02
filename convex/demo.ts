@@ -7,7 +7,9 @@ export const bootstrapDemo = mutation({
   args: {},
   returns: v.object({ email: v.string(), password: v.string() }),
   handler: async (ctx) => {
-    if (process.env.DEMO_ENABLED !== 'true') {
+    // Demo is enabled by default so the "Try demo" button works out of the box.
+    // Set DEMO_ENABLED=false in the Convex deployment to turn it off (e.g. prod).
+    if (process.env.DEMO_ENABLED === 'false') {
       throw new Error('Demo mode is not enabled on this deployment.');
     }
 
