@@ -90,6 +90,38 @@ http.route({
   }),
 });
 
+// Labor punches (Toast employee shift data) — sent separately from check data.
+http.route({
+  path: '/pos/labor',
+  method: 'POST',
+  handler: httpAction(async (ctx, req) => {
+    if (!secretOk(process.env.POS_WEBHOOK_SECRET, req.headers.get('x-venueflow-pos-secret'))) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response('Invalid JSON', { status: 400 });
+    }
+    const connectionSecret = req.headers.get('x-venueflow-connection-secret');
+    if (!body?.venueId || !body?.provider || !Array.isArray(body?.punches) || !connectionSecret) {
+      return new Response('Bad request', { status: 400 });
+    }
+    try {
+      await ctx.runMutation(internal.pos.ingestLaborPunches, {
+        venueId: body.venueId,
+        provider: body.provider,
+        punches: body.punches,
+        connectionSecret,
+      });
+    } catch (e) {
+      return new Response('Rejected', { status: 400 });
+    }
+    return new Response('ok', { status: 200 });
+  }),
+});
+
 http.route({
   path: '/reservations/webhook',
   method: 'POST',

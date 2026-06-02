@@ -296,13 +296,50 @@ export default defineSchema({
     guestId: v.optional(v.id('guests')),
     openedAt: v.number(),
     closedAt: v.optional(v.number()),
+    // Check-level financials
     subtotalCents: v.number(),
+    taxCents: v.optional(v.number()),
     tipCents: v.number(),
     totalCents: v.number(),
+    discountCents: v.optional(v.number()),
+    compCents: v.optional(v.number()),
+    promoCents: v.optional(v.number()),
+    // Guest + service context
+    guestCount: v.optional(v.number()),
+    revenueCenter: v.optional(v.string()),
+    tenderType: v.optional(v.string()),
+    // Menu items (embedded, keeps queries fast for item-mix analytics)
+    menuItems: v.optional(v.array(v.object({
+      name: v.string(),
+      category: v.optional(v.string()),
+      quantity: v.number(),
+      priceCents: v.number(),
+    }))),
     status: posCheckStatus,
     raw: v.optional(v.any()),
     updatedAt: v.number(),
   }).index('by_venue_openedAt', ['venueId', 'openedAt']).index('by_provider_external', ['provider', 'externalCheckId']).index('by_venue_provider_external', ['venueId', 'provider', 'externalCheckId']).index('by_guest', ['guestId']),
+  // Labor punches from POS (Toast-style: one row per clock-in/out per employee).
+  posLaborPunches: defineTable({
+    venueId: v.id('venues'),
+    provider: posProvider,
+    externalEmployeeId: v.string(),
+    employeeName: v.string(),
+    jobTitle: v.optional(v.string()),
+    clockInAt: v.number(),
+    clockOutAt: v.optional(v.number()),
+    regularMinutes: v.optional(v.number()),
+    overtimeMinutes: v.optional(v.number()),
+    declaredTipsCents: v.optional(v.number()),
+    tipsCents: v.optional(v.number()),
+    regularPayCents: v.optional(v.number()),
+    overtimePayCents: v.optional(v.number()),
+    totalPayCents: v.optional(v.number()),
+    businessDate: v.string(),  // YYYY-MM-DD service date
+    updatedAt: v.number(),
+  })
+    .index('by_venue_date', ['venueId', 'businessDate'])
+    .index('by_venue_employee', ['venueId', 'externalEmployeeId']),
   payrollExports: defineTable({
     venueId: v.id('venues'),
     provider: v.union(v.literal('gusto'), v.literal('adp'), v.literal('paychex'), v.literal('csv')),

@@ -52,6 +52,10 @@ export default function TabsLayout() {
         options={{ title: t('nav.integrations'), href: null, tabBarIcon: icon('connection') }}
       />
       <Tabs.Screen
+        name="sales"
+        options={{ title: t('nav.sales'), href: canManage ? '/sales' : null, tabBarIcon: icon('chart-line') }}
+      />
+      <Tabs.Screen
         name="chat"
         options={{ title: t('nav.chat'), tabBarIcon: icon('chat-outline') }}
       />

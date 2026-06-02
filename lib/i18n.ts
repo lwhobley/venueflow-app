@@ -12,6 +12,7 @@ const en = {
     reservations: 'Reservations',
     guests: 'Guests',
     integrations: 'Integrations',
+    sales: 'Sales',
     chat: 'Chat',
     inventory: 'Inventory',
     reports: 'Reports',
