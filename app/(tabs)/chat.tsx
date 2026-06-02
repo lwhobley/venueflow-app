@@ -60,7 +60,7 @@ export default function ChatScreen() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    // Fire-and-forget; swallow rejections (e.g. demo profiles are read-only).
+    // Fire-and-forget; a missing or inactive venue should not block rendering.
     if (venue?.id) void ensureSetup({ venueId: venue.id }).catch(() => {});
   }, [venue?.id, ensureSetup]);
 
@@ -98,7 +98,7 @@ export default function ChatScreen() {
       setShowNewGroup(false);
       router.push(`/chat/${id}`);
     } catch {
-      // ignore — likely a demo (read-only) profile
+      // Keep the current screen stable if group creation is rejected.
     } finally {
       setCreating(false);
     }

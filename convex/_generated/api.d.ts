@@ -11,6 +11,7 @@
 import type * as app from "../app.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
+import type * as autoScheduleEngine from "../autoScheduleEngine.js";
 import type * as barInventory from "../barInventory.js";
 import type * as billing from "../billing.js";
 import type * as billing_shared from "../billing/shared.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   app: typeof app;
   auth: typeof auth;
   authz: typeof authz;
+  autoScheduleEngine: typeof autoScheduleEngine;
   barInventory: typeof barInventory;
   billing: typeof billing;
   "billing/shared": typeof billing_shared;
