@@ -72,9 +72,17 @@ http.route({
     } catch {
       return new Response('Invalid JSON', { status: 400 });
     }
-    if (!body?.venueId || !body?.provider || !body?.check) return new Response('Bad request', { status: 400 });
+    // Per-connection secret, carried in a header alongside the transport secret.
+    const connectionSecret = req.headers.get('x-venueflow-connection-secret');
+    if (!body?.venueId || !body?.provider || !body?.check || !connectionSecret) return new Response('Bad request', { status: 400 });
     try {
-      await ctx.runMutation(internal.pos.ingestPosCheck, { venueId: body.venueId, provider: body.provider, check: body.check });
+      await ctx.runMutation(internal.pos.ingestPosCheck, {
+        venueId: body.venueId,
+        provider: body.provider,
+        check: body.check,
+        connectionSecret,
+        externalLocationId: typeof body.externalLocationId === 'string' ? body.externalLocationId : undefined,
+      });
     } catch (e) {
       return new Response('Rejected', { status: 400 });
     }
@@ -95,9 +103,16 @@ http.route({
     } catch {
       return new Response('Invalid JSON', { status: 400 });
     }
-    if (!body?.venueId || !body?.provider || !body?.reservation) return new Response('Bad request', { status: 400 });
+    const connectionSecret = req.headers.get('x-venueflow-connection-secret');
+    if (!body?.venueId || !body?.provider || !body?.reservation || !connectionSecret) return new Response('Bad request', { status: 400 });
     try {
-      await ctx.runMutation(internal.reservationIntegrations.ingestExternalReservation, { venueId: body.venueId, provider: body.provider, reservation: body.reservation });
+      await ctx.runMutation(internal.reservationIntegrations.ingestExternalReservation, {
+        venueId: body.venueId,
+        provider: body.provider,
+        reservation: body.reservation,
+        connectionSecret,
+        externalVenueId: typeof body.externalVenueId === 'string' ? body.externalVenueId : undefined,
+      });
     } catch (e) {
       return new Response('Rejected', { status: 400 });
     }

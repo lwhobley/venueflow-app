@@ -202,7 +202,6 @@ async function notifyProfile(ctx: AnyCtx, args: { venueId: Id<'venues'>; profile
     kind: args.kind,
     title: args.title,
     body: args.body,
-    readBy: [],
     createdAt: Date.now(),
   });
 }
@@ -214,7 +213,6 @@ async function notifyManagers(ctx: AnyCtx, args: { venueId: Id<'venues'>; kind: 
     kind: args.kind,
     title: args.title,
     body: args.body,
-    readBy: [],
     createdAt: Date.now(),
   });
 }
@@ -1248,17 +1246,25 @@ export const getNotifications = query({
       .withIndex('by_venue_and_createdAt', (q: any) => q.eq('venueId', profile.venueId))
       .order('desc')
       .take(20);
-    return rows
+    const visible = rows
       .filter((row: Doc<'notificationEvents'>) => row.audience !== 'profile' || row.profileId === profile._id)
-      .filter((row: Doc<'notificationEvents'>) => row.audience !== 'managers' || isAdminRole(profile.role))
-      .map((row: Doc<'notificationEvents'>) => ({
-        _id: row._id,
-        kind: row.kind,
-        title: row.title,
-        body: row.body,
-        createdAt: row.createdAt,
-        read: row.readBy.some((id) => id === profile._id),
-      }));
+      .filter((row: Doc<'notificationEvents'>) => row.audience !== 'managers' || isAdminRole(profile.role));
+    return await Promise.all(
+      visible.map(async (row: Doc<'notificationEvents'>) => {
+        const receipt = await (ctx as AnyCtx).db
+          .query('notificationReads')
+          .withIndex('by_notification_and_profile', (q: any) => q.eq('notificationId', row._id).eq('profileId', profile._id))
+          .unique();
+        return {
+          _id: row._id,
+          kind: row.kind,
+          title: row.title,
+          body: row.body,
+          createdAt: row.createdAt,
+          read: Boolean(receipt) || (row.readBy ?? []).some((id) => id === profile._id),
+        };
+      }),
+    );
   },
 });
 
@@ -1273,8 +1279,17 @@ export const markNotificationRead = mutation({
     if (!row || row.venueId !== profile.venueId) throw new Error('Notification not found');
     const canRead = row.audience === 'staff' || (row.audience === 'managers' && isAdminRole(profile.role)) || row.profileId === profile._id;
     if (!canRead) throw new Error('Not authorized');
-    if (!row.readBy.some((id: Id<'profiles'>) => id === profile._id)) {
-      await (ctx as AnyCtx).db.patch(row._id, { readBy: [...row.readBy, profile._id] });
+    const existing = await (ctx as AnyCtx).db
+      .query('notificationReads')
+      .withIndex('by_notification_and_profile', (q: any) => q.eq('notificationId', row._id).eq('profileId', profile._id))
+      .unique();
+    if (!existing) {
+      await (ctx as AnyCtx).db.insert('notificationReads', {
+        notificationId: row._id,
+        profileId: profile._id,
+        venueId: profile.venueId,
+        readAt: Date.now(),
+      });
     }
     return null;
   },
@@ -1299,10 +1314,13 @@ export const getManagerInsights = query({
     if (!profile?.venueId || !isAdminRole(profile.role)) return null;
     const now = Date.now();
     const upcomingEnd = now + 24 * 60 * 60 * 1000;
-    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
-    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
-    const reservations = await (ctx as AnyCtx).db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', profile.venueId)).collect();
-    const requests = await (ctx as AnyCtx).db.query('staffRequests').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    // Bounded reads: these power dashboard counters, not exhaustive lists, so a
+    // generous cap keeps the query within Convex limits as the venue scales.
+    const INSIGHTS_CAP = 2000;
+    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).take(INSIGHTS_CAP);
+    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).order('desc').take(INSIGHTS_CAP);
+    const reservations = await (ctx as AnyCtx).db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', profile.venueId)).order('desc').take(INSIGHTS_CAP);
+    const requests = await (ctx as AnyCtx).db.query('staffRequests').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).take(INSIGHTS_CAP);
     const activeClocks = entries.filter((entry: Doc<'timeEntries'>) => entry.isOpen);
     return {
       scheduledShifts: shifts.filter((shift: Doc<'scheduleShifts'>) => shift.status === 'scheduled' || shift.status === 'covered').length,

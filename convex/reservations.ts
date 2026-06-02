@@ -114,11 +114,19 @@ function csvCell(value: string | number | null | undefined) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+// Cap the working set so the list query stays within Convex function limits as
+// a venue's reservation history grows. The 1000 most recent (by reservation
+// time) covers the active book; older history is reachable via CSV export.
+const RESERVATION_LIST_CAP = 1000;
+
 async function listReservations(ctx: any, venueId: string) {
-  const reservations = await ctx.db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', venueId)).collect();
+  const reservations = await ctx.db
+    .query('reservations')
+    .withIndex('by_venue_time', (q: any) => q.eq('venueId', venueId))
+    .order('desc')
+    .take(RESERVATION_LIST_CAP);
   return reservations
     .filter((reservation: Doc<'reservations'>) => !reservation.deletedAt)
-    .sort((a: Doc<'reservations'>, b: Doc<'reservations'>) => b.reservationTime - a.reservationTime)
     .map((reservation: Doc<'reservations'>) => toReservationValue(reservation));
 }
 

@@ -47,10 +47,27 @@ const posConnectionValue = v.object({
   provider: posProviderValue,
   externalLocationId: v.union(v.string(), v.null()),
   status: posConnectionStatusValue,
+  // Returned so managers can configure the provider's webhook. Only ever
+  // exposed to authorized managers of the owning venue.
+  webhookSecret: v.union(v.string(), v.null()),
   lastSyncAt: v.union(v.number(), v.null()),
   createdAt: v.number(),
   updatedAt: v.number(),
 });
+
+// Constant-time string compare so secret verification doesn't leak length-
+// independent timing. Both inputs are high-entropy tokens.
+function secretsMatch(a: string | undefined | null, b: string | undefined | null) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+// 32-char URL-safe token from two UUIDs (hyphens stripped).
+function newWebhookSecret() {
+  return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
+}
 
 function canManage(role: string) {
   return role === 'admin' || role === 'owner' || role === 'manager';
@@ -74,6 +91,7 @@ function mapConnection(connection: Doc<'posConnections'>) {
     provider: connection.provider,
     externalLocationId: connection.externalLocationId ?? null,
     status: connection.status,
+    webhookSecret: connection.webhookSecret ?? null,
     lastSyncAt: connection.lastSyncAt ?? null,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
@@ -204,12 +222,14 @@ export const upsertPosConnection = mutation({
       updatedAt: now,
     };
     if (existing) {
-      await (ctx as AnyCtx).db.patch(existing._id, payload);
+      // Preserve (or backfill) the per-connection webhook secret on update.
+      const patch = existing.webhookSecret ? payload : { ...payload, webhookSecret: newWebhookSecret() };
+      await (ctx as AnyCtx).db.patch(existing._id, patch);
       const updated = await (ctx as AnyCtx).db.get(existing._id);
       if (!updated) throw new Error('Unable to update POS connection');
       return mapConnection(updated);
     }
-    const id: Id<'posConnections'> = await (ctx as AnyCtx).db.insert('posConnections', { ...payload, createdAt: now });
+    const id: Id<'posConnections'> = await (ctx as AnyCtx).db.insert('posConnections', { ...payload, webhookSecret: newWebhookSecret(), createdAt: now });
     const created = await (ctx as AnyCtx).db.get(id);
     if (!created) throw new Error('Unable to create POS connection');
     return mapConnection(created);
@@ -235,7 +255,15 @@ export const importPosCheck = mutation({
 });
 
 export const ingestPosCheck = internalMutation({
-  args: { venueId: v.id('venues'), provider: posProviderValue, check: posCheckInputValue },
+  args: {
+    venueId: v.id('venues'),
+    provider: posProviderValue,
+    check: posCheckInputValue,
+    // Per-connection secret presented by the webhook caller.
+    connectionSecret: v.string(),
+    // Optional location id the caller claims to be posting for.
+    externalLocationId: v.optional(v.string()),
+  },
   returns: posCheckValue,
   handler: async (ctx, args) => {
     // Only accept webhook writes for venues that have configured this provider.
@@ -244,6 +272,16 @@ export const ingestPosCheck = internalMutation({
       .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
       .unique();
     if (!connection) throw new Error('No POS connection configured for this venue/provider');
+    // Per-connection secret check: a leaked deployment-wide transport secret is
+    // not enough — the caller must also hold this venue's connection secret.
+    if (!secretsMatch(connection.webhookSecret, args.connectionSecret)) {
+      throw new Error('Invalid connection secret');
+    }
+    // If the connection is bound to a specific external location, reject
+    // payloads that claim a different one.
+    if (connection.externalLocationId && args.externalLocationId && connection.externalLocationId !== args.externalLocationId) {
+      throw new Error('Location mismatch for this connection');
+    }
     const check = await upsertCheck(ctx as AnyCtx, args);
     await (ctx as AnyCtx).db.patch(connection._id, { lastSyncAt: Date.now(), status: 'connected', updatedAt: Date.now() });
     return mapCheck(check);

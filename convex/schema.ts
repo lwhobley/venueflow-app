@@ -177,9 +177,24 @@ export default defineSchema({
     ),
     title: v.string(),
     body: v.string(),
-    readBy: v.array(v.id('profiles')),
+    // Legacy per-document read list. No longer written to — read receipts now
+    // live in the `notificationReads` table to avoid unbounded document growth
+    // and write contention on venue-wide notifications. Kept optional so
+    // existing rows remain valid.
+    readBy: v.optional(v.array(v.id('profiles'))),
     createdAt: v.number(),
   }).index('by_venue_and_createdAt', ['venueId', 'createdAt']).index('by_profile_and_createdAt', ['profileId', 'createdAt']),
+  // One row per (notification, reader). Replaces the unbounded readBy array on
+  // notificationEvents so a venue-wide notification's read receipts scale and
+  // don't contend on a single document.
+  notificationReads: defineTable({
+    notificationId: v.id('notificationEvents'),
+    profileId: v.id('profiles'),
+    venueId: v.id('venues'),
+    readAt: v.number(),
+  })
+    .index('by_notification_and_profile', ['notificationId', 'profileId'])
+    .index('by_profile', ['profileId']),
   scheduleEmailEvents: defineTable({
     venueId: v.id('venues'),
     profileId: v.id('profiles'),
@@ -261,6 +276,10 @@ export default defineSchema({
     provider: posProvider,
     externalLocationId: v.optional(v.string()),
     status: posConnectionStatus,
+    // Per-connection webhook secret. Inbound webhooks must present this in
+    // addition to the deployment-wide transport secret, so a leaked global
+    // secret can't post for a venue it doesn't hold the connection secret for.
+    webhookSecret: v.optional(v.string()),
     lastSyncAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -324,6 +343,8 @@ export default defineSchema({
     provider: reservationProvider,
     externalVenueId: v.optional(v.string()),
     status: integrationStatus,
+    // Per-connection webhook secret (see posConnections.webhookSecret).
+    webhookSecret: v.optional(v.string()),
     lastSyncAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),

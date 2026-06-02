@@ -106,6 +106,18 @@ async function upsertGuest(ctx: AnyCtx, args: { venueId: Id<'venues'>; guestName
   });
 }
 
+// Constant-time compare for secret verification (both inputs high-entropy).
+function secretsMatch(a: string | undefined | null, b: string | undefined | null) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function newWebhookSecret() {
+  return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
+}
+
 function mapConnection(connection: Doc<'reservationConnections'>) {
   return {
     _id: connection._id,
@@ -113,6 +125,7 @@ function mapConnection(connection: Doc<'reservationConnections'>) {
     provider: connection.provider,
     externalVenueId: connection.externalVenueId ?? null,
     status: connection.status,
+    webhookSecret: connection.webhookSecret ?? null,
     lastSyncAt: connection.lastSyncAt ?? null,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
@@ -131,6 +144,7 @@ export const getReservationIntegrationOverview = query({
           provider: providerValue,
           externalVenueId: v.union(v.string(), v.null()),
           status: statusValue,
+          webhookSecret: v.union(v.string(), v.null()),
           lastSyncAt: v.union(v.number(), v.null()),
           createdAt: v.number(),
           updatedAt: v.number(),
@@ -176,6 +190,7 @@ export const upsertReservationConnection = mutation({
     provider: providerValue,
     externalVenueId: v.union(v.string(), v.null()),
     status: statusValue,
+    webhookSecret: v.union(v.string(), v.null()),
     lastSyncAt: v.union(v.number(), v.null()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -198,12 +213,13 @@ export const upsertReservationConnection = mutation({
       updatedAt: now,
     };
     if (existing) {
-      await (ctx as AnyCtx).db.patch(existing._id, payload);
+      const patch = existing.webhookSecret ? payload : { ...payload, webhookSecret: newWebhookSecret() };
+      await (ctx as AnyCtx).db.patch(existing._id, patch);
       const updated = await (ctx as AnyCtx).db.get(existing._id);
       if (!updated) throw new Error('Unable to update reservation connection');
       return mapConnection(updated);
     }
-    const id: Id<'reservationConnections'> = await (ctx as AnyCtx).db.insert('reservationConnections', { ...payload, createdAt: now });
+    const id: Id<'reservationConnections'> = await (ctx as AnyCtx).db.insert('reservationConnections', { ...payload, webhookSecret: newWebhookSecret(), createdAt: now });
     const created = await (ctx as AnyCtx).db.get(id);
     if (!created) throw new Error('Unable to create reservation connection');
     return mapConnection(created);
@@ -211,7 +227,13 @@ export const upsertReservationConnection = mutation({
 });
 
 export const ingestExternalReservation = internalMutation({
-  args: { venueId: v.id('venues'), provider: providerValue, reservation: externalReservationInput },
+  args: {
+    venueId: v.id('venues'),
+    provider: providerValue,
+    reservation: externalReservationInput,
+    connectionSecret: v.string(),
+    externalVenueId: v.optional(v.string()),
+  },
   returns: v.object({ reservationId: v.id('reservations'), created: v.boolean() }),
   handler: async (ctx, args) => {
     // Only accept webhook writes for venues that have actually configured this
@@ -221,6 +243,15 @@ export const ingestExternalReservation = internalMutation({
       .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
       .unique();
     if (!configuredConnection) throw new Error('No reservation connection configured for this venue/provider');
+    // Per-connection secret: a leaked deployment-wide transport secret alone
+    // can't post for a venue without also holding its connection secret.
+    if (!secretsMatch(configuredConnection.webhookSecret, args.connectionSecret)) {
+      throw new Error('Invalid connection secret');
+    }
+    // If the connection is bound to a specific external venue, reject mismatches.
+    if (configuredConnection.externalVenueId && args.externalVenueId && configuredConnection.externalVenueId !== args.externalVenueId) {
+      throw new Error('Venue mismatch for this connection');
+    }
 
     const eventId = args.reservation.externalEventId ?? `${args.provider}:${args.reservation.externalId}:${args.reservation.status}`;
     const duplicate = await (ctx as AnyCtx).db

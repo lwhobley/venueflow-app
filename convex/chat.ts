@@ -181,11 +181,14 @@ export const getMessages = query({
       title = (otherId && nameById.get(otherId)) || 'Direct message';
     }
 
-    const rows = await ctx.db
+    // Bound the read: fetch the most recent messages (newest first) then show
+    // them oldest-first. Avoids an unbounded .collect() as threads grow.
+    const recent = await ctx.db
       .query('messages')
       .withIndex('by_conversation', (q: any) => q.eq('conversationId', args.conversationId))
-      .collect();
-    rows.sort((a: Doc<'messages'>, b: Doc<'messages'>) => a.createdAt - b.createdAt);
+      .order('desc')
+      .take(200);
+    const rows = recent.slice().sort((a: Doc<'messages'>, b: Doc<'messages'>) => a.createdAt - b.createdAt);
 
     return {
       title,
