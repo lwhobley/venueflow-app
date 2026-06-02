@@ -6,7 +6,6 @@ import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 
 const providers = ['toast', 'square', 'clover', 'generic'] as const;
@@ -33,9 +32,7 @@ export default function IntegrationsScreen() {
 function IntegrationsScreenInner() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
-  const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
+  const { isReady, canManage } = useAuthenticatedSession();
   const overview = useQuery(api.pos.getPosOverview, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const reservationOverview = useQuery(
     api.reservationIntegrations.getReservationIntegrationOverview,

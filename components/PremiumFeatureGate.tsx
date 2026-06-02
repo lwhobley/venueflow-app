@@ -1,8 +1,6 @@
 import { Platform, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { useQuery } from 'convex/react';
-import { api } from '../convex/_generated/api';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { getTrialState } from '../lib/trial';
 import { colors, spacing } from '../lib/theme';
@@ -14,10 +12,9 @@ import { isAllAccessAccount } from '../lib/permissions';
 // free trial and after it expires — the user must upgrade to use them. When
 // billing is disabled (local/dev builds) the feature is always unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const { me, email } = useAuthenticatedSession();
   const { isPremium, isLoading } = useA0Purchases();
-  const allAccess = isAllAccessAccount(me?.profile.email ?? user?.email);
+  const allAccess = isAllAccessAccount(email);
 
   if (!config.billingEnabled || allAccess || isPremium) {
     return <>{children}</>;

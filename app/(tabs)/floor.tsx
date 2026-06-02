@@ -7,7 +7,6 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
 import { router } from 'expo-router';
 
 const sectionFilters = ['all', 'main', 'patio', 'bar', 'vip'] as const;
@@ -140,7 +139,7 @@ function formatMinutes(minutes: number) {
 export default function FloorScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
-  const { isReady } = useAuthenticatedSession();
+  const { isReady, canManage: canEdit } = useAuthenticatedSession();
   const [section, setSection] = useState<(typeof sectionFilters)[number]>('all');
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
@@ -160,8 +159,6 @@ export default function FloorScreen() {
   const [mergeSel, setMergeSel] = useState<string[]>([]);
   const [mergeParty, setMergeParty] = useState(6);
 
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
   const activeFloor = floor ?? null;
   const reservationQueue = unassignedReservations ?? [];
   const waitlistQueue = openWaitlist ?? [];

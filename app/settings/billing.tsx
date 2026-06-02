@@ -7,7 +7,6 @@ import { api } from '../../convex/_generated/api';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageBilling } from '../../lib/permissions';
 
 const plans = [
   { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$79.99' },
@@ -20,8 +19,7 @@ type PlanId = (typeof plans)[number]['id'];
 export default function BillingScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const { isReady, me, canManageBilling: canEditBilling } = useAuthenticatedSession();
   const billing = useQuery(api.app.getMyVenueBilling, isReady && user && venue?.id ? {} : 'skip');
   const createCheckout = useAction(api.billing.createStripeCheckoutSession);
   const createPortal = useAction(api.billing.createStripeBillingPortalSession);
@@ -29,7 +27,6 @@ export default function BillingScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 3;
-  const canEditBilling = canManageBilling(me?.profile.role ?? user?.role, me?.profile.email ?? user?.email);
 
   const openCheckout = async (planId: PlanId) => {
     setLoading(planId);

@@ -47,7 +47,6 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const navigationReady = Boolean(rootNavigationState?.key);
   const authRoute = route.startsWith('/(auth)/');
   const signedOutProtectedRoute = hydrated && !user && !authRoute;
-  const authPending = hydrated && Boolean(user) && authLoading;
   const staleSignedOutSession = hydrated && Boolean(user) && !authLoading && !isAuthenticated;
   const profileMissing = hydrated && Boolean(user) && isAuthenticated && me === null;
 
@@ -165,6 +164,11 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
       globalObject.removeEventListener?.('error', handleError);
     };
   }, [reason]);
+
+  // A logged-in user with no server profile (deleted account, removed from
+  // tenant) must not see protected content during the ~800ms window before the
+  // deferred signOut fires — render nothing until the session is torn down.
+  if (profileMissing) return null;
 
   return children as never;
 }

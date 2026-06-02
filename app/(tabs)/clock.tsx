@@ -8,7 +8,6 @@ import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 
 type ActiveClockEntry = {
@@ -44,9 +43,9 @@ function fmtTime(at: number) {
 export default function ClockScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady } = useAuthenticatedSession();
+  const { isReady, canManage } = useAuthenticatedSession();
   // Admin/owner/manager are salaried: they don't punch a time clock.
-  const salaried = canManageVenue(user?.role, user?.email);
+  const salaried = canManage;
   const isAdmin = salaried;
   const [location, setLocation] = useState<CurrentLocation | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(true);

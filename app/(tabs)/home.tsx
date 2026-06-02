@@ -13,7 +13,6 @@ import { usePushNotifications } from '../../lib/usePushNotifications';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { spacing, useAppearanceStore, useDesignTheme } from '../../lib/theme';
 import { LocaleCode, useI18n, useLocaleStore } from '../../lib/i18n';
-import { canManageVenue } from '../../lib/permissions';
 
 type NotificationItem = {
   _id: Id<'notificationEvents'>;
@@ -28,7 +27,7 @@ export default function HomeScreen() {
   usePushNotifications();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady } = useAuthenticatedSession();
+  const { isReady, canManage } = useAuthenticatedSession();
   const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
   const notifications = useQuery(api.app.getNotifications, isReady ? {} : 'skip');
   const markNotificationRead = useMutation(api.app.markNotificationRead);
@@ -45,7 +44,6 @@ export default function HomeScreen() {
   const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
   const venueName = dashboard?.venue.name ?? venue?.name ?? '';
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
-  const canManage = canManageVenue(role, dashboard?.profile.email ?? user?.email);
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
