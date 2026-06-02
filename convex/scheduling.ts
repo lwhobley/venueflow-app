@@ -3,8 +3,32 @@ import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { requireProfile, requireVenueManager, requireVenueMember } from './authz';
+import { autoAssignShifts, type EngineStaff, type EngineOpenShift } from './autoScheduleEngine';
 
 const OVERTIME_MINUTES = 40 * 60; // weekly overtime threshold
+
+// Rejects assigning a member to a shift that overlaps another of their shifts
+// on the same day. Used by every assignment path to prevent double-booking.
+async function assertNoDoubleBook(
+  ctx: any,
+  venueId: Id<'venues'>,
+  profileId: Id<'profiles'>,
+  dayIndex: number,
+  startMinutes: number,
+  endMinutes: number,
+  excludeShiftId?: Id<'scheduleShifts'>,
+) {
+  const shifts = await ctx.db
+    .query('scheduleShifts')
+    .withIndex('by_profileId', (q: any) => q.eq('profileId', profileId))
+    .collect();
+  for (const s of shifts as Doc<'scheduleShifts'>[]) {
+    if (s._id === excludeShiftId || s.venueId !== venueId) continue;
+    if (s.dayIndex === dayIndex && s.startMinutes < endMinutes && startMinutes < s.endMinutes) {
+      throw new Error(`That overlaps another shift this person already works on ${dayLabel(dayIndex)}.`);
+    }
+  }
+}
 
 // YYYY-MM-DD strings compare lexicographically in date order, so range overlap
 // is a plain string comparison. Two inclusive ranges overlap when each starts
@@ -354,6 +378,157 @@ export const getManagerSchedule = query({
   },
 });
 
+// ---------- Auto-schedule ----------
+
+// Loads the venue's staff into the engine's plain shape: their availability,
+// the minutes/blocks they already work this week (assigned shifts), so the
+// engine balances load and avoids double-booking against current assignments.
+async function loadEngineInputs(ctx: any, venueId: Id<'venues'>): Promise<{ staff: EngineStaff[]; open: EngineOpenShift[]; nameById: Map<string, string> }> {
+  const shifts = (await ctx.db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).collect()) as Doc<'scheduleShifts'>[];
+  const staff = (await ctx.db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', venueId)).collect()) as Doc<'profiles'>[];
+  const allAvail = (await ctx.db.query('availability').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).collect()) as Doc<'availability'>[];
+
+  const availByProfile = new Map<string, Doc<'availability'>[]>();
+  for (const a of allAvail) {
+    const list = availByProfile.get(a.profileId) ?? [];
+    list.push(a);
+    availByProfile.set(a.profileId, list);
+  }
+  const assignedByProfile = new Map<string, Doc<'scheduleShifts'>[]>();
+  for (const s of shifts) {
+    if (!s.profileId) continue;
+    const list = assignedByProfile.get(s.profileId) ?? [];
+    list.push(s);
+    assignedByProfile.set(s.profileId, list);
+  }
+
+  const engineStaff: EngineStaff[] = staff.map((s) => {
+    const assigned = assignedByProfile.get(s._id) ?? [];
+    return {
+      profileId: s._id,
+      role: s.role,
+      jobTitle: s.jobTitle,
+      availability: (availByProfile.get(s._id) ?? []).map((a) => ({
+        dayIndex: a.dayIndex,
+        startMinutes: a.startMinutes,
+        endMinutes: a.endMinutes,
+        available: a.available,
+      })),
+      assignedMinutes: assigned.reduce((sum, sh) => sum + Math.max(0, sh.endMinutes - sh.startMinutes), 0),
+      assignedBlocks: assigned.map((sh) => ({ dayIndex: sh.dayIndex, startMinutes: sh.startMinutes, endMinutes: sh.endMinutes })),
+    };
+  });
+
+  const open: EngineOpenShift[] = shifts
+    .filter((s) => !s.profileId && s.status === 'open')
+    .map((s) => ({ shiftId: s._id, dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, jobTitle: s.jobTitle }));
+
+  const nameById = new Map(staff.map((s) => [s._id, s.fullName]));
+  return { staff: engineStaff, open, nameById };
+}
+
+const proposalReason = v.union(
+  v.literal('assigned'),
+  v.literal('no_role_match'),
+  v.literal('no_availability'),
+  v.literal('all_double_booked'),
+  v.literal('labor_cap'),
+);
+
+const autoProposalValue = v.object({
+  shiftId: v.id('scheduleShifts'),
+  dayIndex: v.number(),
+  dayLabel: v.string(),
+  startTime: v.string(),
+  endTime: v.string(),
+  jobTitle: v.string(),
+  profileId: v.union(v.id('profiles'), v.null()),
+  memberName: v.union(v.string(), v.null()),
+  reason: proposalReason,
+});
+
+// Read-only preview: proposes assignments for every open shift without
+// persisting. The manager reviews/edits, then commits via applyAutoSchedule.
+export const previewAutoSchedule = query({
+  args: { venueId: v.id('venues') },
+  returns: v.object({
+    proposals: v.array(autoProposalValue),
+    filled: v.number(),
+    unfilled: v.number(),
+    openCount: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const venue = await ctx.db.get(args.venueId);
+    await requireVenueManager(ctx, args.venueId);
+    const { staff, open, nameById } = await loadEngineInputs(ctx, args.venueId);
+    const maxWeeklyMinutes = venue?.weeklyLaborBudgetHours ? Math.round(venue.weeklyLaborBudgetHours * 60) : null;
+    const result = autoAssignShifts(open, staff, { maxWeeklyMinutes });
+
+    const openById = new Map(open.map((o) => [o.shiftId, o]));
+    const proposals = result.proposals.map((p) => {
+      const shift = openById.get(p.shiftId)!;
+      return {
+        shiftId: p.shiftId as Id<'scheduleShifts'>,
+        dayIndex: shift.dayIndex,
+        dayLabel: dayLabel(shift.dayIndex),
+        startTime: minutesToTime(shift.startMinutes),
+        endTime: minutesToTime(shift.endMinutes),
+        jobTitle: shift.jobTitle,
+        profileId: (p.profileId as Id<'profiles'>) ?? null,
+        memberName: p.profileId ? nameById.get(p.profileId) ?? null : null,
+        reason: p.reason,
+      };
+    });
+    return { proposals, filled: result.filled, unfilled: result.unfilled, openCount: open.length };
+  },
+});
+
+// Commits a set of {shiftId, profileId} assignments produced by the preview
+// (optionally after manager edits). Each assignment is re-validated server-side
+// — membership, shift still open, and no double-booking — so a stale preview
+// can never create an invalid schedule.
+export const applyAutoSchedule = mutation({
+  args: {
+    venueId: v.id('venues'),
+    assignments: v.array(v.object({ shiftId: v.id('scheduleShifts'), profileId: v.id('profiles') })),
+  },
+  returns: v.object({ assigned: v.number(), skipped: v.number() }),
+  handler: async (ctx, args) => {
+    await requireVenueManager(ctx, args.venueId);
+    let assigned = 0;
+    let skipped = 0;
+    for (const a of args.assignments) {
+      const shift = await ctx.db.get(a.shiftId);
+      if (!shift || shift.venueId !== args.venueId || shift.profileId) {
+        skipped += 1;
+        continue;
+      }
+      const member = await ctx.db.get(a.profileId);
+      if (!member || member.venueId !== args.venueId) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        await assertNoDoubleBook(ctx, args.venueId, a.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift._id);
+      } catch {
+        skipped += 1;
+        continue;
+      }
+      await ctx.db.patch(shift._id, { profileId: a.profileId, status: 'scheduled' });
+      await notifyProfile(ctx, {
+        venueId: args.venueId,
+        profileId: a.profileId,
+        kind: 'shift_assigned',
+        title: 'Shift assigned',
+        body: `${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)} · ${shift.jobTitle}`,
+      });
+      assigned += 1;
+    }
+    if (assigned > 0) await markScheduleEdited(ctx, args.venueId);
+    return { assigned, skipped };
+  },
+});
+
 export const createShift = mutation({
   args: {
     venueId: v.id('venues'),
@@ -372,6 +547,7 @@ export const createShift = mutation({
     if (args.profileId) {
       const member = await ctx.db.get(args.profileId);
       if (!member || member.venueId !== args.venueId) throw new Error('Staff member is not in this venue');
+      await assertNoDoubleBook(ctx, args.venueId, args.profileId, args.dayIndex, args.startMinutes, args.endMinutes);
     }
     const shiftId = await ctx.db.insert('scheduleShifts', {
       venueId: args.venueId,
@@ -452,6 +628,7 @@ export const assignShift = mutation({
     if (!shift || shift.venueId !== args.venueId) throw new Error('Shift not found');
     const member = await ctx.db.get(args.profileId);
     if (!member || member.venueId !== args.venueId) throw new Error('Staff member is not in this venue');
+    await assertNoDoubleBook(ctx, args.venueId, args.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift._id);
     await ctx.db.patch(shift._id, { profileId: args.profileId, status: 'scheduled' });
     await markScheduleEdited(ctx, args.venueId);
     await notifyProfile(ctx, {
@@ -606,6 +783,7 @@ export const claimOpenShift = mutation({
     const shift = await ctx.db.get(args.shiftId);
     if (!shift || shift.venueId !== profile.venueId) throw new Error('Shift not found');
     if (shift.profileId || shift.status !== 'open') throw new Error('This shift is no longer open');
+    await assertNoDoubleBook(ctx, profile.venueId, profile._id, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift._id);
     await ctx.db.patch(shift._id, { profileId: profile._id, status: 'covered' });
     await markScheduleEdited(ctx, profile.venueId);
     await notifyManagers(ctx, {
