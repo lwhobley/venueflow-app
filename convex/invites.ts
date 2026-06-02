@@ -101,13 +101,16 @@ export const createInvite = mutation({
     if (!profile || profile.venueId !== args.venueId || !isManager(profile.role)) {
       throw new Error('Not authorized');
     }
+    const jobTitle = args.jobTitle.trim();
+    if (!jobTitle) throw new Error('Enter a job title');
+    if (jobTitle.length > 100) throw new Error('Job title must be 100 characters or fewer');
     const token = generateToken();
     const now = Date.now();
     await (ctx as AnyCtx).db.insert('invites', {
       venueId: args.venueId,
       token,
       role: args.role,
-      jobTitle: args.jobTitle,
+      jobTitle,
       createdBy: profile._id,
       expiresAt: now + 7 * 24 * 60 * 60 * 1000,
       createdAt: now,

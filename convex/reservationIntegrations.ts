@@ -3,7 +3,7 @@ import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireActiveSubscription } from './billing/shared';
+import { requirePaidSubscription } from './billing/shared';
 
 type AnyCtx = any;
 
@@ -155,7 +155,7 @@ export const getReservationIntegrationOverview = query({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const connections = await (ctx as AnyCtx).db.query('reservationConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(20);
     const recentEvents = await (ctx as AnyCtx).db.query('reservationSyncEvents').withIndex('by_venue_processedAt', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(20);
     return {
@@ -188,7 +188,7 @@ export const upsertReservationConnection = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     assertNotDemo(profile);
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
     const existing = await (ctx as AnyCtx).db
       .query('reservationConnections')

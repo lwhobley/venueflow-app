@@ -64,7 +64,8 @@ export default defineSchema({
   })
     .index('by_userId', ['userId'])
     .index('by_tokenIdentifier', ['tokenIdentifier'])
-    .index('by_venueId', ['venueId']),
+    .index('by_venueId', ['venueId'])
+    .index('by_email', ['email']),
   venues: defineTable({
     name: v.string(),
     // Normalized business name (lowercased/trimmed) — staff enter the business

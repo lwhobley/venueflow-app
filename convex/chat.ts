@@ -43,6 +43,7 @@ export const createGroup = mutation({
     assertNotDemoProfile(me);
     const name = args.name.trim();
     if (!name) throw new Error('Enter a group name');
+    if (name.length > 100) throw new Error('Group name must be 100 characters or fewer');
     return await ctx.db.insert('conversations', {
       venueId: args.venueId,
       type: 'group',

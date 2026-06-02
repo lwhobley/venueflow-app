@@ -2,7 +2,7 @@ import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireActiveSubscription } from './billing/shared';
+import { requirePaidSubscription } from './billing/shared';
 
 type AnyCtx = any;
 
@@ -162,7 +162,7 @@ export const getPosOverview = query({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const connections = await (ctx as AnyCtx).db.query('posConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(10);
     const checks = await (ctx as AnyCtx).db.query('posChecks').withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(50);
     const dayStart = new Date();
@@ -194,7 +194,7 @@ export const upsertPosConnection = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     assertNotDemo(profile);
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
     const existing = await (ctx as AnyCtx).db
       .query('posConnections')
@@ -227,7 +227,7 @@ export const importPosCheck = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     assertNotDemo(profile);
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const check = await upsertCheck(ctx as AnyCtx, args);
     const connection = await (ctx as AnyCtx).db
       .query('posConnections')

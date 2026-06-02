@@ -42,6 +42,21 @@ export async function requireActiveSubscription(ctx: { db: { get: (id: string) =
   throw new SubscriptionRequiredError(reasonFromStatus(status, true));
 }
 
+// Premium features (Integrations, CRM) require an active paid subscription.
+// Trial accounts are blocked server-side; use requireActiveSubscription for
+// features that are intentionally available during the trial.
+export async function requirePaidSubscription(ctx: { db: { get: (id: string) => Promise<Doc<'venues'> | null> } }, venueId: string) {
+  const venue = await ctx.db.get(venueId);
+  if (!venue) {
+    throw new SubscriptionRequiredError('never_subscribed');
+  }
+  const status = venue.subscriptionStatus ?? null;
+  if (status === 'active') {
+    return venue;
+  }
+  throw new SubscriptionRequiredError(reasonFromStatus(status, true));
+}
+
 export async function canAccessBilling(ctx: { db: { get: (id: string) => Promise<Doc<'venues'> | null> } }, venueId: string) {
   return await requireActiveSubscription(ctx, venueId);
 }

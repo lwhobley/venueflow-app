@@ -349,21 +349,44 @@ export const bootstrapProfile = mutation({
     let profile = existing;
 
     if (!profile) {
-      // New standalone account — no venue until an admin/manager adds this
-      // user's email to a venue roster. Every new account starts a 14-day free
-      // trial so they can browse the app immediately.
-      const roleName = isAllowlistedAdmin ? 'admin' : 'staff';
-      const profileId = await (ctx as AnyCtx).db.insert('profiles', {
-        userId,
-        tokenIdentifier: identity.tokenIdentifier,
-        email,
-        fullName: args.fullName?.trim() || displayName(identity),
-        role: roleName,
-        jobTitle: defaultJobTitle(roleName),
-        venueId: undefined,
-        trialEndsAt: Date.now() + TRIAL_DURATION_MS,
-      });
-      profile = await (ctx as AnyCtx).db.get(profileId);
+      // Check whether an admin pre-created a profile for this email via the
+      // staff roster (upsertVenueStaff). Those profiles have no userId yet.
+      // Claim the pre-created profile so the user inherits their venue/role.
+      const invited = identity.email
+        ? await (ctx as AnyCtx).db
+            .query('profiles')
+            .withIndex('by_email', (q: any) => q.eq('email', identity.email!.toLowerCase()))
+            .filter((q: any) => q.eq(q.field('userId'), undefined))
+            .first()
+        : null;
+
+      if (invited) {
+        const patch: Record<string, unknown> = {
+          userId,
+          tokenIdentifier: identity.tokenIdentifier,
+          trialEndsAt: Date.now() + TRIAL_DURATION_MS,
+        };
+        if (args.fullName?.trim()) patch.fullName = args.fullName.trim();
+        if (isAllowlistedAdmin && invited.role !== 'admin') patch.role = 'admin';
+        await (ctx as AnyCtx).db.patch(invited._id, patch);
+        profile = await (ctx as AnyCtx).db.get(invited._id);
+      } else {
+        // New standalone account — no venue until an admin/manager adds this
+        // user's email to a venue roster. Every new account starts a 14-day free
+        // trial so they can browse the app immediately.
+        const roleName = isAllowlistedAdmin ? 'admin' : 'staff';
+        const profileId = await (ctx as AnyCtx).db.insert('profiles', {
+          userId,
+          tokenIdentifier: identity.tokenIdentifier,
+          email,
+          fullName: args.fullName?.trim() || displayName(identity),
+          role: roleName,
+          jobTitle: defaultJobTitle(roleName),
+          venueId: undefined,
+          trialEndsAt: Date.now() + TRIAL_DURATION_MS,
+        });
+        profile = await (ctx as AnyCtx).db.get(profileId);
+      }
     } else {
       const patch: Record<string, unknown> = {};
       if (!existing.userId) {
@@ -1196,7 +1219,7 @@ export const upsertVenueStaff = mutation({
 
     const profileId = await (ctx as AnyCtx).db.insert('profiles', {
       tokenIdentifier: `${args.email.toLowerCase()}:invited:${now}`,
-      email: args.email,
+      email: args.email.toLowerCase(),
       fullName: args.fullName,
       role: args.role,
       jobTitle: args.jobTitle,

@@ -2,7 +2,7 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireActiveSubscription } from './billing/shared';
+import { requirePaidSubscription } from './billing/shared';
 
 type AnyCtx = any;
 
@@ -114,7 +114,7 @@ export const listGuests = query({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return [];
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const guests = await (ctx as AnyCtx).db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(100);
     const summaries = [];
     for (const guest of guests.filter((row: Doc<'guests'>) => !row.deletedAt)) summaries.push(await summarizeGuest(ctx as AnyCtx, guest));
@@ -128,7 +128,7 @@ export const getGuestProfile = query({
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const guest = await (ctx as AnyCtx).db.get(args.guestId);
     if (!guest || guest.venueId !== args.venueId || guest.deletedAt) return null;
     const reservationRows = await (ctx as AnyCtx).db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', args.guestId)).order('desc').take(25);
@@ -174,7 +174,7 @@ export const upsertGuest = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     assertNotDemo(profile);
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const fullName = args.fullName.trim();
     if (!fullName) throw new Error('Guest name is required');
     const now = Date.now();
@@ -211,7 +211,7 @@ export const removeGuest = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     assertNotDemo(profile);
-    await requireActiveSubscription(ctx as AnyCtx, args.venueId);
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const guest = await (ctx as AnyCtx).db.get(args.guestId);
     if (!guest) return null;
