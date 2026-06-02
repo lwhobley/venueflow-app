@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addDaysISO,
   autoAssignShifts,
   availabilityAllowsShift,
+  blockedDayIndexes,
   blocksDoubleBook,
   timeRangesOverlap,
   type EngineStaff,
@@ -76,6 +78,38 @@ describe('blocksDoubleBook', () => {
   });
 });
 
+describe('addDaysISO', () => {
+  it('adds days across month and year boundaries (UTC)', () => {
+    expect(addDaysISO('2026-06-07', 1)).toBe('2026-06-08');
+    expect(addDaysISO('2026-01-31', 1)).toBe('2026-02-01');
+    expect(addDaysISO('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addDaysISO('2026-06-07', 0)).toBe('2026-06-07');
+  });
+});
+
+describe('blockedDayIndexes', () => {
+  // Week anchored on Sunday 2026-06-07 → Sun..Sat = 06-07..06-13.
+  const week = '2026-06-07';
+
+  it('maps a single in-week day to its index', () => {
+    expect(blockedDayIndexes(week, '2026-06-09', '2026-06-09')).toEqual([2]); // Tue
+  });
+
+  it('maps a multi-day range to all covered indexes', () => {
+    expect(blockedDayIndexes(week, '2026-06-08', '2026-06-10')).toEqual([1, 2, 3]);
+  });
+
+  it('clips ranges that extend outside the week', () => {
+    expect(blockedDayIndexes(week, '2026-06-01', '2026-06-08')).toEqual([0, 1]);
+    expect(blockedDayIndexes(week, '2026-06-13', '2026-06-20')).toEqual([6]);
+  });
+
+  it('returns empty when the range misses the week or dates are malformed', () => {
+    expect(blockedDayIndexes(week, '2026-07-01', '2026-07-05')).toEqual([]);
+    expect(blockedDayIndexes(week, 'nope', '2026-06-09')).toEqual([]);
+  });
+});
+
 describe('autoAssignShifts', () => {
   it('assigns an open shift to an available, role-matched staffer', () => {
     const shifts = [shift('s1', 1, T(9), T(17))];
@@ -121,6 +155,20 @@ describe('autoAssignShifts', () => {
     const people = [staff({ profileId: 'p1', assignedBlocks: [{ dayIndex: 1, startMinutes: T(9), endMinutes: T(17) }], assignedMinutes: T(8) })];
     const result = autoAssignShifts(shifts, people, { maxWeeklyMinutes: null });
     expect(result.proposals[0]).toMatchObject({ profileId: null, reason: 'all_double_booked' });
+  });
+
+  it('skips a staffer who has approved time off on the shift day', () => {
+    const shifts = [shift('s1', 2, T(9), T(17))];
+    const people = [staff({ profileId: 'p1', blockedDays: [2] })];
+    const result = autoAssignShifts(shifts, people, { maxWeeklyMinutes: null });
+    expect(result.proposals[0]).toMatchObject({ profileId: null, reason: 'time_off' });
+  });
+
+  it('still assigns a time-off staffer on a day they are not off', () => {
+    const shifts = [shift('s1', 4, T(9), T(17))];
+    const people = [staff({ profileId: 'p1', blockedDays: [2] })];
+    const result = autoAssignShifts(shifts, people, { maxWeeklyMinutes: null });
+    expect(result.proposals[0]).toMatchObject({ profileId: 'p1', reason: 'assigned' });
   });
 
   it('enforces the weekly labor cap', () => {

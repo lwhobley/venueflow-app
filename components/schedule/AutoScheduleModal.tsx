@@ -14,7 +14,16 @@ const reasonLabel: Record<string, string> = {
   no_availability: 'Nobody available',
   all_double_booked: 'All candidates busy',
   labor_cap: 'Over labor budget',
+  time_off: 'On approved time off',
 };
+
+// The Sunday (day index 0) of the current week, as YYYY-MM-DD in local time.
+// Used to map calendar-date time-off onto the week being scheduled.
+function currentWeekSundayISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay());
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export function AutoScheduleModal({
   venueId,
@@ -29,7 +38,7 @@ export function AutoScheduleModal({
   onApplied: (msg: string) => void;
   staff: StaffOption[];
 }) {
-  const preview = useQuery(api.scheduling.previewAutoSchedule, visible ? { venueId } : 'skip');
+  const preview = useQuery(api.scheduling.previewAutoSchedule, visible ? { venueId, weekStartDate: currentWeekSundayISO() } : 'skip');
   const applyAutoSchedule = useMutation(api.scheduling.applyAutoSchedule);
 
   // shiftId -> chosen profileId ('' = leave open). Seeded from the engine's

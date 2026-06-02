@@ -7,6 +7,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { ScheduleSkeleton } from './ScheduleSkeleton';
 
 type Shift = {
   _id: Id<'scheduleShifts'>;
@@ -115,7 +116,7 @@ export function MyShifts() {
     }
   };
 
-  if (data === undefined) return <Text style={{ color: colors.muted }}>Loading your shifts…</Text>;
+  if (data === undefined) return <ScheduleSkeleton rows={3} />;
 
   return (
     <View style={{ gap: spacing.md }}>

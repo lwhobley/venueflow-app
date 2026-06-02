@@ -24,6 +24,9 @@ export type EngineStaff = {
   assignedMinutes: number;
   // Existing assigned shifts, used for double-booking detection.
   assignedBlocks: EngineBlock[];
+  // Day indexes (0=Sun..6=Sat) the staffer has approved time off for this
+  // week. Computed from calendar-date time-off against the week anchor.
+  blockedDays?: number[];
 };
 
 export type EngineOpenShift = {
@@ -41,7 +44,7 @@ export type EngineConstraints = {
 export type EngineProposal = {
   shiftId: string;
   profileId: string | null;
-  reason: 'assigned' | 'no_role_match' | 'no_availability' | 'all_double_booked' | 'labor_cap';
+  reason: 'assigned' | 'no_role_match' | 'no_availability' | 'all_double_booked' | 'labor_cap' | 'time_off';
 };
 
 export type EngineResult = {
@@ -52,6 +55,35 @@ export type EngineResult = {
 
 export function timeRangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd;
+}
+
+const isoDateRe = /^\d{4}-\d{2}-\d{2}$/;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+// Adds `days` to a YYYY-MM-DD date (UTC math) and returns YYYY-MM-DD.
+export function addDaysISO(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d) + days * 86400000);
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+}
+
+// Given the week's anchor (the Sunday, YYYY-MM-DD) and an inclusive time-off
+// range, returns the day indexes (0=Sun..6=Sat) that fall inside the range.
+// YYYY-MM-DD strings order lexicographically as dates, so the comparison is a
+// plain string compare.
+export function blockedDayIndexes(weekStart: string, rangeStart: string, rangeEnd: string): number[] {
+  if (!isoDateRe.test(weekStart) || !isoDateRe.test(rangeStart) || !isoDateRe.test(rangeEnd)) return [];
+  const lo = rangeStart <= rangeEnd ? rangeStart : rangeEnd;
+  const hi = rangeStart <= rangeEnd ? rangeEnd : rangeStart;
+  const out: number[] = [];
+  for (let i = 0; i < 7; i += 1) {
+    const date = addDaysISO(weekStart, i);
+    if (date >= lo && date <= hi) out.push(i);
+  }
+  return out;
 }
 
 function sameMinute(a: number, b: number): boolean {
@@ -117,7 +149,13 @@ export function autoAssignShifts(
       continue;
     }
 
-    const availEligible = roleEligible.filter((s) =>
+    const offDuty = roleEligible.filter((s) => !(s.blockedDays ?? []).includes(shift.dayIndex));
+    if (offDuty.length === 0) {
+      proposals.push({ shiftId: shift.shiftId, profileId: null, reason: 'time_off' });
+      continue;
+    }
+
+    const availEligible = offDuty.filter((s) =>
       availabilityAllowsShift(s.availability, shift.dayIndex, shift.startMinutes, shift.endMinutes),
     );
     if (availEligible.length === 0) {

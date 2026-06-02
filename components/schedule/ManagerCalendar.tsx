@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, Snackbar, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -9,6 +9,18 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useIsDesktop } from '../../lib/responsive';
 import { AutoScheduleModal } from './AutoScheduleModal';
+import { ScheduleSkeleton } from './ScheduleSkeleton';
+
+type ShiftSnapshot = {
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  jobTitle: string;
+  station: string;
+  status: 'scheduled' | 'open' | 'covered';
+  profileId: Id<'profiles'> | null;
+  notes: string | null;
+};
 
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const hourTicks = [8, 10, 12, 14, 16, 18, 20, 22];
@@ -127,6 +139,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const copyDayShifts = useMutation(api.scheduling.copyDayShifts);
   const clearWeek = useMutation(api.scheduling.clearWeek);
   const setLaborBudget = useMutation(api.scheduling.setLaborBudget);
+  const restoreShifts = useMutation(api.scheduling.restoreShifts);
   const openDm = useMutation(api.chat.openDm);
 
   const [selectedShiftId, setSelectedShiftId] = useState<Id<'scheduleShifts'> | null>(null);
@@ -147,6 +160,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [dragShiftId, setDragShiftId] = useState<Id<'scheduleShifts'> | null>(null);
   const [autoOpen, setAutoOpen] = useState(false);
+  const [undo, setUndo] = useState<{ label: string; shifts: ShiftSnapshot[] } | null>(null);
 
   const shifts = useMemo(() => (data?.shifts ?? []) as ManagerShift[], [data]);
   const staff = useMemo(() => (data?.staff ?? []) as Staff[], [data]);
@@ -185,6 +199,27 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     setPickedStaff(selectedShift.profileId);
   }, [selectedShift]);
 
+  // Keyboard shortcuts (web): ⌘/Ctrl+S saves the open shift panel, ⌘/Ctrl+Z
+  // undoes the last destructive action while the undo toast is showing.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === 's') {
+        e.preventDefault();
+        void savePanel();
+      } else if (key === 'z' && undo) {
+        e.preventDefault();
+        runUndo();
+      }
+    };
+    const target = globalThis as unknown as { addEventListener?: typeof window.addEventListener; removeEventListener?: typeof window.removeEventListener };
+    target.addEventListener?.('keydown', onKey as any);
+    return () => target.removeEventListener?.('keydown', onKey as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undo, panelMode, selectedShiftId, day, start, end, jobTitle, station, notes, pickedStaff]);
+
   const flash = (msg: string) => {
     setActionMsg(msg);
     setTimeout(() => setActionMsg(null), 2600);
@@ -206,6 +241,16 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
       const id = await openDm({ venueId, otherProfileId: profileId });
       router.push(`/chat/${id}`);
     });
+
+  const runUndo = () => {
+    if (!undo) return;
+    const snapshot = undo;
+    setUndo(null);
+    void safe(async () => {
+      await restoreShifts({ venueId, shifts: snapshot.shifts });
+      markEdited();
+    }, 'Restored.');
+  };
 
   const markEdited = () => setStatus((current) => (current === 'Published' ? 'Edited after publish' : current));
 
@@ -304,7 +349,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   }, [shifts]);
 
   if (data === undefined) {
-    return <Text style={{ color: colors.muted }}>Loading schedule...</Text>;
+    return <ScheduleSkeleton rows={5} />;
   }
 
   const topButtonStyle = isDesktop ? { minWidth: 136 } : {};
@@ -333,7 +378,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             <Chip compact style={{ backgroundColor: status === 'Published' ? '#E1FBF3' : status === 'Edited after publish' ? '#FFF5DA' : colors.cream }}>
               {status}
             </Chip>
-            <Button mode="contained" buttonColor={colors.primary} icon="plus" style={topButtonStyle} onPress={() => openCreatePanel()}>
+            <Button mode="contained" buttonColor={colors.primary} icon="plus" style={topButtonStyle} accessibilityLabel="Add a new shift" onPress={() => openCreatePanel()}>
               Add Shift
             </Button>
             <Button
@@ -342,6 +387,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
               icon="auto-fix"
               style={topButtonStyle}
               disabled={openShifts.length === 0}
+              accessibilityLabel="Auto-schedule open shifts"
               onPress={() => setAutoOpen(true)}
             >
               Auto-schedule
@@ -351,11 +397,12 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
               buttonColor={colors.secondary}
               icon="send"
               style={topButtonStyle}
-              onPress={async () => {
+              accessibilityLabel="Publish schedule and notify staff"
+              onPress={() => void safe(async () => {
                 const r = await publishSchedule({ venueId });
                 setStatus('Published');
                 flash(`Published and notified ${r.notified} staff.`);
-              }}
+              })}
             >
               Publish
             </Button>
@@ -399,9 +446,12 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                 title="Clear week"
                 onPress={async () => {
                   setMenuOpen(false);
-                  const r = await clearWeek({ venueId });
-                  markEdited();
-                  flash(`Cleared ${r.removed} shifts.`);
+                  await safe(async () => {
+                    const r = await clearWeek({ venueId });
+                    markEdited();
+                    if (r.removed > 0) setUndo({ label: `Cleared ${r.removed} shifts.`, shifts: r.shifts as ShiftSnapshot[] });
+                    else flash('Nothing to clear.');
+                  });
                 }}
               />
             </Menu>
@@ -697,13 +747,30 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                   ))}
                 </View>
               </ScrollView>
-              <Button mode="contained" buttonColor={colors.primary} icon="content-save" onPress={() => void savePanel()}>
+              <Button mode="contained" buttonColor={colors.primary} icon="content-save" accessibilityLabel={panelMode === 'edit' ? 'Save shift' : 'Create shift'} onPress={() => void savePanel()}>
                 {panelMode === 'edit' ? 'Save shift' : 'Create shift'}
               </Button>
               {selectedShift ? (
                 <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                   <Button compact mode="outlined" textColor={colors.primary} style={{ flex: 1 }} onPress={() => void unassignShift({ venueId, shiftId: selectedShift._id })}>Open</Button>
-                  <Button compact mode="outlined" textColor={colors.danger} style={{ flex: 1 }} onPress={async () => { await deleteShift({ venueId, shiftId: selectedShift._id }); setSelectedShiftId(null); markEdited(); flash('Shift deleted.'); }}>Delete</Button>
+                  <Button compact mode="outlined" textColor={colors.danger} style={{ flex: 1 }} accessibilityLabel="Delete shift" onPress={async () => {
+                    const snap: ShiftSnapshot = {
+                      dayIndex: selectedShift.dayIndex,
+                      startMinutes: selectedShift.startMinutes,
+                      endMinutes: selectedShift.endMinutes,
+                      jobTitle: selectedShift.jobTitle,
+                      station: selectedShift.station,
+                      status: selectedShift.status,
+                      profileId: selectedShift.profileId,
+                      notes: selectedShift.notes,
+                    };
+                    await safe(async () => {
+                      await deleteShift({ venueId, shiftId: selectedShift._id });
+                      setSelectedShiftId(null);
+                      markEdited();
+                      setUndo({ label: 'Shift deleted.', shifts: [snap] });
+                    });
+                  }}>Delete</Button>
                 </View>
               ) : null}
             </Card.Content>
@@ -718,6 +785,15 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
         onApplied={flash}
         staff={staff.map((s) => ({ _id: s._id, fullName: s.fullName, jobTitle: s.jobTitle, role: s.role, weeklyHours: s.weeklyHours }))}
       />
+
+      <Snackbar
+        visible={Boolean(undo)}
+        onDismiss={() => setUndo(null)}
+        duration={6000}
+        action={{ label: 'Undo', onPress: runUndo }}
+      >
+        {undo?.label ?? ''}
+      </Snackbar>
     </View>
   );
 }

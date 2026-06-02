@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Card, SegmentedButtons, Text } from 'react-native-paper';
+import { Button, Card, SegmentedButtons, Snackbar, Text } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -29,6 +29,16 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
   const swapsQuery = useQuery(api.scheduling.listShiftSwaps, { venueId });
   const reviewSwap = useMutation(api.scheduling.reviewShiftSwap);
   const swaps = useMemo(() => (swapsQuery ?? []) as SwapRow[], [swapsQuery]);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const safe = async (action: () => Promise<unknown>, ok?: string) => {
+    try {
+      await action();
+      if (ok) setToast(ok);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Action failed.');
+    }
+  };
 
   return (
     <>
@@ -43,8 +53,8 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
               <Text>{sw.requesterName} → {sw.targetName}</Text>
               <Text style={{ color: colors.muted }}>{sw.requesterShift}{sw.targetShift ? ` ⇄ ${sw.targetShift}` : ' (give-away)'} · {sw.status}</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void reviewSwap({ swapId: sw._id, approve: true })}>Approve</Button>
-                <Button compact mode="outlined" textColor={colors.danger} onPress={() => void reviewSwap({ swapId: sw._id, approve: false })}>Deny</Button>
+                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: true }), 'Swap approved.')}>Approve</Button>
+                <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: false }), 'Swap denied.')}>Deny</Button>
               </View>
             </View>
           ))
@@ -64,8 +74,8 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
               <Text>{request.details}</Text>
               {request.status === 'pending' ? (
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' })}>Approve</Button>
-                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' })}>Deny</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' }), 'Request approved.')}>Approve</Button>
+                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' }), 'Request denied.')}>Deny</Button>
                 </View>
               ) : null}
             </View>
@@ -73,6 +83,9 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
         )}
       </Card.Content>
     </Card>
+    <Snackbar visible={Boolean(toast)} onDismiss={() => setToast(null)} duration={3000} action={{ label: 'Dismiss', onPress: () => setToast(null) }}>
+      {toast ?? ''}
+    </Snackbar>
     </>
   );
 }
