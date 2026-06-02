@@ -125,7 +125,6 @@ function mapConnection(connection: Doc<'reservationConnections'>) {
     provider: connection.provider,
     externalVenueId: connection.externalVenueId ?? null,
     status: connection.status,
-    webhookSecret: connection.webhookSecret ?? null,
     lastSyncAt: connection.lastSyncAt ?? null,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
@@ -144,7 +143,6 @@ export const getReservationIntegrationOverview = query({
           provider: providerValue,
           externalVenueId: v.union(v.string(), v.null()),
           status: statusValue,
-          webhookSecret: v.union(v.string(), v.null()),
           lastSyncAt: v.union(v.number(), v.null()),
           createdAt: v.number(),
           updatedAt: v.number(),
@@ -184,6 +182,9 @@ export const getReservationIntegrationOverview = query({
 
 export const upsertReservationConnection = mutation({
   args: { venueId: v.id('venues'), provider: providerValue, externalVenueId: v.optional(v.string()), status: statusValue },
+  // webhookSecret is returned only when freshly generated (create or backfill);
+  // null on a plain update. The stored secret is never readable again — use
+  // rotateReservationConnectionSecret to obtain a new one.
   returns: v.object({
     _id: v.id('reservationConnections'),
     venueId: v.id('venues'),
@@ -213,16 +214,34 @@ export const upsertReservationConnection = mutation({
       updatedAt: now,
     };
     if (existing) {
-      const patch = existing.webhookSecret ? payload : { ...payload, webhookSecret: newWebhookSecret() };
-      await (ctx as AnyCtx).db.patch(existing._id, patch);
+      const freshSecret = existing.webhookSecret ? null : newWebhookSecret();
+      await (ctx as AnyCtx).db.patch(existing._id, freshSecret ? { ...payload, webhookSecret: freshSecret } : payload);
       const updated = await (ctx as AnyCtx).db.get(existing._id);
       if (!updated) throw new Error('Unable to update reservation connection');
-      return mapConnection(updated);
+      return { ...mapConnection(updated), webhookSecret: freshSecret };
     }
-    const id: Id<'reservationConnections'> = await (ctx as AnyCtx).db.insert('reservationConnections', { ...payload, webhookSecret: newWebhookSecret(), createdAt: now });
+    const secret = newWebhookSecret();
+    const id: Id<'reservationConnections'> = await (ctx as AnyCtx).db.insert('reservationConnections', { ...payload, webhookSecret: secret, createdAt: now });
     const created = await (ctx as AnyCtx).db.get(id);
     if (!created) throw new Error('Unable to create reservation connection');
-    return mapConnection(created);
+    return { ...mapConnection(created), webhookSecret: secret };
+  },
+});
+
+// Rotates the per-connection webhook secret and returns it once. The previous
+// secret stops working immediately.
+export const rotateReservationConnectionSecret = mutation({
+  args: { connectionId: v.id('reservationConnections') },
+  returns: v.object({ webhookSecret: v.string() }),
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    const connection = await (ctx as AnyCtx).db.get(args.connectionId);
+    if (!connection) throw new Error('Connection not found');
+    if (!profile || profile.venueId !== connection.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    await requirePaidSubscription(ctx as AnyCtx, connection.venueId);
+    const secret = newWebhookSecret();
+    await (ctx as AnyCtx).db.patch(connection._id, { webhookSecret: secret, updatedAt: Date.now() });
+    return { webhookSecret: secret };
   },
 });
 

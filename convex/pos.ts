@@ -47,8 +47,22 @@ const posConnectionValue = v.object({
   provider: posProviderValue,
   externalLocationId: v.union(v.string(), v.null()),
   status: posConnectionStatusValue,
-  // Returned so managers can configure the provider's webhook. Only ever
-  // exposed to authorized managers of the owning venue.
+  lastSyncAt: v.union(v.number(), v.null()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+// Connection shape plus the webhook secret. Only returned by the mutations that
+// generate the secret (create / rotate) so it is shown exactly once and is
+// never re-readable through list/overview queries.
+const posConnectionWithSecretValue = v.object({
+  _id: v.id('posConnections'),
+  venueId: v.id('venues'),
+  provider: posProviderValue,
+  externalLocationId: v.union(v.string(), v.null()),
+  status: posConnectionStatusValue,
+  // The freshly generated secret, or null when an existing secret was left
+  // in place (it cannot be read back — rotate to obtain a new one).
   webhookSecret: v.union(v.string(), v.null()),
   lastSyncAt: v.union(v.number(), v.null()),
   createdAt: v.number(),
@@ -91,7 +105,6 @@ function mapConnection(connection: Doc<'posConnections'>) {
     provider: connection.provider,
     externalLocationId: connection.externalLocationId ?? null,
     status: connection.status,
-    webhookSecret: connection.webhookSecret ?? null,
     lastSyncAt: connection.lastSyncAt ?? null,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
@@ -203,7 +216,11 @@ export const upsertPosConnection = mutation({
     externalLocationId: v.optional(v.string()),
     status: posConnectionStatusValue,
   },
-  returns: posConnectionValue,
+  // Returns the webhook secret only when one is freshly generated (new
+  // connection, or backfill of a connection that had none). On a plain update
+  // webhookSecret is null — the stored secret is never readable again; use
+  // rotatePosConnectionSecret to obtain a new one.
+  returns: posConnectionWithSecretValue,
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
@@ -222,17 +239,36 @@ export const upsertPosConnection = mutation({
       updatedAt: now,
     };
     if (existing) {
-      // Preserve (or backfill) the per-connection webhook secret on update.
-      const patch = existing.webhookSecret ? payload : { ...payload, webhookSecret: newWebhookSecret() };
-      await (ctx as AnyCtx).db.patch(existing._id, patch);
+      // Backfill a secret only if the connection somehow has none; otherwise
+      // leave the existing (unreadable) secret untouched.
+      const freshSecret = existing.webhookSecret ? null : newWebhookSecret();
+      await (ctx as AnyCtx).db.patch(existing._id, freshSecret ? { ...payload, webhookSecret: freshSecret } : payload);
       const updated = await (ctx as AnyCtx).db.get(existing._id);
       if (!updated) throw new Error('Unable to update POS connection');
-      return mapConnection(updated);
+      return { ...mapConnection(updated), webhookSecret: freshSecret };
     }
-    const id: Id<'posConnections'> = await (ctx as AnyCtx).db.insert('posConnections', { ...payload, webhookSecret: newWebhookSecret(), createdAt: now });
+    const secret = newWebhookSecret();
+    const id: Id<'posConnections'> = await (ctx as AnyCtx).db.insert('posConnections', { ...payload, webhookSecret: secret, createdAt: now });
     const created = await (ctx as AnyCtx).db.get(id);
     if (!created) throw new Error('Unable to create POS connection');
-    return mapConnection(created);
+    return { ...mapConnection(created), webhookSecret: secret };
+  },
+});
+
+// Rotates (regenerates) the per-connection webhook secret and returns it once.
+// The previous secret stops working immediately.
+export const rotatePosConnectionSecret = mutation({
+  args: { connectionId: v.id('posConnections') },
+  returns: v.object({ webhookSecret: v.string() }),
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    const connection = await (ctx as AnyCtx).db.get(args.connectionId);
+    if (!connection) throw new Error('Connection not found');
+    if (!profile || profile.venueId !== connection.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    await requirePaidSubscription(ctx as AnyCtx, connection.venueId);
+    const secret = newWebhookSecret();
+    await (ctx as AnyCtx).db.patch(connection._id, { webhookSecret: secret, updatedAt: Date.now() });
+    return { webhookSecret: secret };
   },
 });
 

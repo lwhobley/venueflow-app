@@ -49,18 +49,22 @@ function IntegrationsScreenInner() {
   const [externalVenueId, setExternalVenueId] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // A freshly generated webhook secret, shown once. It cannot be read back, so
+  // the manager must copy it now; rotating issues a new one.
+  const [newSecret, setNewSecret] = useState<string | null>(null);
 
   const saveConnection = async () => {
     if (!venue?.id) return;
     setSaving(true);
     setMessage(null);
     try {
-      await upsertConnection({
+      const r = await upsertConnection({
         venueId: venue.id,
         provider,
         externalLocationId: locationId.trim() || undefined,
         status: 'connected',
       });
+      if (r?.webhookSecret) setNewSecret(r.webhookSecret);
       setMessage('POS connection saved.');
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not save POS connection.');
@@ -74,12 +78,13 @@ function IntegrationsScreenInner() {
     setSaving(true);
     setMessage(null);
     try {
-      await upsertReservationConnection({
+      const r = await upsertReservationConnection({
         venueId: venue.id,
         provider: reservationProvider,
         externalVenueId: externalVenueId.trim() || undefined,
         status: 'connected',
       });
+      if (r?.webhookSecret) setNewSecret(r.webhookSecret);
       setMessage('Reservation connection saved.');
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not save reservation connection.');
@@ -136,6 +141,21 @@ function IntegrationsScreenInner() {
         <Text style={{ color: colors.muted }}>Connect POS, reservation sync, and provider activity for {venue?.name ?? 'your venue'}.</Text>
       </View>
 
+      {newSecret ? (
+        <Card style={{ backgroundColor: '#FFF7E6', borderRadius: 16, borderWidth: 1, borderColor: '#F2C97D' }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <Text style={{ fontWeight: '800', color: colors.charcoal }}>Webhook secret — copy it now</Text>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>
+              Send this in the x-venueflow-connection-secret header on each webhook. It is shown once and cannot be retrieved later — save it, then rotate if you lose it.
+            </Text>
+            <Text selectable style={{ fontFamily: 'monospace', fontSize: 14, color: colors.charcoal, backgroundColor: colors.surface, padding: spacing.sm, borderRadius: 8 }}>
+              {newSecret}
+            </Text>
+            <Button compact mode="text" textColor={colors.primary} onPress={() => setNewSecret(null)}>I've saved it</Button>
+          </Card.Content>
+        </Card>
+      ) : null}
+
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {[
           { label: 'Today sales', value: money(overview?.todaySalesCents ?? 0), a: accents[0] },
@@ -166,7 +186,7 @@ function IntegrationsScreenInner() {
             <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveConnection()}>Save connection</Button>
             <Button mode="outlined" textColor={colors.primary} loading={saving} onPress={() => void importSample()}>Import sample check</Button>
           </View>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: /pos/webhook with x-venue-wrangler-pos-secret.</Text>
+          <Text style={{ color: colors.muted }}>Webhook endpoint: /pos/webhook with the x-venueflow-pos-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
         </Card.Content>
       </Card>
 
@@ -182,7 +202,7 @@ function IntegrationsScreenInner() {
           <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveReservationConnection()}>
             Save reservation connection
           </Button>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with x-venue-wrangler-reservation-secret.</Text>
+          <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with the x-venueflow-reservation-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
         </Card.Content>
       </Card>
 
