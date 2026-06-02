@@ -7,6 +7,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useIsDesktop } from '../../lib/responsive';
+import { AutoScheduleModal } from './AutoScheduleModal';
 
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const hourTicks = [8, 10, 12, 14, 16, 18, 20, 22];
@@ -143,6 +144,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [dragShiftId, setDragShiftId] = useState<Id<'scheduleShifts'> | null>(null);
+  const [autoOpen, setAutoOpen] = useState(false);
 
   const shifts = useMemo(() => (data?.shifts ?? []) as ManagerShift[], [data]);
   const staff = useMemo(() => (data?.staff ?? []) as Staff[], [data]);
@@ -310,6 +312,16 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             </Chip>
             <Button mode="contained" buttonColor={colors.primary} icon="plus" style={topButtonStyle} onPress={() => openCreatePanel()}>
               Add Shift
+            </Button>
+            <Button
+              mode="contained"
+              buttonColor={accents[0].fg}
+              icon="auto-fix"
+              style={topButtonStyle}
+              disabled={openShifts.length === 0}
+              onPress={() => setAutoOpen(true)}
+            >
+              Auto-schedule
             </Button>
             <Button
               mode="contained"
@@ -666,6 +678,14 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
           </Card>
         </View>
       </View>
+
+      <AutoScheduleModal
+        venueId={venueId}
+        visible={autoOpen}
+        onClose={() => setAutoOpen(false)}
+        onApplied={flash}
+        staff={staff.map((s) => ({ _id: s._id, fullName: s.fullName, jobTitle: s.jobTitle, role: s.role, weeklyHours: s.weeklyHours }))}
+      />
     </View>
   );
 }
