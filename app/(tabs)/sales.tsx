@@ -54,10 +54,10 @@ function KpiTile({ label, value, sub, accent }: { label: string; value: string; 
   );
 }
 
-type SalesTabProps = { venueId: Id<'venues'>; days: number };
+type SalesTabProps = { venueId: Id<'venues'>; days: number; startTs: number; endTs: number };
 
-function SummaryTab({ venueId, days }: SalesTabProps) {
-  const dashboard = useQuery(api.pos.getSalesSummaryDashboard, { venueId, windowDays: days });
+function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const dashboard = useQuery(api.pos.getSalesSummaryDashboard, { venueId, windowDays: days, startTs, endTs });
 
   if (dashboard === undefined) return <ScheduleSkeleton rows={5} />;
 
@@ -178,8 +178,8 @@ function SummaryTab({ venueId, days }: SalesTabProps) {
   );
 }
 
-function ServersTab({ venueId, days }: SalesTabProps) {
-  const data = useQuery(api.pos.getSalesByServer, { venueId, windowDays: days });
+function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const data = useQuery(api.pos.getSalesByServer, { venueId, windowDays: days, startTs, endTs });
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
@@ -231,8 +231,8 @@ function ServersTab({ venueId, days }: SalesTabProps) {
   );
 }
 
-function ItemsTab({ venueId, days }: SalesTabProps) {
-  const data = useQuery(api.pos.getTopMenuItems, { venueId, windowDays: days, limit: 30 });
+function ItemsTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const data = useQuery(api.pos.getTopMenuItems, { venueId, windowDays: days, limit: 30, startTs, endTs });
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
@@ -279,8 +279,8 @@ function ItemRow({ r, i, maxSales }: { r: { name: string; category: string | nul
   );
 }
 
-function LaborTab({ venueId, days }: SalesTabProps) {
-  const data = useQuery(api.pos.getLaborSummary, { venueId, windowDays: days });
+function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const data = useQuery(api.pos.getLaborSummary, { venueId, windowDays: days, startTs, endTs });
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.byEmployee.length === 0) {
@@ -393,10 +393,10 @@ export default function SalesScreen() {
         />
 
         {/* Content */}
-        {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} />}
-        {tab === 'servers' && <ServersTab venueId={venue.id} days={dateRange.days} />}
-        {tab === 'items' && <ItemsTab venueId={venue.id} days={dateRange.days} />}
-        {tab === 'labor' && <LaborTab venueId={venue.id} days={dateRange.days} />}
+        {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+        {tab === 'servers' && <ServersTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+        {tab === 'items' && <ItemsTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+        {tab === 'labor' && <LaborTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
       </ScrollView>
     </PremiumFeatureGate>
   );

@@ -60,7 +60,7 @@ export function buildPresets(): DatePreset[] {
       key: 'yesterday',
       label: `Yesterday · ${fmtShort(yesterday)}`,
       shortLabel: `Yesterday · ${fmtShort(yesterday)}`,
-      days: 2,
+      days: 1,
       startDate: toStr(yesterday),
       endDate: toStr(yesterday),
       startTs: startOf(yesterday),

@@ -402,6 +402,8 @@ export const getSalesSummaryDashboard = query({
   args: {
     venueId: v.id('venues'),
     windowDays: v.number(),
+    startTs: v.optional(v.number()),
+    endTs: v.optional(v.number()),
   },
   returns: v.union(v.null(), salesSummaryDashboardValue),
   handler: async (ctx, args) => {
@@ -409,9 +411,8 @@ export const getSalesSummaryDashboard = query({
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
-    const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
-    const { start } = dayBounds(-window + 1);
-    const end = dayBounds(1).start;
+    const start = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
+    const end = args.endTs !== undefined ? args.endTs + 1 : dayBounds(1).start;
 
     const checks = (await (ctx as AnyCtx).db
       .query('posChecks')
@@ -511,7 +512,7 @@ export const getSalesByDay = query({
 
 // Per-server breakdown: sales, tips, checks, covers.
 export const getSalesByServer = query({
-  args: { venueId: v.id('venues'), windowDays: v.number() },
+  args: { venueId: v.id('venues'), windowDays: v.number(), startTs: v.optional(v.number()), endTs: v.optional(v.number()) },
   returns: v.union(v.null(), v.array(v.object({
     serverName: v.string(),
     salesCents: v.number(),
@@ -527,9 +528,8 @@ export const getSalesByServer = query({
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
-    const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
-    const { start } = dayBounds(-window + 1);
-    const end = dayBounds(1).start;
+    const start = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
+    const end = args.endTs !== undefined ? args.endTs + 1 : dayBounds(1).start;
 
     const checks = await (ctx as AnyCtx).db
       .query('posChecks')
@@ -637,7 +637,7 @@ export const getSalesByTender = query({
 
 // Top-selling menu items by revenue.
 export const getTopMenuItems = query({
-  args: { venueId: v.id('venues'), windowDays: v.number(), limit: v.optional(v.number()) },
+  args: { venueId: v.id('venues'), windowDays: v.number(), limit: v.optional(v.number()), startTs: v.optional(v.number()), endTs: v.optional(v.number()) },
   returns: v.union(v.null(), v.array(v.object({
     name: v.string(),
     category: v.union(v.string(), v.null()),
@@ -649,10 +649,9 @@ export const getTopMenuItems = query({
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
-    const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
     const cap = Math.min(args.limit ?? 20, 50);
-    const { start } = dayBounds(-window + 1);
-    const end = dayBounds(1).start;
+    const start = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
+    const end = args.endTs !== undefined ? args.endTs + 1 : dayBounds(1).start;
 
     const checks = await (ctx as AnyCtx).db
       .query('posChecks')
@@ -679,7 +678,7 @@ export const getTopMenuItems = query({
 
 // Labor summary from POS punches for a date window.
 export const getLaborSummary = query({
-  args: { venueId: v.id('venues'), windowDays: v.number() },
+  args: { venueId: v.id('venues'), windowDays: v.number(), startTs: v.optional(v.number()), endTs: v.optional(v.number()) },
   returns: v.union(v.null(), v.object({
     totalRegularMins: v.number(),
     totalOvertimeMins: v.number(),
@@ -699,11 +698,12 @@ export const getLaborSummary = query({
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
-    const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
-    // Build the set of business dates we want.
+    // Build the set of business dates we want, iterating by day.
+    const rawStart = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
+    const rawEnd = args.endTs ?? dayBounds(0).start;
     const dates: string[] = [];
-    for (let i = -window + 1; i <= 0; i++) {
-      dates.push(isoDate(dayBounds(i).start));
+    for (let cur = rawStart; cur <= rawEnd; cur += 86_400_000) {
+      dates.push(isoDate(cur));
     }
     const dateSet = new Set(dates);
 
