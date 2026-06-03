@@ -341,7 +341,7 @@ export const saveBeo = mutation({
       specialRequirements: args.specialRequirements,
       internalNotes: args.internalNotes,
       assignedRepId: args.assignedRepId,
-      status: (args.status ?? 'draft') as any,
+      status: args.status as any,
       updatedAt: now,
     };
 
@@ -351,7 +351,7 @@ export const saveBeo = mutation({
       return args.beoId;
     }
 
-    const beoId = await ctx.db.insert('crmBeos', { ...fields, createdAt: now });
+    const beoId = await ctx.db.insert('crmBeos', { ...fields, status: (args.status ?? 'draft') as any, createdAt: now });
 
     if (args.leadId) {
       const lead = await ctx.db.get(args.leadId);

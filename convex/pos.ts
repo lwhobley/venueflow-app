@@ -706,6 +706,9 @@ export const getLaborSummary = query({
       dates.push(isoDate(cur));
     }
     const dateSet = new Set(dates);
+    if (dates.length === 0) {
+      return { totalRegularMins: 0, totalOvertimeMins: 0, totalPayCents: 0, totalTipsCents: 0, byEmployee: [] };
+    }
 
     const punches = await (ctx as AnyCtx).db
       .query('posLaborPunches')
