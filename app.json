@@ -24,11 +24,11 @@
       }
     },
     "android": {
+      "package": "com.venuewrangler.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F4FAFC"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -64,7 +64,8 @@
         }
       ],
       "expo-notifications",
-      "expo-font"
+      "expo-font",
+      "expo-status-bar"
     ],
     "updates": {
       "enabled": false
