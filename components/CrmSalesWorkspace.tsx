@@ -130,7 +130,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
   const convertBeoToContract = useMutation(api.crm.convertBeoToContract);
   const addNote = useMutation(api.crm.addNote);
 
-  const selectedLead = detail?.lead ?? leads?.find((lead) => lead._id === selectedLeadId) ?? leads?.[0] ?? null;
+  const selectedLead = detail?.lead ?? leads?.find((lead) => lead._id === selectedLeadId) ?? null;
   const openLeads = useMemo(() => (leads ?? []).filter((lead) => !lostStatuses.includes(lead.status) && lead.status !== 'won'), [leads]);
   const stats = useMemo(() => {
     const rows = leads ?? [];
@@ -151,44 +151,43 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setMessage('Lead name is required.');
       return;
     }
-    const leadId = await saveLead({
-      venueId,
-      fullName: leadName.trim(),
-      company: leadCompany.trim() || undefined,
-      email: leadEmail.trim() || undefined,
-      phone: leadPhone.trim() || undefined,
-      source: leadSource.trim() || undefined,
-      status: 'new',
-      tags: splitTags(leadTags),
-      estimatedValueCents: parseDollars(leadValue),
-      marketingOptIn: true,
-    });
-    setSelectedLeadId(leadId);
-    setShowLeadForm(false);
-    setLeadName('');
-    setLeadCompany('');
-    setLeadEmail('');
-    setLeadPhone('');
-    setLeadValue('');
-    setLeadTags('');
-    setMessage('Lead created.');
+    try {
+      const leadId = await saveLead({
+        venueId,
+        fullName: leadName.trim(),
+        company: leadCompany.trim() || undefined,
+        email: leadEmail.trim() || undefined,
+        phone: leadPhone.trim() || undefined,
+        source: leadSource.trim() || undefined,
+        status: 'new',
+        tags: splitTags(leadTags),
+        estimatedValueCents: parseDollars(leadValue),
+        marketingOptIn: true,
+      });
+      setSelectedLeadId(leadId);
+      setShowLeadForm(false);
+      setLeadName('');
+      setLeadCompany('');
+      setLeadEmail('');
+      setLeadPhone('');
+      setLeadValue('');
+      setLeadTags('');
+      setMessage('Lead created.');
+    } catch (err) {
+      setMessage(`Failed to create lead: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
-  const updateSelectedStatus = async (status: LeadStatus) => {
-    if (!venueId || !selectedLead) return;
-    await saveLead({
-      venueId,
-      leadId: selectedLead._id,
-      fullName: selectedLead.fullName,
-      email: selectedLead.email,
-      phone: selectedLead.phone,
-      company: selectedLead.company,
-      source: selectedLead.source,
-      status,
-      tags: selectedLead.tags,
-      estimatedValueCents: selectedLead.estimatedValueCents,
-    });
-    setMessage(`Moved to ${status.replace('_', ' ')}.`);
+  const updateLeadStatus = async (leadId: Id<'crmLeads'>, status: LeadStatus) => {
+    if (!venueId) return;
+    const target = leads?.find((l) => l._id === leadId) ?? (detail?.lead?._id === leadId ? detail.lead : null);
+    if (!target) return;
+    try {
+      await saveLead({ venueId, leadId, fullName: target.fullName, status });
+      setMessage(`Moved to ${status.replace('_', ' ')}.`);
+    } catch (err) {
+      setMessage(`Failed to update lead: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const createEventDoc = async () => {
@@ -196,53 +195,72 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setMessage('Event name is required.');
       return;
     }
-    const beoId = await saveBeo({
-      venueId,
-      leadId: selectedLead?._id,
-      eventName: eventName.trim(),
-      eventDate: dateInputValue(eventDate),
-      eventType: eventType.trim() || undefined,
-      guestCount: Number(eventGuests) || undefined,
-      venueSpace: eventSpace.trim() || undefined,
-      fbMinimumCents: parseDollars(eventMinimum),
-      depositCents: parseDollars(eventDeposit),
-      status: 'draft',
-    });
-    setShowEventForm(false);
-    setEventName('');
-    setEventDate('');
-    setEventGuests('');
-    setEventSpace('');
-    setEventMinimum('');
-    setEventDeposit('');
-    setMessage('BEO draft created.');
-    return beoId;
+    try {
+      const beoId = await saveBeo({
+        venueId,
+        leadId: selectedLead?._id,
+        eventName: eventName.trim(),
+        eventDate: dateInputValue(eventDate),
+        eventType: eventType.trim() || undefined,
+        guestCount: Number(eventGuests) || undefined,
+        venueSpace: eventSpace.trim() || undefined,
+        fbMinimumCents: parseDollars(eventMinimum),
+        depositCents: parseDollars(eventDeposit),
+        status: 'draft',
+      });
+      setShowEventForm(false);
+      setEventName('');
+      setEventDate('');
+      setEventGuests('');
+      setEventSpace('');
+      setEventMinimum('');
+      setEventDeposit('');
+      setMessage('BEO draft created.');
+      return beoId;
+    } catch (err) {
+      setMessage(`Failed to create BEO: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const createContractFromLead = async () => {
     if (!venueId || !selectedLead) return;
-    await saveContract({
-      venueId,
-      leadId: selectedLead._id,
-      eventName: eventName.trim() || `${selectedLead.company ?? selectedLead.fullName} event`,
-      eventDate: dateInputValue(eventDate),
-      guestCount: Number(eventGuests) || undefined,
-      venueSpace: eventSpace.trim() || undefined,
-      fbMinimumCents: parseDollars(eventMinimum) ?? selectedLead.estimatedValueCents,
-      paymentSchedule: parseDollars(eventDeposit) ? [{ amountCents: parseDollars(eventDeposit)!, dueDate: Date.now(), type: 'deposit' as const }] : undefined,
-      cancellationPolicy: 'Deposit is non-refundable after the booking deadline. Final balance is due before event start.',
-      forceMajeure: true,
-      liabilityWaiver: true,
-      status: 'draft',
-    });
-    setMessage('Contract draft created.');
+    const depositCents = parseDollars(eventDeposit);
+    try {
+      await saveContract({
+        venueId,
+        leadId: selectedLead._id,
+        eventName: eventName.trim() || `${selectedLead.company ?? selectedLead.fullName} event`,
+        eventDate: dateInputValue(eventDate),
+        guestCount: Number(eventGuests) || undefined,
+        venueSpace: eventSpace.trim() || undefined,
+        fbMinimumCents: parseDollars(eventMinimum) ?? selectedLead.estimatedValueCents,
+        paymentSchedule: depositCents ? [{ amountCents: depositCents, dueDate: Date.now(), type: 'deposit' as const }] : undefined,
+        cancellationPolicy: 'Deposit is non-refundable after the booking deadline. Final balance is due before event start.',
+        forceMajeure: true,
+        liabilityWaiver: true,
+        status: 'draft',
+      });
+      setEventName('');
+      setEventDate('');
+      setEventGuests('');
+      setEventSpace('');
+      setEventMinimum('');
+      setEventDeposit('');
+      setMessage('Contract draft created.');
+    } catch (err) {
+      setMessage(`Failed to create contract: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const saveNote = async () => {
     if (!venueId || !selectedLead || !noteText.trim()) return;
-    await addNote({ venueId, leadId: selectedLead._id, text: noteText.trim() });
-    setNoteText('');
-    setMessage('Note added.');
+    try {
+      await addNote({ venueId, leadId: selectedLead._id, text: noteText.trim() });
+      setNoteText('');
+      setMessage('Note added.');
+    } catch (err) {
+      setMessage(`Failed to save note: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   if (!enabled || !venueId) return null;
@@ -331,7 +349,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         ) : null}
 
         {view === 'pipeline' ? (
-          <PipelineView leads={leads} selectedLeadId={selectedLead?._id ?? null} onSelectLead={setSelectedLeadId} onMove={updateSelectedStatus} />
+          <PipelineView leads={leads} selectedLeadId={selectedLead?._id ?? null} onSelectLead={setSelectedLeadId} onMove={(leadId, status) => void updateLeadStatus(leadId, status)} />
         ) : null}
 
         {view === 'contacts' ? (
@@ -341,8 +359,12 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         {view === 'events' ? (
           <EventsView beos={beos} onConvert={async (beoId) => {
             if (!venueId) return;
-            await convertBeoToContract({ venueId, beoId });
-            setMessage('Converted BEO to contract.');
+            try {
+              await convertBeoToContract({ venueId, beoId });
+              setMessage('Converted BEO to contract.');
+            } catch (err) {
+              setMessage(`Failed to convert: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            }
           }} />
         ) : null}
 
@@ -358,7 +380,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
           noteText={noteText}
           onNoteText={setNoteText}
           onSaveNote={() => void saveNote()}
-          onMove={(status) => void updateSelectedStatus(status)}
+          onMove={(status) => { if (selectedLead) void updateLeadStatus(selectedLead._id, status); }}
         />
       </Card.Content>
     </Card>
@@ -416,7 +438,7 @@ function PipelineView({
   leads: LeadRow[] | undefined;
   selectedLeadId: Id<'crmLeads'> | null;
   onSelectLead: (id: Id<'crmLeads'>) => void;
-  onMove: (status: LeadStatus) => void;
+  onMove: (leadId: Id<'crmLeads'>, status: LeadStatus) => void;
 }) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -436,7 +458,7 @@ function PipelineView({
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{lead.company ?? lead.source ?? 'No company'} - {money(lead.estimatedValueCents)}</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.xs }}>
                     <Button compact mode="text" textColor={colors.primary} onPress={() => onSelectLead(lead._id)}>Open</Button>
-                    <Button compact mode="text" textColor={colors.primary} onPress={() => onMove(column.status)}>Move here</Button>
+                    <Button compact mode="text" textColor={colors.primary} onPress={() => onMove(lead._id, column.status)}>Move here</Button>
                   </View>
                 </View>
               ))}

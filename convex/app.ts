@@ -1305,10 +1305,12 @@ export const getManagerInsights = query({
     // Bounded reads: these power dashboard counters, not exhaustive lists, so a
     // generous cap keeps the query within Convex limits as the venue scales.
     const INSIGHTS_CAP = 2000;
-    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).take(INSIGHTS_CAP);
-    const entries = await (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).order('desc').take(INSIGHTS_CAP);
-    const reservations = await (ctx as AnyCtx).db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', profile.venueId)).order('desc').take(INSIGHTS_CAP);
-    const requests = await (ctx as AnyCtx).db.query('staffRequests').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).take(INSIGHTS_CAP);
+    const [shifts, entries, reservations, requests] = await Promise.all([
+      (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).take(INSIGHTS_CAP),
+      (ctx as AnyCtx).db.query('timeEntries').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).order('desc').take(INSIGHTS_CAP),
+      (ctx as AnyCtx).db.query('reservations').withIndex('by_venue_time', (q: any) => q.eq('venueId', profile.venueId)).order('desc').take(INSIGHTS_CAP),
+      (ctx as AnyCtx).db.query('staffRequests').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).take(INSIGHTS_CAP),
+    ]);
     const activeClocks = entries.filter((entry: Doc<'timeEntries'>) => entry.isOpen);
     return {
       scheduledShifts: shifts.filter((shift: Doc<'scheduleShifts'>) => shift.status === 'scheduled' || shift.status === 'covered').length,

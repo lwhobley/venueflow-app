@@ -27,8 +27,8 @@ function buildActions(insights: InsightSnapshot, dashboard: any): CopilotAction[
   if (!insights) {
     actions.push({
       tone: 'neutral',
-      title: 'Copilot is standing by',
-      body: 'Connect venue data or sign in as a manager to unlock live operations recommendations.',
+      title: 'Ops Brief is standing by',
+      body: 'Connect venue data or sign in as a manager to unlock live operations summaries.',
     });
     return actions;
   }
@@ -109,7 +109,7 @@ export function AiCopilotPanel({
   onClose: () => void;
 }) {
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('Ask me what needs attention before service.');
+  const [answer, setAnswer] = useState('Ask about staffing, clocks, reservations, or requests.');
   const actions = useMemo(() => buildActions(insights, dashboard), [dashboard, insights]);
 
   const ask = () => setAnswer(answerQuestion(question, insights));
@@ -118,9 +118,9 @@ export function AiCopilotPanel({
     <CommandSurface palette={palette} strong style={{ gap: spacing.md, borderColor: palette.primary }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
         <View style={{ flex: 1, minWidth: 220 }}>
-          <CommandText palette={palette} variant="label">AI Copilot</CommandText>
-          <CommandText palette={palette} variant="title">Active operations assistant</CommandText>
-          <CommandText palette={palette} variant="caption">Live recommendations from schedule, clocks, reservations, and manager requests.</CommandText>
+          <CommandText palette={palette} variant="label">Ops Brief</CommandText>
+          <CommandText palette={palette} variant="title">Live operations snapshot</CommandText>
+          <CommandText palette={palette} variant="caption">Live summaries from schedule, clocks, reservations, and manager requests.</CommandText>
         </View>
         <CommandButton palette={palette} icon="close" onPress={onClose}>Close</CommandButton>
       </View>
@@ -140,7 +140,7 @@ export function AiCopilotPanel({
 
       <View style={{ gap: spacing.sm }}>
         <TextInput
-          label="Ask Copilot"
+          label="Quick lookup"
           value={question}
           onChangeText={setQuestion}
           mode="outlined"
@@ -153,7 +153,7 @@ export function AiCopilotPanel({
           onSubmitEditing={ask}
         />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm }}>
-          <CommandButton palette={palette} icon="creation" onPress={ask}>Ask</CommandButton>
+          <CommandButton palette={palette} icon="magnify" onPress={ask}>Look up</CommandButton>
           <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>{answer}</CommandText>
         </View>
       </View>

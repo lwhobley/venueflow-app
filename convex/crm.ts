@@ -116,13 +116,13 @@ export const listBeos = query({
         .query('crmBeos')
         .withIndex('by_venue_status', (q) => q.eq('venueId', venueId).eq('status', status as any))
         .order('desc')
-        .take(100);
+        .take(500);
     } else {
       beos = await ctx.db
         .query('crmBeos')
         .withIndex('by_venue', (q) => q.eq('venueId', venueId))
         .order('desc')
-        .take(100);
+        .take(500);
     }
 
     const leadIds = [...new Set(beos.map((b) => b.leadId).filter(Boolean) as Id<'crmLeads'>[])];
@@ -150,13 +150,13 @@ export const listContracts = query({
         .query('crmContracts')
         .withIndex('by_venue_status', (q) => q.eq('venueId', venueId).eq('status', status as any))
         .order('desc')
-        .take(100);
+        .take(500);
     } else {
       contracts = await ctx.db
         .query('crmContracts')
         .withIndex('by_venue', (q) => q.eq('venueId', venueId))
         .order('desc')
-        .take(100);
+        .take(500);
     }
 
     const leadIds = [...new Set(contracts.map((c) => c.leadId).filter(Boolean) as Id<'crmLeads'>[])];

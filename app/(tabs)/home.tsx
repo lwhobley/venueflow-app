@@ -106,7 +106,7 @@ export default function HomeScreen() {
   };
 
   const markAllAlertsRead = async () => {
-    await Promise.all(unreadNotifications.slice(0, 20).map((item) => markNotificationRead({ notificationId: item._id })));
+    await Promise.all(unreadNotifications.map((item) => markNotificationRead({ notificationId: item._id })));
   };
 
   return (
