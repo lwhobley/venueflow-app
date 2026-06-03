@@ -656,11 +656,17 @@ export const getWeeklySchedule = query({
     if (!identity) return null;
     const profile = await getProfile(ctx as AnyCtx);
     if (!profile || !profile.venueId) return null;
-    const shifts = await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect();
+    // Managers and above see all venue shifts; staff see only their own.
+    const shifts = isAdminRole(profile.role)
+      ? await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_venueId', (q: any) => q.eq('venueId', profile.venueId)).collect()
+      : await (ctx as AnyCtx).db.query('scheduleShifts').withIndex('by_profileId', (q: any) => q.eq('profileId', profile._id)).collect();
     const mapped: Array<ReturnType<typeof mapShift>> = [];
     for (const shift of shifts) {
-      const shiftProfile = shift.profileId ? await (ctx as AnyCtx).db.get(shift.profileId) : null;
-      mapped.push(mapShift(shift, shiftProfile?.fullName ?? null));
+      // For manager queries resolve names; for staff queries the shift is already theirs.
+      const shiftProfile = isAdminRole(profile.role) && shift.profileId
+        ? await (ctx as AnyCtx).db.get(shift.profileId)
+        : null;
+      mapped.push(mapShift(shift, isAdminRole(profile.role) ? (shiftProfile?.fullName ?? null) : profile.fullName));
     }
     return mapped;
   },
@@ -1155,6 +1161,11 @@ export const upsertVenueStaff = mutation({
     const viewer = await getProfile(ctx as AnyCtx);
     if (!viewer || viewer.venueId !== args.venueId || !isAdminRole(viewer.role)) throw new Error('Not authorized');
 
+    // Managers cannot grant roles at or above their own level.
+    const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess === true;
+    if (!viewerIsOwnerOrAdmin && (args.role === 'admin' || args.role === 'owner' || args.role === 'manager')) {
+      throw new Error('Managers cannot assign admin, owner, or manager roles');
+    }
 
     const existing = await (ctx as AnyCtx).db.query('profiles').withIndex('by_venueId', (q: any) => q.eq('venueId', args.venueId)).collect();
     const member = existing.find((item: Doc<'profiles'>) => item.email.toLowerCase() === args.email.toLowerCase()) ?? null;

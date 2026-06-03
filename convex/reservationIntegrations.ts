@@ -285,7 +285,7 @@ export const ingestExternalReservation = internalMutation({
       partySize: Math.max(1, Math.round(args.reservation.partySize)),
       reservationTime: args.reservation.reservationTime,
       durationMinutes: args.reservation.durationMinutes ?? 120,
-      source: args.reservation.source ?? args.provider,
+      source: args.reservation.source ?? (args.provider === 'generic' ? 'direct' : args.provider),
       status: args.reservation.status,
       specialRequests: cleanText(args.reservation.specialRequests),
       notes: cleanText(args.reservation.notes),

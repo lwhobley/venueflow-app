@@ -18,7 +18,7 @@ const plans = [
 type PlanId = (typeof plans)[number]['id'];
 
 const headlineByReason: Record<string, string> = {
-  trial_expired: 'Your 3-day trial has ended',
+  trial_expired: 'Your 14-day trial has ended',
   trial_active: 'Upgrade to unlock this feature',
   payment_failed: "Your payment didn't go through",
   cancelled: 'Your subscription has been cancelled',
@@ -74,7 +74,7 @@ export default function BillingLockedScreen() {
             <Text style={{ color: colors.muted }}>Venue: {venue?.name ?? 'No venue selected'}</Text>
             <Text style={{ color: colors.muted }}>Signed in as {user?.email ?? 'unknown'}</Text>
 
-            <Text variant="titleMedium">3-day free trial</Text>
+            <Text variant="titleMedium">14-day free trial</Text>
             <Text style={{ color: colors.muted }}>Choose the user tier that fits this venue. Subscriptions renew monthly and unlock the full app.</Text>
 
             {plans.map((plan) => (

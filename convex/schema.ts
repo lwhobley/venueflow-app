@@ -600,6 +600,8 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     dataRetentionWarnedAt: v.optional(v.number()),
+    lastStripeEventAt: v.optional(v.number()),
+    lastRevenueCatEventAt: v.optional(v.number()),
   }).index('by_venue', ['venueId']).index('by_status', ['status']).index('by_external_id', ['externalSubscriptionId']),
   subscriptionEvents: defineTable({
     venueId: v.id('venues'),

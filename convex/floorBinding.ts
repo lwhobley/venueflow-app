@@ -29,11 +29,11 @@ function sourceLabel(source: string) {
 }
 
 async function loadFloorPlan(ctx: any, venueId: string) {
-  return await ctx.db.query('floorPlans').withIndex('by_venue_active', (q: any) => q.eq('venueId', venueId).eq('isActive', true)).unique();
+  return await ctx.db.query('floorPlans').withIndex('by_venue_active', (q: any) => q.eq('venueId', venueId).eq('isActive', true)).first();
 }
 
 async function loadTableState(ctx: any, tableId: Id<'tables'>) {
-  return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).unique();
+  return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).first();
 }
 
 async function loadAssignmentSource(ctx: any, assignment: Doc<'tableAssignments'>) {

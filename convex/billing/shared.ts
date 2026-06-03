@@ -29,6 +29,7 @@ export function reasonFromStatus(status: Doc<'venues'>['subscriptionStatus'] | n
   if (status === 'trialing' || status === 'active') return 'trial_active';
   if (status === 'past_due') return 'payment_failed';
   if (status === 'cancelled') return 'cancelled';
+  if (status === 'paused') return 'cancelled';
   if (status === 'expired') return 'trial_expired';
   return 'cancelled';
 }

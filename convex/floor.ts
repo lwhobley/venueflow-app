@@ -122,11 +122,11 @@ async function requireVenueMember(ctx: any, venueId: string) {
 }
 
 async function loadFloorPlan(ctx: any, venueId: string) {
-  return await ctx.db.query('floorPlans').withIndex('by_venue_active', (q: any) => q.eq('venueId', venueId).eq('isActive', true)).unique();
+  return await ctx.db.query('floorPlans').withIndex('by_venue_active', (q: any) => q.eq('venueId', venueId).eq('isActive', true)).first();
 }
 
 async function loadState(ctx: any, tableId: Doc<'tables'>['_id']) {
-  return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).unique();
+  return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).first();
 }
 
 export const getActiveFloorPlan = query({
@@ -388,7 +388,7 @@ export const clearActiveFloorPlan = mutation({
 
     const tables = await ctx.db.query('tables').withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', plan._id)).take(500);
     for (const table of tables) {
-      const state = await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', table._id)).unique();
+      const state = await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', table._id)).first();
       if (state) await ctx.db.delete(state._id);
       const assignments = await ctx.db.query('tableAssignments').withIndex('by_table_time', (q: any) => q.eq('tableId', table._id)).take(100);
       for (const assignment of assignments) await ctx.db.delete(assignment._id);

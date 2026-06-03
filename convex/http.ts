@@ -319,7 +319,9 @@ http.route({
   method: 'POST',
   handler: httpAction(async (ctx, req) => {
     const expected = process.env.REVENUECAT_WEBHOOK_AUTH;
-    const received = req.headers.get('authorization');
+    // Strip Bearer prefix so env var can be set with or without it.
+    const rawAuth = req.headers.get('authorization') ?? '';
+    const received = rawAuth.startsWith('Bearer ') ? rawAuth.slice(7) : rawAuth;
     if (!secretOk(expected, received)) return new Response('Unauthorized', { status: 401 });
     let body: any;
     try {
@@ -330,6 +332,8 @@ http.route({
     const event = body?.event;
     const appUserId: string | undefined = event?.app_user_id;
     const type: string | undefined = event?.type;
+    const eventId: string | undefined = event?.id;
+    const eventCreatedAtMs: number | undefined = typeof event?.event_timestamp_ms === 'number' ? event.event_timestamp_ms : undefined;
     if (!appUserId || !type) return new Response('ok', { status: 200 });
     const status = REVENUECAT_ACTIVE_TYPES.has(type)
       ? 'active'
@@ -340,7 +344,12 @@ http.route({
           : null;
     if (status) {
       try {
-        await ctx.runMutation(internal.billing.handleRevenueCatEvent, { appUserId, status: status as any });
+        await ctx.runMutation(internal.billing.handleRevenueCatEvent, {
+          appUserId,
+          status: status as any,
+          eventId: eventId ?? `${type}:${appUserId}:${eventCreatedAtMs ?? Date.now()}`,
+          eventCreatedAtMs: eventCreatedAtMs ?? Date.now(),
+        });
       } catch {
         // Unknown app_user_id (not a venue) — ignore.
       }

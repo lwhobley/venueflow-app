@@ -128,7 +128,7 @@ function mapStripeStatus(status: string | undefined) {
     case 'incomplete_expired':
       return 'expired';
     default:
-      return status ?? 'past_due';
+      return 'past_due';
   }
 }
 
@@ -140,7 +140,7 @@ export const getMyBilling = query({
     if (!identity) return null;
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile?.venueId) return null;
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
+    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).first();
     if (!subscription) return null;
     return {
       venueId: subscription.venueId,
@@ -176,7 +176,7 @@ export const getStripeBillingContext = internalQuery({
 
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
     if (!venue) return null;
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
+    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).first();
     if (!subscription) return null;
     return {
       venueId: profile.venueId,
@@ -212,7 +212,7 @@ export const createStripeCheckoutSession = action({
       'subscription_data[metadata][venueName]': context.venueName,
       'subscription_data[metadata][planId]': selectedPlanId,
       'subscription_data[metadata][userLimit]': String(selectedPlan.userLimit),
-      'subscription_data[trial_period_days]': '3',
+      'subscription_data[trial_period_days]': '14',
       allow_promotion_codes: 'true',
     };
     if (context.externalCustomerId) params.customer = context.externalCustomerId;
@@ -248,25 +248,49 @@ export const reconcilePaidSubscription = internalMutation({
   },
   returns: billingValue,
   handler: async (ctx, args) => {
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).unique();
-    if (!subscription) throw new Error('Subscription not found');
+    let subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).first();
 
     const venue = await (ctx as AnyCtx).db.get(args.venueId);
     if (!venue) throw new Error('Venue not found');
 
     const now = Date.now();
     const currentPeriodEnd = periodEndForPackage(args.packageRef, now);
-    await (ctx as AnyCtx).db.patch(subscription._id, {
-      status: 'active',
-      platform: args.platform,
-      planId: args.packageRef,
-      externalSubscriptionId: args.productId ?? subscription.externalSubscriptionId,
-      currentPeriodStart: now,
-      currentPeriodEnd,
-      cancelAtPeriodEnd: false,
-      cancelledAt: null,
-      updatedAt: now,
-    });
+
+    if (!subscription) {
+      const plan = planById(args.packageRef);
+      const subId = await (ctx as AnyCtx).db.insert('subscriptions', {
+        venueId: args.venueId,
+        status: 'active',
+        platform: args.platform,
+        planId: args.packageRef,
+        priceCents: plan.priceCents,
+        currency: 'usd',
+        trialStartedAt: now,
+        trialEndsAt: now,
+        currentPeriodStart: now,
+        currentPeriodEnd,
+        cancelAtPeriodEnd: false,
+        cancelledAt: null,
+        externalSubscriptionId: args.productId ?? null,
+        externalCustomerId: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      subscription = await (ctx as AnyCtx).db.get(subId);
+      if (!subscription) throw new Error('Unable to create subscription');
+    } else {
+      await (ctx as AnyCtx).db.patch(subscription._id, {
+        status: 'active',
+        platform: args.platform,
+        planId: args.packageRef,
+        externalSubscriptionId: args.productId ?? subscription.externalSubscriptionId,
+        currentPeriodStart: now,
+        currentPeriodEnd,
+        cancelAtPeriodEnd: false,
+        cancelledAt: null,
+        updatedAt: now,
+      });
+    }
     await (ctx as AnyCtx).db.patch(venue._id, {
       subscriptionStatus: 'active',
       subscriptionPlatform: args.platform,
@@ -300,10 +324,10 @@ export const handleStripeWebhook = internalMutation({
     const venueId = object?.metadata?.venueId ?? object?.client_reference_id;
     let subscription: Doc<'subscriptions'> | null = null;
     if (venueId) {
-      subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).unique();
+      subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).first();
     }
     if (!subscription && object?.id && String(event.type ?? '').startsWith('customer.subscription.')) {
-      subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_external_id', (q: any) => q.eq('externalSubscriptionId', object.id)).unique();
+      subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_external_id', (q: any) => q.eq('externalSubscriptionId', object.id)).first();
     }
     if (!subscription) return { status: 'skipped' };
 
@@ -311,8 +335,19 @@ export const handleStripeWebhook = internalMutation({
     const duplicate = await (ctx as AnyCtx).db
       .query('subscriptionEvents')
       .withIndex('by_source_external_id', (q: any) => q.eq('source', 'stripe').eq('externalEventId', externalEventId))
-      .unique();
+      .first();
     if (duplicate) return { status: 'duplicate' };
+
+    // Skip state-changing events that arrived out of order (Stripe doesn't
+    // guarantee delivery order). checkout.session.completed is always applied
+    // since it seeds the subscription row.
+    const eventCreatedMs = typeof event.created === 'number' ? event.created * 1000 : null;
+    const lastEventAt = (subscription as any).lastStripeEventAt ?? 0;
+    const isStateChange = String(event.type ?? '').startsWith('customer.subscription.') ||
+      event.type === 'invoice.paid' || event.type === 'invoice.payment_failed';
+    if (isStateChange && eventCreatedMs !== null && eventCreatedMs < lastEventAt) {
+      return { status: 'skipped_stale' };
+    }
 
     await (ctx as AnyCtx).db.insert('subscriptionEvents', {
       venueId: subscription.venueId,
@@ -325,7 +360,7 @@ export const handleStripeWebhook = internalMutation({
       errorMessage: null,
     });
 
-    const patch: Record<string, unknown> = { updatedAt: Date.now(), platform: 'stripe' };
+    const patch: Record<string, unknown> = { updatedAt: Date.now(), platform: 'stripe', ...(eventCreatedMs ? { lastStripeEventAt: eventCreatedMs } : {}) };
     if (event.type === 'checkout.session.completed') {
       patch.externalCustomerId = object.customer ?? subscription.externalCustomerId;
       patch.externalSubscriptionId = object.subscription ?? subscription.externalSubscriptionId;
@@ -411,22 +446,60 @@ export const handleStripeWebhook = internalMutation({
 // RevenueCat webhook handler (called from convex/http.ts). The RevenueCat
 // app_user_id is the venue id, so we map the event straight onto that venue.
 export const handleRevenueCatEvent = internalMutation({
-  args: { appUserId: v.string(), status: subscriptionStatusValue },
+  args: {
+    appUserId: v.string(),
+    status: subscriptionStatusValue,
+    eventId: v.string(),
+    eventCreatedAtMs: v.number(),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
     // app_user_id is a venue id string; ignore anything that isn't a real venue.
     const venue = await (ctx as AnyCtx).db.get(args.appUserId as Id<'venues'>).catch(() => null);
     if (!venue || !('name' in venue)) return null;
+
+    const subscription = await (ctx as AnyCtx).db
+      .query('subscriptions')
+      .withIndex('by_venue', (q: any) => q.eq('venueId', venue._id))
+      .first();
+
+    // Only let Apple mutate when there's no existing platform lock or it's already Apple.
+    // This prevents a stale RevenueCat event from clobbering a live Stripe subscription.
+    if (subscription?.platform === 'stripe') return null;
+
+    // Dedup: skip if we've already seen this event id.
+    const duplicate = await (ctx as AnyCtx).db
+      .query('subscriptionEvents')
+      .withIndex('by_source_external_id', (q: any) => q.eq('source', 'apple').eq('externalEventId', args.eventId))
+      .first();
+    if (duplicate) return null;
+
+    // Skip out-of-order events (later event already processed).
+    const lastEventAt = (subscription as any)?.lastRevenueCatEventAt ?? 0;
+    if (args.eventCreatedAtMs < lastEventAt) return null;
+
+    await (ctx as AnyCtx).db.insert('subscriptionEvents', {
+      venueId: venue._id,
+      source: 'apple',
+      externalEventId: args.eventId,
+      eventType: args.status,
+      payload: { status: args.status },
+      processedAt: Date.now(),
+      status: 'processed',
+      errorMessage: null,
+    });
+
     await (ctx as AnyCtx).db.patch(venue._id, {
       subscriptionStatus: args.status,
       subscriptionPlatform: 'apple',
     });
-    const subscription = await (ctx as AnyCtx).db
-      .query('subscriptions')
-      .withIndex('by_venue', (q: any) => q.eq('venueId', venue._id))
-      .unique();
     if (subscription) {
-      await (ctx as AnyCtx).db.patch(subscription._id, { status: args.status, platform: 'apple', updatedAt: Date.now() });
+      await (ctx as AnyCtx).db.patch(subscription._id, {
+        status: args.status,
+        platform: 'apple',
+        updatedAt: Date.now(),
+        lastRevenueCatEventAt: args.eventCreatedAtMs,
+      } as any);
     }
     return null;
   },

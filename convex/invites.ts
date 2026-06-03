@@ -99,6 +99,11 @@ export const createInvite = mutation({
     if (!profile || profile.venueId !== args.venueId || !isManager(profile.role)) {
       throw new Error('Not authorized');
     }
+    // Only owners and admins can invite managers; managers can only invite staff.
+    const isOwnerOrAdmin = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess === true;
+    if (args.role === 'manager' && !isOwnerOrAdmin) {
+      throw new Error('Only owners and admins can invite managers');
+    }
     const jobTitle = args.jobTitle.trim();
     if (!jobTitle) throw new Error('Enter a job title');
     if (jobTitle.length > 100) throw new Error('Job title must be 100 characters or fewer');

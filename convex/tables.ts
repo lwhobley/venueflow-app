@@ -30,7 +30,7 @@ function canTransfer(role: Doc<'profiles'>['role']) {
 }
 
 async function loadState(ctx: any, tableId: Id<'tables'>) {
-  return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).unique();
+  return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).first();
 }
 
 async function loadTableAndPlan(ctx: any, tableId: Id<'tables'>) {
