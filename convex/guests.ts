@@ -101,13 +101,26 @@ async function getProfile(ctx: AnyCtx) {
   return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
-function canManage(role: string) {
-  return role === 'admin' || role === 'owner' || role === 'manager';
+// allAccess support/ops profiles manage every venue regardless of role, matching
+// requireVenueManager in authz.ts and canManageVenue on the client.
+function canManage(profile: { role: string; allAccess?: boolean }) {
+  return profile.allAccess === true || profile.role === 'admin' || profile.role === 'owner' || profile.role === 'manager';
 }
 
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function secretsMatch(a: string | undefined | null, b: string | undefined | null) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function newWebhookSecret() {
+  return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
 }
 
 function cleanTags(tags: string[]) {
@@ -250,7 +263,7 @@ export const listGuests = query({
   returns: v.array(guestSummaryValue),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return [];
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return [];
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const guests = await (ctx as AnyCtx).db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(100);
     const summaries = [];
@@ -264,7 +277,7 @@ export const getGuestProfile = query({
   returns: v.union(v.null(), guestProfileValue),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const guest = await (ctx as AnyCtx).db.get(args.guestId);
     if (!guest || guest.venueId !== args.venueId || guest.deletedAt) return null;
@@ -336,7 +349,7 @@ export const upsertGuest = mutation({
   returns: guestSummaryValue,
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const fullName = args.fullName.trim();
@@ -381,7 +394,7 @@ export const ingestLeads = mutation({
   returns: leadIngestResultValue,
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     return await ingestLeadRows(ctx as AnyCtx, args.venueId, args.leads);
@@ -389,13 +402,33 @@ export const ingestLeads = mutation({
 });
 
 export const ingestLeadsFromWebhook = internalMutation({
-  args: { venueId: v.id('venues'), leads: v.array(leadInputValue) },
+  args: { venueId: v.id('venues'), leads: v.array(leadInputValue), connectionSecret: v.string() },
   returns: leadIngestResultValue,
   handler: async (ctx, args) => {
     const venue = await (ctx as AnyCtx).db.get(args.venueId);
     if (!venue || venue.deletedAt) throw new Error('Venue not found');
+    // Per-venue secret: a leaked deployment-wide LEADS_WEBHOOK_SECRET alone can't
+    // inject leads into a venue without also holding that venue's connection
+    // secret. The venue owner generates it from the Integrations screen.
+    if (!venue.leadsWebhookSecret) throw new Error('Lead ingestion is not enabled for this venue');
+    if (!secretsMatch(venue.leadsWebhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
     if (venue.subscriptionStatus !== 'active' && venue.subscriptionStatus !== 'trialing') throw new Error('Subscription required');
     return await ingestLeadRows(ctx as AnyCtx, args.venueId, args.leads);
+  },
+});
+
+// Generates (or rotates) the per-venue secret for the /crm/leads webhook. The
+// secret is returned once and never exposed through reads. Manager-only.
+export const rotateLeadsWebhookSecret = mutation({
+  args: { venueId: v.id('venues') },
+  returns: v.object({ webhookSecret: v.string() }),
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    const secret = newWebhookSecret();
+    await (ctx as AnyCtx).db.patch(args.venueId, { leadsWebhookSecret: secret });
+    return { webhookSecret: secret };
   },
 });
 
@@ -404,7 +437,7 @@ export const removeGuest = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 

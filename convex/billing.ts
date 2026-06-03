@@ -129,8 +129,9 @@ function mapStripeStatus(status: string | undefined) {
       return 'past_due';
     case 'canceled':
       return 'cancelled';
-    case 'incomplete_expired':
     case 'paused':
+      return 'paused';
+    case 'incomplete_expired':
       return 'expired';
     default:
       return status ?? 'past_due';

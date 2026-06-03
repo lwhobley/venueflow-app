@@ -18,13 +18,15 @@ async function overlappingShift(
   endMinutes: number,
   exclude: Set<string>,
 ): Promise<Doc<'scheduleShifts'> | null> {
+  // Scoped to this venue/person/day so we never load another venue's schedule or
+  // a year of unrelated shifts just to check one overlap.
   const shifts = await ctx.db
     .query('scheduleShifts')
-    .withIndex('by_profileId', (q: any) => q.eq('profileId', profileId))
+    .withIndex('by_venue_profile_day', (q: any) => q.eq('venueId', venueId).eq('profileId', profileId).eq('dayIndex', dayIndex))
     .collect();
   for (const s of shifts as Doc<'scheduleShifts'>[]) {
-    if (exclude.has(s._id) || s.venueId !== venueId) continue;
-    if (s.dayIndex === dayIndex && s.startMinutes < endMinutes && startMinutes < s.endMinutes) return s;
+    if (exclude.has(s._id)) continue;
+    if (s.startMinutes < endMinutes && startMinutes < s.endMinutes) return s;
   }
   return null;
 }

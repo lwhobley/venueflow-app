@@ -115,8 +115,10 @@ function newWebhookSecret() {
   return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
 }
 
-function canManage(role: string) {
-  return role === 'admin' || role === 'owner' || role === 'manager';
+// allAccess support/ops profiles manage every venue regardless of role, matching
+// requireVenueManager in authz.ts and canManageVenue on the client.
+function canManage(profile: { role: string; allAccess?: boolean }) {
+  return profile.allAccess === true || profile.role === 'admin' || profile.role === 'owner' || profile.role === 'manager';
 }
 
 function cleanText(value: string | undefined) {
@@ -128,6 +130,32 @@ async function getProfile(ctx: AnyCtx) {
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
   return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
+}
+
+// Resolves the connection for a venue+provider, tolerating venues that have more
+// than one row for the same provider (e.g. two locations). When the caller names
+// an externalLocationId we prefer the row bound to it; otherwise the first match.
+// Using collect() instead of unique() means a duplicate row never hard-crashes
+// ingestion.
+async function findPosConnection(
+  ctx: AnyCtx,
+  venueId: Id<'venues'>,
+  provider: 'toast' | 'square' | 'clover' | 'generic',
+  externalLocationId?: string,
+): Promise<Doc<'posConnections'> | null> {
+  const connections: Doc<'posConnections'>[] = await ctx.db
+    .query('posConnections')
+    .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', venueId).eq('provider', provider))
+    .collect();
+  if (connections.length === 0) return null;
+  if (externalLocationId) {
+    const bound = connections.find((c) => c.externalLocationId === externalLocationId);
+    if (bound) return bound;
+    // A location-bound connection exists but none match the incoming id: do not
+    // silently fall through to an unrelated location.
+    if (connections.some((c) => c.externalLocationId)) return null;
+  }
+  return connections[0];
 }
 
 function mapConnection(connection: Doc<'posConnections'>) {
@@ -175,7 +203,10 @@ function mapCheck(check: Doc<'posChecks'>) {
 async function findGuestByName(ctx: AnyCtx, venueId: Id<'venues'>, guestName: string | undefined) {
   const name = guestName?.trim().toLowerCase();
   if (!name) return null;
-  const guests = await ctx.db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).take(100);
+  // Scan the venue's full guest list (case-insensitive match). A capped take()
+  // would silently fail to link checks for guests past the cap, corrupting spend
+  // and visit history for the tail of the list.
+  const guests = await ctx.db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).collect();
   return guests.find((guest: Doc<'guests'>) => guest.fullName.toLowerCase() === name) ?? null;
 }
 
@@ -278,7 +309,7 @@ export const getPosOverview = query({
   ),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const connections = await (ctx as AnyCtx).db.query('posConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(10);
     const checks = await (ctx as AnyCtx).db.query('posChecks').withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(50);
@@ -347,7 +378,7 @@ export const getSalesSummary = query({
   returns: v.union(v.null(), salesSummaryValue),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -387,7 +418,7 @@ export const getSalesSummaryDashboard = query({
   returns: v.union(v.null(), salesSummaryDashboardValue),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -461,7 +492,7 @@ export const getSalesByDay = query({
   returns: v.union(v.null(), v.array(v.object({ date: v.string(), salesCents: v.number(), checkCount: v.number(), coverCount: v.number() }))),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -505,7 +536,7 @@ export const getSalesByServer = query({
   }))),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -549,7 +580,7 @@ export const getSalesByRevenueCenter = query({
   }))),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -588,7 +619,7 @@ export const getSalesByTender = query({
   }))),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -627,7 +658,7 @@ export const getTopMenuItems = query({
   }))),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -677,7 +708,7 @@ export const getLaborSummary = query({
   })),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -741,7 +772,7 @@ export const upsertPosConnection = mutation({
   returns: posConnectionWithSecretValue,
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
@@ -778,7 +809,7 @@ export const rotatePosConnectionSecret = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     const connection = await (ctx as AnyCtx).db.get(args.connectionId);
     if (!connection) throw new Error('Connection not found');
-    if (!profile || profile.venueId !== connection.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== connection.venueId || !canManage(profile)) throw new Error('Not authorized');
     await requirePaidSubscription(ctx as AnyCtx, connection.venueId);
     const secret = newWebhookSecret();
     await (ctx as AnyCtx).db.patch(connection._id, { webhookSecret: secret, updatedAt: Date.now() });
@@ -791,7 +822,7 @@ export const importPosCheck = mutation({
   returns: posCheckValue,
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const check = await upsertCheck(ctx as AnyCtx, args);
@@ -814,13 +845,10 @@ export const ingestPosCheck = internalMutation({
   },
   returns: posCheckValue,
   handler: async (ctx, args) => {
-    const connection = await (ctx as AnyCtx).db
-      .query('posConnections')
-      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
-      .unique();
+    const connection = await findPosConnection(ctx as AnyCtx, args.venueId, args.provider, args.externalLocationId);
     if (!connection) throw new Error('No POS connection configured for this venue/provider');
     if (!secretsMatch(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
-    if (connection.externalLocationId && args.externalLocationId && connection.externalLocationId !== args.externalLocationId) {
+    if (connection.externalLocationId && connection.externalLocationId !== args.externalLocationId) {
       throw new Error('Location mismatch for this connection');
     }
     const check = await upsertCheck(ctx as AnyCtx, args);
@@ -838,10 +866,7 @@ export const ingestLaborPunches = internalMutation({
   },
   returns: v.object({ upserted: v.number() }),
   handler: async (ctx, args) => {
-    const connection = await (ctx as AnyCtx).db
-      .query('posConnections')
-      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
-      .unique();
+    const connection = await findPosConnection(ctx as AnyCtx, args.venueId, args.provider);
     if (!connection) throw new Error('No POS connection configured for this venue/provider');
     if (!secretsMatch(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
 

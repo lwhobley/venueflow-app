@@ -47,8 +47,10 @@ const externalReservationInput = v.object({
   raw: v.optional(v.any()),
 });
 
-function canManage(role: string) {
-  return role === 'admin' || role === 'owner' || role === 'manager';
+// allAccess support/ops profiles manage every venue regardless of role, matching
+// requireVenueManager in authz.ts and canManageVenue on the client.
+function canManage(profile: { role: string; allAccess?: boolean }) {
+  return profile.allAccess === true || profile.role === 'admin' || profile.role === 'owner' || profile.role === 'manager';
 }
 
 function cleanText(value: string | undefined) {
@@ -162,7 +164,7 @@ export const getReservationIntegrationOverview = query({
   ),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const connections = await (ctx as AnyCtx).db.query('reservationConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(20);
     const recentEvents = await (ctx as AnyCtx).db.query('reservationSyncEvents').withIndex('by_venue_processedAt', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(20);
@@ -198,7 +200,7 @@ export const upsertReservationConnection = mutation({
   }),
   handler: async (ctx, args) => {
     const profile = await getProfile(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
@@ -237,7 +239,7 @@ export const rotateReservationConnectionSecret = mutation({
     const profile = await getProfile(ctx as AnyCtx);
     const connection = await (ctx as AnyCtx).db.get(args.connectionId);
     if (!connection) throw new Error('Connection not found');
-    if (!profile || profile.venueId !== connection.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== connection.venueId || !canManage(profile)) throw new Error('Not authorized');
     await requirePaidSubscription(ctx as AnyCtx, connection.venueId);
     const secret = newWebhookSecret();
     await (ctx as AnyCtx).db.patch(connection._id, { webhookSecret: secret, updatedAt: Date.now() });
@@ -267,8 +269,10 @@ export const ingestExternalReservation = internalMutation({
     if (!secretsMatch(configuredConnection.webhookSecret, args.connectionSecret)) {
       throw new Error('Invalid connection secret');
     }
-    // If the connection is bound to a specific external venue, reject mismatches.
-    if (configuredConnection.externalVenueId && args.externalVenueId && configuredConnection.externalVenueId !== args.externalVenueId) {
+    // If the connection is bound to a specific external venue, the payload must
+    // carry the matching id. A missing or different id is rejected — omitting it
+    // must not be a way to bypass the binding.
+    if (configuredConnection.externalVenueId && configuredConnection.externalVenueId !== args.externalVenueId) {
       throw new Error('Venue mismatch for this connection');
     }
 

@@ -67,7 +67,7 @@ function receivedSecret(req: Request, headerName: string) {
 const LEAD_CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type, x-venueflow-leads-secret',
+  'Access-Control-Allow-Headers': 'authorization, content-type, x-venueflow-leads-secret, x-venueflow-connection-secret',
 };
 
 function leadJson(body: unknown, status = 200) {
@@ -208,10 +208,14 @@ http.route({
       return leadJson({ error: 'Invalid JSON' }, 400);
     }
     if (!body?.venueId || typeof body.venueId !== 'string') return leadJson({ error: 'venueId is required' }, 400);
+    // Per-venue connection secret, carried alongside the deployment-wide transport
+    // secret, so a leaked transport secret alone can't post for an arbitrary venue.
+    const connectionSecret = req.headers.get('x-venueflow-connection-secret');
+    if (!connectionSecret) return leadJson({ error: 'Missing connection secret' }, 401);
     const leads = leadsFromBody(body);
     if (leads.length === 0) return leadJson({ error: 'No valid leads found' }, 400);
     try {
-      const result = await ctx.runMutation(internal.guests.ingestLeadsFromWebhook, { venueId: body.venueId, leads });
+      const result = await ctx.runMutation(internal.guests.ingestLeadsFromWebhook, { venueId: body.venueId, leads, connectionSecret });
       return leadJson({ ok: true, ...result });
     } catch (e) {
       return leadJson({ error: e instanceof Error ? e.message : 'Lead ingest rejected' }, 400);

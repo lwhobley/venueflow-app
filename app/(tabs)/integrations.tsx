@@ -43,6 +43,7 @@ function IntegrationsScreenInner() {
   ) as any;
   const upsertConnection = useMutation(api.pos.upsertPosConnection);
   const upsertReservationConnection = useMutation(api.reservationIntegrations.upsertReservationConnection);
+  const rotateLeadsSecret = useMutation(api.guests.rotateLeadsWebhookSecret);
 
   const [provider, setProvider] = useState<Provider>('toast');
   const [locationId, setLocationId] = useState('');
@@ -89,6 +90,21 @@ function IntegrationsScreenInner() {
       setMessage('Reservation connection saved.');
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not save reservation connection.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const generateLeadsSecret = async () => {
+    if (!venue?.id) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const r = await rotateLeadsSecret({ venueId: venue.id });
+      if (r?.webhookSecret) setNewSecret(r.webhookSecret);
+      setMessage('Lead webhook secret generated.');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not generate lead webhook secret.');
     } finally {
       setSaving(false);
     }
@@ -174,6 +190,19 @@ function IntegrationsScreenInner() {
             Save reservation connection
           </Button>
           <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with the x-venueflow-reservation-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>CRM lead capture</Text>
+          <Text style={{ color: colors.muted }}>
+            Pipe website forms, email, or CSV uploads into your guest CRM. Generate a per-venue secret, then POST to /crm/leads with the
+            x-venueflow-leads-secret (deployment) and x-venueflow-connection-secret (per-venue) headers.
+          </Text>
+          <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void generateLeadsSecret()}>
+            Generate lead webhook secret
+          </Button>
         </Card.Content>
       </Card>
 
