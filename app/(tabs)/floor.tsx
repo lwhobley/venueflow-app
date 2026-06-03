@@ -149,7 +149,6 @@ export default function FloorScreen() {
   const unassignedReservations = useQuery(api.floorBinding.getUnassignedReservations, isReady && venue?.id ? { venueId: venue.id, withinMinutes: 120 } : 'skip') as ReservationQueueItem[] | null | undefined;
   const openWaitlist = useQuery(api.floorBinding.getOpenWaitlist, isReady && venue?.id ? { venueId: venue.id } : 'skip') as WaitlistItem[] | null | undefined;
 
-  const seedFloor = useMutation(api.seed.seedDemoFloorPlan);
   const releaseAssignment = useMutation(api.floorBinding.releaseAssignment);
   const markDirty = useMutation(api.tables.markDirty);
   const markClean = useMutation(api.tables.markClean);
@@ -206,16 +205,6 @@ export default function FloorScreen() {
   const selectedAssignments = selected?.activeAssignments ?? [];
   const selectedNextAssignment = selected?.nextAssignment ?? null;
   const needsAssignmentCount = reservationQueue.length;
-
-  const onSeed = async () => {
-    if (!venue?.id) return;
-    setActionError(null);
-    try {
-      await seedFloor({ venueId: venue.id });
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not seed floor plan.');
-    }
-  };
 
   const onRelease = async (assignmentId: string) => {
     if (!venue?.id) return;
@@ -322,14 +311,11 @@ export default function FloorScreen() {
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium">No active floor plan yet</Text>
-            <Text style={{ color: colors.muted }}>Build your own in the editor, or seed a sample to get started.</Text>
+            <Text style={{ color: colors.muted }}>Build your own floor plan in the editor to start tracking live tables.</Text>
             {canEdit ? (
               <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                 <Button mode="contained" buttonColor={colors.primary} icon="pencil" onPress={() => router.push('/floor/editor')}>
                   Build floor plan
-                </Button>
-                <Button mode="outlined" textColor={colors.primary} onPress={() => void onSeed()}>
-                  Seed sample
                 </Button>
               </View>
             ) : null}

@@ -25,6 +25,7 @@ const reservationStatus = v.union(
 );
 const reservationSource = v.union(v.literal('direct'), v.literal('opentable'), v.literal('resy'), v.literal('phone'), v.literal('walk_in'));
 const externalReservationSource = v.union(reservationSource, v.literal('sevenrooms'), v.literal('tock'), v.literal('google'));
+const privateEventStatus = v.union(v.literal('inquiry'), v.literal('proposal'), v.literal('contract_sent'), v.literal('booked'), v.literal('completed'), v.literal('cancelled'));
 const waitlistStatus = v.union(v.literal('waiting'), v.literal('assigned'), v.literal('seated'), v.literal('completed'), v.literal('removed'));
 const assignmentHoldType = v.union(v.literal('reserved'), v.literal('held'), v.literal('seated'));
 const posProvider = v.union(v.literal('toast'), v.literal('square'), v.literal('clover'), v.literal('generic'));
@@ -267,6 +268,14 @@ export default defineSchema({
     fullName: v.string(),
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
+    lifecycleStage: v.optional(v.union(v.literal('lead'), v.literal('regular'), v.literal('vip'), v.literal('lapsed'))),
+    source: v.optional(v.string()),
+    birthday: v.optional(v.string()),
+    company: v.optional(v.string()),
+    marketingOptIn: v.optional(v.boolean()),
+    favoriteTable: v.optional(v.string()),
+    preferredServer: v.optional(v.string()),
+    dietaryNotes: v.optional(v.string()),
     tags: v.array(v.string()),
     notes: v.optional(v.string()),
     createdAt: v.number(),
@@ -358,13 +367,27 @@ export default defineSchema({
     guestName: v.string(),
     guestPhone: v.optional(v.string()),
     guestEmail: v.optional(v.string()),
+    guestCompany: v.optional(v.string()),
     partySize: v.number(),
     reservationTime: v.number(),
     durationMinutes: v.number(),
     source: externalReservationSource,
     status: reservationStatus,
     specialRequests: v.optional(v.string()),
+    occasion: v.optional(v.string()),
     tags: v.array(v.string()),
+    isPrivateEvent: v.optional(v.boolean()),
+    eventName: v.optional(v.string()),
+    eventStatus: v.optional(privateEventStatus),
+    eventSpace: v.optional(v.string()),
+    setupStyle: v.optional(v.string()),
+    menuNotes: v.optional(v.string()),
+    beverageNotes: v.optional(v.string()),
+    billingNotes: v.optional(v.string()),
+    contractStatus: v.optional(v.string()),
+    beoStatus: v.optional(v.string()),
+    estimatedValueCents: v.optional(v.number()),
+    depositDueCents: v.optional(v.number()),
     externalId: v.optional(v.string()),
     toastCheckGuid: v.optional(v.string()),
     depositStatus: v.optional(v.string()),

@@ -63,14 +63,14 @@ export default function HomeScreen() {
 
   const kpis = useMemo(
     () => [
-      { label: t('dashboard.covers'), value: formatNumber(todayReservations || reservationCount), delta: t('dashboard.onPace'), icon: 'silverware-fork-knife' as const, trend: [4, 7, 8, 10, 12, 14, 16] },
-      { label: t('dashboard.revenue'), value: formatCurrency((todayReservations || 8) * 84), delta: t('dashboard.pacingLabel'), icon: 'chart-line' as const, trend: [5, 8, 6, 12, 13, 17, 20] },
-      { label: t('dashboard.occupancy'), value: `${Math.min(96, 54 + todayReservations * 4)}%`, delta: t('dashboard.fullFloor'), icon: 'seat' as const, trend: [6, 8, 10, 11, 13, 12, 15] },
-      { label: t('dashboard.turns'), value: formatNumber(Math.max(1.8, todayReservations / 7), { maximumFractionDigits: 1 }), delta: t('dashboard.tableTurns'), icon: 'rotate-3d-variant' as const, trend: [3, 4, 5, 4, 6, 7, 8] },
-      { label: t('dashboard.guestSpend'), value: formatCurrency(84), delta: t('dashboard.vipLabel'), icon: 'account-star-outline' as const, trend: [5, 5, 7, 8, 7, 9, 11] },
-      { label: t('dashboard.staffReady'), value: `${readiness}%`, delta: openShifts ? t('dashboard.watch') : t('dashboard.clear'), icon: 'account-check-outline' as const, trend: [4, 6, 8, 9, 10, 12, readiness || 12] },
+      { label: t('dashboard.covers'), value: formatNumber(todayReservations), delta: t('common.today'), icon: 'silverware-fork-knife' as const, trend: [0] },
+      { label: t('dashboard.revenue'), value: formatCurrency(0), delta: t('dashboard.pacingLabel'), icon: 'chart-line' as const, trend: [0] },
+      { label: t('dashboard.occupancy'), value: '0%', delta: t('dashboard.fullFloor'), icon: 'seat' as const, trend: [0] },
+      { label: t('dashboard.turns'), value: formatNumber(0, { maximumFractionDigits: 1 }), delta: t('dashboard.tableTurns'), icon: 'rotate-3d-variant' as const, trend: [0] },
+      { label: t('dashboard.guestSpend'), value: formatCurrency(0), delta: t('dashboard.vipLabel'), icon: 'account-star-outline' as const, trend: [0] },
+      { label: t('dashboard.staffReady'), value: `${readiness}%`, delta: openShifts ? t('dashboard.watch') : t('dashboard.clear'), icon: 'account-check-outline' as const, trend: [readiness] },
     ],
-    [formatCurrency, formatNumber, openShifts, readiness, reservationCount, t, todayReservations],
+    [formatCurrency, formatNumber, openShifts, readiness, t, todayReservations],
   );
 
   const weeklyHighlights = dashboard
@@ -236,9 +236,9 @@ export default function HomeScreen() {
           <CommandSurface palette={palette} style={{ flexGrow: 1, flexBasis: 240, gap: spacing.md }}>
             <CommandText palette={palette} variant="title">{t('dashboard.floorControl')}</CommandText>
             {[
-              [t('dashboard.seatingFlow'), Math.min(96, 50 + todayReservations * 5), palette.primary],
-              [t('dashboard.kitchenFire'), 72, palette.warning],
-              [t('dashboard.barQueue'), 38 + openShifts * 8, openShifts ? palette.danger : palette.success],
+              [t('dashboard.seatingFlow'), 0, palette.primary],
+              [t('dashboard.kitchenFire'), 0, palette.warning],
+              [t('dashboard.barQueue'), 0, openShifts ? palette.danger : palette.success],
             ].map(([label, value, color]) => (
               <View key={String(label)} style={{ gap: spacing.xs }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>

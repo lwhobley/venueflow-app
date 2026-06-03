@@ -59,6 +59,166 @@ function secretOk(expected: string | undefined, received: string | null) {
   return !!expected && !!received && timingSafeEqual(received, expected);
 }
 
+function receivedSecret(req: Request, headerName: string) {
+  const raw = req.headers.get(headerName) ?? req.headers.get('authorization');
+  return raw?.startsWith('Bearer ') ? raw.slice('Bearer '.length) : raw;
+}
+
+const LEAD_CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, content-type, x-venueflow-leads-secret',
+};
+
+function leadJson(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...LEAD_CORS_HEADERS, 'Content-Type': 'application/json' },
+  });
+}
+
+function cleanString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function emailFromText(value: string | undefined) {
+  return value?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
+}
+
+function phoneFromText(value: string | undefined) {
+  return value?.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/)?.[0];
+}
+
+function splitLeadTags(value: unknown) {
+  if (Array.isArray(value)) return value.map((tag) => cleanString(tag)).filter((tag): tag is string => Boolean(tag)).slice(0, 12);
+  return cleanString(value)
+    ?.split(/[|,]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function normaliseLead(value: any, defaultSource?: string) {
+  if (!value || typeof value !== 'object') return null;
+  const fullName = cleanString(value.fullName) ?? cleanString(value.name) ?? cleanString(value.guestName) ?? cleanString(value.customerName);
+  if (!fullName) return null;
+  const email = cleanString(value.email) ?? emailFromText(cleanString(value.contact));
+  const phone = cleanString(value.phone) ?? cleanString(value.mobile) ?? phoneFromText(cleanString(value.contact));
+  const lead = {
+    fullName,
+    phone,
+    email,
+    source: cleanString(value.source) ?? defaultSource,
+    company: cleanString(value.company) ?? cleanString(value.organization),
+    tags: splitLeadTags(value.tags),
+    notes: cleanString(value.notes) ?? cleanString(value.message) ?? cleanString(value.description),
+    marketingOptIn: typeof value.marketingOptIn === 'boolean' ? value.marketingOptIn : Boolean(value.optIn ?? value.marketing_opt_in ?? false),
+  };
+  return Object.fromEntries(Object.entries(lead).filter(([, leadValue]) => leadValue !== undefined)) as typeof lead;
+}
+
+function splitCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      cells.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function parseCsvLeads(value: string, defaultSource?: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line, index) => !(index === 0 && /name/i.test(splitCsvLine(line)[0] ?? '')))
+    .map((line) => {
+      const [fullName, email, phone, source, company, tags, notes] = splitCsvLine(line);
+      return normaliseLead({ fullName, email, phone, source, company, tags, notes, marketingOptIn: true }, defaultSource);
+    })
+    .filter((lead): lead is NonNullable<ReturnType<typeof normaliseLead>> => Boolean(lead));
+}
+
+function parseEmailLead(value: any, defaultSource?: string) {
+  if (!value || typeof value !== 'object') return null;
+  const text = [cleanString(value.subject), cleanString(value.text), cleanString(value.html)].filter(Boolean).join('\n');
+  const from = cleanString(value.from);
+  const fromName = from?.replace(/<.*?>/, '').trim();
+  const explicitName = text.match(/^name:\s*(.+)$/im)?.[1]?.trim();
+  const fullName = cleanString(value.name) ?? explicitName ?? fromName;
+  return normaliseLead(
+    {
+      fullName,
+      email: cleanString(value.email) ?? emailFromText(from) ?? emailFromText(text),
+      phone: cleanString(value.phone) ?? phoneFromText(text),
+      source: cleanString(value.source) ?? defaultSource ?? 'Email',
+      company: cleanString(value.company),
+      tags: value.tags,
+      notes: text.slice(0, 2000),
+      marketingOptIn: value.marketingOptIn,
+    },
+    defaultSource ?? 'Email',
+  );
+}
+
+function leadsFromBody(body: any) {
+  const defaultSource = cleanString(body?.source);
+  const leads: Array<ReturnType<typeof normaliseLead>> = Array.isArray(body?.leads)
+    ? body.leads.map((lead: any) => normaliseLead(lead, defaultSource))
+    : body?.lead
+      ? [normaliseLead(body.lead, defaultSource)]
+      : [];
+  if (cleanString(body?.csv) || cleanString(body?.csvText)) leads.push(...parseCsvLeads(cleanString(body.csv) ?? cleanString(body.csvText) ?? '', defaultSource));
+  if (body?.email) leads.push(parseEmailLead(body.email, defaultSource));
+  if (leads.length === 0) leads.push(normaliseLead(body, defaultSource));
+  return leads.filter((lead): lead is NonNullable<ReturnType<typeof normaliseLead>> => Boolean(lead)).slice(0, 100);
+}
+
+http.route({
+  path: '/crm/leads',
+  method: 'OPTIONS',
+  handler: httpAction(async () => new Response(null, { status: 204, headers: LEAD_CORS_HEADERS })),
+});
+
+http.route({
+  path: '/crm/leads',
+  method: 'POST',
+  handler: httpAction(async (ctx, req) => {
+    if (!secretOk(process.env.LEADS_WEBHOOK_SECRET, receivedSecret(req, 'x-venueflow-leads-secret'))) {
+      return leadJson({ error: 'Unauthorized' }, 401);
+    }
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return leadJson({ error: 'Invalid JSON' }, 400);
+    }
+    if (!body?.venueId || typeof body.venueId !== 'string') return leadJson({ error: 'venueId is required' }, 400);
+    const leads = leadsFromBody(body);
+    if (leads.length === 0) return leadJson({ error: 'No valid leads found' }, 400);
+    try {
+      const result = await ctx.runMutation(internal.guests.ingestLeadsFromWebhook, { venueId: body.venueId, leads });
+      return leadJson({ ok: true, ...result });
+    } catch (e) {
+      return leadJson({ error: e instanceof Error ? e.message : 'Lead ingest rejected' }, 400);
+    }
+  }),
+});
+
 http.route({
   path: '/pos/webhook',
   method: 'POST',

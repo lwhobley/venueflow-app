@@ -15,15 +15,28 @@ type Source = (typeof reservationSources)[number];
 
 type ReservationRow = {
   id: string;
+  _id?: string;
   guestName: string;
+  guestCompany?: string | null;
   partySize: number;
   reservationTime: number;
   durationMinutes: number;
   source: string;
   status: string;
   tags: string[];
+  occasion?: string | null;
   specialRequests: string | null;
   notes: string | null;
+  isPrivateEvent?: boolean;
+  eventName?: string | null;
+  eventStatus?: string | null;
+  eventSpace?: string | null;
+  setupStyle?: string | null;
+  menuNotes?: string | null;
+  beverageNotes?: string | null;
+  billingNotes?: string | null;
+  estimatedValueCents?: number | null;
+  depositDueCents?: number | null;
 };
 
 type FloorTable = {
@@ -49,6 +62,10 @@ function fmtDay(at: number) {
 }
 function pad(n: number) {
   return n.toString().padStart(2, '0');
+}
+function dollarsToCents(value: string) {
+  const amount = Number(value.replace(/[$,]/g, '').trim());
+  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : undefined;
 }
 
 export default function ReservationsScreen() {
@@ -115,7 +132,10 @@ export default function ReservationsScreen() {
     }
   };
 
-  const reservations = useMemo(() => (page?.reservations ?? []) as ReservationRow[], [page]);
+  const reservations = useMemo(
+    () => ((page?.reservations ?? []) as ReservationRow[]).map((reservation) => ({ ...reservation, id: reservation.id ?? reservation._id ?? '' })),
+    [page],
+  );
   const tables = useMemo(() => (floor?.tables ?? []) as FloorTable[], [floor]);
   const openTables = useMemo(
     () => tables.filter((t) => t.table.isReservable !== false && (!t.state || t.state.status === 'available' || t.state.status === 'dirty')),
@@ -125,15 +145,27 @@ export default function ReservationsScreen() {
   // New reservation form
   const now = new Date();
   const [showForm, setShowForm] = useState(false);
-  const [guestName, setGuestName] = useState('');
+  const [showPrivateEventForm, setShowPrivateEventForm] = useState(false);
+  const [guestFirstName, setGuestFirstName] = useState('');
+  const [guestLastName, setGuestLastName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
+  const [guestCompany, setGuestCompany] = useState('');
   const [partySize, setPartySize] = useState(2);
   const [date, setDate] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
   const [time, setTime] = useState(`${pad((now.getHours() + 1) % 24)}:00`);
   const [source, setSource] = useState<Source>('direct');
   const [tags, setTags] = useState('');
+  const [occasion, setOccasion] = useState('');
   const [notes, setNotes] = useState('');
+  const [eventName, setEventName] = useState('');
+  const [eventSpace, setEventSpace] = useState('');
+  const [setupStyle, setSetupStyle] = useState('');
+  const [menuNotes, setMenuNotes] = useState('');
+  const [beverageNotes, setBeverageNotes] = useState('');
+  const [billingNotes, setBillingNotes] = useState('');
+  const [estimatedValue, setEstimatedValue] = useState('');
+  const [depositDue, setDepositDue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -147,8 +179,11 @@ export default function ReservationsScreen() {
 
   const createReservation = async () => {
     setError(null);
-    if (!venue?.id || !guestName.trim()) {
-      setError('Enter a guest name.');
+    const firstName = guestFirstName.trim();
+    const lastName = guestLastName.trim();
+    const fullName = [firstName, lastName].filter(Boolean).join(' ');
+    if (!venue?.id || !firstName || !lastName) {
+      setError('Enter first and last name.');
       return;
     }
     const ts = new Date(`${date}T${time}:00`).getTime();
@@ -159,25 +194,51 @@ export default function ReservationsScreen() {
     try {
       await saveReservation({
         venueId: venue.id,
-        guestName: guestName.trim(),
+        guestName: fullName,
         guestPhone: guestPhone.trim() || undefined,
         guestEmail: guestEmail.trim() || undefined,
+        guestCompany: guestCompany.trim() || undefined,
         partySize,
         reservationTime: ts,
-        durationMinutes: 120,
+        durationMinutes: showPrivateEventForm ? 240 : 120,
         source,
         status: 'confirmed',
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        occasion: occasion.trim() || undefined,
         specialRequests: notes.trim() || undefined,
         notes: notes.trim() || undefined,
+        isPrivateEvent: showPrivateEventForm,
+        eventName: showPrivateEventForm ? eventName.trim() || undefined : undefined,
+        eventStatus: showPrivateEventForm ? 'proposal' : undefined,
+        eventSpace: showPrivateEventForm ? eventSpace.trim() || undefined : undefined,
+        setupStyle: showPrivateEventForm ? setupStyle.trim() || undefined : undefined,
+        menuNotes: showPrivateEventForm ? menuNotes.trim() || undefined : undefined,
+        beverageNotes: showPrivateEventForm ? beverageNotes.trim() || undefined : undefined,
+        billingNotes: showPrivateEventForm ? billingNotes.trim() || undefined : undefined,
+        contractStatus: showPrivateEventForm ? 'draft' : undefined,
+        beoStatus: showPrivateEventForm ? 'draft' : undefined,
+        estimatedValueCents: showPrivateEventForm ? dollarsToCents(estimatedValue) : undefined,
+        depositDueCents: showPrivateEventForm ? dollarsToCents(depositDue) : undefined,
       });
-      setGuestName('');
+      setGuestFirstName('');
+      setGuestLastName('');
       setGuestPhone('');
       setGuestEmail('');
+      setGuestCompany('');
       setTags('');
+      setOccasion('');
       setNotes('');
+      setEventName('');
+      setEventSpace('');
+      setSetupStyle('');
+      setMenuNotes('');
+      setBeverageNotes('');
+      setBillingNotes('');
+      setEstimatedValue('');
+      setDepositDue('');
       setPartySize(2);
       setShowForm(false);
+      setShowPrivateEventForm(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create reservation.');
     }
@@ -232,6 +293,7 @@ export default function ReservationsScreen() {
         {[
           { label: 'Active', value: page?.activeCount ?? 0, a: accents[2] },
           { label: 'Upcoming', value: page?.upcomingCount ?? 0, a: accents[0] },
+          { label: 'Private events', value: reservations.filter((item) => item.isPrivateEvent).length, a: accents[5] },
           { label: 'Cancelled', value: page?.cancelledCount ?? 0, a: accents[1] },
         ].map((s) => (
           <Card key={s.label} style={{ flex: 1, backgroundColor: s.a.bg, borderRadius: 16 }}>
@@ -300,16 +362,33 @@ export default function ReservationsScreen() {
           <Card.Content style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text variant="titleMedium" style={{ fontWeight: '700' }}>New reservation</Text>
-              <Button compact mode={showForm ? 'text' : 'contained'} buttonColor={showForm ? undefined : colors.primary} onPress={() => setShowForm((v) => !v)}>
-                {showForm ? 'Close' : 'Add'}
-              </Button>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Button compact mode={showPrivateEventForm ? 'contained' : 'outlined'} buttonColor={showPrivateEventForm ? colors.primary : undefined} textColor={showPrivateEventForm ? '#fff' : colors.primary} onPress={() => {
+                  setShowForm(true);
+                  setShowPrivateEventForm((value) => !value);
+                  setPartySize((value) => Math.max(value, 20));
+                  setTags((value) => (value.includes('private_event') ? value : [value, 'private_event'].filter(Boolean).join(', ')));
+                }}>
+                  Private event
+                </Button>
+                <Button compact mode={showForm ? 'text' : 'contained'} buttonColor={showForm ? undefined : colors.primary} onPress={() => setShowForm((v) => !v)}>
+                  {showForm ? 'Close' : 'Add'}
+                </Button>
+              </View>
             </View>
             {showForm ? (
               <>
-                <TextInput label="Guest name" value={guestName} onChangeText={setGuestName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                  <TextInput label="Phone" value={guestPhone} onChangeText={setGuestPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
-                  <TextInput label="Email" value={guestEmail} onChangeText={setGuestEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
+                <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                  <TextInput label="First name" value={guestFirstName} onChangeText={setGuestFirstName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
+                  <TextInput label="Last name" value={guestLastName} onChangeText={setGuestLastName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
+                </View>
+                <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                  <TextInput label="Phone number" value={guestPhone} onChangeText={setGuestPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                  <TextInput label="Email" value={guestEmail} onChangeText={setGuestEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                </View>
+                <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                  <TextInput label="Company (optional)" value={guestCompany} onChangeText={setGuestCompany} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                  <TextInput label="Occasion" value={occasion} onChangeText={setOccasion} mode="outlined" placeholder="Birthday, anniversary, business dinner" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Text style={{ width: 64 }}>Party</Text>
@@ -326,8 +405,27 @@ export default function ReservationsScreen() {
                     <Chip key={s} selected={source === s} onPress={() => setSource(s)}>{s.replace('_', ' ')}</Chip>
                   ))}
                 </View>
-                <TextInput label="Tags (comma separated)" value={tags} onChangeText={setTags} mode="outlined" style={{ backgroundColor: colors.surface }} />
-                <TextInput label="Notes / requests" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                {showPrivateEventForm ? (
+                  <Card style={{ backgroundColor: accents[5].bg, borderRadius: 14 }}>
+                    <Card.Content style={{ gap: spacing.sm }}>
+                      <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>Private event booking</Text>
+                      <Text style={{ color: colors.muted }}>Capture event details needed to generate BEOs and contracts from CRM.</Text>
+                      <TextInput label="Event name" value={eventName} onChangeText={setEventName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                        <TextInput label="Event space / room" value={eventSpace} onChangeText={setEventSpace} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                        <TextInput label="Setup style" value={setupStyle} onChangeText={setSetupStyle} mode="outlined" placeholder="Cocktail, seated dinner, classroom" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                        <TextInput label="Estimated value" value={estimatedValue} onChangeText={setEstimatedValue} mode="outlined" keyboardType="decimal-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                        <TextInput label="Deposit due" value={depositDue} onChangeText={setDepositDue} mode="outlined" keyboardType="decimal-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                      </View>
+                      <TextInput label="Menu notes" value={menuNotes} onChangeText={setMenuNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                      <TextInput label="Beverage notes" value={beverageNotes} onChangeText={setBeverageNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                      <TextInput label="Billing / contract notes" value={billingNotes} onChangeText={setBillingNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                    </Card.Content>
+                  </Card>
+                ) : null}
+                <TextInput label="Guest notes / requests" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
                 <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()}>Create reservation</Button>
               </>
@@ -358,6 +456,17 @@ export default function ReservationsScreen() {
                   </View>
                   <Text>{res.guestName} · party of {res.partySize}</Text>
                   <Text style={{ color: colors.muted }}>{fmtDay(res.reservationTime)} · {res.source.replace('_', ' ')}</Text>
+                  {res.guestCompany ? <Text style={{ color: colors.muted }}>{res.guestCompany}</Text> : null}
+                  {res.occasion ? <Chip compact style={{ alignSelf: 'flex-start' }}>{res.occasion}</Chip> : null}
+                  {res.isPrivateEvent ? (
+                    <Card style={{ backgroundColor: accents[5].bg, borderRadius: 12 }}>
+                      <Card.Content style={{ gap: 4 }}>
+                        <Text style={{ color: accents[5].fg, fontWeight: '800' }}>{res.eventName || 'Private event'}</Text>
+                        <Text style={{ color: colors.muted }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || 'Event details pending'}</Text>
+                        {res.estimatedValueCents ? <Text style={{ color: colors.muted }}>Estimated value ${(res.estimatedValueCents / 100).toLocaleString()}</Text> : null}
+                      </Card.Content>
+                    </Card>
+                  ) : null}
 
                   {res.notes || res.specialRequests ? <Text style={{ color: colors.muted }}>{res.notes ?? res.specialRequests}</Text> : null}
                   {res.tags?.length ? (
@@ -383,7 +492,7 @@ export default function ReservationsScreen() {
                     <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: 12, padding: 10 }}>
                       <Text style={{ color: colors.muted }}>Tap an open table to reserve, or long-actions to seat now:</Text>
                       {openTables.length === 0 ? (
-                        <Text style={{ color: colors.danger }}>No open tables. Build/seed a floor plan first.</Text>
+                        <Text style={{ color: colors.danger }}>No open tables. Build a floor plan first.</Text>
                       ) : (
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {openTables.map((t) => (

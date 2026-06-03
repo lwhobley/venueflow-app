@@ -42,7 +42,6 @@ function IntegrationsScreenInner() {
     isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip',
   ) as any;
   const upsertConnection = useMutation(api.pos.upsertPosConnection);
-  const importPosCheck = useMutation(api.pos.importPosCheck);
   const upsertReservationConnection = useMutation(api.reservationIntegrations.upsertReservationConnection);
 
   const [provider, setProvider] = useState<Provider>('toast');
@@ -90,35 +89,6 @@ function IntegrationsScreenInner() {
       setMessage('Reservation connection saved.');
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not save reservation connection.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const importSample = async () => {
-    if (!venue?.id) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await importPosCheck({
-        venueId: venue.id,
-        provider,
-        check: {
-          externalCheckId: `manual-${Date.now()}`,
-          tableLabel: '12',
-          serverName: user?.full_name ?? 'Manager',
-          guestName: 'Walk-in guest',
-          openedAt: Date.now() - 45 * 60 * 1000,
-          closedAt: Date.now(),
-          subtotalCents: 8600,
-          tipCents: 1720,
-          totalCents: 10320,
-          status: 'paid',
-        },
-      });
-      setMessage('Sample POS check imported.');
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not import check.');
     } finally {
       setSaving(false);
     }
@@ -186,7 +156,6 @@ function IntegrationsScreenInner() {
           {message ? <Text style={{ color: message.includes('Could') ? colors.danger : colors.muted }}>{message}</Text> : null}
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
             <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveConnection()}>Save connection</Button>
-            <Button mode="outlined" textColor={colors.primary} loading={saving} onPress={() => void importSample()}>Import sample check</Button>
           </View>
           <Text style={{ color: colors.muted }}>Webhook endpoint: /pos/webhook with the x-venueflow-pos-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
         </Card.Content>

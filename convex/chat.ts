@@ -1,7 +1,7 @@
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import { requireProfile, requireVenueMember } from './authz';
+import { requireProfile, requireVenueManager, requireVenueMember } from './authz';
 
 const GENERAL_GROUP_NAME = 'All Staff';
 
@@ -220,6 +220,24 @@ export const sendMessage = mutation({
       createdAt: now,
     });
     await ctx.db.patch(conv._id, { lastMessageAt: now, lastMessageText: text.slice(0, 80) });
+    return null;
+  },
+});
+
+export const deleteConversation = mutation({
+  args: { conversationId: v.id('conversations') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const conv = await ctx.db.get(args.conversationId);
+    if (!conv) return null;
+    await requireVenueManager(ctx, conv.venueId);
+
+    const messages = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q: any) => q.eq('conversationId', args.conversationId))
+      .take(500);
+    for (const message of messages) await ctx.db.delete(message._id);
+    await ctx.db.delete(conv._id);
     return null;
   },
 });

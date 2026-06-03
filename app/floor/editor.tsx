@@ -335,6 +335,7 @@ export default function FloorEditorScreen() {
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const floor = useQuery(api.floor.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const saveFloorPlan = useMutation(api.floor.saveFloorPlan);
+  const clearActiveFloorPlan = useMutation(api.floor.clearActiveFloorPlan);
 
   const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
@@ -346,6 +347,7 @@ export default function FloorEditorScreen() {
   const [selectedChairKey, setSelectedChairKey] = useState<string | null>(null);
   const [name, setName] = useState('Main Floor');
   const [saved, setSaved] = useState(false);
+  const [clearMessage, setClearMessage] = useState<string | null>(null);
   const counter = useRef(0);
   const chairCounter = useRef(0);
 
@@ -483,6 +485,18 @@ export default function FloorEditorScreen() {
     setTimeout(() => setSaved(false), 2500);
   };
 
+  const onClearFloorPlan = async () => {
+    if (!venue?.id) return;
+    setTables([]);
+    setChairs([]);
+    setSelectedKey(null);
+    setSelectedChairKey(null);
+    setClearMessage(null);
+    const result = await clearActiveFloorPlan({ venueId: venue.id });
+    setClearMessage(`Cleared ${result.deletedTables} table${result.deletedTables === 1 ? '' : 's'} and ${result.deletedChairs} chair${result.deletedChairs === 1 ? '' : 's'}.`);
+    setTimeout(() => setClearMessage(null), 3000);
+  };
+
   if (!canEdit) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
@@ -515,7 +529,9 @@ export default function FloorEditorScreen() {
             <Button mode="contained-tonal" icon="rectangle-outline" onPress={() => addTable('rect')}>Rectangle</Button>
             <Button mode="contained-tonal" icon="sofa-outline" onPress={() => addTable('booth')}>Booth</Button>
             <Button mode="contained-tonal" icon="seat-outline" onPress={addChair}>Chair</Button>
+            <Button mode="outlined" textColor={colors.danger} icon="delete-sweep-outline" onPress={() => void onClearFloorPlan()}>Clear floor plan</Button>
           </View>
+          {clearMessage ? <Text style={{ color: colors.muted }}>{clearMessage}</Text> : null}
         </Card.Content>
       </Card>
 

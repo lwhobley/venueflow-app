@@ -365,3 +365,38 @@ export const saveFloorPlan = mutation({
     return { floorPlanId };
   },
 });
+
+export const clearActiveFloorPlan = mutation({
+  args: { venueId: v.id('venues') },
+  returns: v.object({ deletedTables: v.number(), deletedChairs: v.number() }),
+  handler: async (ctx, args) => {
+    const profile = await requireProfile(ctx);
+    if (!canManageFloor(profile.role)) throw new Error('Admin access required');
+    if (!profile.venueId || profile.venueId !== args.venueId) throw new Error('Profile does not belong to this venue');
+    await requireActiveSubscription(ctx as any, args.venueId);
+
+    const plan = await loadFloorPlan(ctx, args.venueId);
+    if (!plan) return { deletedTables: 0, deletedChairs: 0 };
+
+    let deletedTables = 0;
+    let deletedChairs = 0;
+    const chairs = await ctx.db.query('floorChairs').withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', plan._id)).take(500);
+    for (const chair of chairs) {
+      await ctx.db.delete(chair._id);
+      deletedChairs += 1;
+    }
+
+    const tables = await ctx.db.query('tables').withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', plan._id)).take(500);
+    for (const table of tables) {
+      const state = await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', table._id)).unique();
+      if (state) await ctx.db.delete(state._id);
+      const assignments = await ctx.db.query('tableAssignments').withIndex('by_table_time', (q: any) => q.eq('tableId', table._id)).take(100);
+      for (const assignment of assignments) await ctx.db.delete(assignment._id);
+      await ctx.db.delete(table._id);
+      deletedTables += 1;
+    }
+
+    await ctx.db.patch(plan._id, { updatedAt: Date.now() });
+    return { deletedTables, deletedChairs };
+  },
+});

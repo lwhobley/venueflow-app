@@ -1,7 +1,7 @@
 import { type ComponentProps, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, HelperText, Text, TextInput } from 'react-native-paper';
+import { Button, HelperText, IconButton, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -9,6 +9,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { canManageVenue } from '../../lib/permissions';
 
 function initials(name: string) {
   return name
@@ -30,21 +31,24 @@ function Avatar({ name, color }: { name: string; color: string }) {
 
 type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 
-function Row({ name, subtitle, color, icon, onPress }: { name: string; subtitle?: string | null; color: string; icon?: MaterialIconName; onPress: () => void }) {
+function Row({ name, subtitle, color, icon, onPress, onDelete }: { name: string; subtitle?: string | null; color: string; icon?: MaterialIconName; onPress: () => void; onDelete?: () => void }) {
   return (
-    <Pressable onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
-      {icon ? (
-        <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
-          <MaterialCommunityIcons name={icon} size={22} color="#fff" />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <Pressable onPress={onPress} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
+        {icon ? (
+          <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: color, alignItems: 'center', justifyContent: 'center' }}>
+            <MaterialCommunityIcons name={icon} size={22} color="#fff" />
+          </View>
+        ) : (
+          <Avatar name={name} color={color} />
+        )}
+        <View style={{ flex: 1, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 8 }}>
+          <Text style={{ fontWeight: '700' }}>{name}</Text>
+          {subtitle ? <Text style={{ color: colors.muted }} numberOfLines={1}>{subtitle}</Text> : null}
         </View>
-      ) : (
-        <Avatar name={name} color={color} />
-      )}
-      <View style={{ flex: 1, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 8 }}>
-        <Text style={{ fontWeight: '700' }}>{name}</Text>
-        {subtitle ? <Text style={{ color: colors.muted }} numberOfLines={1}>{subtitle}</Text> : null}
-      </View>
-    </Pressable>
+      </Pressable>
+      {onDelete ? <IconButton icon="delete-outline" iconColor={colors.danger} onPress={onDelete} /> : null}
+    </View>
   );
 }
 
@@ -52,10 +56,12 @@ type DirectoryEntry = { _id: string; fullName: string; role: string; jobTitle: s
 
 export default function ChatScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady } = useAuthenticatedSession();
+  const { isReady, user } = useAuthenticatedSession();
+  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const ensureSetup = useMutation(api.chat.ensureChatSetup);
   const openDm = useMutation(api.chat.openDm);
   const createGroup = useMutation(api.chat.createGroup);
+  const deleteConversation = useMutation(api.chat.deleteConversation);
   const conversations = useQuery(api.chat.listConversations, isReady && venue?.id ? { venueId: venue.id } : 'skip');
   const directory = useQuery(api.chat.listDirectory, isReady && venue?.id ? { venueId: venue.id } : 'skip');
 
@@ -75,6 +81,7 @@ export default function ChatScreen() {
   const groups = conversations?.groups ?? [];
   const dms = conversations?.dms ?? [];
   const dmByName = useMemo(() => new Map(dms.map((d) => [d.title, d])), [dms]);
+  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
   const palette = accents;
   const colorFor = (i: number) => palette[i % palette.length].fg;
@@ -115,6 +122,15 @@ export default function ChatScreen() {
       setError(e instanceof Error ? e.message : 'Could not create group.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const onDeleteConversation = async (conversationId: string) => {
+    setError(null);
+    try {
+      await deleteConversation({ conversationId: conversationId as Id<'conversations'> });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not delete chat.');
     }
   };
 
@@ -159,7 +175,7 @@ export default function ChatScreen() {
           </View>
         ) : null}
         {groups.map((g) => (
-          <Row key={g._id} name={g.title} subtitle={g.lastMessageText ?? 'Tap to open the group chat'} color={colors.primary} icon="account-group" onPress={() => router.push(`/chat/${g._id}`)} />
+          <Row key={g._id} name={g.title} subtitle={g.lastMessageText ?? 'Tap to open the group chat'} color={colors.primary} icon="account-group" onPress={() => router.push(`/chat/${g._id}`)} onDelete={canManage ? () => void onDeleteConversation(g._id) : undefined} />
         ))}
       </View>
 
@@ -168,7 +184,7 @@ export default function ChatScreen() {
         <View>
           <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Direct messages</Text>
           {dms.map((d, i) => (
-            <Row key={d._id} name={d.title} subtitle={d.lastMessageText} color={colorFor(i)} onPress={() => router.push(`/chat/${d._id}`)} />
+            <Row key={d._id} name={d.title} subtitle={d.lastMessageText} color={colorFor(i)} onPress={() => router.push(`/chat/${d._id}`)} onDelete={canManage ? () => void onDeleteConversation(d._id) : undefined} />
           ))}
         </View>
       ) : null}

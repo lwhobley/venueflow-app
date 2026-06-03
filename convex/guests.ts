@@ -1,4 +1,4 @@
-import { mutation, query } from './_generated/server';
+import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -14,6 +14,14 @@ const guestSummaryValue = v.object({
   fullName: v.string(),
   phone: v.union(v.string(), v.null()),
   email: v.union(v.string(), v.null()),
+  lifecycleStage: v.union(v.literal('lead'), v.literal('regular'), v.literal('vip'), v.literal('lapsed')),
+  source: v.union(v.string(), v.null()),
+  birthday: v.union(v.string(), v.null()),
+  company: v.union(v.string(), v.null()),
+  marketingOptIn: v.boolean(),
+  favoriteTable: v.union(v.string(), v.null()),
+  preferredServer: v.union(v.string(), v.null()),
+  dietaryNotes: v.union(v.string(), v.null()),
   tags: v.array(v.string()),
   notes: v.union(v.string(), v.null()),
   createdAt: v.number(),
@@ -23,6 +31,8 @@ const guestSummaryValue = v.object({
   lastVisitAt: v.union(v.number(), v.null()),
   upcomingReservationAt: v.union(v.number(), v.null()),
   totalSpendCents: v.number(),
+  averageSpendCents: v.number(),
+  daysSinceLastVisit: v.union(v.number(), v.null()),
 });
 
 const guestProfileValue = v.object({
@@ -36,6 +46,16 @@ const guestProfileValue = v.object({
       status: v.string(),
       tags: v.array(v.string()),
       notes: v.union(v.string(), v.null()),
+      isPrivateEvent: v.boolean(),
+      eventName: v.union(v.string(), v.null()),
+      eventStatus: v.union(v.string(), v.null()),
+      eventSpace: v.union(v.string(), v.null()),
+      setupStyle: v.union(v.string(), v.null()),
+      menuNotes: v.union(v.string(), v.null()),
+      beverageNotes: v.union(v.string(), v.null()),
+      billingNotes: v.union(v.string(), v.null()),
+      estimatedValueCents: v.union(v.number(), v.null()),
+      depositDueCents: v.union(v.number(), v.null()),
     }),
   ),
   checks: v.array(
@@ -48,8 +68,31 @@ const guestProfileValue = v.object({
       totalCents: v.number(),
       tipCents: v.number(),
       status: v.string(),
+      revenueCenter: v.union(v.string(), v.null()),
+      tenderType: v.union(v.string(), v.null()),
+      guestCount: v.union(v.number(), v.null()),
+      menuItems: v.array(v.object({ name: v.string(), category: v.union(v.string(), v.null()), quantity: v.number(), priceCents: v.number() })),
     }),
   ),
+});
+
+const lifecycleStageValue = v.union(v.literal('lead'), v.literal('regular'), v.literal('vip'), v.literal('lapsed'));
+const leadInputValue = v.object({
+  fullName: v.string(),
+  phone: v.optional(v.string()),
+  email: v.optional(v.string()),
+  source: v.optional(v.string()),
+  company: v.optional(v.string()),
+  tags: v.optional(v.array(v.string())),
+  notes: v.optional(v.string()),
+  marketingOptIn: v.optional(v.boolean()),
+});
+
+const leadIngestResultValue = v.object({
+  created: v.number(),
+  updated: v.number(),
+  skipped: v.number(),
+  guestIds: v.array(v.id('guests')),
 });
 
 async function getProfile(ctx: AnyCtx) {
@@ -71,6 +114,93 @@ function cleanTags(tags: string[]) {
   return Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean))).slice(0, 12);
 }
 
+function mergeTags(existing: string[], incoming: string[]) {
+  return cleanTags([...existing, ...incoming]);
+}
+
+async function findExistingGuest(ctx: AnyCtx, args: { venueId: Id<'venues'>; email?: string; phone?: string; fullName: string }) {
+  if (args.email) {
+    const matches = await ctx.db.query('guests').withIndex('by_email', (q: any) => q.eq('email', args.email)).take(10);
+    const match = matches.find((guest: Doc<'guests'>) => guest.venueId === args.venueId && !guest.deletedAt);
+    if (match) return match;
+  }
+  if (args.phone) {
+    const matches = await ctx.db.query('guests').withIndex('by_phone', (q: any) => q.eq('phone', args.phone)).take(10);
+    const match = matches.find((guest: Doc<'guests'>) => guest.venueId === args.venueId && !guest.deletedAt);
+    if (match) return match;
+  }
+  const candidates = await ctx.db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(300);
+  const nameKey = args.fullName.trim().toLowerCase();
+  return candidates.find((guest: Doc<'guests'>) => !guest.deletedAt && guest.fullName.trim().toLowerCase() === nameKey) ?? null;
+}
+
+async function ingestLeadRows(ctx: AnyCtx, venueId: Id<'venues'>, leads: Array<{ fullName: string; phone?: string; email?: string; source?: string; company?: string; tags?: string[]; notes?: string; marketingOptIn?: boolean }>) {
+  const now = Date.now();
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const guestIds: Id<'guests'>[] = [];
+  const seen = new Set<string>();
+
+  for (const lead of leads.slice(0, 100)) {
+    const fullName = lead.fullName.trim();
+    if (!fullName) {
+      skipped += 1;
+      continue;
+    }
+    const phone = cleanText(lead.phone);
+    const email = cleanText(lead.email)?.toLowerCase();
+    const key = email ?? phone ?? fullName.toLowerCase();
+    if (seen.has(key)) {
+      skipped += 1;
+      continue;
+    }
+    seen.add(key);
+
+    const existing = await findExistingGuest(ctx, { venueId, email, phone, fullName });
+    const incomingTags = cleanTags([...(lead.tags ?? []), 'lead']);
+    const source = cleanText(lead.source);
+    const notes = cleanText(lead.notes);
+    const company = cleanText(lead.company);
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        fullName,
+        phone: phone ?? existing.phone,
+        email: email ?? existing.email,
+        lifecycleStage: existing.lifecycleStage ?? 'lead',
+        source: source ?? existing.source,
+        company: company ?? existing.company,
+        marketingOptIn: lead.marketingOptIn ?? existing.marketingOptIn ?? false,
+        tags: mergeTags(existing.tags, incomingTags),
+        notes: notes ? [existing.notes, notes].filter(Boolean).join('\n') : existing.notes,
+        updatedAt: now,
+      });
+      guestIds.push(existing._id);
+      updated += 1;
+    } else {
+      const guestId: Id<'guests'> = await ctx.db.insert('guests', {
+        venueId,
+        fullName,
+        phone,
+        email,
+        lifecycleStage: 'lead',
+        source,
+        company,
+        marketingOptIn: lead.marketingOptIn ?? false,
+        tags: incomingTags,
+        notes,
+        createdAt: now,
+        updatedAt: now,
+      });
+      guestIds.push(guestId);
+      created += 1;
+    }
+  }
+
+  return { created, updated, skipped, guestIds };
+}
+
 async function summarizeGuest(ctx: AnyCtx, guest: Doc<'guests'>) {
   const reservationRows = await ctx.db.query('reservations').withIndex('by_guest', (q: any) => q.eq('guestId', guest._id)).take(50);
   const reservations = reservationRows.filter((reservation: Doc<'reservations'>) => !reservation.deletedAt);
@@ -78,6 +208,7 @@ async function summarizeGuest(ctx: AnyCtx, guest: Doc<'guests'>) {
   const now = Date.now();
   const completedReservations = reservations.filter((reservation: Doc<'reservations'>) => reservation.status === 'completed' || reservation.status === 'seated');
   const paidChecks = checks.filter((check: Doc<'posChecks'>) => check.status === 'paid');
+  const totalSpendCents = paidChecks.reduce((sum: number, check: Doc<'posChecks'>) => sum + check.totalCents, 0);
   const upcoming = reservations
     .filter((reservation: Doc<'reservations'>) => reservation.reservationTime >= now && reservation.status !== 'cancelled')
     .sort((a: Doc<'reservations'>, b: Doc<'reservations'>) => a.reservationTime - b.reservationTime)[0];
@@ -92,6 +223,14 @@ async function summarizeGuest(ctx: AnyCtx, guest: Doc<'guests'>) {
     fullName: guest.fullName,
     phone: guest.phone ?? null,
     email: guest.email ?? null,
+    lifecycleStage: guest.lifecycleStage ?? (totalSpendCents >= 100000 || paidChecks.length >= 5 ? 'vip' : paidChecks.length >= 2 || completedReservations.length >= 2 ? 'regular' : 'lead'),
+    source: guest.source ?? null,
+    birthday: guest.birthday ?? null,
+    company: guest.company ?? null,
+    marketingOptIn: guest.marketingOptIn ?? false,
+    favoriteTable: guest.favoriteTable ?? null,
+    preferredServer: guest.preferredServer ?? null,
+    dietaryNotes: guest.dietaryNotes ?? null,
     tags: guest.tags,
     notes: guest.notes ?? null,
     createdAt: guest.createdAt,
@@ -100,7 +239,9 @@ async function summarizeGuest(ctx: AnyCtx, guest: Doc<'guests'>) {
     visitCount: completedReservations.length + paidChecks.length,
     lastVisitAt: lastVisitAt > 0 ? lastVisitAt : null,
     upcomingReservationAt: upcoming?.reservationTime ?? null,
-    totalSpendCents: paidChecks.reduce((sum: number, check: Doc<'posChecks'>) => sum + check.totalCents, 0),
+    totalSpendCents,
+    averageSpendCents: paidChecks.length ? Math.round(totalSpendCents / paidChecks.length) : 0,
+    daysSinceLastVisit: lastVisitAt > 0 ? Math.floor((now - lastVisitAt) / (24 * 60 * 60 * 1000)) : null,
   };
 }
 
@@ -140,6 +281,16 @@ export const getGuestProfile = query({
         status: reservation.status,
         tags: reservation.tags,
         notes: reservation.notes ?? reservation.specialRequests ?? null,
+        isPrivateEvent: reservation.isPrivateEvent ?? false,
+        eventName: reservation.eventName ?? null,
+        eventStatus: reservation.eventStatus ?? null,
+        eventSpace: reservation.eventSpace ?? null,
+        setupStyle: reservation.setupStyle ?? null,
+        menuNotes: reservation.menuNotes ?? null,
+        beverageNotes: reservation.beverageNotes ?? null,
+        billingNotes: reservation.billingNotes ?? null,
+        estimatedValueCents: reservation.estimatedValueCents ?? null,
+        depositDueCents: reservation.depositDueCents ?? null,
       })),
       checks: checks.map((check: Doc<'posChecks'>) => ({
         _id: check._id,
@@ -150,6 +301,15 @@ export const getGuestProfile = query({
         totalCents: check.totalCents,
         tipCents: check.tipCents,
         status: check.status,
+        revenueCenter: check.revenueCenter ?? null,
+        tenderType: check.tenderType ?? null,
+        guestCount: check.guestCount ?? null,
+        menuItems: (check.menuItems ?? []).slice(0, 12).map((item) => ({
+          name: item.name,
+          category: item.category ?? null,
+          quantity: item.quantity,
+          priceCents: item.priceCents,
+        })),
       })),
     };
   },
@@ -162,6 +322,14 @@ export const upsertGuest = mutation({
     fullName: v.string(),
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
+    lifecycleStage: v.optional(lifecycleStageValue),
+    source: v.optional(v.string()),
+    birthday: v.optional(v.string()),
+    company: v.optional(v.string()),
+    marketingOptIn: v.optional(v.boolean()),
+    favoriteTable: v.optional(v.string()),
+    preferredServer: v.optional(v.string()),
+    dietaryNotes: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
   },
@@ -179,6 +347,14 @@ export const upsertGuest = mutation({
       fullName,
       phone: cleanText(args.phone),
       email: cleanText(args.email)?.toLowerCase(),
+      lifecycleStage: args.lifecycleStage,
+      source: cleanText(args.source),
+      birthday: cleanText(args.birthday),
+      company: cleanText(args.company),
+      marketingOptIn: args.marketingOptIn ?? false,
+      favoriteTable: cleanText(args.favoriteTable),
+      preferredServer: cleanText(args.preferredServer),
+      dietaryNotes: cleanText(args.dietaryNotes),
       tags: cleanTags(args.tags ?? []),
       notes: cleanText(args.notes),
       updatedAt: now,
@@ -197,6 +373,29 @@ export const upsertGuest = mutation({
     const created = await (ctx as AnyCtx).db.get(guestId);
     if (!created) throw new Error('Unable to create guest');
     return await summarizeGuest(ctx as AnyCtx, created);
+  },
+});
+
+export const ingestLeads = mutation({
+  args: { venueId: v.id('venues'), leads: v.array(leadInputValue) },
+  returns: leadIngestResultValue,
+  handler: async (ctx, args) => {
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
+
+    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    return await ingestLeadRows(ctx as AnyCtx, args.venueId, args.leads);
+  },
+});
+
+export const ingestLeadsFromWebhook = internalMutation({
+  args: { venueId: v.id('venues'), leads: v.array(leadInputValue) },
+  returns: leadIngestResultValue,
+  handler: async (ctx, args) => {
+    const venue = await (ctx as AnyCtx).db.get(args.venueId);
+    if (!venue || venue.deletedAt) throw new Error('Venue not found');
+    if (venue.subscriptionStatus !== 'active' && venue.subscriptionStatus !== 'trialing') throw new Error('Subscription required');
+    return await ingestLeadRows(ctx as AnyCtx, args.venueId, args.leads);
   },
 });
 

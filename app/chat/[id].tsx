@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { IconButton, Text, TextInput } from 'react-native-paper';
+import { HelperText, IconButton, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -23,7 +23,9 @@ export default function ConversationScreen() {
   const conversationId: Id<'conversations'> | null = rawId && isValidId(rawId) ? rawId as Id<'conversations'> : null;
   const data = useQuery(api.chat.getMessages, isReady && conversationId ? { conversationId } : 'skip');
   const sendMessage = useMutation(api.chat.sendMessage);
+  const deleteConversation = useMutation(api.chat.deleteConversation);
   const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   const messages = data?.messages ?? [];
@@ -40,13 +42,26 @@ export default function ConversationScreen() {
     await sendMessage({ conversationId, text: t });
   };
 
+  const onDeleteChat = async () => {
+    if (!conversationId) return;
+    setError(null);
+    try {
+      await deleteConversation({ conversationId });
+      router.back();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not delete chat.');
+    }
+  };
+
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.primary, paddingTop: 8, paddingBottom: 12, paddingHorizontal: 4 }}>
         <IconButton icon="arrow-left" iconColor="#fff" onPress={() => router.back()} />
-        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800' }}>{data?.title ?? 'Chat'}</Text>
+        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', flex: 1 }}>{data?.title ?? 'Chat'}</Text>
+        <IconButton icon="delete-outline" iconColor="#fff" onPress={() => void onDeleteChat()} />
       </View>
+      {error ? <HelperText type="error" visible>{error}</HelperText> : null}
 
       <ScrollView ref={scrollRef} contentContainerStyle={{ padding: spacing.md, gap: 8 }}>
         {messages.length === 0 ? (

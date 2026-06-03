@@ -28,7 +28,7 @@ export default function BillingScreen() {
   const [loading, setLoading] = useState<PlanId | 'portal' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 3;
+  const trialDaysLeft = billing ? Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
   const canEditBilling = canManageBilling(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
   const openCheckout = async (planId: PlanId) => {
@@ -80,8 +80,8 @@ export default function BillingScreen() {
           <Text variant="headlineSmall">Billing</Text>
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
           <Text style={{ color: colors.muted }}>3-day free trial. Choose the user tier that fits this venue.</Text>
-          <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'trialing'}</Text>
-          <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in trial</Text>
+          <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'Not configured'}</Text>
+          {billing ? <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in trial</Text> : null}
           <Text style={{ color: colors.muted }}>Subscriptions renew monthly and unlock the full app.</Text>
           <Text style={{ color: colors.muted }}>Current plan: {billing?.planId ?? 'Not subscribed'}</Text>
           <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
