@@ -1,4 +1,4 @@
-import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
+import { action, internalMutation, internalQuery, query } from './_generated/server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
@@ -400,53 +400,13 @@ export const handleStripeWebhook = internalMutation({
   },
 });
 
-export const syncVenueSubscription = mutation({
-  args: {
-    venueId: v.id('venues'),
-    status: subscriptionStatusValue,
-    platform: subscriptionPlatformValue,
-  },
-  returns: billingValue,
-  handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || (profile.role !== 'admin' && profile.role !== 'owner')) {
-      throw new Error('Not authorized');
-    }
-
-    if (args.status === 'active' || args.status === 'trialing') {
-      throw new Error('Paid subscription status must be reconciled by a verified billing provider');
-    }
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).unique();
-    if (!subscription) throw new Error('Subscription not found');
-    await (ctx as AnyCtx).db.patch(subscription._id, {
-      status: args.status,
-      platform: args.platform,
-      updatedAt: Date.now(),
-    });
-    const updated = await (ctx as AnyCtx).db.get(subscription._id);
-    if (!updated) throw new Error('Unable to update subscription');
-    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
-    if (!venue) throw new Error('Venue not found');
-    await (ctx as AnyCtx).db.patch(venue._id, {
-      subscriptionStatus: args.status,
-      subscriptionPlatform: args.platform,
-    });
-    return {
-      venueId: updated.venueId,
-      status: updated.status,
-      platform: updated.platform,
-      trialStartedAt: updated.trialStartedAt,
-      trialEndsAt: updated.trialEndsAt,
-      currentPeriodStart: updated.currentPeriodStart,
-      currentPeriodEnd: updated.currentPeriodEnd,
-      cancelAtPeriodEnd: updated.cancelAtPeriodEnd,
-      cancelledAt: updated.cancelledAt,
-      planId: updated.planId,
-      priceCents: updated.priceCents,
-      currency: updated.currency,
-    };
-  },
-});
+// Subscription status is written ONLY by verified billing-provider paths
+// (reconcilePaidSubscription, handleStripeWebhook, handleRevenueCatEvent — all
+// internalMutations). There is intentionally no client-callable mutation to set
+// it: a previous syncVenueSubscription let an authenticated owner downgrade
+// their own venue (cancelled/past_due/expired/paused) without the provider,
+// corrupting access state. Cancellation flows through the Stripe billing portal
+// (createStripeBillingPortalSession); the resulting status returns via webhook.
 
 // RevenueCat webhook handler (called from convex/http.ts). The RevenueCat
 // app_user_id is the venue id, so we map the event straight onto that venue.
