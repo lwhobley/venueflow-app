@@ -8,6 +8,7 @@ import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
+import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 
 type Insight = {
   scheduledShifts: number;
@@ -27,6 +28,8 @@ export default function ReportsScreen() {
   const [showTimeCsv, setShowTimeCsv] = useState(false);
   const [showPayrollCsv, setShowPayrollCsv] = useState(false);
   const [showReservationCsv, setShowReservationCsv] = useState(false);
+  const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
+
   const insights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip') as Insight | null | undefined;
   const timeCsv = useQuery(api.app.exportTimeEntriesCsv, isReady && canManage && showTimeCsv ? {} : 'skip') as string | null | undefined;
   const reservationCsv = useQuery(api.reservations.exportReservationsCsv, isReady && canManage && showReservationCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
@@ -52,15 +55,22 @@ export default function ReportsScreen() {
     { label: 'Pending requests', value: insights?.pendingRequests ?? 0, accent: accents[1] },
   ];
 
+  const periodLabel = payroll?.periodStart && payroll?.periodEnd
+    ? `${new Date(payroll.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(payroll.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    : null;
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Reports</Text>
-        <Text style={{ color: colors.muted }}>{venue?.name ?? 'Venue'} analytics and exports.</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: spacing.sm }}>
+        <View style={{ gap: 4 }}>
+          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Reports</Text>
+          <Text style={{ color: colors.muted }}>{venue?.name ?? 'Venue'} analytics and exports.</Text>
+        </View>
+        <DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />
       </View>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
@@ -73,20 +83,34 @@ export default function ReportsScreen() {
         </Card.Content>
       </Card>
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        {metrics.map((metric) => (
-          <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, width: '48%', flexGrow: 1, borderRadius: 16 }}>
-            <Card.Content style={{ gap: 4 }}>
-              <Text style={{ color: metric.accent.fg, fontSize: 28, fontWeight: '800' }}>{metric.value}</Text>
-              <Text style={{ color: colors.muted }}>{metric.label}</Text>
-            </Card.Content>
-          </Card>
-        ))}
-      </View>
+      {/* Live metrics — always show current state */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Live snapshot</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>
+              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · right now
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            {metrics.map((metric) => (
+              <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, minWidth: '47%', flexGrow: 1, borderRadius: 14 }}>
+                <Card.Content style={{ gap: 4 }}>
+                  <Text style={{ color: metric.accent.fg, fontSize: 26, fontWeight: '800' }}>{metric.value}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{metric.label}</Text>
+                </Card.Content>
+              </Card>
+            ))}
+          </View>
+        </Card.Content>
+      </Card>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Time entries CSV</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Time entries CSV</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{dateRange.shortLabel}</Text>
+          </View>
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowTimeCsv((value) => !value)}>
             {showTimeCsv ? 'Hide export' : 'Load export'}
           </Button>
@@ -100,11 +124,11 @@ export default function ReportsScreen() {
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, alignItems: 'center' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <View style={{ flex: 1 }}>
               <Text variant="titleMedium" style={{ fontWeight: '700' }}>Payroll integration</Text>
               <Text style={{ color: colors.muted }}>
-                {payroll ? `${payroll.totalHours} hours · ${payroll.openEntryCount} open entries` : 'Loading payroll summary...'}
+                {payroll ? `${payroll.totalHours}h · ${payroll.openEntryCount} open entries${periodLabel ? ` · ${periodLabel}` : ''}` : 'Loading payroll summary...'}
               </Text>
             </View>
             <Button
@@ -133,7 +157,10 @@ export default function ReportsScreen() {
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservations CSV</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservations CSV</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{dateRange.shortLabel}</Text>
+          </View>
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowReservationCsv((value) => !value)}>
             {showReservationCsv ? 'Hide export' : 'Load export'}
           </Button>

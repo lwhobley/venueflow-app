@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Card, Chip, SegmentedButtons, Text } from 'react-native-paper';
+import { Card, Chip, SegmentedButtons, Text } from 'react-native-paper';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -10,13 +10,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { ScheduleSkeleton } from '../../components/schedule/ScheduleSkeleton';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
-
-type WindowOption = { label: string; days: number };
-const WINDOWS: WindowOption[] = [
-  { label: 'Today', days: 1 },
-  { label: '7 d', days: 7 },
-  { label: '30 d', days: 30 },
-];
+import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 
 function dollars(cents: number) {
   return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -348,8 +342,7 @@ export default function SalesScreen() {
   const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
   const [tab, setTab] = useState<'summary' | 'servers' | 'items' | 'labor'>('summary');
-  const [windowIdx, setWindowIdx] = useState(0);
-  const window = WINDOWS[windowIdx];
+  const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
 
   if (!canManage) {
     return (
@@ -379,25 +372,12 @@ export default function SalesScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={{ gap: 4 }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Sales</Text>
-          <Text style={{ color: colors.muted }}>{venue.name ?? 'Venue'} · POS analytics</Text>
-        </View>
-
-        {/* Time window pills */}
-        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-          {WINDOWS.map((w, i) => (
-            <Button
-              key={w.label}
-              compact
-              mode={windowIdx === i ? 'contained' : 'outlined'}
-              buttonColor={windowIdx === i ? colors.primary : undefined}
-              textColor={windowIdx === i ? '#fff' : colors.primary}
-              onPress={() => setWindowIdx(i)}
-            >
-              {w.label}
-            </Button>
-          ))}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: spacing.sm }}>
+          <View style={{ gap: 4 }}>
+            <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Sales</Text>
+            <Text style={{ color: colors.muted }}>{venue.name ?? 'Venue'} · POS analytics</Text>
+          </View>
+          <DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />
         </View>
 
         {/* Tab switcher */}
@@ -413,10 +393,10 @@ export default function SalesScreen() {
         />
 
         {/* Content */}
-        {tab === 'summary' && <SummaryTab venueId={venue.id} days={window.days} />}
-        {tab === 'servers' && <ServersTab venueId={venue.id} days={window.days} />}
-        {tab === 'items' && <ItemsTab venueId={venue.id} days={window.days} />}
-        {tab === 'labor' && <LaborTab venueId={venue.id} days={window.days} />}
+        {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} />}
+        {tab === 'servers' && <ServersTab venueId={venue.id} days={dateRange.days} />}
+        {tab === 'items' && <ItemsTab venueId={venue.id} days={dateRange.days} />}
+        {tab === 'labor' && <LaborTab venueId={venue.id} days={dateRange.days} />}
       </ScrollView>
     </PremiumFeatureGate>
   );

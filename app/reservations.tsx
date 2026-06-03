@@ -9,6 +9,7 @@ import { accents, colors, spacing } from '../lib/theme';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { canManageVenue } from '../lib/permissions';
+import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
 
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
@@ -189,10 +190,14 @@ export default function ReservationsScreen() {
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
-  const sorted = useMemo(
-    () => [...reservations].sort((a, b) => a.reservationTime - b.reservationTime),
-    [reservations],
-  );
+  const { selected: listDateRange, setSelected: setListDateRange, presets: listPresets } = useDateRange('today');
+
+  const sorted = useMemo(() => {
+    const { startTs, endTs } = listDateRange;
+    return [...reservations]
+      .filter((r) => r.reservationTime >= startTs && r.reservationTime <= endTs)
+      .sort((a, b) => a.reservationTime - b.reservationTime);
+  }, [reservations, listDateRange]);
 
   const dateOptions = useMemo(() => {
     const today = new Date();
@@ -520,12 +525,15 @@ export default function ReservationsScreen() {
       {/* Reservation list */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Bookings</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Bookings</Text>
+            <DateRangeBar selected={listDateRange} presets={listPresets} onSelect={setListDateRange} />
+          </View>
           {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
           {page === undefined ? (
             <Text style={{ color: colors.muted }}>Loading…</Text>
           ) : sorted.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No reservations yet.</Text>
+            <Text style={{ color: colors.muted }}>No reservations for {listDateRange.shortLabel.toLowerCase()}.</Text>
           ) : (
             sorted.map((res) => {
               const sc = statusColor[res.status] ?? { bg: colors.cream, fg: colors.muted };
