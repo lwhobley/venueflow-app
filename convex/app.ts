@@ -128,6 +128,9 @@ const notificationEventValue = v.object({
   _id: v.id('notificationEvents'),
   kind: v.union(
     v.literal('shift_assigned'),
+    v.literal('schedule_published'),
+    v.literal('swap_proposed'),
+    v.literal('swap_reviewed'),
     v.literal('request_created'),
     v.literal('request_reviewed'),
     v.literal('reservation_due'),
