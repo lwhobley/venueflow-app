@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { Card, Text } from 'react-native-paper';
-import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
@@ -110,7 +109,6 @@ export default function ClockScreen() {
 
   const { time, ampm } = fmtClock(now);
   const punches = timeClock?.punches ?? [];
-  const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
 
   return (
     <ScrollView
@@ -179,12 +177,9 @@ export default function ClockScreen() {
       {/* Period totals */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Period totals</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-              <DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />
-              <Text style={{ color: colors.primary, fontWeight: '800' }}>Total: {timeClock?.totalHours ?? 0}h</Text>
-            </View>
+            <Text style={{ color: colors.primary, fontWeight: '800' }}>Total: {timeClock?.totalHours ?? 0}h</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: spacing.lg }}>
             <View>
@@ -204,7 +199,7 @@ export default function ClockScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Daily punches</Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>{dateRange.shortLabel}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{fmtDate(now)}</Text>
           </View>
           {punches.length === 0 ? (
             <Text style={{ color: colors.muted }}>No punches yet today.</Text>

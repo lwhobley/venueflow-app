@@ -199,6 +199,7 @@ export default function ReservationsScreen() {
       .sort((a, b) => a.reservationTime - b.reservationTime);
   }, [reservations, listDateRange]);
 
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const dateOptions = useMemo(() => {
     const today = new Date();
     return Array.from({ length: 14 }, (_, i) => {
@@ -208,7 +209,8 @@ export default function ReservationsScreen() {
       const label = i === 0 ? `Today · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : i === 1 ? `Tomorrow · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       return { value, label, dayOfWeek: d.getDay() };
     });
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayStr]);
 
   const selectedDateOption = dateOptions.find((o) => o.value === date) ?? dateOptions[0];
   const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? new Date().getDay());

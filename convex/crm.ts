@@ -22,14 +22,14 @@ export const listLeads = query({
         .withIndex('by_venue_status', (q) => q.eq('venueId', venueId).eq('status', status as any))
         .filter((q) => q.eq(q.field('deletedAt'), undefined))
         .order('desc')
-        .collect();
+        .take(500);
     } else {
       leads = await ctx.db
         .query('crmLeads')
         .withIndex('by_venue', (q) => q.eq('venueId', venueId))
         .filter((q) => q.eq(q.field('deletedAt'), undefined))
         .order('desc')
-        .collect();
+        .take(500);
     }
 
     if (search) {
@@ -346,7 +346,8 @@ export const saveBeo = mutation({
     };
 
     if (args.beoId) {
-      await ctx.db.patch(args.beoId, fields);
+      const patch = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+      await ctx.db.patch(args.beoId, patch as any);
       return args.beoId;
     }
 
@@ -417,7 +418,7 @@ export const saveContract = mutation({
       return args.contractId;
     }
 
-    const contractNumber = `C-${now.toString(36).toUpperCase().slice(-6)}`;
+    const contractNumber = `C-${now.toString(36).toUpperCase().slice(-6)}${Math.random().toString(36).toUpperCase().slice(2, 5)}`;
     const contractId = await ctx.db.insert('crmContracts', {
       venueId: args.venueId,
       leadId: args.leadId,
@@ -472,7 +473,7 @@ export const convertBeoToContract = mutation({
     if (!beo || beo.venueId !== venueId) throw new Error('BEO not found');
 
     const now = Date.now();
-    const contractNumber = `C-${now.toString(36).toUpperCase().slice(-6)}`;
+    const contractNumber = `C-${now.toString(36).toUpperCase().slice(-6)}${Math.random().toString(36).toUpperCase().slice(2, 5)}`;
 
     const contractId = await ctx.db.insert('crmContracts', {
       venueId,

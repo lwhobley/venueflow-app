@@ -109,12 +109,21 @@ export function buildPresets(): DatePreset[] {
   ];
 }
 
-/** Hook that owns the selected preset and rebuilds presets once on mount. */
+/** Hook that owns the selected preset. Presets refresh each calendar day. */
 export function useDateRange(defaultKey = 'today') {
-  const presets = useMemo(buildPresets, []);
+  const todayStr = toStr(new Date());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const presets = useMemo(buildPresets, [todayStr]);
   const [selected, setSelected] = useState<DatePreset>(
     () => presets.find((p) => p.key === defaultKey) ?? presets[0],
   );
+  // Render-phase sync: when the calendar day rolls over, refresh the selected preset
+  // so timestamps stay accurate without requiring a manual user interaction.
+  const [lastToday, setLastToday] = useState(todayStr);
+  if (lastToday !== todayStr) {
+    setLastToday(todayStr);
+    setSelected(presets.find((p) => p.key === selected.key) ?? presets[0]);
+  }
   return { selected, setSelected, presets };
 }
 
