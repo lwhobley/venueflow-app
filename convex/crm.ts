@@ -1,7 +1,26 @@
 import { mutation, query } from './_generated/server';
+import type { MutationCtx } from './_generated/server';
 import { v } from 'convex/values';
-import type { Id } from './_generated/dataModel';
-import { requireProfile, canManage, requireVenueMember } from './authz';
+import type { Doc, Id } from './_generated/dataModel';
+import { canManage, requireVenueMember } from './authz';
+
+async function requireLeadInVenue(ctx: MutationCtx, venueId: Id<'venues'>, leadId: Id<'crmLeads'>): Promise<Doc<'crmLeads'>> {
+  const lead = await ctx.db.get(leadId);
+  if (!lead || lead.venueId !== venueId) throw new Error('Lead not found');
+  return lead;
+}
+
+async function requireBeoInVenue(ctx: MutationCtx, venueId: Id<'venues'>, beoId: Id<'crmBeos'>): Promise<Doc<'crmBeos'>> {
+  const beo = await ctx.db.get(beoId);
+  if (!beo || beo.venueId !== venueId) throw new Error('BEO not found');
+  return beo;
+}
+
+async function requireContractInVenue(ctx: MutationCtx, venueId: Id<'venues'>, contractId: Id<'crmContracts'>): Promise<Doc<'crmContracts'>> {
+  const contract = await ctx.db.get(contractId);
+  if (!contract || contract.venueId !== venueId) throw new Error('Contract not found');
+  return contract;
+}
 
 // ─── Queries ────────────────────────────────────────────────────────────────
 
@@ -321,9 +340,9 @@ export const saveBeo = mutation({
     const profile = await requireVenueMember(ctx, args.venueId);
     if (!canManage(profile)) throw new Error('Manager access required');
     const now = Date.now();
+    if (args.leadId) await requireLeadInVenue(ctx, args.venueId, args.leadId);
 
     const fields = {
-      venueId: args.venueId,
       leadId: args.leadId,
       eventName: args.eventName,
       eventDate: args.eventDate,
@@ -346,26 +365,24 @@ export const saveBeo = mutation({
     };
 
     if (args.beoId) {
+      await requireBeoInVenue(ctx, args.venueId, args.beoId);
       const patch = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
       await ctx.db.patch(args.beoId, patch as any);
       return args.beoId;
     }
 
-    const beoId = await ctx.db.insert('crmBeos', { ...fields, status: (args.status ?? 'draft') as any, createdAt: now });
+    const beoId = await ctx.db.insert('crmBeos', { ...fields, venueId: args.venueId, status: (args.status ?? 'draft') as any, createdAt: now });
 
     if (args.leadId) {
-      const lead = await ctx.db.get(args.leadId);
-      if (lead) {
-        await ctx.db.patch(args.leadId, { lastActivityAt: now, updatedAt: now });
-        await ctx.db.insert('crmActivityLog', {
-          venueId: args.venueId,
-          leadId: args.leadId,
-          actorId: profile._id,
-          kind: 'beo_created',
-          detail: `BEO created: ${args.eventName}`,
-          createdAt: now,
-        });
-      }
+      await ctx.db.patch(args.leadId, { lastActivityAt: now, updatedAt: now });
+      await ctx.db.insert('crmActivityLog', {
+        venueId: args.venueId,
+        leadId: args.leadId,
+        actorId: profile._id,
+        kind: 'beo_created',
+        detail: `BEO created: ${args.eventName}`,
+        createdAt: now,
+      });
     }
 
     return beoId;
@@ -400,7 +417,11 @@ export const saveContract = mutation({
     if (!canManage(profile)) throw new Error('Manager access required');
     const now = Date.now();
 
+    if (args.leadId) await requireLeadInVenue(ctx, args.venueId, args.leadId);
+    if (args.beoId) await requireBeoInVenue(ctx, args.venueId, args.beoId);
+
     if (args.contractId) {
+      await requireContractInVenue(ctx, args.venueId, args.contractId);
       const patch: Record<string, any> = { updatedAt: now };
       if (args.eventName !== undefined) patch.eventName = args.eventName;
       if (args.eventDate !== undefined) patch.eventDate = args.eventDate;
@@ -442,18 +463,15 @@ export const saveContract = mutation({
     });
 
     if (args.leadId) {
-      const lead = await ctx.db.get(args.leadId);
-      if (lead) {
-        await ctx.db.patch(args.leadId, { lastActivityAt: now, updatedAt: now });
-        await ctx.db.insert('crmActivityLog', {
-          venueId: args.venueId,
-          leadId: args.leadId,
-          actorId: profile._id,
-          kind: 'contract_created',
-          detail: `Contract ${contractNumber} created`,
-          createdAt: now,
-        });
-      }
+      await ctx.db.patch(args.leadId, { lastActivityAt: now, updatedAt: now });
+      await ctx.db.insert('crmActivityLog', {
+        venueId: args.venueId,
+        leadId: args.leadId,
+        actorId: profile._id,
+        kind: 'contract_created',
+        detail: `Contract ${contractNumber} created`,
+        createdAt: now,
+      });
     }
 
     return contractId;
