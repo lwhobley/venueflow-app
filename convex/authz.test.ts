@@ -47,8 +47,8 @@ describe('reasonFromStatus', () => {
     expect(reasonFromStatus('expired', true)).toBe('trial_expired');
   });
 
-  it('prompts an upgrade (not a resubscribe) when a live trial/active hits a paid-only feature', () => {
-    expect(reasonFromStatus('trialing', true)).toBe('trial_active');
-    expect(reasonFromStatus('active', true)).toBe('trial_active');
+  it('treats trialing/active as not-yet-blocked', () => {
+    expect(reasonFromStatus('trialing', true)).toBe('never_subscribed');
+    expect(reasonFromStatus('active', true)).toBe('never_subscribed');
   });
 });

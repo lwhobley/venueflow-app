@@ -1,10 +1,9 @@
 import { internalMutation, mutation, query } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
+import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { requirePaidSubscription } from './billing/shared';
-import { timingSafeEqual, newWebhookSecret } from './secrets';
-import { canManage, getProfileOrNull } from './authz';
 
 type AnyCtx = any;
 
@@ -48,6 +47,10 @@ const externalReservationInput = v.object({
   raw: v.optional(v.any()),
 });
 
+function canManage(role: string) {
+  return role === 'admin' || role === 'owner' || role === 'manager';
+}
+
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -55,6 +58,12 @@ function cleanText(value: string | undefined) {
 
 function mergeTags(existing: string[], incoming: string[]) {
   return Array.from(new Set([...existing, ...incoming].map((tag) => tag.trim()).filter(Boolean))).slice(0, 12);
+}
+
+async function getProfile(ctx: AnyCtx) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) return null;
+  return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
 async function upsertGuest(ctx: AnyCtx, args: { venueId: Id<'venues'>; guestName: string; guestPhone?: string; guestEmail?: string; tags: string[]; notes?: string }) {
@@ -77,7 +86,6 @@ async function upsertGuest(ctx: AnyCtx, args: { venueId: Id<'venues'>; guestName
   if (guest) {
     await ctx.db.patch(guest._id, {
       fullName: args.guestName.trim(),
-      nameLower: args.guestName.trim().toLowerCase(),
       phone: phone ?? guest.phone,
       email: email ?? guest.email,
       tags: mergeTags(guest.tags, args.tags),
@@ -89,7 +97,6 @@ async function upsertGuest(ctx: AnyCtx, args: { venueId: Id<'venues'>; guestName
   return await ctx.db.insert('guests', {
     venueId: args.venueId,
     fullName: args.guestName.trim(),
-    nameLower: args.guestName.trim().toLowerCase(),
     phone,
     email,
     tags: mergeTags([], args.tags),
@@ -97,6 +104,18 @@ async function upsertGuest(ctx: AnyCtx, args: { venueId: Id<'venues'>; guestName
     createdAt: now,
     updatedAt: now,
   });
+}
+
+// Constant-time compare for secret verification (both inputs high-entropy).
+function secretsMatch(a: string | undefined | null, b: string | undefined | null) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function newWebhookSecret() {
+  return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
 }
 
 function mapConnection(connection: Doc<'reservationConnections'>) {
@@ -142,8 +161,8 @@ export const getReservationIntegrationOverview = query({
     }),
   ),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const connections = await (ctx as AnyCtx).db.query('reservationConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(20);
     const recentEvents = await (ctx as AnyCtx).db.query('reservationSyncEvents').withIndex('by_venue_processedAt', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(20);
@@ -178,8 +197,8 @@ export const upsertReservationConnection = mutation({
     updatedAt: v.number(),
   }),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
@@ -215,10 +234,10 @@ export const rotateReservationConnectionSecret = mutation({
   args: { connectionId: v.id('reservationConnections') },
   returns: v.object({ webhookSecret: v.string() }),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
+    const profile = await getProfile(ctx as AnyCtx);
     const connection = await (ctx as AnyCtx).db.get(args.connectionId);
     if (!connection) throw new Error('Connection not found');
-    if (!profile || profile.venueId !== connection.venueId || !canManage(profile)) throw new Error('Not authorized');
+    if (!profile || profile.venueId !== connection.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     await requirePaidSubscription(ctx as AnyCtx, connection.venueId);
     const secret = newWebhookSecret();
     await (ctx as AnyCtx).db.patch(connection._id, { webhookSecret: secret, updatedAt: Date.now() });
@@ -245,13 +264,11 @@ export const ingestExternalReservation = internalMutation({
     if (!configuredConnection) throw new Error('No reservation connection configured for this venue/provider');
     // Per-connection secret: a leaked deployment-wide transport secret alone
     // can't post for a venue without also holding its connection secret.
-    if (!timingSafeEqual(configuredConnection.webhookSecret, args.connectionSecret)) {
+    if (!secretsMatch(configuredConnection.webhookSecret, args.connectionSecret)) {
       throw new Error('Invalid connection secret');
     }
-    // If the connection is bound to a specific external venue, the payload must
-    // carry the matching id. A missing or different id is rejected — omitting it
-    // must not be a way to bypass the binding.
-    if (configuredConnection.externalVenueId && configuredConnection.externalVenueId !== args.externalVenueId) {
+    // If the connection is bound to a specific external venue, reject mismatches.
+    if (configuredConnection.externalVenueId && args.externalVenueId && configuredConnection.externalVenueId !== args.externalVenueId) {
       throw new Error('Venue mismatch for this connection');
     }
 

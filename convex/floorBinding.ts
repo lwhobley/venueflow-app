@@ -1,24 +1,20 @@
-import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
-import type { Doc, Id } from "./_generated/dataModel";
-import { requireVenueManager, requireVenueMember } from "./authz";
+import { mutation, query } from './_generated/server';
+import { v } from 'convex/values';
+import type { Doc, Id } from './_generated/dataModel';
+import { requireVenueManager, requireVenueMember } from './authz';
 
 // Legacy validator kept only so older clients that still send `actorRole` pass
 // arg validation. The value is ignored — authorization is derived server-side
 // from the authenticated profile via convex/authz.ts.
 const roleValue = v.union(
-  v.literal("admin"),
-  v.literal("owner"),
-  v.literal("manager"),
-  v.literal("server"),
-  v.literal("staff"),
+  v.literal('admin'),
+  v.literal('owner'),
+  v.literal('manager'),
+  v.literal('server'),
+  v.literal('staff'),
 );
-const holdTypeValue = v.union(
-  v.literal("reserved"),
-  v.literal("held"),
-  v.literal("seated"),
-);
-const sourceValue = v.union(v.literal("reservation"), v.literal("waitlist"));
+const holdTypeValue = v.union(v.literal('reserved'), v.literal('held'), v.literal('seated'));
+const sourceValue = v.union(v.literal('reservation'), v.literal('waitlist'));
 
 function startOfDay(date: string) {
   return new Date(`${date}T00:00:00.000Z`).getTime();
@@ -29,44 +25,23 @@ function endOfDay(date: string) {
 }
 
 function sourceLabel(source: string) {
-  return source === "opentable"
-    ? "OpenTable"
-    : source === "resy"
-      ? "Resy"
-      : source === "phone"
-        ? "Phone"
-        : source === "walk_in"
-          ? "Walk-in"
-          : source === "host"
-            ? "Host"
-            : "Direct";
+  return source === 'opentable' ? 'OpenTable' : source === 'resy' ? 'Resy' : source === 'phone' ? 'Phone' : source === 'walk_in' ? 'Walk-in' : source === 'host' ? 'Host' : 'Direct';
 }
 
 async function loadFloorPlan(ctx: any, venueId: string) {
-  return await ctx.db
-    .query("floorPlans")
-    .withIndex("by_venue_active", (q: any) =>
-      q.eq("venueId", venueId).eq("isActive", true),
-    )
-    .unique();
+  return await ctx.db.query('floorPlans').withIndex('by_venue_active', (q: any) => q.eq('venueId', venueId).eq('isActive', true)).unique();
 }
 
-async function loadTableState(ctx: any, tableId: Id<"tables">) {
-  return await ctx.db
-    .query("tableStates")
-    .withIndex("by_table", (q: any) => q.eq("tableId", tableId))
-    .unique();
+async function loadTableState(ctx: any, tableId: Id<'tables'>) {
+  return await ctx.db.query('tableStates').withIndex('by_table', (q: any) => q.eq('tableId', tableId)).unique();
 }
 
-async function loadAssignmentSource(
-  ctx: any,
-  assignment: Doc<"tableAssignments">,
-) {
+async function loadAssignmentSource(ctx: any, assignment: Doc<'tableAssignments'>) {
   if (assignment.reservationId) {
     const reservation = await ctx.db.get(assignment.reservationId);
     if (!reservation) return null;
     return {
-      sourceType: "reservation" as const,
+      sourceType: 'reservation' as const,
       guestName: reservation.guestName,
       partySize: reservation.partySize,
       source: sourceLabel(reservation.source),
@@ -81,7 +56,7 @@ async function loadAssignmentSource(
     const waitlist = await ctx.db.get(assignment.waitlistId);
     if (!waitlist) return null;
     return {
-      sourceType: "waitlist" as const,
+      sourceType: 'waitlist' as const,
       guestName: waitlist.guestName,
       partySize: waitlist.partySize,
       source: sourceLabel(waitlist.source),
@@ -95,15 +70,8 @@ async function loadAssignmentSource(
   return null;
 }
 
-async function loadAssignmentsForTable(
-  ctx: any,
-  tableId: Id<"tables">,
-  now: number,
-) {
-  const assignments = await ctx.db
-    .query("tableAssignments")
-    .withIndex("by_table_time", (q: any) => q.eq("tableId", tableId))
-    .take(500);
+async function loadAssignmentsForTable(ctx: any, tableId: Id<'tables'>, now: number) {
+  const assignments = await ctx.db.query('tableAssignments').withIndex('by_table_time', (q: any) => q.eq('tableId', tableId)).collect();
   const hydrated = [] as Array<any>;
   for (const assignment of assignments) {
     if (assignment.releasedAt) continue;
@@ -111,24 +79,10 @@ async function loadAssignmentsForTable(
     if (!source) continue;
     hydrated.push({ assignment, source });
   }
-  hydrated.sort(
-    (
-      left: { assignment: Doc<"tableAssignments"> },
-      right: { assignment: Doc<"tableAssignments"> },
-    ) => left.assignment.startsAt - right.assignment.startsAt,
-  );
+  hydrated.sort((left: { assignment: Doc<'tableAssignments'> }, right: { assignment: Doc<'tableAssignments'> }) => left.assignment.startsAt - right.assignment.startsAt);
   const activeWindowEnd = now + 2 * 60 * 60 * 1000;
-  const activeAssignments = hydrated.filter(
-    ({ assignment }: { assignment: Doc<"tableAssignments"> }) =>
-      assignment.holdType !== "seated" &&
-      assignment.startsAt <= activeWindowEnd &&
-      assignment.endsAt >= now,
-  );
-  const nextAssignment =
-    hydrated.find(
-      ({ assignment }: { assignment: Doc<"tableAssignments"> }) =>
-        assignment.startsAt > activeWindowEnd,
-    ) ?? null;
+  const activeAssignments = hydrated.filter(({ assignment }: { assignment: Doc<'tableAssignments'> }) => assignment.holdType !== 'seated' && assignment.startsAt <= activeWindowEnd && assignment.endsAt >= now);
+  const nextAssignment = hydrated.find(({ assignment }: { assignment: Doc<'tableAssignments'> }) => assignment.startsAt > activeWindowEnd) ?? null;
   return {
     activeAssignments: activeAssignments.map(mapAssignmentRow),
     nextAssignment: nextAssignment ? mapAssignmentRow(nextAssignment) : null,
@@ -157,11 +111,7 @@ function mapAssignmentRow(entry: any) {
   };
 }
 
-async function loadTableWithAssignments(
-  ctx: any,
-  table: Doc<"tables">,
-  now: number,
-) {
+async function loadTableWithAssignments(ctx: any, table: Doc<'tables'>, now: number) {
   const state = await loadTableState(ctx, table._id);
   const binding = await loadAssignmentsForTable(ctx, table._id, now);
   return {
@@ -172,7 +122,7 @@ async function loadTableWithAssignments(
       label: table.label,
       shape: table.shape,
       seats: table.seats,
-      seatLabelStyle: table.seatLabelStyle ?? "number",
+      seatLabelStyle: table.seatLabelStyle ?? 'number',
       x: table.x,
       y: table.y,
       width: table.width,
@@ -203,18 +153,8 @@ async function loadTableWithAssignments(
   };
 }
 
-async function writeTableHistory(
-  ctx: any,
-  payload: {
-    venueId: string;
-    tableId: Id<"tables">;
-    fromStatus: string;
-    toStatus: string;
-    partySize: number | null;
-    metadata?: Record<string, string | number | boolean | null> | null;
-  },
-) {
-  await ctx.db.insert("tableStateHistory", {
+async function writeTableHistory(ctx: any, payload: { venueId: string; tableId: Id<'tables'>; fromStatus: string; toStatus: string; partySize: number | null; metadata?: Record<string, string | number | boolean | null> | null }) {
+  await ctx.db.insert('tableStateHistory', {
     venueId: payload.venueId,
     tableId: payload.tableId,
     fromStatus: payload.fromStatus,
@@ -226,14 +166,7 @@ async function writeTableHistory(
   });
 }
 
-async function applyTableStatus(
-  ctx: any,
-  venueId: string,
-  tableId: Id<"tables">,
-  status: Doc<"tableStates">["status"],
-  partySize?: number | null,
-  notes?: string | null,
-) {
+async function applyTableStatus(ctx: any, venueId: string, tableId: Id<'tables'>, status: Doc<'tableStates'>['status'], partySize?: number | null, notes?: string | null) {
   const state = await loadTableState(ctx, tableId);
   const now = Date.now();
   const next = {
@@ -243,97 +176,56 @@ async function applyTableStatus(
     partySize: partySize ?? undefined,
     serverId: undefined,
     toastCheckGuid: state?.toastCheckGuid ?? undefined,
-    seatedAt: status === "seated" ? (state?.seatedAt ?? now) : undefined,
+    seatedAt: status === 'seated' ? state?.seatedAt ?? now : undefined,
     lastActivityAt: now,
     notes: notes ?? undefined,
   };
   if (state) await ctx.db.patch(state._id, next);
-  else await ctx.db.insert("tableStates", next);
-  await writeTableHistory(ctx, {
-    venueId,
-    tableId,
-    fromStatus: state?.status ?? "available",
-    toStatus: status,
-    partySize: partySize ?? null,
-    metadata: { tableId: String(tableId) },
-  });
+  else await ctx.db.insert('tableStates', next);
+  await writeTableHistory(ctx, { venueId, tableId, fromStatus: state?.status ?? 'available', toStatus: status, partySize: partySize ?? null, metadata: { tableId: String(tableId) } });
 }
 
 async function findVenuePlan(ctx: any, venueId: string) {
   const plan = await loadFloorPlan(ctx, venueId);
   if (!plan) return null;
-  const tables = await ctx.db
-    .query("tables")
-    .withIndex("by_floor_plan", (q: any) => q.eq("floorPlanId", plan._id))
-    .take(500);
+  const tables = await ctx.db.query('tables').withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', plan._id)).collect();
   return { plan, tables };
 }
 
-async function validateNoOverlap(
-  ctx: any,
-  tableIds: Id<"tables">[],
-  startsAt: number,
-  endsAt: number,
-) {
+async function validateNoOverlap(ctx: any, tableIds: Id<'tables'>[], startsAt: number, endsAt: number) {
   for (const tableId of tableIds) {
-    const assignments = await ctx.db
-      .query("tableAssignments")
-      .withIndex("by_table_time", (q: any) => q.eq("tableId", tableId))
-      .take(500);
-    const conflict = assignments.find(
-      (assignment: Doc<"tableAssignments">) =>
-        !assignment.releasedAt &&
-        assignment.startsAt < endsAt &&
-        assignment.endsAt > startsAt,
-    );
-    if (conflict) throw new Error("Table already has an overlapping hold");
+    const assignments = await ctx.db.query('tableAssignments').withIndex('by_table_time', (q: any) => q.eq('tableId', tableId)).collect();
+    const conflict = assignments.find((assignment: Doc<'tableAssignments'>) => !assignment.releasedAt && assignment.startsAt < endsAt && assignment.endsAt > startsAt);
+    if (conflict) throw new Error('Table already has an overlapping hold');
   }
 }
 
-async function assignToTables(
-  ctx: any,
-  args: {
-    venueId: string;
-    tableIds: Id<"tables">[];
-    holdType: "reserved" | "held" | "seated";
-    startsAt: number;
-    endsAt: number;
-    reservationId?: Id<"reservations">;
-    waitlistId?: Id<"waitlist">;
-    sourceType: "reservation" | "waitlist";
-  },
-) {
+async function assignToTables(ctx: any, args: { venueId: string; tableIds: Id<'tables'>[]; holdType: 'reserved' | 'held' | 'seated'; startsAt: number; endsAt: number; reservationId?: Id<'reservations'>; waitlistId?: Id<'waitlist'>; sourceType: 'reservation' | 'waitlist'; }) {
   const venue = await findVenuePlan(ctx, args.venueId);
-  if (!venue) throw new Error("Floor plan not found");
-  if (args.tableIds.length === 0) throw new Error("Select at least one table");
-  if (args.endsAt <= args.startsAt)
-    throw new Error("End time must be after start time");
+  if (!venue) throw new Error('Floor plan not found');
+  if (args.tableIds.length === 0) throw new Error('Select at least one table');
+  if (args.endsAt <= args.startsAt) throw new Error('End time must be after start time');
 
-  const tableIdsInPlan = new Set(
-    venue.tables.map((table: Doc<"tables">) => table._id),
-  );
+  const tableIdsInPlan = new Set(venue.tables.map((table: Doc<'tables'>) => table._id));
   for (const tableId of args.tableIds) {
-    if (!tableIdsInPlan.has(tableId))
-      throw new Error("Table is outside this venue");
+    if (!tableIdsInPlan.has(tableId)) throw new Error('Table is outside this venue');
   }
 
   if (args.reservationId) {
     const reservation = await ctx.db.get(args.reservationId);
-    if (!reservation || reservation.venueId !== args.venueId)
-      throw new Error("Reservation is outside this venue");
+    if (!reservation || reservation.venueId !== args.venueId) throw new Error('Reservation is outside this venue');
   }
 
   if (args.waitlistId) {
     const waitlist = await ctx.db.get(args.waitlistId);
-    if (!waitlist || waitlist.venueId !== args.venueId)
-      throw new Error("Waitlist entry is outside this venue");
+    if (!waitlist || waitlist.venueId !== args.venueId) throw new Error('Waitlist entry is outside this venue');
   }
 
   await validateNoOverlap(ctx, args.tableIds, args.startsAt, args.endsAt);
 
   const createdAt = Date.now();
   for (const tableId of args.tableIds) {
-    await ctx.db.insert("tableAssignments", {
+    await ctx.db.insert('tableAssignments', {
       venueId: args.venueId,
       reservationId: args.reservationId,
       waitlistId: args.waitlistId,
@@ -346,46 +238,30 @@ async function assignToTables(
       releasedReason: undefined,
     });
     const partySize = args.reservationId
-      ? (await ctx.db.get(args.reservationId))?.partySize
-      : args.waitlistId
-        ? (await ctx.db.get(args.waitlistId))?.partySize
-        : undefined;
-    await applyTableStatus(
-      ctx,
-      args.venueId,
-      tableId,
-      args.holdType === "seated"
-        ? "seated"
-        : args.holdType === "held"
-          ? "held"
-          : "reserved",
-      partySize,
-    );
+        ? (await ctx.db.get(args.reservationId))?.partySize
+        : args.waitlistId
+          ? (await ctx.db.get(args.waitlistId))?.partySize
+          : undefined;
+await applyTableStatus(ctx, args.venueId, tableId, args.holdType === 'seated' ? 'seated' : args.holdType === 'held' ? 'held' : 'reserved', partySize);
   }
 
   if (args.reservationId) {
     const reservation = await ctx.db.get(args.reservationId);
     if (reservation) {
-      await ctx.db.patch(reservation._id, {
-        status: args.holdType === "seated" ? "seated" : "confirmed",
-        updatedAt: Date.now(),
-      });
+      await ctx.db.patch(reservation._id, { status: args.holdType === 'seated' ? 'seated' : 'confirmed', updatedAt: Date.now() });
     }
   }
 
   if (args.waitlistId) {
     const waitlist = await ctx.db.get(args.waitlistId);
     if (waitlist) {
-      await ctx.db.patch(waitlist._id, {
-        status: args.holdType === "seated" ? "seated" : "assigned",
-        updatedAt: Date.now(),
-      });
+      await ctx.db.patch(waitlist._id, { status: args.holdType === 'seated' ? 'seated' : 'assigned', updatedAt: Date.now() });
     }
   }
 }
 
 export const getActiveFloorPlan = query({
-  args: { venueId: v.id("venues") },
+  args: { venueId: v.id('venues') },
   returns: v.any(),
   handler: async (ctx, args) => {
     await requireVenueMember(ctx, args.venueId);
@@ -397,11 +273,9 @@ export const getActiveFloorPlan = query({
       tables.push(await loadTableWithAssignments(ctx, table, now));
     }
     const chairRows = await ctx.db
-      .query("floorChairs")
-      .withIndex("by_floor_plan", (q: any) =>
-        q.eq("floorPlanId", venue.plan._id),
-      )
-      .take(500);
+      .query('floorChairs')
+      .withIndex('by_floor_plan', (q: any) => q.eq('floorPlanId', venue.plan._id))
+      .collect();
     return {
       floorPlan: {
         _id: venue.plan._id,
@@ -416,41 +290,26 @@ export const getActiveFloorPlan = query({
         updatedAt: venue.plan.updatedAt,
       },
       tables,
-      chairs: chairRows.map((c: Doc<"floorChairs">) => ({
-        _id: c._id,
-        x: c.x,
-        y: c.y,
-        rotation: c.rotation,
-        label: c.label ?? null,
-      })),
+      chairs: chairRows.map((c: Doc<'floorChairs'>) => ({ _id: c._id, x: c.x, y: c.y, rotation: c.rotation, label: c.label ?? null })),
     };
   },
 });
 
 export const getTableTimeline = query({
-  args: { tableId: v.id("tables"), date: v.string() },
+  args: { tableId: v.id('tables'), date: v.string() },
   returns: v.any(),
   handler: async (ctx, args) => {
     const table = await ctx.db.get(args.tableId);
-    if (!table) throw new Error("Table not found");
+    if (!table) throw new Error('Table not found');
     const plan = await ctx.db.get(table.floorPlanId);
-    if (!plan) throw new Error("Floor plan not found");
+    if (!plan) throw new Error('Floor plan not found');
     await requireVenueMember(ctx, plan.venueId);
     const start = startOfDay(args.date);
     const end = endOfDay(args.date);
-    const assignments = await ctx.db
-      .query("tableAssignments")
-      .withIndex("by_table_time", (q: any) => q.eq("tableId", args.tableId))
-      .take(500);
-    const dayAssignments = assignments.filter(
-      (assignment: Doc<"tableAssignments">) =>
-        assignment.startsAt >= start && assignment.startsAt <= end,
-    );
+    const assignments = await ctx.db.query('tableAssignments').withIndex('by_table_time', (q: any) => q.eq('tableId', args.tableId)).collect();
+    const dayAssignments = assignments.filter((assignment: Doc<'tableAssignments'>) => assignment.startsAt >= start && assignment.startsAt <= end);
     const output = [] as Array<any>;
-    for (const assignment of dayAssignments.sort(
-      (a: { startsAt: number }, b: { startsAt: number }) =>
-        a.startsAt - b.startsAt,
-    )) {
+    for (const assignment of dayAssignments.sort((a: { startsAt: number }, b: { startsAt: number }) => a.startsAt - b.startsAt)) {
       const source = await loadAssignmentSource(ctx, assignment);
       if (!source) continue;
       output.push(mapAssignmentRow({ assignment, source }));
@@ -460,47 +319,30 @@ export const getTableTimeline = query({
 });
 
 export const getUnassignedReservations = query({
-  args: { venueId: v.id("venues"), withinMinutes: v.number() },
+  args: { venueId: v.id('venues'), withinMinutes: v.number() },
   returns: v.any(),
   handler: async (ctx, args) => {
     await requireVenueMember(ctx, args.venueId);
     const now = Date.now();
     const windowEnd = now + Math.max(15, args.withinMinutes) * 60 * 1000;
     const reservations = await ctx.db
-      .query("reservations")
-      .withIndex("by_venue_time", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("reservationTime", now)
-          .lte("reservationTime", windowEnd),
-      )
-      .order("asc")
+      .query('reservations')
+      .withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId).gte('reservationTime', now).lte('reservationTime', windowEnd))
+      .order('asc')
       .take(200);
     const assignments = await ctx.db
-      .query("tableAssignments")
-      .withIndex("by_venue_time", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("startsAt", now)
-          .lte("startsAt", windowEnd),
-      )
-      .order("asc")
+      .query('tableAssignments')
+      .withIndex('by_venue_time', (q: any) => q.eq('venueId', args.venueId).gte('startsAt', now).lte('startsAt', windowEnd))
+      .order('asc')
       .take(500);
     const assignedReservationIds = new Set(
       assignments
-        .filter(
-          (assignment: Doc<"tableAssignments">) =>
-            !assignment.releasedAt && assignment.reservationId,
-        )
-        .map((assignment: Doc<"tableAssignments">) => assignment.reservationId),
+        .filter((assignment: Doc<'tableAssignments'>) => !assignment.releasedAt && assignment.reservationId)
+        .map((assignment: Doc<'tableAssignments'>) => assignment.reservationId),
     );
     const queue = [] as Array<any>;
     for (const reservation of reservations) {
-      if (
-        reservation.status !== "confirmed" ||
-        assignedReservationIds.has(reservation._id)
-      )
-        continue;
+      if (reservation.status !== 'confirmed' || assignedReservationIds.has(reservation._id)) continue;
       queue.push({
         id: reservation._id,
         guestName: reservation.guestName,
@@ -519,28 +361,15 @@ export const getUnassignedReservations = query({
 });
 
 export const getOpenWaitlist = query({
-  args: { venueId: v.id("venues") },
+  args: { venueId: v.id('venues') },
   returns: v.any(),
   handler: async (ctx, args) => {
     await requireVenueMember(ctx, args.venueId);
-    const waiting = await ctx.db
-      .query("waitlist")
-      .withIndex("by_venue_status", (q: any) =>
-        q.eq("venueId", args.venueId).eq("status", "waiting"),
-      )
-      .take(100);
-    const assigned = await ctx.db
-      .query("waitlist")
-      .withIndex("by_venue_status", (q: any) =>
-        q.eq("venueId", args.venueId).eq("status", "assigned"),
-      )
-      .take(100);
+    const waiting = await ctx.db.query('waitlist').withIndex('by_venue_status', (q: any) => q.eq('venueId', args.venueId).eq('status', 'waiting')).take(100);
+    const assigned = await ctx.db.query('waitlist').withIndex('by_venue_status', (q: any) => q.eq('venueId', args.venueId).eq('status', 'assigned')).take(100);
     return [...waiting, ...assigned]
-      .sort(
-        (a: Doc<"waitlist">, b: Doc<"waitlist">) =>
-          a.requestedAt - b.requestedAt,
-      )
-      .map((item: Doc<"waitlist">) => ({
+      .sort((a: Doc<'waitlist'>, b: Doc<'waitlist'>) => a.requestedAt - b.requestedAt)
+      .map((item: Doc<'waitlist'>) => ({
         id: item._id,
         guestName: item.guestName,
         guestPhone: item.guestPhone ?? null,
@@ -556,26 +385,26 @@ export const getOpenWaitlist = query({
 
 export const addToWaitlist = mutation({
   args: {
-    venueId: v.id("venues"),
+    venueId: v.id('venues'),
     guestName: v.string(),
     partySize: v.number(),
     guestPhone: v.optional(v.string()),
     notes: v.optional(v.string()),
   },
-  returns: v.id("waitlist"),
+  returns: v.id('waitlist'),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
 
     const name = args.guestName.trim();
-    if (!name) throw new Error("Enter a guest name");
+    if (!name) throw new Error('Enter a guest name');
     const now = Date.now();
-    return await ctx.db.insert("waitlist", {
+    return await ctx.db.insert('waitlist', {
       venueId: args.venueId,
       guestName: name,
       guestPhone: args.guestPhone?.trim() || undefined,
       partySize: Math.max(1, Math.round(args.partySize)),
-      source: "walk_in",
-      status: "waiting",
+      source: 'walk_in',
+      status: 'waiting',
       requestedAt: now,
       notes: args.notes?.trim() || undefined,
       createdAt: now,
@@ -585,41 +414,36 @@ export const addToWaitlist = mutation({
 });
 
 export const markWaitlistReady = mutation({
-  args: { venueId: v.id("venues"), waitlistId: v.id("waitlist") },
+  args: { venueId: v.id('venues'), waitlistId: v.id('waitlist') },
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
 
     const entry = await ctx.db.get(args.waitlistId);
-    if (!entry || entry.venueId !== args.venueId)
-      throw new Error("Waitlist entry not found");
-    await ctx.db.patch(entry._id, {
-      readyAt: Date.now(),
-      updatedAt: Date.now(),
-    });
+    if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
+    await ctx.db.patch(entry._id, { readyAt: Date.now(), updatedAt: Date.now() });
     return null;
   },
 });
 
 export const removeFromWaitlist = mutation({
-  args: { venueId: v.id("venues"), waitlistId: v.id("waitlist") },
+  args: { venueId: v.id('venues'), waitlistId: v.id('waitlist') },
   returns: v.null(),
   handler: async (ctx, args) => {
     const me = await requireVenueMember(ctx, args.venueId);
 
     const entry = await ctx.db.get(args.waitlistId);
-    if (!entry || entry.venueId !== args.venueId)
-      throw new Error("Waitlist entry not found");
-    await ctx.db.patch(entry._id, { status: "removed", updatedAt: Date.now() });
+    if (!entry || entry.venueId !== args.venueId) throw new Error('Waitlist entry not found');
+    await ctx.db.patch(entry._id, { status: 'removed', updatedAt: Date.now() });
     return null;
   },
 });
 
 export const assignReservationToTables = mutation({
   args: {
-    venueId: v.id("venues"),
-    reservationId: v.id("reservations"),
-    tableIds: v.array(v.id("tables")),
+    venueId: v.id('venues'),
+    reservationId: v.id('reservations'),
+    tableIds: v.array(v.id('tables')),
     holdType: holdTypeValue,
     startsAt: v.number(),
     endsAt: v.number(),
@@ -631,24 +455,16 @@ export const assignReservationToTables = mutation({
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
 
-    await assignToTables(ctx, {
-      venueId: args.venueId,
-      tableIds: args.tableIds,
-      holdType: args.holdType,
-      startsAt: args.startsAt,
-      endsAt: args.endsAt,
-      reservationId: args.reservationId,
-      sourceType: "reservation",
-    });
+    await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, reservationId: args.reservationId, sourceType: 'reservation' });
     return null;
   },
 });
 
 export const assignWaitlistToTables = mutation({
   args: {
-    venueId: v.id("venues"),
-    waitlistId: v.id("waitlist"),
-    tableIds: v.array(v.id("tables")),
+    venueId: v.id('venues'),
+    waitlistId: v.id('waitlist'),
+    tableIds: v.array(v.id('tables')),
     holdType: holdTypeValue,
     startsAt: v.number(),
     endsAt: v.number(),
@@ -658,76 +474,34 @@ export const assignWaitlistToTables = mutation({
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
 
-    await assignToTables(ctx, {
-      venueId: args.venueId,
-      tableIds: args.tableIds,
-      holdType: args.holdType,
-      startsAt: args.startsAt,
-      endsAt: args.endsAt,
-      waitlistId: args.waitlistId,
-      sourceType: "waitlist",
-    });
+    await assignToTables(ctx, { venueId: args.venueId, tableIds: args.tableIds, holdType: args.holdType, startsAt: args.startsAt, endsAt: args.endsAt, waitlistId: args.waitlistId, sourceType: 'waitlist' });
     return null;
   },
 });
 
 export const releaseAssignment = mutation({
-  args: {
-    venueId: v.id("venues"),
-    assignmentId: v.id("tableAssignments"),
-    reason: v.string(),
-    actorRole: v.optional(roleValue),
-  },
+  args: { venueId: v.id('venues'), assignmentId: v.id('tableAssignments'), reason: v.string(), actorRole: v.optional(roleValue) },
   returns: v.null(),
   handler: async (ctx, args) => {
     const profile = await requireVenueManager(ctx, args.venueId);
 
     const assignment = await ctx.db.get(args.assignmentId);
-    if (!assignment) throw new Error("Assignment not found");
-    if (assignment.venueId !== args.venueId) throw new Error("Wrong venue");
+    if (!assignment) throw new Error('Assignment not found');
+    if (assignment.venueId !== args.venueId) throw new Error('Wrong venue');
     if (assignment.releasedAt) return null;
-    await ctx.db.patch(assignment._id, {
-      releasedAt: Date.now(),
-      releasedReason: args.reason,
-    });
-    const otherActive = await ctx.db
-      .query("tableAssignments")
-      .withIndex("by_table_time", (q: any) =>
-        q.eq("tableId", assignment.tableId),
-      )
-      .take(500);
-    const stillBusy = otherActive.some(
-      (item: Doc<"tableAssignments">) =>
-        item._id !== assignment._id &&
-        !item.releasedAt &&
-        item.startsAt <= Date.now() &&
-        item.endsAt >= Date.now(),
-    );
+    await ctx.db.patch(assignment._id, { releasedAt: Date.now(), releasedReason: args.reason });
+    const otherActive = await ctx.db.query('tableAssignments').withIndex('by_table_time', (q: any) => q.eq('tableId', assignment.tableId)).collect();
+    const stillBusy = otherActive.some((item: Doc<'tableAssignments'>) => item._id !== assignment._id && !item.releasedAt && item.startsAt <= Date.now() && item.endsAt >= Date.now());
     if (!stillBusy) {
-      await applyTableStatus(
-        ctx,
-        args.venueId,
-        assignment.tableId,
-        "available",
-        null,
-        args.reason,
-      );
+      await applyTableStatus(ctx, args.venueId, assignment.tableId, 'available', null, args.reason);
     }
     if (assignment.reservationId) {
       const reservation = await ctx.db.get(assignment.reservationId);
-      if (reservation)
-        await ctx.db.patch(reservation._id, {
-          status: "confirmed",
-          updatedAt: Date.now(),
-        });
+      if (reservation) await ctx.db.patch(reservation._id, { status: 'confirmed', updatedAt: Date.now() });
     }
     if (assignment.waitlistId) {
       const waitlist = await ctx.db.get(assignment.waitlistId);
-      if (waitlist)
-        await ctx.db.patch(waitlist._id, {
-          status: "waiting",
-          updatedAt: Date.now(),
-        });
+      if (waitlist) await ctx.db.patch(waitlist._id, { status: 'waiting', updatedAt: Date.now() });
     }
     return null;
   },

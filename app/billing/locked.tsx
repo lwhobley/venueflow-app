@@ -19,7 +19,6 @@ type PlanId = (typeof plans)[number]['id'];
 
 const headlineByReason: Record<string, string> = {
   trial_expired: 'Your 3-day trial has ended',
-  trial_active: 'Upgrade to unlock this feature',
   payment_failed: "Your payment didn't go through",
   cancelled: 'Your subscription has been cancelled',
   never_subscribed: 'Subscribe to access Venue Wrangler',

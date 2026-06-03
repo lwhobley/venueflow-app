@@ -189,7 +189,6 @@ async function upsertReservationGuest(ctx: any, args: { venueId: Id<'venues'>; g
   if (guest) {
     await ctx.db.patch(guest._id, {
       fullName: args.guestName.trim(),
-      nameLower: args.guestName.trim().toLowerCase(),
       phone: phone ?? guest.phone,
       email: email ?? guest.email,
       company: company ?? guest.company,
@@ -202,7 +201,6 @@ async function upsertReservationGuest(ctx: any, args: { venueId: Id<'venues'>; g
   return await ctx.db.insert('guests', {
     venueId: args.venueId,
     fullName: args.guestName.trim(),
-    nameLower: args.guestName.trim().toLowerCase(),
     phone,
     email,
     company,

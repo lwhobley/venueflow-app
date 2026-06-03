@@ -32,11 +32,9 @@ import type * as reservationIntegrations from "../reservationIntegrations.js";
 import type * as reservations from "../reservations.js";
 import type * as scheduleEmails from "../scheduleEmails.js";
 import type * as scheduling from "../scheduling.js";
-import type * as secrets from "../secrets.js";
 import type * as seed from "../seed.js";
 import type * as staffAuth from "../staffAuth.js";
 import type * as tables from "../tables.js";
-import type * as webhookRateLimit from "../webhookRateLimit.js";
 
 import type {
   ApiFromModules,
@@ -69,11 +67,9 @@ declare const fullApi: ApiFromModules<{
   reservations: typeof reservations;
   scheduleEmails: typeof scheduleEmails;
   scheduling: typeof scheduling;
-  secrets: typeof secrets;
   seed: typeof seed;
   staffAuth: typeof staffAuth;
   tables: typeof tables;
-  webhookRateLimit: typeof webhookRateLimit;
 }>;
 
 /**

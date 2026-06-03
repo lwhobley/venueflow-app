@@ -1,28 +1,14 @@
-import { internalMutation, mutation, query } from "./_generated/server";
-import { v } from "convex/values";
-import type { Doc, Id } from "./_generated/dataModel";
-import { requirePaidSubscription } from "./billing/shared";
-import { timingSafeEqual, newWebhookSecret } from "./secrets";
-import { canManage, getProfileOrNull } from "./authz";
+import { internalMutation, mutation, query } from './_generated/server';
+import { v } from 'convex/values';
+import { getAuthUserId } from '@convex-dev/auth/server';
+import type { Doc, Id } from './_generated/dataModel';
+import { requirePaidSubscription } from './billing/shared';
 
 type AnyCtx = any;
 
-const posProviderValue = v.union(
-  v.literal("toast"),
-  v.literal("square"),
-  v.literal("clover"),
-  v.literal("generic"),
-);
-const posConnectionStatusValue = v.union(
-  v.literal("connected"),
-  v.literal("paused"),
-  v.literal("error"),
-);
-const posCheckStatusValue = v.union(
-  v.literal("open"),
-  v.literal("paid"),
-  v.literal("void"),
-);
+const posProviderValue = v.union(v.literal('toast'), v.literal('square'), v.literal('clover'), v.literal('generic'));
+const posConnectionStatusValue = v.union(v.literal('connected'), v.literal('paused'), v.literal('error'));
+const posCheckStatusValue = v.union(v.literal('open'), v.literal('paid'), v.literal('void'));
 
 const menuItemInputValue = v.object({
   name: v.string(),
@@ -70,8 +56,8 @@ const posLaborPunchInputValue = v.object({
 });
 
 const posCheckValue = v.object({
-  _id: v.id("posChecks"),
-  venueId: v.id("venues"),
+  _id: v.id('posChecks'),
+  venueId: v.id('venues'),
   provider: posProviderValue,
   externalCheckId: v.string(),
   tableLabel: v.union(v.string(), v.null()),
@@ -89,24 +75,14 @@ const posCheckValue = v.object({
   discountCents: v.union(v.number(), v.null()),
   compCents: v.union(v.number(), v.null()),
   promoCents: v.union(v.number(), v.null()),
-  menuItems: v.union(
-    v.array(
-      v.object({
-        name: v.string(),
-        category: v.union(v.string(), v.null()),
-        quantity: v.number(),
-        priceCents: v.number(),
-      }),
-    ),
-    v.null(),
-  ),
+  menuItems: v.union(v.array(v.object({ name: v.string(), category: v.union(v.string(), v.null()), quantity: v.number(), priceCents: v.number() })), v.null()),
   status: posCheckStatusValue,
   updatedAt: v.number(),
 });
 
 const posConnectionValue = v.object({
-  _id: v.id("posConnections"),
-  venueId: v.id("venues"),
+  _id: v.id('posConnections'),
+  venueId: v.id('venues'),
   provider: posProviderValue,
   externalLocationId: v.union(v.string(), v.null()),
   status: posConnectionStatusValue,
@@ -117,8 +93,8 @@ const posConnectionValue = v.object({
 
 // Secret-bearing shape returned once at create/rotate; never via reads.
 const posConnectionWithSecretValue = v.object({
-  _id: v.id("posConnections"),
-  venueId: v.id("venues"),
+  _id: v.id('posConnections'),
+  venueId: v.id('venues'),
   provider: posProviderValue,
   externalLocationId: v.union(v.string(), v.null()),
   status: posConnectionStatusValue,
@@ -128,42 +104,33 @@ const posConnectionWithSecretValue = v.object({
   updatedAt: v.number(),
 });
 
+function secretsMatch(a: string | undefined | null, b: string | undefined | null) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function newWebhookSecret() {
+  return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
+}
+
+function canManage(role: string) {
+  return role === 'admin' || role === 'owner' || role === 'manager';
+}
+
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }
 
-// Resolves the connection for a venue+provider, tolerating venues that have more
-// than one row for the same provider (e.g. two locations). When the caller names
-// an externalLocationId we prefer the row bound to it; otherwise the first match.
-// Using collect() instead of unique() means a duplicate row never hard-crashes
-// ingestion.
-async function findPosConnection(
-  ctx: AnyCtx,
-  venueId: Id<"venues">,
-  provider: "toast" | "square" | "clover" | "generic",
-  externalLocationId?: string,
-): Promise<Doc<"posConnections"> | null> {
-  const connections: Doc<"posConnections">[] = await ctx.db
-    .query("posConnections")
-    .withIndex("by_venue_and_provider", (q: any) =>
-      q.eq("venueId", venueId).eq("provider", provider),
-    )
-    .take(20);
-  if (connections.length === 0) return null;
-  if (externalLocationId) {
-    const bound = connections.find(
-      (c) => c.externalLocationId === externalLocationId,
-    );
-    if (bound) return bound;
-    // A location-bound connection exists but none match the incoming id: do not
-    // silently fall through to an unrelated location.
-    if (connections.some((c) => c.externalLocationId)) return null;
-  }
-  return connections[0];
+async function getProfile(ctx: AnyCtx) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) return null;
+  return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
-function mapConnection(connection: Doc<"posConnections">) {
+function mapConnection(connection: Doc<'posConnections'>) {
   return {
     _id: connection._id,
     venueId: connection.venueId,
@@ -176,7 +143,7 @@ function mapConnection(connection: Doc<"posConnections">) {
   };
 }
 
-function mapCheck(check: Doc<"posChecks">) {
+function mapCheck(check: Doc<'posChecks'>) {
   return {
     _id: check._id,
     venueId: check.venueId,
@@ -198,71 +165,26 @@ function mapCheck(check: Doc<"posChecks">) {
     compCents: check.compCents ?? null,
     promoCents: check.promoCents ?? null,
     menuItems: check.menuItems
-      ? check.menuItems.map((it) => ({
-          name: it.name,
-          category: it.category ?? null,
-          quantity: it.quantity,
-          priceCents: it.priceCents,
-        }))
+      ? check.menuItems.map((it) => ({ name: it.name, category: it.category ?? null, quantity: it.quantity, priceCents: it.priceCents }))
       : null,
     status: check.status,
     updatedAt: check.updatedAt,
   };
 }
 
-async function findGuestByName(
-  ctx: AnyCtx,
-  venueId: Id<"venues">,
-  guestName: string | undefined,
-) {
+async function findGuestByName(ctx: AnyCtx, venueId: Id<'venues'>, guestName: string | undefined) {
   const name = guestName?.trim().toLowerCase();
   if (!name) return null;
-  // Fast path: indexed by lowercased name. Re-verify fullName so a stale
-  // nameLower (e.g. an un-synced rename) can never produce a false match.
-  const indexed = await ctx.db
-    .query("guests")
-    .withIndex("by_venue_nameLower", (q: any) =>
-      q.eq("venueId", venueId).eq("nameLower", name),
-    )
-    .take(10);
-  const hit = indexed.find(
-    (guest: Doc<"guests">) => guest.fullName.trim().toLowerCase() === name,
-  );
-  if (hit) return hit;
-  // Legacy rows written before nameLower existed aren't in the index. Fall back
-  // to a scan and backfill the match so it's indexed next time — the system
-  // self-heals without a manual migration.
-  const guests = await ctx.db
-    .query("guests")
-    .withIndex("by_venue", (q: any) => q.eq("venueId", venueId))
-    .take(500);
-  const match =
-    guests.find(
-      (guest: Doc<"guests">) => guest.fullName.trim().toLowerCase() === name,
-    ) ?? null;
-  if (match && match.nameLower !== name)
-    await ctx.db.patch(match._id, { nameLower: name });
-  return match;
+  const guests = await ctx.db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).take(100);
+  return guests.find((guest: Doc<'guests'>) => guest.fullName.toLowerCase() === name) ?? null;
 }
 
-async function upsertCheck(
-  ctx: AnyCtx,
-  args: {
-    venueId: Id<"venues">;
-    provider: "toast" | "square" | "clover" | "generic";
-    check: any;
-  },
-) {
+async function upsertCheck(ctx: AnyCtx, args: { venueId: Id<'venues'>; provider: 'toast' | 'square' | 'clover' | 'generic'; check: any }) {
   const now = Date.now();
   const guest = await findGuestByName(ctx, args.venueId, args.check.guestName);
   const existing = await ctx.db
-    .query("posChecks")
-    .withIndex("by_venue_provider_external", (q: any) =>
-      q
-        .eq("venueId", args.venueId)
-        .eq("provider", args.provider)
-        .eq("externalCheckId", args.check.externalCheckId),
-    )
+    .query('posChecks')
+    .withIndex('by_venue_provider_external', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider).eq('externalCheckId', args.check.externalCheckId))
     .unique();
   const c = args.check;
   const payload = {
@@ -273,33 +195,18 @@ async function upsertCheck(
     serverName: cleanText(c.serverName),
     guestName: cleanText(c.guestName),
     guestId: guest?._id,
-    guestCount:
-      typeof c.guestCount === "number"
-        ? Math.max(0, Math.round(c.guestCount))
-        : undefined,
+    guestCount: typeof c.guestCount === 'number' ? Math.max(0, Math.round(c.guestCount)) : undefined,
     revenueCenter: cleanText(c.revenueCenter),
     tenderType: cleanText(c.tenderType),
     openedAt: c.openedAt,
     closedAt: c.closedAt,
     subtotalCents: Math.max(0, Math.round(c.subtotalCents)),
-    taxCents:
-      typeof c.taxCents === "number"
-        ? Math.max(0, Math.round(c.taxCents))
-        : undefined,
+    taxCents: typeof c.taxCents === 'number' ? Math.max(0, Math.round(c.taxCents)) : undefined,
     tipCents: Math.max(0, Math.round(c.tipCents)),
     totalCents: Math.max(0, Math.round(c.totalCents)),
-    discountCents:
-      typeof c.discountCents === "number"
-        ? Math.max(0, Math.round(c.discountCents))
-        : undefined,
-    compCents:
-      typeof c.compCents === "number"
-        ? Math.max(0, Math.round(c.compCents))
-        : undefined,
-    promoCents:
-      typeof c.promoCents === "number"
-        ? Math.max(0, Math.round(c.promoCents))
-        : undefined,
+    discountCents: typeof c.discountCents === 'number' ? Math.max(0, Math.round(c.discountCents)) : undefined,
+    compCents: typeof c.compCents === 'number' ? Math.max(0, Math.round(c.compCents)) : undefined,
+    promoCents: typeof c.promoCents === 'number' ? Math.max(0, Math.round(c.promoCents)) : undefined,
     menuItems: Array.isArray(c.menuItems)
       ? c.menuItems.map((it: any) => ({
           name: String(it.name).slice(0, 200),
@@ -315,12 +222,12 @@ async function upsertCheck(
   if (existing) {
     await ctx.db.patch(existing._id, payload);
     const updated = await ctx.db.get(existing._id);
-    if (!updated) throw new Error("Unable to update POS check");
+    if (!updated) throw new Error('Unable to update POS check');
     return updated;
   }
-  const id: Id<"posChecks"> = await ctx.db.insert("posChecks", payload);
+  const id: Id<'posChecks'> = await ctx.db.insert('posChecks', payload);
   const created = await ctx.db.get(id);
-  if (!created) throw new Error("Unable to create POS check");
+  if (!created) throw new Error('Unable to create POS check');
   return created;
 }
 
@@ -335,23 +242,15 @@ function dayBounds(offsetDays: number) {
 
 function isoDate(ts: number) {
   const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // Aggregate check-level fields into a running summary object.
-function accumulateCheck(
-  acc: {
-    salesCents: number;
-    taxCents: number;
-    tipCents: number;
-    discountCents: number;
-    compCents: number;
-    promoCents: number;
-    checkCount: number;
-    coverCount: number;
-  },
-  c: Doc<"posChecks">,
-) {
+function accumulateCheck(acc: {
+  salesCents: number; taxCents: number; tipCents: number;
+  discountCents: number; compCents: number; promoCents: number;
+  checkCount: number; coverCount: number;
+}, c: Doc<'posChecks'>) {
   acc.salesCents += c.totalCents;
   acc.taxCents += c.taxCents ?? 0;
   acc.tipCents += c.tipCents;
@@ -365,7 +264,7 @@ function accumulateCheck(
 // ---------- Queries ----------
 
 export const getPosOverview = query({
-  args: { venueId: v.id("venues") },
+  args: { venueId: v.id('venues') },
   returns: v.union(
     v.null(),
     v.object({
@@ -378,45 +277,23 @@ export const getPosOverview = query({
     }),
   ),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
-    const connections = await (ctx as AnyCtx).db
-      .query("posConnections")
-      .withIndex("by_venue", (q: any) => q.eq("venueId", args.venueId))
-      .take(10);
-    const checks = await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) => q.eq("venueId", args.venueId))
-      .order("desc")
-      .take(50);
+    const connections = await (ctx as AnyCtx).db.query('posConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(10);
+    const checks = await (ctx as AnyCtx).db.query('posChecks').withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(50);
     const { start: dayStart } = dayBounds(0);
-    const todaysChecks = checks.filter(
-      (c: Doc<"posChecks">) => c.openedAt >= dayStart,
-    );
+    const todaysChecks = checks.filter((c: Doc<'posChecks'>) => c.openedAt >= dayStart);
     return {
       connections: connections.map(mapConnection),
       recentChecks: checks.map(mapCheck),
-      todaySalesCents: todaysChecks.reduce(
-        (s: number, c: Doc<"posChecks">) => s + c.totalCents,
-        0,
-      ),
-      todayTipsCents: todaysChecks.reduce(
-        (s: number, c: Doc<"posChecks">) => s + c.tipCents,
-        0,
-      ),
-      openChecks: checks.filter((c: Doc<"posChecks">) => c.status === "open")
-        .length,
-      lastSyncAt: connections.reduce(
-        (latest: number | null, conn: Doc<"posConnections">) => {
-          if (!conn.lastSyncAt) return latest;
-          return latest == null
-            ? conn.lastSyncAt
-            : Math.max(latest, conn.lastSyncAt);
-        },
-        null,
-      ),
+      todaySalesCents: todaysChecks.reduce((s: number, c: Doc<'posChecks'>) => s + c.totalCents, 0),
+      todayTipsCents: todaysChecks.reduce((s: number, c: Doc<'posChecks'>) => s + c.tipCents, 0),
+      openChecks: checks.filter((c: Doc<'posChecks'>) => c.status === 'open').length,
+      lastSyncAt: connections.reduce((latest: number | null, conn: Doc<'posConnections'>) => {
+        if (!conn.lastSyncAt) return latest;
+        return latest == null ? conn.lastSyncAt : Math.max(latest, conn.lastSyncAt);
+      }, null),
     };
   },
 });
@@ -463,15 +340,14 @@ const salesSummaryDashboardValue = v.object({
 
 export const getSalesSummary = query({
   args: {
-    venueId: v.id("venues"),
+    venueId: v.id('venues'),
     // Number of days back from today. 0 = today, 1 = yesterday, 7 = last 7 days.
     windowDays: v.number(),
   },
   returns: v.union(v.null(), salesSummaryValue),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -479,29 +355,13 @@ export const getSalesSummary = query({
     const end = dayBounds(1).start; // midnight tonight
 
     const checks = await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("openedAt", start)
-          .lt("openedAt", end),
-      )
-      .order("asc")
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
       .take(5000);
 
-    const paid = (checks as Doc<"posChecks">[]).filter(
-      (c) => c.status !== "void",
-    );
-    const acc = {
-      salesCents: 0,
-      taxCents: 0,
-      tipCents: 0,
-      discountCents: 0,
-      compCents: 0,
-      promoCents: 0,
-      checkCount: 0,
-      coverCount: 0,
-    };
+    const paid = (checks as Doc<'posChecks'>[]).filter((c) => c.status !== 'void');
+    const acc = { salesCents: 0, taxCents: 0, tipCents: 0, discountCents: 0, compCents: 0, promoCents: 0, checkCount: 0, coverCount: 0 };
     let totalTimeMins = 0;
     let timedChecks = 0;
     for (const c of paid) {
@@ -513,26 +373,21 @@ export const getSalesSummary = query({
     }
     return {
       ...acc,
-      avgCheckCents: acc.checkCount
-        ? Math.round(acc.salesCents / acc.checkCount)
-        : 0,
-      avgCheckTimeMins: timedChecks
-        ? Math.round(totalTimeMins / timedChecks)
-        : null,
+      avgCheckCents: acc.checkCount ? Math.round(acc.salesCents / acc.checkCount) : 0,
+      avgCheckTimeMins: timedChecks ? Math.round(totalTimeMins / timedChecks) : null,
     };
   },
 });
 
 export const getSalesSummaryDashboard = query({
   args: {
-    venueId: v.id("venues"),
+    venueId: v.id('venues'),
     windowDays: v.number(),
   },
   returns: v.union(v.null(), salesSummaryDashboardValue),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -540,43 +395,20 @@ export const getSalesSummaryDashboard = query({
     const end = dayBounds(1).start;
 
     const checks = (await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("openedAt", start)
-          .lt("openedAt", end),
-      )
-      .order("asc")
-      .take(5000)) as Doc<"posChecks">[];
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
+      .take(5000)) as Doc<'posChecks'>[];
 
-    const acc = {
-      salesCents: 0,
-      taxCents: 0,
-      tipCents: 0,
-      discountCents: 0,
-      compCents: 0,
-      promoCents: 0,
-      checkCount: 0,
-      coverCount: 0,
-    };
-    const byDay = new Map<
-      string,
-      { salesCents: number; checkCount: number; coverCount: number }
-    >();
-    const byTender = new Map<
-      string,
-      { salesCents: number; checkCount: number }
-    >();
-    const byRevenueCenter = new Map<
-      string,
-      { salesCents: number; checkCount: number; coverCount: number }
-    >();
+    const acc = { salesCents: 0, taxCents: 0, tipCents: 0, discountCents: 0, compCents: 0, promoCents: 0, checkCount: 0, coverCount: 0 };
+    const byDay = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
+    const byTender = new Map<string, { salesCents: number; checkCount: number }>();
+    const byRevenueCenter = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
     let totalTimeMins = 0;
     let timedChecks = 0;
 
     for (const check of checks) {
-      if (check.status === "void") continue;
+      if (check.status === 'void') continue;
       accumulateCheck(acc, check);
       if (check.closedAt) {
         totalTimeMins += (check.closedAt - check.openedAt) / 60_000;
@@ -584,31 +416,20 @@ export const getSalesSummaryDashboard = query({
       }
 
       const date = isoDate(check.openedAt);
-      const dayRow = byDay.get(date) ?? {
-        salesCents: 0,
-        checkCount: 0,
-        coverCount: 0,
-      };
+      const dayRow = byDay.get(date) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
       dayRow.salesCents += check.totalCents;
       dayRow.checkCount += 1;
       dayRow.coverCount += check.guestCount ?? 1;
       byDay.set(date, dayRow);
 
-      const tender = check.tenderType?.trim() || "Unknown";
-      const tenderRow = byTender.get(tender) ?? {
-        salesCents: 0,
-        checkCount: 0,
-      };
+      const tender = check.tenderType?.trim() || 'Unknown';
+      const tenderRow = byTender.get(tender) ?? { salesCents: 0, checkCount: 0 };
       tenderRow.salesCents += check.totalCents;
       tenderRow.checkCount += 1;
       byTender.set(tender, tenderRow);
 
-      const revenueCenter = check.revenueCenter?.trim() || "Default";
-      const revenueCenterRow = byRevenueCenter.get(revenueCenter) ?? {
-        salesCents: 0,
-        checkCount: 0,
-        coverCount: 0,
-      };
+      const revenueCenter = check.revenueCenter?.trim() || 'Default';
+      const revenueCenterRow = byRevenueCenter.get(revenueCenter) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
       revenueCenterRow.salesCents += check.totalCents;
       revenueCenterRow.checkCount += 1;
       revenueCenterRow.coverCount += check.guestCount ?? 1;
@@ -618,12 +439,8 @@ export const getSalesSummaryDashboard = query({
     return {
       summary: {
         ...acc,
-        avgCheckCents: acc.checkCount
-          ? Math.round(acc.salesCents / acc.checkCount)
-          : 0,
-        avgCheckTimeMins: timedChecks
-          ? Math.round(totalTimeMins / timedChecks)
-          : null,
+        avgCheckCents: acc.checkCount ? Math.round(acc.salesCents / acc.checkCount) : 0,
+        avgCheckTimeMins: timedChecks ? Math.round(totalTimeMins / timedChecks) : null,
       },
       byDay: Array.from(byDay.entries())
         .sort(([a], [b]) => a.localeCompare(b))
@@ -640,22 +457,11 @@ export const getSalesSummaryDashboard = query({
 
 // Per-day breakdown for sparklines: array of { date, salesCents, checkCount }
 export const getSalesByDay = query({
-  args: { venueId: v.id("venues"), windowDays: v.number() },
-  returns: v.union(
-    v.null(),
-    v.array(
-      v.object({
-        date: v.string(),
-        salesCents: v.number(),
-        checkCount: v.number(),
-        coverCount: v.number(),
-      }),
-    ),
-  ),
+  args: { venueId: v.id('venues'), windowDays: v.number() },
+  returns: v.union(v.null(), v.array(v.object({ date: v.string(), salesCents: v.number(), checkCount: v.number(), coverCount: v.number() }))),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -663,28 +469,16 @@ export const getSalesByDay = query({
     const end = dayBounds(1).start;
 
     const checks = await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("openedAt", start)
-          .lt("openedAt", end),
-      )
-      .order("asc")
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
       .take(5000);
 
-    const byDay = new Map<
-      string,
-      { salesCents: number; checkCount: number; coverCount: number }
-    >();
-    for (const c of checks as Doc<"posChecks">[]) {
-      if (c.status === "void") continue;
+    const byDay = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
+    for (const c of (checks as Doc<'posChecks'>[])) {
+      if (c.status === 'void') continue;
       const date = isoDate(c.openedAt);
-      const row = byDay.get(date) ?? {
-        salesCents: 0,
-        checkCount: 0,
-        coverCount: 0,
-      };
+      const row = byDay.get(date) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
       row.salesCents += c.totalCents;
       row.checkCount += 1;
       row.coverCount += c.guestCount ?? 1;
@@ -698,26 +492,20 @@ export const getSalesByDay = query({
 
 // Per-server breakdown: sales, tips, checks, covers.
 export const getSalesByServer = query({
-  args: { venueId: v.id("venues"), windowDays: v.number() },
-  returns: v.union(
-    v.null(),
-    v.array(
-      v.object({
-        serverName: v.string(),
-        salesCents: v.number(),
-        tipCents: v.number(),
-        discountCents: v.number(),
-        compCents: v.number(),
-        checkCount: v.number(),
-        coverCount: v.number(),
-        avgCheckCents: v.number(),
-      }),
-    ),
-  ),
+  args: { venueId: v.id('venues'), windowDays: v.number() },
+  returns: v.union(v.null(), v.array(v.object({
+    serverName: v.string(),
+    salesCents: v.number(),
+    tipCents: v.number(),
+    discountCents: v.number(),
+    compCents: v.number(),
+    checkCount: v.number(),
+    coverCount: v.number(),
+    avgCheckCents: v.number(),
+  }))),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -725,36 +513,17 @@ export const getSalesByServer = query({
     const end = dayBounds(1).start;
 
     const checks = await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("openedAt", start)
-          .lt("openedAt", end),
-      )
-      .order("asc")
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
       .take(5000);
 
-    type Row = {
-      salesCents: number;
-      tipCents: number;
-      discountCents: number;
-      compCents: number;
-      checkCount: number;
-      coverCount: number;
-    };
+    type Row = { salesCents: number; tipCents: number; discountCents: number; compCents: number; checkCount: number; coverCount: number };
     const byServer = new Map<string, Row>();
-    for (const c of checks as Doc<"posChecks">[]) {
-      if (c.status === "void") continue;
-      const name = c.serverName?.trim() || "Unknown";
-      const row = byServer.get(name) ?? {
-        salesCents: 0,
-        tipCents: 0,
-        discountCents: 0,
-        compCents: 0,
-        checkCount: 0,
-        coverCount: 0,
-      };
+    for (const c of (checks as Doc<'posChecks'>[])) {
+      if (c.status === 'void') continue;
+      const name = c.serverName?.trim() || 'Unknown';
+      const row = byServer.get(name) ?? { salesCents: 0, tipCents: 0, discountCents: 0, compCents: 0, checkCount: 0, coverCount: 0 };
       row.salesCents += c.totalCents;
       row.tipCents += c.tipCents;
       row.discountCents += c.discountCents ?? 0;
@@ -764,35 +533,23 @@ export const getSalesByServer = query({
       byServer.set(name, row);
     }
     return Array.from(byServer.entries())
-      .map(([serverName, r]) => ({
-        serverName,
-        ...r,
-        avgCheckCents: r.checkCount
-          ? Math.round(r.salesCents / r.checkCount)
-          : 0,
-      }))
+      .map(([serverName, r]) => ({ serverName, ...r, avgCheckCents: r.checkCount ? Math.round(r.salesCents / r.checkCount) : 0 }))
       .sort((a, b) => b.salesCents - a.salesCents);
   },
 });
 
 // Per-revenue-center breakdown.
 export const getSalesByRevenueCenter = query({
-  args: { venueId: v.id("venues"), windowDays: v.number() },
-  returns: v.union(
-    v.null(),
-    v.array(
-      v.object({
-        revenueCenter: v.string(),
-        salesCents: v.number(),
-        checkCount: v.number(),
-        coverCount: v.number(),
-      }),
-    ),
-  ),
+  args: { venueId: v.id('venues'), windowDays: v.number() },
+  returns: v.union(v.null(), v.array(v.object({
+    revenueCenter: v.string(),
+    salesCents: v.number(),
+    checkCount: v.number(),
+    coverCount: v.number(),
+  }))),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -800,28 +557,16 @@ export const getSalesByRevenueCenter = query({
     const end = dayBounds(1).start;
 
     const checks = await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("openedAt", start)
-          .lt("openedAt", end),
-      )
-      .order("asc")
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
       .take(5000);
 
-    const byRC = new Map<
-      string,
-      { salesCents: number; checkCount: number; coverCount: number }
-    >();
-    for (const c of checks as Doc<"posChecks">[]) {
-      if (c.status === "void") continue;
-      const rc = c.revenueCenter?.trim() || "Default";
-      const row = byRC.get(rc) ?? {
-        salesCents: 0,
-        checkCount: 0,
-        coverCount: 0,
-      };
+    const byRC = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
+    for (const c of (checks as Doc<'posChecks'>[])) {
+      if (c.status === 'void') continue;
+      const rc = c.revenueCenter?.trim() || 'Default';
+      const row = byRC.get(rc) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
       row.salesCents += c.totalCents;
       row.checkCount += 1;
       row.coverCount += c.guestCount ?? 1;
@@ -835,21 +580,15 @@ export const getSalesByRevenueCenter = query({
 
 // Per-tender-type breakdown.
 export const getSalesByTender = query({
-  args: { venueId: v.id("venues"), windowDays: v.number() },
-  returns: v.union(
-    v.null(),
-    v.array(
-      v.object({
-        tenderType: v.string(),
-        salesCents: v.number(),
-        checkCount: v.number(),
-      }),
-    ),
-  ),
+  args: { venueId: v.id('venues'), windowDays: v.number() },
+  returns: v.union(v.null(), v.array(v.object({
+    tenderType: v.string(),
+    salesCents: v.number(),
+    checkCount: v.number(),
+  }))),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -857,23 +596,15 @@ export const getSalesByTender = query({
     const end = dayBounds(1).start;
 
     const checks = await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("openedAt", start)
-          .lt("openedAt", end),
-      )
-      .order("asc")
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
       .take(5000);
 
-    const byTender = new Map<
-      string,
-      { salesCents: number; checkCount: number }
-    >();
-    for (const c of checks as Doc<"posChecks">[]) {
-      if (c.status === "void") continue;
-      const tender = c.tenderType?.trim() || "Unknown";
+    const byTender = new Map<string, { salesCents: number; checkCount: number }>();
+    for (const c of (checks as Doc<'posChecks'>[])) {
+      if (c.status === 'void') continue;
+      const tender = c.tenderType?.trim() || 'Unknown';
       const row = byTender.get(tender) ?? { salesCents: 0, checkCount: 0 };
       row.salesCents += c.totalCents;
       row.checkCount += 1;
@@ -887,26 +618,16 @@ export const getSalesByTender = query({
 
 // Top-selling menu items by revenue.
 export const getTopMenuItems = query({
-  args: {
-    venueId: v.id("venues"),
-    windowDays: v.number(),
-    limit: v.optional(v.number()),
-  },
-  returns: v.union(
-    v.null(),
-    v.array(
-      v.object({
-        name: v.string(),
-        category: v.union(v.string(), v.null()),
-        quantity: v.number(),
-        salesCents: v.number(),
-      }),
-    ),
-  ),
+  args: { venueId: v.id('venues'), windowDays: v.number(), limit: v.optional(v.number()) },
+  returns: v.union(v.null(), v.array(v.object({
+    name: v.string(),
+    category: v.union(v.string(), v.null()),
+    quantity: v.number(),
+    salesCents: v.number(),
+  }))),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -915,35 +636,17 @@ export const getTopMenuItems = query({
     const end = dayBounds(1).start;
 
     const checks = await (ctx as AnyCtx).db
-      .query("posChecks")
-      .withIndex("by_venue_openedAt", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("openedAt", start)
-          .lt("openedAt", end),
-      )
-      .order("asc")
+      .query('posChecks')
+      .withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId).gte('openedAt', start).lt('openedAt', end))
+      .order('asc')
       .take(5000);
 
-    const byItem = new Map<
-      string,
-      {
-        name: string;
-        category: string | null;
-        quantity: number;
-        salesCents: number;
-      }
-    >();
-    for (const c of checks as Doc<"posChecks">[]) {
-      if (c.status === "void" || !c.menuItems) continue;
+    const byItem = new Map<string, { name: string; category: string | null; quantity: number; salesCents: number }>();
+    for (const c of (checks as Doc<'posChecks'>[])) {
+      if (c.status === 'void' || !c.menuItems) continue;
       for (const it of c.menuItems) {
         const key = it.name.toLowerCase();
-        const row = byItem.get(key) ?? {
-          name: it.name,
-          category: it.category ?? null,
-          quantity: 0,
-          salesCents: 0,
-        };
+        const row = byItem.get(key) ?? { name: it.name, category: it.category ?? null, quantity: 0, salesCents: 0 };
         row.quantity += it.quantity;
         row.salesCents += it.priceCents * it.quantity;
         byItem.set(key, row);
@@ -957,30 +660,24 @@ export const getTopMenuItems = query({
 
 // Labor summary from POS punches for a date window.
 export const getLaborSummary = query({
-  args: { venueId: v.id("venues"), windowDays: v.number() },
-  returns: v.union(
-    v.null(),
-    v.object({
-      totalRegularMins: v.number(),
-      totalOvertimeMins: v.number(),
-      totalPayCents: v.number(),
-      totalTipsCents: v.number(),
-      byEmployee: v.array(
-        v.object({
-          employeeName: v.string(),
-          jobTitle: v.union(v.string(), v.null()),
-          regularMins: v.number(),
-          overtimeMins: v.number(),
-          payCents: v.number(),
-          tipsCents: v.number(),
-        }),
-      ),
-    }),
-  ),
+  args: { venueId: v.id('venues'), windowDays: v.number() },
+  returns: v.union(v.null(), v.object({
+    totalRegularMins: v.number(),
+    totalOvertimeMins: v.number(),
+    totalPayCents: v.number(),
+    totalTipsCents: v.number(),
+    byEmployee: v.array(v.object({
+      employeeName: v.string(),
+      jobTitle: v.union(v.string(), v.null()),
+      regularMins: v.number(),
+      overtimeMins: v.number(),
+      payCents: v.number(),
+      tipsCents: v.number(),
+    })),
+  })),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      return null;
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
@@ -992,39 +689,21 @@ export const getLaborSummary = query({
     const dateSet = new Set(dates);
 
     const punches = await (ctx as AnyCtx).db
-      .query("posLaborPunches")
-      .withIndex("by_venue_date", (q: any) =>
-        q
-          .eq("venueId", args.venueId)
-          .gte("businessDate", dates[0])
-          .lte("businessDate", dates[dates.length - 1]),
-      )
-      .order("asc")
+      .query('posLaborPunches')
+      .withIndex('by_venue_date', (q: any) => q.eq('venueId', args.venueId).gte('businessDate', dates[0]).lte('businessDate', dates[dates.length - 1]))
+      .order('asc')
       .take(2000);
 
-    type EmpRow = {
-      employeeName: string;
-      jobTitle: string | null;
-      regularMins: number;
-      overtimeMins: number;
-      payCents: number;
-      tipsCents: number;
-    };
+    type EmpRow = { employeeName: string; jobTitle: string | null; regularMins: number; overtimeMins: number; payCents: number; tipsCents: number };
     const byEmp = new Map<string, EmpRow>();
-    let totalRegularMins = 0,
-      totalOvertimeMins = 0,
-      totalPayCents = 0,
-      totalTipsCents = 0;
+    let totalRegularMins = 0, totalOvertimeMins = 0, totalPayCents = 0, totalTipsCents = 0;
 
-    for (const p of punches as Doc<"posLaborPunches">[]) {
+    for (const p of (punches as Doc<'posLaborPunches'>[])) {
       if (!dateSet.has(p.businessDate)) continue;
       const row = byEmp.get(p.externalEmployeeId) ?? {
         employeeName: p.employeeName,
         jobTitle: p.jobTitle ?? null,
-        regularMins: 0,
-        overtimeMins: 0,
-        payCents: 0,
-        tipsCents: 0,
+        regularMins: 0, overtimeMins: 0, payCents: 0, tipsCents: 0,
       };
       const reg = p.regularMinutes ?? 0;
       const ot = p.overtimeMinutes ?? 0;
@@ -1045,9 +724,7 @@ export const getLaborSummary = query({
       totalOvertimeMins,
       totalPayCents,
       totalTipsCents,
-      byEmployee: Array.from(byEmp.values()).sort(
-        (a, b) => b.payCents - a.payCents,
-      ),
+      byEmployee: Array.from(byEmp.values()).sort((a, b) => b.payCents - a.payCents),
     };
   },
 });
@@ -1056,28 +733,22 @@ export const getLaborSummary = query({
 
 export const upsertPosConnection = mutation({
   args: {
-    venueId: v.id("venues"),
+    venueId: v.id('venues'),
     provider: posProviderValue,
     externalLocationId: v.optional(v.string()),
     status: posConnectionStatusValue,
   },
   returns: posConnectionWithSecretValue,
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      throw new Error("Not authorized");
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
-    // Match on location too, so re-saving a location updates its row while a new
-    // location creates its own — and so this never trips .unique() if a venue
-    // ends up with more than one connection per provider.
-    const existing = await findPosConnection(
-      ctx as AnyCtx,
-      args.venueId,
-      args.provider,
-      cleanText(args.externalLocationId),
-    );
+    const existing = await (ctx as AnyCtx).db
+      .query('posConnections')
+      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
+      .unique();
     const payload = {
       venueId: args.venueId,
       provider: args.provider,
@@ -1087,80 +758,55 @@ export const upsertPosConnection = mutation({
     };
     if (existing) {
       const freshSecret = existing.webhookSecret ? null : newWebhookSecret();
-      await (ctx as AnyCtx).db.patch(
-        existing._id,
-        freshSecret ? { ...payload, webhookSecret: freshSecret } : payload,
-      );
+      await (ctx as AnyCtx).db.patch(existing._id, freshSecret ? { ...payload, webhookSecret: freshSecret } : payload);
       const updated = await (ctx as AnyCtx).db.get(existing._id);
-      if (!updated) throw new Error("Unable to update POS connection");
+      if (!updated) throw new Error('Unable to update POS connection');
       return { ...mapConnection(updated), webhookSecret: freshSecret };
     }
     const secret = newWebhookSecret();
-    const id: Id<"posConnections"> = await (ctx as AnyCtx).db.insert(
-      "posConnections",
-      { ...payload, webhookSecret: secret, createdAt: now },
-    );
+    const id: Id<'posConnections'> = await (ctx as AnyCtx).db.insert('posConnections', { ...payload, webhookSecret: secret, createdAt: now });
     const created = await (ctx as AnyCtx).db.get(id);
-    if (!created) throw new Error("Unable to create POS connection");
+    if (!created) throw new Error('Unable to create POS connection');
     return { ...mapConnection(created), webhookSecret: secret };
   },
 });
 
 export const rotatePosConnectionSecret = mutation({
-  args: { connectionId: v.id("posConnections") },
+  args: { connectionId: v.id('posConnections') },
   returns: v.object({ webhookSecret: v.string() }),
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
+    const profile = await getProfile(ctx as AnyCtx);
     const connection = await (ctx as AnyCtx).db.get(args.connectionId);
-    if (!connection) throw new Error("Connection not found");
-    if (
-      !profile ||
-      profile.venueId !== connection.venueId ||
-      !canManage(profile)
-    )
-      throw new Error("Not authorized");
+    if (!connection) throw new Error('Connection not found');
+    if (!profile || profile.venueId !== connection.venueId || !canManage(profile.role)) throw new Error('Not authorized');
     await requirePaidSubscription(ctx as AnyCtx, connection.venueId);
     const secret = newWebhookSecret();
-    await (ctx as AnyCtx).db.patch(connection._id, {
-      webhookSecret: secret,
-      updatedAt: Date.now(),
-    });
+    await (ctx as AnyCtx).db.patch(connection._id, { webhookSecret: secret, updatedAt: Date.now() });
     return { webhookSecret: secret };
   },
 });
 
 export const importPosCheck = mutation({
-  args: {
-    venueId: v.id("venues"),
-    provider: posProviderValue,
-    check: posCheckInputValue,
-  },
+  args: { venueId: v.id('venues'), provider: posProviderValue, check: posCheckInputValue },
   returns: posCheckValue,
   handler: async (ctx, args) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
-    if (!profile || profile.venueId !== args.venueId || !canManage(profile))
-      throw new Error("Not authorized");
+    const profile = await getProfile(ctx as AnyCtx);
+    if (!profile || profile.venueId !== args.venueId || !canManage(profile.role)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const check = await upsertCheck(ctx as AnyCtx, args);
-    const connection = await findPosConnection(
-      ctx as AnyCtx,
-      args.venueId,
-      args.provider,
-    );
-    if (connection)
-      await (ctx as AnyCtx).db.patch(connection._id, {
-        lastSyncAt: Date.now(),
-        status: "connected",
-        updatedAt: Date.now(),
-      });
+    const connection = await (ctx as AnyCtx).db
+      .query('posConnections')
+      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
+      .unique();
+    if (connection) await (ctx as AnyCtx).db.patch(connection._id, { lastSyncAt: Date.now(), status: 'connected', updatedAt: Date.now() });
     return mapCheck(check);
   },
 });
 
 export const ingestPosCheck = internalMutation({
   args: {
-    venueId: v.id("venues"),
+    venueId: v.id('venues'),
     provider: posProviderValue,
     check: posCheckInputValue,
     connectionSecret: v.string(),
@@ -1168,69 +814,45 @@ export const ingestPosCheck = internalMutation({
   },
   returns: posCheckValue,
   handler: async (ctx, args) => {
-    const connection = await findPosConnection(
-      ctx as AnyCtx,
-      args.venueId,
-      args.provider,
-      args.externalLocationId,
-    );
-    if (!connection)
-      throw new Error("No POS connection configured for this venue/provider");
-    if (!timingSafeEqual(connection.webhookSecret, args.connectionSecret))
-      throw new Error("Invalid connection secret");
-    // Location is optional per-check metadata inside an already secret-authenticated
-    // connection. Only reject when the webhook actually carries a location that
-    // disagrees — many POS providers don't echo it in each check payload, and
-    // findPosConnection already routes by location when one is supplied.
-    if (
-      connection.externalLocationId &&
-      args.externalLocationId &&
-      connection.externalLocationId !== args.externalLocationId
-    ) {
-      throw new Error("Location mismatch for this connection");
+    const connection = await (ctx as AnyCtx).db
+      .query('posConnections')
+      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
+      .unique();
+    if (!connection) throw new Error('No POS connection configured for this venue/provider');
+    if (!secretsMatch(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
+    if (connection.externalLocationId && args.externalLocationId && connection.externalLocationId !== args.externalLocationId) {
+      throw new Error('Location mismatch for this connection');
     }
     const check = await upsertCheck(ctx as AnyCtx, args);
-    await (ctx as AnyCtx).db.patch(connection._id, {
-      lastSyncAt: Date.now(),
-      status: "connected",
-      updatedAt: Date.now(),
-    });
+    await (ctx as AnyCtx).db.patch(connection._id, { lastSyncAt: Date.now(), status: 'connected', updatedAt: Date.now() });
     return mapCheck(check);
   },
 });
 
 export const ingestLaborPunches = internalMutation({
   args: {
-    venueId: v.id("venues"),
+    venueId: v.id('venues'),
     provider: posProviderValue,
     punches: v.array(posLaborPunchInputValue),
     connectionSecret: v.string(),
   },
   returns: v.object({ upserted: v.number() }),
   handler: async (ctx, args) => {
-    const connection = await findPosConnection(
-      ctx as AnyCtx,
-      args.venueId,
-      args.provider,
-    );
-    if (!connection)
-      throw new Error("No POS connection configured for this venue/provider");
-    if (!timingSafeEqual(connection.webhookSecret, args.connectionSecret))
-      throw new Error("Invalid connection secret");
+    const connection = await (ctx as AnyCtx).db
+      .query('posConnections')
+      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
+      .unique();
+    if (!connection) throw new Error('No POS connection configured for this venue/provider');
+    if (!secretsMatch(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
 
     const now = Date.now();
     let upserted = 0;
     for (const p of args.punches) {
       const existing = await (ctx as AnyCtx).db
-        .query("posLaborPunches")
-        .withIndex("by_venue_employee_businessDate_and_clockInAt", (q: any) =>
-          q
-            .eq("venueId", args.venueId)
-            .eq("externalEmployeeId", p.externalEmployeeId)
-            .eq("businessDate", p.businessDate)
-            .eq("clockInAt", p.clockInAt),
-        )
-        .unique();
+        .query('posLaborPunches')
+        .withIndex('by_venue_employee', (q: any) => q.eq('venueId', args.venueId).eq('externalEmployeeId', p.externalEmployeeId))
+        .filter((q: any) => q.eq(q.field('businessDate'), p.businessDate).eq(q.field('clockInAt'), p.clockInAt))
+        .first();
       const payload = {
         venueId: args.venueId,
         provider: args.provider,
@@ -1252,7 +874,7 @@ export const ingestLaborPunches = internalMutation({
       if (existing) {
         await (ctx as AnyCtx).db.patch(existing._id, payload);
       } else {
-        await (ctx as AnyCtx).db.insert("posLaborPunches", payload);
+        await (ctx as AnyCtx).db.insert('posLaborPunches', payload);
       }
       upserted += 1;
     }
