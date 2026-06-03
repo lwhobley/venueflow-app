@@ -43,12 +43,14 @@ function IntegrationsScreenInner() {
   ) as any;
   const upsertConnection = useMutation(api.pos.upsertPosConnection);
   const upsertReservationConnection = useMutation(api.reservationIntegrations.upsertReservationConnection);
+  const rotateLeadsSecret = useMutation(api.guests.rotateLeadsWebhookSecret);
 
   const [provider, setProvider] = useState<Provider>('toast');
   const [locationId, setLocationId] = useState('');
   const [reservationProvider, setReservationProvider] = useState<ReservationProvider>('opentable');
   const [externalVenueId, setExternalVenueId] = useState('');
-  const [saving, setSaving] = useState(false);
+  // Which action is in flight, so only its button spins (not all three).
+  const [pending, setPending] = useState<'pos' | 'reservation' | 'leads' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   // A freshly generated webhook secret, shown once. It cannot be read back, so
   // the manager must copy it now; rotating issues a new one.
@@ -56,7 +58,7 @@ function IntegrationsScreenInner() {
 
   const saveConnection = async () => {
     if (!venue?.id) return;
-    setSaving(true);
+    setPending('pos');
     setMessage(null);
     try {
       const r = await upsertConnection({
@@ -70,13 +72,13 @@ function IntegrationsScreenInner() {
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not save POS connection.');
     } finally {
-      setSaving(false);
+      setPending(null);
     }
   };
 
   const saveReservationConnection = async () => {
     if (!venue?.id) return;
-    setSaving(true);
+    setPending('reservation');
     setMessage(null);
     try {
       const r = await upsertReservationConnection({
@@ -90,7 +92,22 @@ function IntegrationsScreenInner() {
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not save reservation connection.');
     } finally {
-      setSaving(false);
+      setPending(null);
+    }
+  };
+
+  const generateLeadsSecret = async () => {
+    if (!venue?.id) return;
+    setPending('leads');
+    setMessage(null);
+    try {
+      const r = await rotateLeadsSecret({ venueId: venue.id });
+      if (r?.webhookSecret) setNewSecret(r.webhookSecret);
+      setMessage('Lead webhook secret generated.');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not generate lead webhook secret.');
+    } finally {
+      setPending(null);
     }
   };
 
@@ -155,7 +172,7 @@ function IntegrationsScreenInner() {
           <TextInput label="Provider location ID" value={locationId} onChangeText={setLocationId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
           {message ? <Text style={{ color: message.includes('Could') ? colors.danger : colors.muted }}>{message}</Text> : null}
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-            <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveConnection()}>Save connection</Button>
+            <Button mode="contained" buttonColor={colors.primary} loading={pending === 'pos'} disabled={pending !== null} onPress={() => void saveConnection()}>Save connection</Button>
           </View>
           <Text style={{ color: colors.muted }}>Webhook endpoint: /pos/webhook with the x-venueflow-pos-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
         </Card.Content>
@@ -170,10 +187,23 @@ function IntegrationsScreenInner() {
             ))}
           </View>
           <TextInput label="Provider venue ID" value={externalVenueId} onChangeText={setExternalVenueId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
-          <Button mode="contained" buttonColor={colors.primary} loading={saving} onPress={() => void saveReservationConnection()}>
+          <Button mode="contained" buttonColor={colors.primary} loading={pending === 'reservation'} disabled={pending !== null} onPress={() => void saveReservationConnection()}>
             Save reservation connection
           </Button>
           <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with the x-venueflow-reservation-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>CRM lead capture</Text>
+          <Text style={{ color: colors.muted }}>
+            Pipe website forms, email, or CSV uploads into your guest CRM. Generate a per-venue secret, then POST to /crm/leads with the
+            x-venueflow-leads-secret (deployment) and x-venueflow-connection-secret (per-venue) headers.
+          </Text>
+          <Button mode="contained" buttonColor={colors.primary} loading={pending === 'leads'} disabled={pending !== null} onPress={() => void generateLeadsSecret()}>
+            Generate lead webhook secret
+          </Button>
         </Card.Content>
       </Card>
 

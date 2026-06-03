@@ -78,6 +78,11 @@ export default defineSchema({
     scheduleUpdatedAfterPublishAt: v.optional(v.number()),
     subscriptionStatus: v.optional(v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'))),
     subscriptionPlatform: v.optional(v.union(v.literal('stripe'), v.literal('apple'), v.null())),
+    // Per-venue secret for the /crm/leads webhook. Mirrors the per-connection
+    // secret on posConnections/reservationConnections so a leaked deployment-wide
+    // LEADS_WEBHOOK_SECRET alone can't inject leads into a venue the caller does
+    // not hold this secret for. Generated on demand; never returned via reads.
+    leadsWebhookSecret: v.optional(v.string()),
   }).index('by_code', ['code']),
   venueRoles: defineTable({
     venueId: v.id('venues'),
@@ -98,7 +103,13 @@ export default defineSchema({
     station: v.string(),
     notes: v.optional(v.string()),
     status: v.union(v.literal('scheduled'), v.literal('open'), v.literal('covered')),
-  }).index('by_venueId', ['venueId']).index('by_dayIndex', ['dayIndex']).index('by_profileId', ['profileId']),
+  })
+    .index('by_venueId', ['venueId'])
+    .index('by_dayIndex', ['dayIndex'])
+    .index('by_profileId', ['profileId'])
+    // Scopes double-booking lookups to one venue/person/day instead of loading
+    // every shift a profile has ever worked across all venues.
+    .index('by_venue_profile_day', ['venueId', 'profileId', 'dayIndex']),
   scheduleTemplates: defineTable({
     venueId: v.id('venues'),
     name: v.string(),
@@ -281,7 +292,14 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     deletedAt: v.optional(v.number()),
-  }).index('by_venue', ['venueId']).index('by_phone', ['phone']).index('by_email', ['email']),
+    // Lowercased fullName for indexed name lookups (POS check → guest linking).
+    // Written on guest create/rename; legacy rows are backfilled lazily on match.
+    nameLower: v.optional(v.string()),
+  })
+    .index('by_venue', ['venueId'])
+    .index('by_phone', ['phone'])
+    .index('by_email', ['email'])
+    .index('by_venue_nameLower', ['venueId', 'nameLower']),
   posConnections: defineTable({
     venueId: v.id('venues'),
     provider: posProvider,

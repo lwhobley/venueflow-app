@@ -3,7 +3,7 @@ import { getAuthUserId } from '@convex-dev/auth/server';
 
 export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'expired' | 'paused';
 export type SubscriptionPlatform = 'stripe' | 'apple' | null;
-export type SubscriptionRequiredReason = 'trial_expired' | 'payment_failed' | 'cancelled' | 'never_subscribed';
+export type SubscriptionRequiredReason = 'trial_expired' | 'trial_active' | 'payment_failed' | 'cancelled' | 'never_subscribed';
 
 export class SubscriptionRequiredError extends Error {
   reason: SubscriptionRequiredReason;
@@ -23,8 +23,10 @@ export const subscriptionAllowlist = {
 
 export function reasonFromStatus(status: Doc<'venues'>['subscriptionStatus'] | null | undefined, hasSubscriptionRow: boolean): SubscriptionRequiredReason {
   if (!hasSubscriptionRow || status == null) return 'never_subscribed';
-  if (status === 'trialing') return 'never_subscribed';
-  if (status === 'active') return 'never_subscribed';
+  // A live trial that is blocked from a *paid-only* feature: the caller must
+  // upgrade, not "resubscribe". An active subscription only reaches here on the
+  // paid-feature path; treat both as an upgrade prompt rather than a dead end.
+  if (status === 'trialing' || status === 'active') return 'trial_active';
   if (status === 'past_due') return 'payment_failed';
   if (status === 'cancelled') return 'cancelled';
   if (status === 'expired') return 'trial_expired';
