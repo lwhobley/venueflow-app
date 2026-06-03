@@ -41,6 +41,12 @@ async function loadTableAndPlan(ctx: any, tableId: Id<'tables'>) {
   return { table, floorPlan };
 }
 
+async function requireProfileInVenue(ctx: any, venueId: Id<'venues'>, profileId: Id<'profiles'>) {
+  const member = await ctx.db.get(profileId);
+  if (!member || member.venueId !== venueId) throw new Error('Server is outside your venue');
+  return member as Doc<'profiles'>;
+}
+
 async function writeHistory(
   ctx: any,
   payload: {
@@ -80,6 +86,10 @@ async function applyUpdate(
   if (profile.role === 'server' && current?.serverId && current.serverId !== profile._id) {
     throw new Error('Servers can only update their own tables');
   }
+  if (profile.role === 'server' && patch.serverId && patch.serverId !== profile._id) {
+    throw new Error('Servers can only assign themselves to tables');
+  }
+  if (patch.serverId) await requireProfileInVenue(ctx, floorPlan.venueId, patch.serverId);
 
   const now = Date.now();
   const nextStatus = patch.status ?? current?.status ?? 'available';
@@ -234,6 +244,7 @@ export const mergeTablesForParty = mutation({
     if (profile.venueId !== args.venueId) throw new Error('Table is outside your venue');
     await requireActiveSubscription(ctx as any, args.venueId);
     if (args.tableIds.length < 2) throw new Error('Pick at least two tables to merge');
+    if (args.serverId) await requireProfileInVenue(ctx, args.venueId, args.serverId);
 
     const groupId = `mg_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
     const now = Date.now();

@@ -22,6 +22,12 @@ async function requireContractInVenue(ctx: MutationCtx, venueId: Id<'venues'>, c
   return contract;
 }
 
+async function requireProfileInVenue(ctx: MutationCtx, venueId: Id<'venues'>, profileId: Id<'profiles'>): Promise<Doc<'profiles'>> {
+  const assignee = await ctx.db.get(profileId);
+  if (!assignee || assignee.venueId !== venueId) throw new Error('Assignee not found');
+  return assignee;
+}
+
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 export const listLeads = query({
@@ -213,6 +219,7 @@ export const saveLead = mutation({
     if (!canManage(profile)) throw new Error('Manager access required');
 
     const now = Date.now();
+    if (args.assignedToId) await requireProfileInVenue(ctx, args.venueId, args.assignedToId);
 
     if (args.leadId) {
       const existing = await ctx.db.get(args.leadId);
