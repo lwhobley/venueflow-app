@@ -96,6 +96,10 @@ function parseDollars(value: string) {
   return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : undefined;
 }
 
+function errMsg(err: unknown) {
+  return err instanceof Error ? err.message : 'Unknown error';
+}
+
 export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> | undefined; enabled: boolean }) {
   const isDesktop = useIsDesktop();
   const [view, setView] = useState<WorkspaceView>('dashboard');
@@ -174,7 +178,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setLeadTags('');
       setMessage('Lead created.');
     } catch (err) {
-      setMessage(`Failed to create lead: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setMessage(`Failed to create lead: ${errMsg(err)}`);
     }
   };
 
@@ -186,7 +190,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       await saveLead({ venueId, leadId, fullName: target.fullName, status });
       setMessage(`Moved to ${status.replace('_', ' ')}.`);
     } catch (err) {
-      setMessage(`Failed to update lead: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setMessage(`Failed to update lead: ${errMsg(err)}`);
     }
   };
 
@@ -218,7 +222,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setMessage('BEO draft created.');
       return beoId;
     } catch (err) {
-      setMessage(`Failed to create BEO: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setMessage(`Failed to create BEO: ${errMsg(err)}`);
     }
   };
 
@@ -248,7 +252,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setEventDeposit('');
       setMessage('Contract draft created.');
     } catch (err) {
-      setMessage(`Failed to create contract: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setMessage(`Failed to create contract: ${errMsg(err)}`);
     }
   };
 
@@ -259,7 +263,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setNoteText('');
       setMessage('Note added.');
     } catch (err) {
-      setMessage(`Failed to save note: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setMessage(`Failed to save note: ${errMsg(err)}`);
     }
   };
 
@@ -363,7 +367,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
               await convertBeoToContract({ venueId, beoId });
               setMessage('Converted BEO to contract.');
             } catch (err) {
-              setMessage(`Failed to convert: ${err instanceof Error ? err.message : 'Unknown error'}`);
+              setMessage(`Failed to convert: ${errMsg(err)}`);
             }
           }} />
         ) : null}
@@ -440,25 +444,31 @@ function PipelineView({
   onSelectLead: (id: Id<'crmLeads'>) => void;
   onMove: (leadId: Id<'crmLeads'>, status: LeadStatus) => void;
 }) {
+  const selectedLead = (leads ?? []).find((lead) => lead._id === selectedLeadId) ?? null;
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
       <View style={{ flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.xs }}>
         {statusColumns.map((column) => {
           const rows = (leads ?? []).filter((lead) => lead.status === column.status);
           const total = rows.reduce((sum, lead) => sum + (lead.estimatedValueCents ?? 0), 0);
+          const canMoveSelectedHere = selectedLead != null && selectedLead.status !== column.status;
           return (
             <View key={column.status} style={{ width: 245, gap: spacing.sm, padding: spacing.sm, borderRadius: 8, backgroundColor: column.accent.bg }}>
-              <View>
-                <Text style={{ color: column.accent.fg, fontWeight: '800' }}>{column.label}</Text>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>{rows.length} deals - {money(total)}</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.xs }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: column.accent.fg, fontWeight: '800' }}>{column.label}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{rows.length} deals - {money(total)}</Text>
+                </View>
+                {canMoveSelectedHere ? (
+                  <Button compact mode="text" textColor={colors.primary} onPress={() => onMove(selectedLead._id, column.status)}>Move here</Button>
+                ) : null}
               </View>
               {rows.length === 0 ? <Text style={{ color: colors.muted, fontSize: 12 }}>No deals in this stage.</Text> : rows.map((lead) => (
                 <View key={lead._id} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: colors.surface, borderWidth: selectedLeadId === lead._id ? 1 : 0, borderColor: column.accent.fg }}>
                   <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{lead.company ?? lead.source ?? 'No company'} - {money(lead.estimatedValueCents)}</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.xs }}>
-                    <Button compact mode="text" textColor={colors.primary} onPress={() => onSelectLead(lead._id)}>Open</Button>
-                    <Button compact mode="text" textColor={colors.primary} onPress={() => onMove(lead._id, column.status)}>Move here</Button>
+                  <View style={{ flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', marginTop: spacing.xs }}>
+                    <Button compact mode="text" textColor={colors.primary} onPress={() => onSelectLead(lead._id)}>{selectedLeadId === lead._id ? 'Selected' : 'Select'}</Button>
                   </View>
                 </View>
               ))}
