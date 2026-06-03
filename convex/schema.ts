@@ -38,6 +38,36 @@ const barStockMovementType = v.union(v.literal('count'), v.literal('received'), 
 const managerGoalPeriod = v.union(v.literal('day'), v.literal('week'));
 const managerGoalStatus = v.union(v.literal('open'), v.literal('done'), v.literal('cancelled'));
 
+const crmLeadStatus = v.union(
+  v.literal('new'),
+  v.literal('contacted'),
+  v.literal('qualified'),
+  v.literal('proposal_sent'),
+  v.literal('negotiating'),
+  v.literal('won'),
+  v.literal('lost'),
+  v.literal('unqualified'),
+  v.literal('on_hold'),
+);
+const beoStatus = v.union(
+  v.literal('draft'),
+  v.literal('sent'),
+  v.literal('reviewed'),
+  v.literal('confirmed'),
+  v.literal('amended'),
+  v.literal('cancelled'),
+);
+const contractStatus = v.union(
+  v.literal('draft'),
+  v.literal('sent'),
+  v.literal('viewed'),
+  v.literal('partially_signed'),
+  v.literal('fully_signed'),
+  v.literal('expired'),
+  v.literal('cancelled'),
+  v.literal('disputed'),
+);
+
 export default defineSchema({
   ...authTables,
   profiles: defineTable({
@@ -647,6 +677,107 @@ export default defineSchema({
     expiresAt: v.number(),
     createdAt: v.number(),
   }).index('by_token', ['token']).index('by_venue', ['venueId']),
+
+  crmLeads: defineTable({
+    venueId: v.id('venues'),
+    guestId: v.optional(v.id('guests')),
+    fullName: v.string(),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    company: v.optional(v.string()),
+    source: v.optional(v.string()),
+    status: crmLeadStatus,
+    tags: v.array(v.string()),
+    assignedToId: v.optional(v.id('profiles')),
+    marketingOptIn: v.optional(v.boolean()),
+    lastActivityAt: v.optional(v.number()),
+    estimatedValueCents: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
+  })
+    .index('by_venue', ['venueId'])
+    .index('by_venue_status', ['venueId', 'status'])
+    .index('by_guest', ['guestId']),
+
+  crmNotes: defineTable({
+    venueId: v.id('venues'),
+    leadId: v.id('crmLeads'),
+    authorId: v.id('profiles'),
+    text: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_lead_time', ['leadId', 'createdAt'])
+    .index('by_venue', ['venueId']),
+
+  crmBeos: defineTable({
+    venueId: v.id('venues'),
+    leadId: v.optional(v.id('crmLeads')),
+    eventName: v.string(),
+    eventDate: v.optional(v.number()),
+    eventType: v.optional(v.string()),
+    guestCount: v.optional(v.number()),
+    venueSpace: v.optional(v.string()),
+    setupStyle: v.optional(v.string()),
+    fbMinimumCents: v.optional(v.number()),
+    depositCents: v.optional(v.number()),
+    depositDueDate: v.optional(v.number()),
+    menuAppetizers: v.optional(v.string()),
+    menuEntrees: v.optional(v.string()),
+    menuDesserts: v.optional(v.string()),
+    menuBarPackage: v.optional(v.string()),
+    specialRequirements: v.optional(v.string()),
+    internalNotes: v.optional(v.string()),
+    assignedRepId: v.optional(v.id('profiles')),
+    status: beoStatus,
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_venue', ['venueId'])
+    .index('by_lead', ['leadId'])
+    .index('by_venue_status', ['venueId', 'status']),
+
+  crmContracts: defineTable({
+    venueId: v.id('venues'),
+    leadId: v.optional(v.id('crmLeads')),
+    beoId: v.optional(v.id('crmBeos')),
+    contractNumber: v.string(),
+    contractDate: v.optional(v.number()),
+    eventName: v.optional(v.string()),
+    eventDate: v.optional(v.number()),
+    guestCount: v.optional(v.number()),
+    venueSpace: v.optional(v.string()),
+    fbMinimumCents: v.optional(v.number()),
+    paymentSchedule: v.array(v.object({
+      amountCents: v.number(),
+      dueDate: v.number(),
+      type: v.union(v.literal('deposit'), v.literal('installment'), v.literal('final')),
+    })),
+    cancellationPolicy: v.optional(v.string()),
+    forceMajeure: v.optional(v.boolean()),
+    liabilityWaiver: v.optional(v.boolean()),
+    customClauses: v.array(v.string()),
+    clientSignatureName: v.optional(v.string()),
+    clientSignatureDate: v.optional(v.number()),
+    status: contractStatus,
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_venue', ['venueId'])
+    .index('by_lead', ['leadId'])
+    .index('by_beo', ['beoId'])
+    .index('by_venue_status', ['venueId', 'status']),
+
+  crmActivityLog: defineTable({
+    venueId: v.id('venues'),
+    leadId: v.id('crmLeads'),
+    actorId: v.optional(v.id('profiles')),
+    kind: v.string(),
+    detail: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index('by_lead_time', ['leadId', 'createdAt'])
+    .index('by_venue_time', ['venueId', 'createdAt']),
 
   // AI-generated "Cosmic Insights" for the dashboard. A cron regenerates a
   // fresh batch every 8 hours; the dashboard shows the latest batch.
