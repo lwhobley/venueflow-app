@@ -142,6 +142,39 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const restoreShifts = useMutation(api.scheduling.restoreShifts);
   const openDm = useMutation(api.chat.openDm);
 
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const weekStart = useMemo(() => {
+    const today = new Date();
+    const sunday = new Date(today);
+    sunday.setDate(today.getDate() - today.getDay() + weekOffset * 7);
+    sunday.setHours(0, 0, 0, 0);
+    return sunday;
+  }, [weekOffset]);
+
+  const dayDate = (dayIndex: number) => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + dayIndex);
+    return d;
+  };
+
+  const formatDayDate = (dayIndex: number) =>
+    dayDate(dayIndex).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const formatDayNum = (dayIndex: number) => String(dayDate(dayIndex).getDate());
+
+  const isToday = (dayIndex: number) => {
+    const today = new Date();
+    const d = dayDate(dayIndex);
+    return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  };
+
+  const weekRangeLabel = () => {
+    const sunStr = dayDate(0).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const satStr = dayDate(6).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return `${sunStr} – ${satStr}`;
+  };
+
   const [selectedShiftId, setSelectedShiftId] = useState<Id<'scheduleShifts'> | null>(null);
   const [panelMode, setPanelMode] = useState<PanelMode>('create');
   const [pickedStaff, setPickedStaff] = useState<Id<'profiles'> | null>(null);
@@ -361,12 +394,12 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
         <Card.Content style={{ gap: spacing.md }}>
           <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: spacing.sm, alignItems: isDesktop ? 'center' : 'stretch' }}>
             <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-              <Button compact mode="outlined" textColor={colors.primary} icon="chevron-left" onPress={() => flash('Previous week preview.')}>Prev</Button>
+              <Button compact mode="outlined" textColor={colors.primary} icon="chevron-left" onPress={() => setWeekOffset((o) => o - 1)}>Prev</Button>
               <View style={{ minWidth: isDesktop ? 210 : 0 }}>
                 <Text style={{ color: colors.primary, fontWeight: '800' }}>Weekly Schedule</Text>
-                <Text style={{ color: colors.muted }}>This week | Draft planner</Text>
+                <Text style={{ color: colors.muted }}>{weekRangeLabel()} | Draft planner</Text>
               </View>
-              <Button compact mode="outlined" textColor={colors.primary} icon="chevron-right" onPress={() => flash('Next week preview.')}>Next</Button>
+              <Button compact mode="outlined" textColor={colors.primary} icon="chevron-right" onPress={() => setWeekOffset((o) => o + 1)}>Next</Button>
             </View>
             <Searchbar
               placeholder="Search employees or roles"
@@ -547,7 +580,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
               {openShifts.length === 0 ? <Text style={{ color: colors.muted }}>No open shifts.</Text> : null}
               {openShifts.slice(0, 5).map((shift) => (
                 <Pressable key={shift._id} onPress={() => setSelectedShiftId(shift._id)} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: accents[4].bg }}>
-                  <Text style={{ color: accents[4].fg, fontWeight: '800' }}>{dayLabels[shift.dayIndex]} {shift.startTime}</Text>
+                  <Text style={{ color: accents[4].fg, fontWeight: '800' }}>{dayLabels[shift.dayIndex]} {formatDayDate(shift.dayIndex)} {shift.startTime}</Text>
                   <Text style={{ color: colors.charcoal }}>{shift.jobTitle} | {shift.station}</Text>
                 </Pressable>
               ))}
@@ -607,11 +640,14 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                   </View>
                   {dayLabels.map((label, dayIndex) => {
                     const dayShifts = shifts.filter((shift) => shift.dayIndex === dayIndex);
+                    const today = isToday(dayIndex);
+                    const active = day === dayIndex;
                     return (
                       <View key={label} style={{ flexDirection: 'row', minHeight: 96 }}>
                         <Pressable onPress={() => setDay(dayIndex)} style={{ width: 56, paddingTop: spacing.sm }}>
-                          <Text style={{ color: day === dayIndex ? colors.primary : colors.charcoal, fontWeight: '800' }}>{label}</Text>
-                          <Text style={{ color: colors.muted, fontSize: 11 }}>{dayShifts.length} shifts</Text>
+                          <Text style={{ color: active ? colors.primary : today ? colors.secondary : colors.charcoal, fontWeight: '800' }}>{label}</Text>
+                          <Text style={{ color: today ? colors.secondary : active ? colors.primary : colors.muted, fontSize: 12, fontWeight: today ? '800' : '400' }}>{formatDayDate(dayIndex).split(' ')[1]}</Text>
+                          <Text style={{ color: colors.muted, fontSize: 10 }}>{dayShifts.length} shifts</Text>
                         </Pressable>
                         <View style={{ flex: 1, minHeight: 92, borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: 'hidden', position: 'relative', backgroundColor: colors.background }}>
                           <View style={{ position: 'absolute', inset: 0 as any, flexDirection: 'row' }}>
@@ -713,7 +749,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   {dayLabels.map((label, index) => (
-                    <Chip key={label} compact selected={day === index} onPress={() => setDay(index)}>{label}</Chip>
+                    <Chip key={label} compact selected={day === index} onPress={() => setDay(index)}>{label} {formatDayNum(index)}</Chip>
                   ))}
                 </View>
               </ScrollView>
