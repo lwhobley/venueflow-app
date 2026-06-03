@@ -187,6 +187,22 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const laborBudget = data?.laborBudgetHours ?? null;
   const overBudget = laborBudget != null && totalHours > laborBudget;
 
+  const todayIndex = new Date().getDay();
+  const weekDates = useMemo(() => {
+    const today = new Date();
+    const sunday = new Date(today);
+    sunday.setDate(today.getDate() - today.getDay());
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() + i);
+      return d;
+    });
+  }, []);
+  const weekRangeLabel = useMemo(() => {
+    const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return `${fmt(weekDates[0])} – ${fmt(weekDates[6])}`;
+  }, [weekDates]);
+
   useEffect(() => {
     if (!selectedShift) return;
     setPanelMode('edit');
@@ -364,7 +380,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
               <Button compact mode="outlined" textColor={colors.primary} icon="chevron-left" onPress={() => flash('Previous week preview.')}>Prev</Button>
               <View style={{ minWidth: isDesktop ? 210 : 0 }}>
                 <Text style={{ color: colors.primary, fontWeight: '800' }}>Weekly Schedule</Text>
-                <Text style={{ color: colors.muted }}>This week | Draft planner</Text>
+                <Text style={{ color: colors.muted }}>{weekRangeLabel} | Draft planner</Text>
               </View>
               <Button compact mode="outlined" textColor={colors.primary} icon="chevron-right" onPress={() => flash('Next week preview.')}>Next</Button>
             </View>
@@ -611,6 +627,18 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       <View key={label} style={{ flexDirection: 'row', minHeight: 96 }}>
                         <Pressable onPress={() => setDay(dayIndex)} style={{ width: 56, paddingTop: spacing.sm }}>
                           <Text style={{ color: day === dayIndex ? colors.primary : colors.charcoal, fontWeight: '800' }}>{label}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Text style={{
+                              color: todayIndex === dayIndex ? colors.primary : colors.muted,
+                              fontSize: 11,
+                              fontWeight: todayIndex === dayIndex ? '800' : '400',
+                            }}>
+                              {weekDates[dayIndex].getDate()}
+                            </Text>
+                            {todayIndex === dayIndex && (
+                              <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: colors.primary }} />
+                            )}
+                          </View>
                           <Text style={{ color: colors.muted, fontSize: 11 }}>{dayShifts.length} shifts</Text>
                         </Pressable>
                         <View style={{ flex: 1, minHeight: 92, borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: 'hidden', position: 'relative', backgroundColor: colors.background }}>
