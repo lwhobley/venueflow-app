@@ -292,7 +292,14 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     deletedAt: v.optional(v.number()),
-  }).index('by_venue', ['venueId']).index('by_phone', ['phone']).index('by_email', ['email']),
+    // Lowercased fullName for indexed name lookups (POS check → guest linking).
+    // Written on guest create/rename; legacy rows are backfilled lazily on match.
+    nameLower: v.optional(v.string()),
+  })
+    .index('by_venue', ['venueId'])
+    .index('by_phone', ['phone'])
+    .index('by_email', ['email'])
+    .index('by_venue_nameLower', ['venueId', 'nameLower']),
   posConnections: defineTable({
     venueId: v.id('venues'),
     provider: posProvider,

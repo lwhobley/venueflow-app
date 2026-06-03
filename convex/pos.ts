@@ -1,8 +1,9 @@
 import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
-import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { requirePaidSubscription } from './billing/shared';
+import { timingSafeEqual, newWebhookSecret } from './secrets';
+import { canManage, getProfileOrNull } from './authz';
 
 type AnyCtx = any;
 
@@ -104,32 +105,9 @@ const posConnectionWithSecretValue = v.object({
   updatedAt: v.number(),
 });
 
-function secretsMatch(a: string | undefined | null, b: string | undefined | null) {
-  if (!a || !b || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-function newWebhookSecret() {
-  return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
-}
-
-// allAccess support/ops profiles manage every venue regardless of role, matching
-// requireVenueManager in authz.ts and canManageVenue on the client.
-function canManage(profile: { role: string; allAccess?: boolean }) {
-  return profile.allAccess === true || profile.role === 'admin' || profile.role === 'owner' || profile.role === 'manager';
-}
-
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
-}
-
-async function getProfile(ctx: AnyCtx) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) return null;
-  return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
 }
 
 // Resolves the connection for a venue+provider, tolerating venues that have more
@@ -203,11 +181,21 @@ function mapCheck(check: Doc<'posChecks'>) {
 async function findGuestByName(ctx: AnyCtx, venueId: Id<'venues'>, guestName: string | undefined) {
   const name = guestName?.trim().toLowerCase();
   if (!name) return null;
-  // Scan the venue's full guest list (case-insensitive match). A capped take()
-  // would silently fail to link checks for guests past the cap, corrupting spend
-  // and visit history for the tail of the list.
+  // Fast path: indexed by lowercased name. Re-verify fullName so a stale
+  // nameLower (e.g. an un-synced rename) can never produce a false match.
+  const indexed = await ctx.db
+    .query('guests')
+    .withIndex('by_venue_nameLower', (q: any) => q.eq('venueId', venueId).eq('nameLower', name))
+    .take(10);
+  const hit = indexed.find((guest: Doc<'guests'>) => guest.fullName.trim().toLowerCase() === name);
+  if (hit) return hit;
+  // Legacy rows written before nameLower existed aren't in the index. Fall back
+  // to a scan and backfill the match so it's indexed next time — the system
+  // self-heals without a manual migration.
   const guests = await ctx.db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).collect();
-  return guests.find((guest: Doc<'guests'>) => guest.fullName.toLowerCase() === name) ?? null;
+  const match = guests.find((guest: Doc<'guests'>) => guest.fullName.trim().toLowerCase() === name) ?? null;
+  if (match && match.nameLower !== name) await ctx.db.patch(match._id, { nameLower: name });
+  return match;
 }
 
 async function upsertCheck(ctx: AnyCtx, args: { venueId: Id<'venues'>; provider: 'toast' | 'square' | 'clover' | 'generic'; check: any }) {
@@ -308,7 +296,7 @@ export const getPosOverview = query({
     }),
   ),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const connections = await (ctx as AnyCtx).db.query('posConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(10);
@@ -377,7 +365,7 @@ export const getSalesSummary = query({
   },
   returns: v.union(v.null(), salesSummaryValue),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -417,7 +405,7 @@ export const getSalesSummaryDashboard = query({
   },
   returns: v.union(v.null(), salesSummaryDashboardValue),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -491,7 +479,7 @@ export const getSalesByDay = query({
   args: { venueId: v.id('venues'), windowDays: v.number() },
   returns: v.union(v.null(), v.array(v.object({ date: v.string(), salesCents: v.number(), checkCount: v.number(), coverCount: v.number() }))),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -535,7 +523,7 @@ export const getSalesByServer = query({
     avgCheckCents: v.number(),
   }))),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -579,7 +567,7 @@ export const getSalesByRevenueCenter = query({
     coverCount: v.number(),
   }))),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -618,7 +606,7 @@ export const getSalesByTender = query({
     checkCount: v.number(),
   }))),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -657,7 +645,7 @@ export const getTopMenuItems = query({
     salesCents: v.number(),
   }))),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -707,7 +695,7 @@ export const getLaborSummary = query({
     })),
   })),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
 
@@ -771,15 +759,15 @@ export const upsertPosConnection = mutation({
   },
   returns: posConnectionWithSecretValue,
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const now = Date.now();
-    const existing = await (ctx as AnyCtx).db
-      .query('posConnections')
-      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
-      .unique();
+    // Match on location too, so re-saving a location updates its row while a new
+    // location creates its own — and so this never trips .unique() if a venue
+    // ends up with more than one connection per provider.
+    const existing = await findPosConnection(ctx as AnyCtx, args.venueId, args.provider, cleanText(args.externalLocationId));
     const payload = {
       venueId: args.venueId,
       provider: args.provider,
@@ -806,7 +794,7 @@ export const rotatePosConnectionSecret = mutation({
   args: { connectionId: v.id('posConnections') },
   returns: v.object({ webhookSecret: v.string() }),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     const connection = await (ctx as AnyCtx).db.get(args.connectionId);
     if (!connection) throw new Error('Connection not found');
     if (!profile || profile.venueId !== connection.venueId || !canManage(profile)) throw new Error('Not authorized');
@@ -821,15 +809,12 @@ export const importPosCheck = mutation({
   args: { venueId: v.id('venues'), provider: posProviderValue, check: posCheckInputValue },
   returns: posCheckValue,
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const check = await upsertCheck(ctx as AnyCtx, args);
-    const connection = await (ctx as AnyCtx).db
-      .query('posConnections')
-      .withIndex('by_venue_and_provider', (q: any) => q.eq('venueId', args.venueId).eq('provider', args.provider))
-      .unique();
+    const connection = await findPosConnection(ctx as AnyCtx, args.venueId, args.provider);
     if (connection) await (ctx as AnyCtx).db.patch(connection._id, { lastSyncAt: Date.now(), status: 'connected', updatedAt: Date.now() });
     return mapCheck(check);
   },
@@ -847,8 +832,12 @@ export const ingestPosCheck = internalMutation({
   handler: async (ctx, args) => {
     const connection = await findPosConnection(ctx as AnyCtx, args.venueId, args.provider, args.externalLocationId);
     if (!connection) throw new Error('No POS connection configured for this venue/provider');
-    if (!secretsMatch(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
-    if (connection.externalLocationId && connection.externalLocationId !== args.externalLocationId) {
+    if (!timingSafeEqual(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
+    // Location is optional per-check metadata inside an already secret-authenticated
+    // connection. Only reject when the webhook actually carries a location that
+    // disagrees — many POS providers don't echo it in each check payload, and
+    // findPosConnection already routes by location when one is supplied.
+    if (connection.externalLocationId && args.externalLocationId && connection.externalLocationId !== args.externalLocationId) {
       throw new Error('Location mismatch for this connection');
     }
     const check = await upsertCheck(ctx as AnyCtx, args);
@@ -868,7 +857,7 @@ export const ingestLaborPunches = internalMutation({
   handler: async (ctx, args) => {
     const connection = await findPosConnection(ctx as AnyCtx, args.venueId, args.provider);
     if (!connection) throw new Error('No POS connection configured for this venue/provider');
-    if (!secretsMatch(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
+    if (!timingSafeEqual(connection.webhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
 
     const now = Date.now();
     let upserted = 0;

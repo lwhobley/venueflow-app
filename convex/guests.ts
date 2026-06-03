@@ -1,8 +1,9 @@
 import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
-import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { requirePaidSubscription } from './billing/shared';
+import { timingSafeEqual, newWebhookSecret } from './secrets';
+import { canManage, getProfileOrNull } from './authz';
 
 type AnyCtx = any;
 
@@ -95,32 +96,9 @@ const leadIngestResultValue = v.object({
   guestIds: v.array(v.id('guests')),
 });
 
-async function getProfile(ctx: AnyCtx) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) return null;
-  return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
-}
-
-// allAccess support/ops profiles manage every venue regardless of role, matching
-// requireVenueManager in authz.ts and canManageVenue on the client.
-function canManage(profile: { role: string; allAccess?: boolean }) {
-  return profile.allAccess === true || profile.role === 'admin' || profile.role === 'owner' || profile.role === 'manager';
-}
-
 function cleanText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function secretsMatch(a: string | undefined | null, b: string | undefined | null) {
-  if (!a || !b || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-function newWebhookSecret() {
-  return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
 }
 
 function cleanTags(tags: string[]) {
@@ -179,6 +157,7 @@ async function ingestLeadRows(ctx: AnyCtx, venueId: Id<'venues'>, leads: Array<{
     if (existing) {
       await ctx.db.patch(existing._id, {
         fullName,
+        nameLower: fullName.trim().toLowerCase(),
         phone: phone ?? existing.phone,
         email: email ?? existing.email,
         lifecycleStage: existing.lifecycleStage ?? 'lead',
@@ -195,6 +174,7 @@ async function ingestLeadRows(ctx: AnyCtx, venueId: Id<'venues'>, leads: Array<{
       const guestId: Id<'guests'> = await ctx.db.insert('guests', {
         venueId,
         fullName,
+        nameLower: fullName.trim().toLowerCase(),
         phone,
         email,
         lifecycleStage: 'lead',
@@ -262,7 +242,7 @@ export const listGuests = query({
   args: { venueId: v.id('venues') },
   returns: v.array(guestSummaryValue),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return [];
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const guests = await (ctx as AnyCtx).db.query('guests').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(100);
@@ -276,7 +256,7 @@ export const getGuestProfile = query({
   args: { venueId: v.id('venues'), guestId: v.id('guests') },
   returns: v.union(v.null(), guestProfileValue),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const guest = await (ctx as AnyCtx).db.get(args.guestId);
@@ -348,7 +328,7 @@ export const upsertGuest = mutation({
   },
   returns: guestSummaryValue,
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
@@ -358,6 +338,7 @@ export const upsertGuest = mutation({
     const payload = {
       venueId: args.venueId,
       fullName,
+      nameLower: fullName.trim().toLowerCase(),
       phone: cleanText(args.phone),
       email: cleanText(args.email)?.toLowerCase(),
       lifecycleStage: args.lifecycleStage,
@@ -393,7 +374,7 @@ export const ingestLeads = mutation({
   args: { venueId: v.id('venues'), leads: v.array(leadInputValue) },
   returns: leadIngestResultValue,
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
@@ -411,8 +392,11 @@ export const ingestLeadsFromWebhook = internalMutation({
     // inject leads into a venue without also holding that venue's connection
     // secret. The venue owner generates it from the Integrations screen.
     if (!venue.leadsWebhookSecret) throw new Error('Lead ingestion is not enabled for this venue');
-    if (!secretsMatch(venue.leadsWebhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
-    if (venue.subscriptionStatus !== 'active' && venue.subscriptionStatus !== 'trialing') throw new Error('Subscription required');
+    if (!timingSafeEqual(venue.leadsWebhookSecret, args.connectionSecret)) throw new Error('Invalid connection secret');
+    // CRM (lead capture and the guest list) is a paid feature: rotateLeadsWebhookSecret
+    // and listGuests both require an active subscription, so ingest must match —
+    // otherwise a trial venue could never hold a secret to reach this point.
+    if (venue.subscriptionStatus !== 'active') throw new Error('Subscription required');
     return await ingestLeadRows(ctx as AnyCtx, args.venueId, args.leads);
   },
 });
@@ -423,7 +407,7 @@ export const rotateLeadsWebhookSecret = mutation({
   args: { venueId: v.id('venues') },
   returns: v.object({ webhookSecret: v.string() }),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);
     const secret = newWebhookSecret();
@@ -436,7 +420,7 @@ export const removeGuest = mutation({
   args: { venueId: v.id('venues'), guestId: v.id('guests') },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) throw new Error('Not authorized');
 
     await requirePaidSubscription(ctx as AnyCtx, args.venueId);

@@ -1,8 +1,8 @@
 import { action, internalMutation, internalQuery, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
-import { getAuthUserId } from '@convex-dev/auth/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
+import { getProfileOrNull } from './authz';
 
 // Intentional escape hatch — shared helpers used across query/mutation ctxs.
 // See note in convex/app.ts. Tracked for proper typing in the hardening task.
@@ -78,12 +78,6 @@ function periodEndForPackage(packageRef: string, now: number) {
   return now + 30 * 24 * 60 * 60 * 1000;
 }
 
-async function getProfile(ctx: AnyCtx) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) return null;
-  return await ctx.db.query('profiles').withIndex('by_userId', (q: any) => q.eq('userId', userId)).unique();
-}
-
 function isBillingAdmin(role: string) {
   return role === 'admin' || role === 'owner';
 }
@@ -144,7 +138,7 @@ export const getMyBilling = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile?.venueId) return null;
     const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
     if (!subscription) return null;
@@ -177,7 +171,7 @@ export const getStripeBillingContext = internalQuery({
     }),
   ),
   handler: async (ctx) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile?.venueId || !isBillingAdmin(profile.role)) return null;
 
     const venue = await (ctx as AnyCtx).db.get(profile.venueId);
@@ -414,7 +408,7 @@ export const syncVenueSubscription = mutation({
   },
   returns: billingValue,
   handler: async (ctx, args) => {
-    const profile = await getProfile(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || (profile.role !== 'admin' && profile.role !== 'owner')) {
       throw new Error('Not authorized');
     }

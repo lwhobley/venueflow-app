@@ -39,6 +39,25 @@ export async function requireProfile(ctx: any): Promise<Profile> {
   return profile as Profile;
 }
 
+/** Like requireProfile but returns null instead of throwing — for handlers that
+ * degrade to an empty/no-op result (rather than an error) when the caller is
+ * unauthenticated or has no profile. */
+export async function getProfileOrNull(ctx: any): Promise<Profile | null> {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) return null;
+  return (await ctx.db
+    .query('profiles')
+    .withIndex('by_userId', (q: any) => q.eq('userId', userId))
+    .unique()) as Profile | null;
+}
+
+/** Manager-or-allAccess check on an already-loaded profile. The single source of
+ * truth for "can manage this venue" on the server; mirrors canManageVenue on the
+ * client. */
+export function canManage(profile: Pick<Profile, 'role' | 'allAccess'>): boolean {
+  return profile.allAccess === true || isManager(profile.role);
+}
+
 /**
  * Ensures the caller is assigned to `venueId`. Returns the caller's profile.
  * Closes the "profile has no venue → check skipped" hole by treating a missing
