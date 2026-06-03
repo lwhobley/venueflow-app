@@ -9,6 +9,7 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
+import { CrmSalesWorkspace } from '../../components/CrmSalesWorkspace';
 
 type LifecycleStage = 'lead' | 'regular' | 'vip' | 'lapsed';
 type Segment = 'all' | LifecycleStage | 'upcoming' | 'needs_follow_up';
@@ -425,9 +426,11 @@ function GuestsScreenInner() {
       showsVerticalScrollIndicator={false}
     >
       <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Guest CRM</Text>
-        <Text style={{ color: colors.muted }}>Relationship history, preferences, and follow-up cues for {venue?.name ?? 'your venue'}.</Text>
+        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>CRM</Text>
+        <Text style={{ color: colors.muted }}>Sales pipeline, event docs, guest intelligence, and follow-up cues for {venue?.name ?? 'your venue'}.</Text>
       </View>
+
+      <CrmSalesWorkspace venueId={venue?.id} enabled={isReady && canManage} />
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {[

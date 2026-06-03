@@ -20,17 +20,17 @@ export const listLeads = query({
       leads = await ctx.db
         .query('crmLeads')
         .withIndex('by_venue_status', (q) => q.eq('venueId', venueId).eq('status', status as any))
-        .filter((q) => q.eq(q.field('deletedAt'), undefined))
         .order('desc')
         .take(500);
     } else {
       leads = await ctx.db
         .query('crmLeads')
         .withIndex('by_venue', (q) => q.eq('venueId', venueId))
-        .filter((q) => q.eq(q.field('deletedAt'), undefined))
         .order('desc')
         .take(500);
     }
+
+    leads = leads.filter((lead) => !lead.deletedAt);
 
     if (search) {
       const q = search.toLowerCase();
@@ -70,17 +70,17 @@ export const getLead = query({
         .query('crmNotes')
         .withIndex('by_lead_time', (q) => q.eq('leadId', leadId))
         .order('desc')
-        .collect(),
+        .take(50),
       ctx.db
         .query('crmBeos')
         .withIndex('by_lead', (q) => q.eq('leadId', leadId))
         .order('desc')
-        .collect(),
+        .take(25),
       ctx.db
         .query('crmContracts')
         .withIndex('by_lead', (q) => q.eq('leadId', leadId))
         .order('desc')
-        .collect(),
+        .take(25),
       ctx.db
         .query('crmActivityLog')
         .withIndex('by_lead_time', (q) => q.eq('leadId', leadId))
@@ -116,13 +116,13 @@ export const listBeos = query({
         .query('crmBeos')
         .withIndex('by_venue_status', (q) => q.eq('venueId', venueId).eq('status', status as any))
         .order('desc')
-        .collect();
+        .take(100);
     } else {
       beos = await ctx.db
         .query('crmBeos')
         .withIndex('by_venue', (q) => q.eq('venueId', venueId))
         .order('desc')
-        .collect();
+        .take(100);
     }
 
     const leadIds = [...new Set(beos.map((b) => b.leadId).filter(Boolean) as Id<'crmLeads'>[])];
@@ -150,13 +150,13 @@ export const listContracts = query({
         .query('crmContracts')
         .withIndex('by_venue_status', (q) => q.eq('venueId', venueId).eq('status', status as any))
         .order('desc')
-        .collect();
+        .take(100);
     } else {
       contracts = await ctx.db
         .query('crmContracts')
         .withIndex('by_venue', (q) => q.eq('venueId', venueId))
         .order('desc')
-        .collect();
+        .take(100);
     }
 
     const leadIds = [...new Set(contracts.map((c) => c.leadId).filter(Boolean) as Id<'crmLeads'>[])];

@@ -1229,21 +1229,24 @@ export const getNotifications = query({
       .order('desc')
       .take(20);
     const visible = rows
-      .filter((row: Doc<'notificationEvents'>) => row.audience !== 'profile' || row.profileId === profile._id)
-      .filter((row: Doc<'notificationEvents'>) => row.audience !== 'managers' || isAdminRole(profile.role));
+      .filter((row: Doc<'notificationEvents'>) => {
+        if (row.audience === 'profile') return row.profileId === profile._id;
+        if (row.audience === 'managers') return isAdminRole(profile.role);
+        return row.audience === 'staff';
+      });
     return await Promise.all(
       visible.map(async (row: Doc<'notificationEvents'>) => {
-        const receipt = await (ctx as AnyCtx).db
+        const receipts = await (ctx as AnyCtx).db
           .query('notificationReads')
           .withIndex('by_notification_and_profile', (q: any) => q.eq('notificationId', row._id).eq('profileId', profile._id))
-          .unique();
+          .take(1);
         return {
           _id: row._id,
           kind: row.kind,
           title: row.title,
           body: row.body,
           createdAt: row.createdAt,
-          read: Boolean(receipt) || (row.readBy ?? []).some((id) => id === profile._id),
+          read: receipts.length > 0 || (row.readBy ?? []).some((id) => id === profile._id),
         };
       }),
     );
@@ -1259,13 +1262,16 @@ export const markNotificationRead = mutation({
 
     const row = await (ctx as AnyCtx).db.get(args.notificationId);
     if (!row || row.venueId !== profile.venueId) throw new Error('Notification not found');
-    const canRead = row.audience === 'staff' || (row.audience === 'managers' && isAdminRole(profile.role)) || row.profileId === profile._id;
+    const canRead =
+      row.audience === 'staff' ||
+      (row.audience === 'managers' && isAdminRole(profile.role)) ||
+      (row.audience === 'profile' && row.profileId === profile._id);
     if (!canRead) throw new Error('Not authorized');
     const existing = await (ctx as AnyCtx).db
       .query('notificationReads')
       .withIndex('by_notification_and_profile', (q: any) => q.eq('notificationId', row._id).eq('profileId', profile._id))
-      .unique();
-    if (!existing) {
+      .take(1);
+    if (existing.length === 0) {
       await (ctx as AnyCtx).db.insert('notificationReads', {
         notificationId: row._id,
         profileId: profile._id,

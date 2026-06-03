@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import type { ColorValue } from 'react-native';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { useDesignTheme } from '../../lib/theme';
@@ -10,7 +11,7 @@ import { canManageVenue } from '../../lib/permissions';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap) =>
-  ({ color, size }: { color: string; size: number }) => <MaterialCommunityIcons name={name} size={size} color={color} />;
+  ({ color, size }: { color: ColorValue; size: number }) => <MaterialCommunityIcons name={name} size={size} color={color} />;
 
 export default function TabsLayout() {
   const localUser = useAuthStore((state: AuthState) => state.user);
@@ -48,7 +49,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="reservations" options={{ title: t('nav.reservations'), tabBarIcon: icon('book-clock-outline') }} />
       <Tabs.Screen
         name="guests"
-        options={{ title: t('nav.guests'), href: null, tabBarIcon: icon('account-heart-outline') }}
+        options={{ title: 'CRM', href: canManage ? '/guests' : null, tabBarIcon: icon('account-heart-outline') }}
       />
       <Tabs.Screen
         name="integrations"

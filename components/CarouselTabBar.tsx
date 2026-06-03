@@ -4,12 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, useDesignTheme } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
 
+type TabRoute = BottomTabBarProps['state']['routes'][number];
+
 export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const palette = useDesignTheme();
   const { t } = useI18n();
 
-  const visible = state.routes.filter((route) => {
+  const visible = state.routes.filter((route: TabRoute) => {
     const opts = descriptors[route.key].options as { href?: string | null };
     return opts.href !== null;
   });
@@ -31,9 +33,9 @@ export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarP
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 10, alignItems: 'center' }}
       >
-        {visible.map((route) => {
+        {visible.map((route: TabRoute) => {
           const { options } = descriptors[route.key];
-          const activeIndex = state.routes.findIndex((r) => r.key === route.key);
+          const activeIndex = state.routes.findIndex((r: TabRoute) => r.key === route.key);
           const isFocused = state.index === activeIndex;
           const color = isFocused ? palette.backgroundAlt : palette.muted;
           const label = (options.title ?? route.name) as string;

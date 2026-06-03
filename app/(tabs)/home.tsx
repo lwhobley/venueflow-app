@@ -6,6 +6,8 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { CommandButton, CommandSurface, CommandText, MiniTrend, StatusPill } from '../../components/FutureUI';
+import { AiCopilotPanel } from '../../components/AiCopilotPanel';
+import { AlertsPanel } from '../../components/AlertsPanel';
 import { CosmicInsights } from '../../components/CosmicInsights';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -47,9 +49,12 @@ export default function HomeScreen() {
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
   const canManage = canManageVenue(role, dashboard?.profile.allAccess ?? user?.all_access);
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const managerInsights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip');
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [goalTitle, setGoalTitle] = useState('');
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
 
   const reservations = managerDashboard?.vipOrLargeReservations ?? [];
   const reservationCount = managerDashboard?.totalReservations ?? 0;
@@ -92,11 +97,16 @@ export default function HomeScreen() {
     : [];
 
   const recentNotifications = (notifications ?? []) as NotificationItem[];
+  const unreadNotifications = recentNotifications.filter((item) => !item.read);
 
   const addGoal = async () => {
     if (!venue?.id || !goalTitle.trim()) return;
     await upsertManagerGoal({ venueId: venue.id, title: goalTitle.trim(), period: 'day', targetDate: todayKey, status: 'open' });
     setGoalTitle('');
+  };
+
+  const markAllAlertsRead = async () => {
+    await Promise.all(unreadNotifications.slice(0, 20).map((item) => markNotificationRead({ notificationId: item._id })));
   };
 
   return (
@@ -116,8 +126,12 @@ export default function HomeScreen() {
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: spacing.xs }}>
             <CommandButton palette={palette} icon="calendar-today">{formatDate(today, { month: '2-digit', day: '2-digit' })}</CommandButton>
-            <CommandButton palette={palette} icon="bell-outline">{t('command.alerts')}</CommandButton>
-            <CommandButton palette={palette} icon="creation">{t('command.ai')}</CommandButton>
+            <CommandButton palette={palette} icon={unreadNotifications.length ? 'bell-ring-outline' : 'bell-outline'} selected={alertsOpen} onPress={() => setAlertsOpen((value) => !value)}>
+              {unreadNotifications.length ? `${t('command.alerts')} ${unreadNotifications.length}` : t('command.alerts')}
+            </CommandButton>
+            <CommandButton palette={palette} icon="creation" selected={copilotOpen} onPress={() => setCopilotOpen((value) => !value)}>
+              {copilotOpen ? 'Copilot Active' : t('command.ai')}
+            </CommandButton>
           </View>
         </View>
 
@@ -152,6 +166,25 @@ export default function HomeScreen() {
           ))}
         </View>
       </View>
+
+      {alertsOpen ? (
+        <AlertsPanel
+          palette={palette}
+          notifications={recentNotifications}
+          onClose={() => setAlertsOpen(false)}
+          onMarkRead={(notificationId) => void markNotificationRead({ notificationId })}
+          onMarkAllRead={() => void markAllAlertsRead()}
+        />
+      ) : null}
+
+      {copilotOpen ? (
+        <AiCopilotPanel
+          palette={palette}
+          insights={managerInsights}
+          dashboard={dashboard}
+          onClose={() => setCopilotOpen(false)}
+        />
+      ) : null}
 
       {openShifts > 0 ? (
         <CommandSurface palette={palette} strong style={{ gap: spacing.sm, borderColor: palette.warning }}>
