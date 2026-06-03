@@ -646,8 +646,19 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       <View key={label} style={{ flexDirection: 'row', minHeight: 96 }}>
                         <Pressable onPress={() => setDay(dayIndex)} style={{ width: 56, paddingTop: spacing.sm }}>
                           <Text style={{ color: active ? colors.primary : today ? colors.secondary : colors.charcoal, fontWeight: '800' }}>{label}</Text>
-                          <Text style={{ color: today ? colors.secondary : active ? colors.primary : colors.muted, fontSize: 12, fontWeight: today ? '800' : '400' }}>{formatDayDate(dayIndex).split(' ')[1]}</Text>
-                          <Text style={{ color: colors.muted, fontSize: 10 }}>{dayShifts.length} shifts</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Text style={{
+                              color: today ? colors.secondary : active ? colors.primary : colors.muted,
+                              fontSize: 11,
+                              fontWeight: today ? '800' : '400',
+                            }}>
+                              {formatDayNum(dayIndex)}
+                            </Text>
+                            {today && (
+                              <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: colors.secondary }} />
+                            )}
+                          </View>
+                          <Text style={{ color: colors.muted, fontSize: 11 }}>{dayShifts.length} shifts</Text>
                         </Pressable>
                         <View style={{ flex: 1, minHeight: 92, borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: 'hidden', position: 'relative', backgroundColor: colors.background }}>
                           <View style={{ position: 'absolute', inset: 0 as any, flexDirection: 'row' }}>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Card, Chip, IconButton, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../convex/_generated/api';
@@ -9,9 +9,24 @@ import { accents, colors, spacing } from '../lib/theme';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { canManageVenue } from '../lib/permissions';
+import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
 
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
+
+const MEAL_TIMES: Record<string, { label: string; time: string; duration: number }> = {
+  breakfast: { label: 'Breakfast', time: '08:00', duration: 60 },
+  brunch: { label: 'Brunch', time: '10:00', duration: 90 },
+  lunch: { label: 'Lunch', time: '12:00', duration: 90 },
+  dinner: { label: 'Dinner', time: '18:00', duration: 120 },
+};
+
+function getMealsForDayOfWeek(dow: number) {
+  const isWeekend = dow === 0 || dow === 6;
+  return isWeekend
+    ? [MEAL_TIMES.brunch, MEAL_TIMES.dinner]
+    : [MEAL_TIMES.breakfast, MEAL_TIMES.lunch, MEAL_TIMES.dinner];
+}
 
 type ReservationRow = {
   id: string;
@@ -153,7 +168,10 @@ export default function ReservationsScreen() {
   const [guestCompany, setGuestCompany] = useState('');
   const [partySize, setPartySize] = useState(2);
   const [date, setDate] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
-  const [time, setTime] = useState(`${pad((now.getHours() + 1) % 24)}:00`);
+  const [time, setTime] = useState('18:00');
+  const [selectedMeal, setSelectedMeal] = useState('dinner');
+  const [dateMenuOpen, setDateMenuOpen] = useState(false);
+  const [mealMenuOpen, setMealMenuOpen] = useState(false);
   const [source, setSource] = useState<Source>('direct');
   const [tags, setTags] = useState('');
   const [occasion, setOccasion] = useState('');
@@ -172,10 +190,28 @@ export default function ReservationsScreen() {
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
-  const sorted = useMemo(
-    () => [...reservations].sort((a, b) => a.reservationTime - b.reservationTime),
-    [reservations],
-  );
+  const { selected: listDateRange, setSelected: setListDateRange, presets: listPresets } = useDateRange('today');
+
+  const sorted = useMemo(() => {
+    const { startTs, endTs } = listDateRange;
+    return [...reservations]
+      .filter((r) => r.reservationTime >= startTs && r.reservationTime <= endTs)
+      .sort((a, b) => a.reservationTime - b.reservationTime);
+  }, [reservations, listDateRange]);
+
+  const dateOptions = useMemo(() => {
+    const today = new Date();
+    return Array.from({ length: 14 }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      const value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const label = i === 0 ? `Today · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : i === 1 ? `Tomorrow · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      return { value, label, dayOfWeek: d.getDay() };
+    });
+  }, []);
+
+  const selectedDateOption = dateOptions.find((o) => o.value === date) ?? dateOptions[0];
+  const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? new Date().getDay());
 
   const createReservation = async () => {
     setError(null);
@@ -200,7 +236,7 @@ export default function ReservationsScreen() {
         guestCompany: guestCompany.trim() || undefined,
         partySize,
         reservationTime: ts,
-        durationMinutes: showPrivateEventForm ? 240 : 120,
+        durationMinutes: showPrivateEventForm ? 240 : (MEAL_TIMES[selectedMeal]?.duration ?? 120),
         source,
         status: 'confirmed',
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
@@ -237,6 +273,9 @@ export default function ReservationsScreen() {
       setEstimatedValue('');
       setDepositDue('');
       setPartySize(2);
+      const todayDow = new Date().getDay();
+      setSelectedMeal(todayDow === 0 || todayDow === 6 ? 'brunch' : 'dinner');
+      setTime(todayDow === 0 || todayDow === 6 ? '10:00' : '18:00');
       setShowForm(false);
       setShowPrivateEventForm(false);
     } catch (e) {
@@ -397,8 +436,57 @@ export default function ReservationsScreen() {
                   <IconButton icon="plus" mode="outlined" size={16} onPress={() => setPartySize((p) => Math.min(30, p + 1))} />
                 </View>
                 <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                  <TextInput label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} mode="outlined" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
-                  <TextInput label="Time (HH:MM)" value={time} onChangeText={setTime} mode="outlined" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
+                  <Menu
+                    visible={dateMenuOpen}
+                    onDismiss={() => setDateMenuOpen(false)}
+                    anchor={
+                      <Button mode="outlined" onPress={() => setDateMenuOpen(true)} style={{ flex: 1 }} contentStyle={{ justifyContent: 'flex-start' }}>
+                        {selectedDateOption?.label ?? date}
+                      </Button>
+                    }
+                  >
+                    {dateOptions.map((opt) => (
+                      <Menu.Item
+                        key={opt.value}
+                        title={opt.label}
+                        onPress={() => {
+                          setDate(opt.value);
+                          setDateMenuOpen(false);
+                          const meals = getMealsForDayOfWeek(opt.dayOfWeek);
+                          const stillValid = meals.some((m) => m.label.toLowerCase() === selectedMeal);
+                          if (!stillValid) {
+                            const fallback = opt.dayOfWeek === 0 || opt.dayOfWeek === 6 ? 'brunch' : 'dinner';
+                            setSelectedMeal(fallback);
+                            setTime(MEAL_TIMES[fallback].time);
+                          }
+                        }}
+                      />
+                    ))}
+                  </Menu>
+                  <Menu
+                    visible={mealMenuOpen}
+                    onDismiss={() => setMealMenuOpen(false)}
+                    anchor={
+                      <Button mode="outlined" onPress={() => setMealMenuOpen(true)} style={{ flex: 1 }} contentStyle={{ justifyContent: 'flex-start' }}>
+                        {MEAL_TIMES[selectedMeal]?.label ?? selectedMeal}
+                      </Button>
+                    }
+                  >
+                    {availableMeals.map((meal) => {
+                      const key = meal.label.toLowerCase();
+                      return (
+                        <Menu.Item
+                          key={key}
+                          title={`${meal.label} · ${meal.time}`}
+                          onPress={() => {
+                            setSelectedMeal(key);
+                            setTime(meal.time);
+                            setMealMenuOpen(false);
+                          }}
+                        />
+                      );
+                    })}
+                  </Menu>
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {reservationSources.map((s) => (
@@ -437,12 +525,15 @@ export default function ReservationsScreen() {
       {/* Reservation list */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Bookings</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Bookings</Text>
+            <DateRangeBar selected={listDateRange} presets={listPresets} onSelect={setListDateRange} />
+          </View>
           {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
           {page === undefined ? (
             <Text style={{ color: colors.muted }}>Loading…</Text>
           ) : sorted.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No reservations yet.</Text>
+            <Text style={{ color: colors.muted }}>No reservations for {listDateRange.shortLabel.toLowerCase()}.</Text>
           ) : (
             sorted.map((res) => {
               const sc = statusColor[res.status] ?? { bg: colors.cream, fg: colors.muted };
@@ -451,11 +542,14 @@ export default function ReservationsScreen() {
               return (
                 <View key={res.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={{ fontWeight: '800' }}>{fmtResTime(res.reservationTime)}</Text>
+                    <View>
+                      <Text style={{ fontWeight: '800' }}>{fmtDay(res.reservationTime)}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 13 }}>{fmtResTime(res.reservationTime)}</Text>
+                    </View>
                     <Chip compact style={{ backgroundColor: sc.bg }} textStyle={{ color: sc.fg }}>{res.status.replace('_', ' ')}</Chip>
                   </View>
                   <Text>{res.guestName} · party of {res.partySize}</Text>
-                  <Text style={{ color: colors.muted }}>{fmtDay(res.reservationTime)} · {res.source.replace('_', ' ')}</Text>
+                  <Text style={{ color: colors.muted }}>{res.source.replace('_', ' ')}</Text>
                   {res.guestCompany ? <Text style={{ color: colors.muted }}>{res.guestCompany}</Text> : null}
                   {res.occasion ? <Chip compact style={{ alignSelf: 'flex-start' }}>{res.occasion}</Chip> : null}
                   {res.isPrivateEvent ? (

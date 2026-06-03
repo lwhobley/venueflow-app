@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Button, Card, Switch, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
@@ -34,6 +34,18 @@ export function AvailabilityEditor() {
   const [savedNote, setSavedNote] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const todayIndex = new Date().getDay();
+  const weekDates = useMemo(() => {
+    const today = new Date();
+    const sunday = new Date(today);
+    sunday.setDate(today.getDate() - today.getDay());
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() + i);
+      return d;
+    });
+  }, []);
 
   useEffect(() => {
     if (!saved) return;
@@ -85,7 +97,13 @@ export function AvailabilityEditor() {
         <Card key={dayLabels[i]} style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{dayLabels[i]}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
+                <Text variant="titleMedium" style={{ fontWeight: '700', color: todayIndex === i ? colors.primary : undefined }}>{dayLabels[i]}</Text>
+                <Text style={{ color: todayIndex === i ? colors.primary : colors.muted, fontSize: 13, fontWeight: todayIndex === i ? '700' : '400' }}>
+                  {weekDates[i].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </Text>
+                {todayIndex === i ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} /> : null}
+              </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={{ color: d.available ? accents[2].fg : colors.muted }}>{d.available ? 'Available' : 'Off'}</Text>
                 <Switch value={d.available} onValueChange={(v) => update(i, { available: v })} color={colors.primary} />

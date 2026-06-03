@@ -84,6 +84,21 @@ export function MyShifts() {
   const open = useMemo(() => (data?.open ?? []) as Shift[], [data]);
   const roster = useMemo(() => (data?.roster ?? []) as RosterDay[], [data]);
   const blackouts = useMemo(() => (blackoutData ?? []) as Blackout[], [blackoutData]);
+
+  const weekDates = useMemo(() => {
+    const today = new Date();
+    const sunday = new Date(today);
+    sunday.setDate(today.getDate() - today.getDay());
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() + i);
+      return d;
+    });
+  }, []);
+  const todayDayIndex = new Date().getDay();
+
+  const shiftDate = (dayIndex: number) =>
+    weekDates[dayIndex]?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) ?? '';
   const nextShift = useMemo(() => {
     const now = new Date();
     const today = now.getDay();
@@ -127,8 +142,9 @@ export function MyShifts() {
           <Card.Content style={{ gap: 4 }}>
             <Text variant="titleMedium" style={{ color: accents[0].fg, fontWeight: '800' }}>Upcoming shift reminder</Text>
             <Text style={{ color: colors.charcoal }}>
-              {nextShift.dayLabel} at {nextShift.startTime} · {nextShift.jobTitle} · {nextShift.station}
+              {nextShift.dayLabel}{nextShift.dayIndex === todayDayIndex ? ' (Today)' : ''} · {shiftDate(nextShift.dayIndex)} · {nextShift.startTime} – {nextShift.endTime}
             </Text>
+            <Text style={{ color: accents[0].fg }}>{nextShift.jobTitle} · {nextShift.station}</Text>
           </Card.Content>
         </Card>
       ) : null}
@@ -141,11 +157,14 @@ export function MyShifts() {
           ) : (
             mine.map((s) => (
               <View key={s._id} style={{ padding: 12, borderRadius: 12, backgroundColor: s.conflict ? '#FDE7E9' : colors.cream, borderWidth: s.conflict ? 1.5 : 0, borderColor: colors.danger, gap: 6 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ fontWeight: '700' }}>{s.dayLabel} · {s.startTime} – {s.endTime}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                  <View>
+                    <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
+                  </View>
                   {s.conflict ? <Text style={{ color: colors.danger, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
                 </View>
-                <Text>{s.jobTitle} · {s.station}</Text>
+                <Text style={{ color: colors.charcoal }}>{s.jobTitle} · {s.station}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                   <Button compact mode="outlined" textColor={colors.danger} onPress={() => void run(() => requestDropShift({ shiftId: s._id }), 'Drop request sent.')}>
                     Request to drop
@@ -205,7 +224,9 @@ export function MyShifts() {
           ) : (
             roster.map((day) => (
               <View key={day.dayIndex} style={{ gap: 6, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                <Text style={{ fontWeight: '700' }}>{day.dayLabel}</Text>
+                <Text style={{ fontWeight: '700', color: day.dayIndex === todayDayIndex ? colors.primary : undefined }}>
+                  {day.dayLabel} · {shiftDate(day.dayIndex)}{day.dayIndex === todayDayIndex ? ' · Today' : ''}
+                </Text>
                 {day.coworkers.length === 0 ? (
                   <Text style={{ color: colors.muted }}>You're the only one scheduled.</Text>
                 ) : (
@@ -246,7 +267,10 @@ export function MyShifts() {
             open.map((s) => (
               <View key={s._id} style={{ padding: 12, borderRadius: 12, backgroundColor: accents[4].bg, gap: 6 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontWeight: '700' }}>{s.dayLabel} · {s.startTime} – {s.endTime}</Text>
+                  <View>
+                    <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
+                  </View>
                   {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Outside your availability</Chip> : null}
                 </View>
                 <Text>{s.jobTitle} · {s.station}</Text>
