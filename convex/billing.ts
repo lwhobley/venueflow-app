@@ -1,13 +1,9 @@
 import { action, internalMutation, internalQuery, query } from './_generated/server';
+import type { MutationCtx, QueryCtx, ActionCtx } from './_generated/server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { getProfileOrNull } from './authz';
-
-// Intentional escape hatch — shared helpers used across query/mutation ctxs.
-// See note in convex/app.ts. Tracked for proper typing in the hardening task.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyCtx = any;
 
 const subscriptionStatusValue = v.union(v.literal('trialing'), v.literal('active'), v.literal('past_due'), v.literal('cancelled'), v.literal('expired'), v.literal('paused'));
 const subscriptionPlatformValue = v.union(v.literal('stripe'), v.literal('apple'), v.null());
@@ -135,12 +131,15 @@ function mapStripeStatus(status: string | undefined) {
 export const getMyBilling = query({
   args: {},
   returns: v.union(v.null(), billingValue),
-  handler: async (ctx) => {
+  handler: async (ctx: QueryCtx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
-    const profile = await getProfileOrNull(ctx as AnyCtx);
+    const profile = await getProfileOrNull(ctx);
     if (!profile?.venueId) return null;
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
+    const subscription = await ctx.db
+      .query('subscriptions')
+      .withIndex('by_venue', (q) => q.eq('venueId', profile.venueId!))
+      .unique();
     if (!subscription) return null;
     return {
       venueId: subscription.venueId,
@@ -170,13 +169,16 @@ export const getStripeBillingContext = internalQuery({
       externalCustomerId: v.union(v.string(), v.null()),
     }),
   ),
-  handler: async (ctx) => {
-    const profile = await getProfileOrNull(ctx as AnyCtx);
+  handler: async (ctx: QueryCtx) => {
+    const profile = await getProfileOrNull(ctx);
     if (!profile?.venueId || !isBillingAdmin(profile.role)) return null;
 
-    const venue = await (ctx as AnyCtx).db.get(profile.venueId);
+    const venue = await ctx.db.get(profile.venueId);
     if (!venue) return null;
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', profile.venueId)).unique();
+    const subscription = await ctx.db
+      .query('subscriptions')
+      .withIndex('by_venue', (q) => q.eq('venueId', profile.venueId!))
+      .unique();
     if (!subscription) return null;
     return {
       venueId: profile.venueId,
@@ -190,7 +192,7 @@ export const getStripeBillingContext = internalQuery({
 export const createStripeCheckoutSession = action({
   args: { planId: v.optional(v.string()) },
   returns: stripeSessionValue,
-  handler: async (ctx, args): Promise<{ url: string }> => {
+  handler: async (ctx: ActionCtx, args): Promise<{ url: string }> => {
     const context: { venueId: Id<'venues'>; venueName: string; email: string; externalCustomerId: string | null } | null = await ctx.runQuery(
       internal.billing.getStripeBillingContext,
       {},
@@ -226,7 +228,7 @@ export const createStripeCheckoutSession = action({
 export const createStripeBillingPortalSession = action({
   args: {},
   returns: stripeSessionValue,
-  handler: async (ctx): Promise<{ url: string }> => {
+  handler: async (ctx: ActionCtx): Promise<{ url: string }> => {
     const context: { externalCustomerId: string | null } | null = await ctx.runQuery(internal.billing.getStripeBillingContext, {});
     if (!context) throw new Error('Only venue owners can manage billing');
     if (!context.externalCustomerId) throw new Error('No Stripe customer is linked yet');
@@ -247,16 +249,19 @@ export const reconcilePaidSubscription = internalMutation({
     platform: subscriptionPlatformValue,
   },
   returns: billingValue,
-  handler: async (ctx, args) => {
-    const subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).unique();
+  handler: async (ctx: MutationCtx, args) => {
+    const subscription = await ctx.db
+      .query('subscriptions')
+      .withIndex('by_venue', (q) => q.eq('venueId', args.venueId))
+      .unique();
     if (!subscription) throw new Error('Subscription not found');
 
-    const venue = await (ctx as AnyCtx).db.get(args.venueId);
+    const venue = await ctx.db.get(args.venueId);
     if (!venue) throw new Error('Venue not found');
 
     const now = Date.now();
     const currentPeriodEnd = periodEndForPackage(args.packageRef, now);
-    await (ctx as AnyCtx).db.patch(subscription._id, {
+    await ctx.db.patch(subscription._id, {
       status: 'active',
       platform: args.platform,
       planId: args.packageRef,
@@ -267,12 +272,12 @@ export const reconcilePaidSubscription = internalMutation({
       cancelledAt: null,
       updatedAt: now,
     });
-    await (ctx as AnyCtx).db.patch(venue._id, {
+    await ctx.db.patch(venue._id, {
       subscriptionStatus: 'active',
       subscriptionPlatform: args.platform,
     });
 
-    const updated = await (ctx as AnyCtx).db.get(subscription._id);
+    const updated = await ctx.db.get(subscription._id);
     if (!updated) throw new Error('Unable to update subscription');
     return {
       venueId: updated.venueId,
@@ -294,27 +299,33 @@ export const reconcilePaidSubscription = internalMutation({
 export const handleStripeWebhook = internalMutation({
   args: { event: v.any() },
   returns: v.object({ status: v.string() }),
-  handler: async (ctx, args) => {
+  handler: async (ctx: MutationCtx, args) => {
     const event = args.event;
     const object = event?.data?.object ?? {};
     const venueId = object?.metadata?.venueId ?? object?.client_reference_id;
     let subscription: Doc<'subscriptions'> | null = null;
     if (venueId) {
-      subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_venue', (q: any) => q.eq('venueId', venueId)).unique();
+      subscription = await ctx.db
+        .query('subscriptions')
+        .withIndex('by_venue', (q) => q.eq('venueId', venueId))
+        .unique();
     }
     if (!subscription && object?.id && String(event.type ?? '').startsWith('customer.subscription.')) {
-      subscription = await (ctx as AnyCtx).db.query('subscriptions').withIndex('by_external_id', (q: any) => q.eq('externalSubscriptionId', object.id)).unique();
+      subscription = await ctx.db
+        .query('subscriptions')
+        .withIndex('by_external_id', (q) => q.eq('externalSubscriptionId', object.id))
+        .unique();
     }
     if (!subscription) return { status: 'skipped' };
 
     const externalEventId = event.id ?? `${event.type}:${Date.now()}`;
-    const duplicate = await (ctx as AnyCtx).db
+    const duplicate = await ctx.db
       .query('subscriptionEvents')
-      .withIndex('by_source_external_id', (q: any) => q.eq('source', 'stripe').eq('externalEventId', externalEventId))
+      .withIndex('by_source_external_id', (q) => q.eq('source', 'stripe').eq('externalEventId', externalEventId))
       .unique();
     if (duplicate) return { status: 'duplicate' };
 
-    await (ctx as AnyCtx).db.insert('subscriptionEvents', {
+    await ctx.db.insert('subscriptionEvents', {
       venueId: subscription.venueId,
       source: 'stripe',
       externalEventId,
@@ -369,17 +380,20 @@ export const handleStripeWebhook = internalMutation({
       invoiceStatusPatch.currentPeriodEnd = stripeMs(object.period_end);
     }
 
-    await (ctx as AnyCtx).db.patch(subscription._id, { ...patch, ...invoiceStatusPatch });
-    const updated = await (ctx as AnyCtx).db.get(subscription._id);
+    await ctx.db.patch(subscription._id, { ...patch, ...invoiceStatusPatch });
+    const updated = await ctx.db.get(subscription._id);
     if (updated) {
-      await (ctx as AnyCtx).db.patch(updated.venueId, {
+      await ctx.db.patch(updated.venueId, {
         subscriptionStatus: updated.status,
         subscriptionPlatform: updated.platform,
       });
     }
 
     if ((event.type === 'invoice.paid' || event.type === 'invoice.payment_failed') && object.id) {
-      const existingInvoice = await (ctx as AnyCtx).db.query('invoices').withIndex('by_stripe_id', (q: any) => q.eq('stripeInvoiceId', object.id)).unique();
+      const existingInvoice = await ctx.db
+        .query('invoices')
+        .withIndex('by_stripe_id', (q) => q.eq('stripeInvoiceId', object.id))
+        .unique();
       const invoicePayload = {
         venueId: subscription.venueId,
         stripeInvoiceId: object.id,
@@ -393,8 +407,8 @@ export const handleStripeWebhook = internalMutation({
         createdAt: stripeMs(object.created) ?? Date.now(),
         paidAt: stripeMs(object.status_transitions?.paid_at),
       };
-      if (existingInvoice) await (ctx as AnyCtx).db.patch(existingInvoice._id, invoicePayload);
-      else await (ctx as AnyCtx).db.insert('invoices', invoicePayload);
+      if (existingInvoice) await ctx.db.patch(existingInvoice._id, invoicePayload);
+      else await ctx.db.insert('invoices', invoicePayload);
     }
     return { status: 'processed' };
   },
@@ -413,20 +427,20 @@ export const handleStripeWebhook = internalMutation({
 export const handleRevenueCatEvent = internalMutation({
   args: { appUserId: v.string(), status: subscriptionStatusValue },
   returns: v.null(),
-  handler: async (ctx, args) => {
+  handler: async (ctx: MutationCtx, args) => {
     // app_user_id is a venue id string; ignore anything that isn't a real venue.
-    const venue = await (ctx as AnyCtx).db.get(args.appUserId as Id<'venues'>).catch(() => null);
+    const venue = await ctx.db.get(args.appUserId as Id<'venues'>).catch(() => null);
     if (!venue || !('name' in venue)) return null;
-    await (ctx as AnyCtx).db.patch(venue._id, {
+    await ctx.db.patch(venue._id, {
       subscriptionStatus: args.status,
       subscriptionPlatform: 'apple',
     });
-    const subscription = await (ctx as AnyCtx).db
+    const subscription = await ctx.db
       .query('subscriptions')
-      .withIndex('by_venue', (q: any) => q.eq('venueId', venue._id))
+      .withIndex('by_venue', (q) => q.eq('venueId', venue._id))
       .unique();
     if (subscription) {
-      await (ctx as AnyCtx).db.patch(subscription._id, { status: args.status, platform: 'apple', updatedAt: Date.now() });
+      await ctx.db.patch(subscription._id, { status: args.status, platform: 'apple', updatedAt: Date.now() });
     }
     return null;
   },
