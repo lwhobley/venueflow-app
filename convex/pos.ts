@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import { requirePaidSubscription } from './billing/shared';
+import { requirePaidSubscription, SubscriptionRequiredError } from './billing/shared';
 import { timingSafeEqual, newWebhookSecret } from './secrets';
 import { canManage, getProfileOrNull } from './authz';
 
@@ -280,6 +280,16 @@ function accumulateCheck(acc: {
   acc.coverCount += c.guestCount ?? 1;
 }
 
+async function canReadPaidPos(ctx: AnyCtx, venueId: Id<'venues'>) {
+  try {
+    await requirePaidSubscription(ctx, venueId);
+    return true;
+  } catch (error) {
+    if (error instanceof SubscriptionRequiredError) return false;
+    throw error;
+  }
+}
+
 // ---------- Queries ----------
 
 export const getPosOverview = query({
@@ -298,7 +308,7 @@ export const getPosOverview = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
     const connections = await (ctx as AnyCtx).db.query('posConnections').withIndex('by_venue', (q: any) => q.eq('venueId', args.venueId)).take(10);
     const checks = await (ctx as AnyCtx).db.query('posChecks').withIndex('by_venue_openedAt', (q: any) => q.eq('venueId', args.venueId)).order('desc').take(50);
     const { start: dayStart } = dayBounds(0);
@@ -367,7 +377,7 @@ export const getSalesSummary = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
     const { start } = dayBounds(-window + 1);
@@ -409,7 +419,7 @@ export const getSalesSummaryDashboard = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     const start = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
     const end = args.endTs !== undefined ? args.endTs + 1 : dayBounds(1).start;
@@ -482,7 +492,7 @@ export const getSalesByDay = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
     const { start } = dayBounds(-window + 1);
@@ -526,7 +536,7 @@ export const getSalesByServer = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     const start = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
     const end = args.endTs !== undefined ? args.endTs + 1 : dayBounds(1).start;
@@ -569,7 +579,7 @@ export const getSalesByRevenueCenter = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
     const { start } = dayBounds(-window + 1);
@@ -608,7 +618,7 @@ export const getSalesByTender = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     const window = Math.min(Math.max(1, Math.round(args.windowDays)), 90);
     const { start } = dayBounds(-window + 1);
@@ -647,7 +657,7 @@ export const getTopMenuItems = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     const cap = Math.min(args.limit ?? 20, 50);
     const start = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
@@ -696,7 +706,7 @@ export const getLaborSummary = query({
   handler: async (ctx, args) => {
     const profile = await getProfileOrNull(ctx as AnyCtx);
     if (!profile || profile.venueId !== args.venueId || !canManage(profile)) return null;
-    await requirePaidSubscription(ctx as AnyCtx, args.venueId);
+    if (!(await canReadPaidPos(ctx as AnyCtx, args.venueId))) return null;
 
     // Build the set of business dates we want, iterating by day.
     const rawStart = args.startTs ?? dayBounds(-Math.min(Math.max(1, Math.round(args.windowDays)), 90) + 1).start;
