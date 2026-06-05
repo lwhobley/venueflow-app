@@ -34,7 +34,6 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/venuetest?sslmode=disable
-      DATABASE_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/venuetest?sslmode=disable
       JWT_SECRET: ci-test-secret-not-used-in-prod
 
     steps:
