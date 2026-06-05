@@ -12,6 +12,9 @@ import { IsEmail, IsNumber, IsOptional, IsString, Max, Min } from 'class-validat
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
+import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
+import { VenueScope } from '../../venue/venue-scope.decorator';
+import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // Mirrors TRIAL_DURATION_MS in convex/app.ts. Keep in sync with the Convex backend.
@@ -87,6 +90,7 @@ class UpdateVenueDto {
 export class AppController {
   constructor(private readonly prisma: PrismaService) {}
 
+  @SkipVenueScope()
   @Get('me')
   async getMe(@CurrentUser() user: AuthUser) {
     const profile = await this.prisma.profile.findFirst({
@@ -100,6 +104,7 @@ export class AppController {
     };
   }
 
+  @SkipVenueScope()
   @Post('bootstrap-profile')
   async bootstrapProfile(@CurrentUser() user: AuthUser, @Body() body: BootstrapProfileDto) {
     // Trust the authenticated identity for email, never the client. The body
@@ -135,17 +140,19 @@ export class AppController {
   }
 
   @Patch('venue')
-  async updateVenue(@CurrentUser() user: AuthUser, @Body() body: UpdateVenueDto) {
-    const profile = await this.prisma.profile.findFirstOrThrow({ where: { userId: user.sub } });
-    if (!profile.venueId) {
+  async updateVenue(
+    @VenueScope() scope: VenueScopedRequest['venueScope'],
+    @Body() body: UpdateVenueDto,
+  ) {
+    if (!scope) {
       return { venue: null };
     }
-    if (!isAdminRole(profile.role)) {
+    if (!isAdminRole(scope.role)) {
       throw new ForbiddenException('Not authorized to update venue settings');
     }
 
     const venue = await this.prisma.venue.update({
-      where: { id: profile.venueId },
+      where: { id: scope.venueId },
       data: body,
     });
 
@@ -153,8 +160,13 @@ export class AppController {
   }
 
   @Delete('me')
-  async deleteMyAccount(@CurrentUser() user: AuthUser) {
-    const profile = await this.prisma.profile.findFirst({ where: { userId: user.sub } });
+  async deleteMyAccount(
+    @CurrentUser() user: AuthUser,
+    @VenueScope() scope: VenueScopedRequest['venueScope'],
+  ) {
+    const profile = scope
+      ? await this.prisma.profile.findFirst({ where: { id: scope.profileId } })
+      : await this.prisma.profile.findFirst({ where: { userId: user.sub } });
     if (!profile) {
       return { ok: true };
     }
