@@ -1,0 +1,801 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  owner
+  manager
+  server
+  staff
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  cancelled
+  expired
+  paused
+}
+
+enum SubscriptionPlatform {
+  stripe
+  apple
+}
+
+enum ShiftStatus {
+  scheduled
+  open
+  covered
+}
+
+enum RequestStatus {
+  pending
+  approved
+  denied
+  cancelled
+}
+
+enum TableShape {
+  round
+  square
+  rect
+  booth
+}
+
+enum TableSection {
+  main
+  patio
+  bar
+  vip
+}
+
+enum TableStatus {
+  available
+  seated
+  dirty
+  reserved
+  held
+  out_of_service
+}
+
+enum ReservationStatus {
+  requested
+  confirmed
+  checked_in
+  seated
+  completed
+  no_show
+  cancelled
+}
+
+enum ReservationSource {
+  direct
+  opentable
+  resy
+  phone
+  walk_in
+  sevenrooms
+  tock
+  google
+}
+
+enum PosProvider {
+  toast
+  square
+  clover
+  generic
+}
+
+enum IntegrationStatus {
+  connected
+  paused
+  error
+}
+
+enum PosCheckStatus {
+  open
+  paid
+  void
+}
+
+enum WaitlistStatus {
+  waiting
+  assigned
+  seated
+  completed
+  removed
+}
+
+enum HoldType {
+  reserved
+  held
+  seated
+}
+
+enum CrmLeadStatus {
+  new
+  contacted
+  qualified
+  proposal_sent
+  negotiating
+  won
+  lost
+  unqualified
+  on_hold
+}
+
+enum BeoStatus {
+  draft
+  sent
+  reviewed
+  confirmed
+  amended
+  cancelled
+}
+
+enum ContractStatus {
+  draft
+  sent
+  viewed
+  partially_signed
+  fully_signed
+  expired
+  cancelled
+  disputed
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String?   @unique
+  phone     String?   @unique
+  createdAt DateTime  @default(now())
+  profiles  Profile[]
+  sessions  Session[]
+  accounts  AuthAccount[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String?  @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  createdAt         DateTime @default(now())
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId, provider])
+}
+
+model Venue {
+  id                       String                @id @default(cuid())
+  name                     String
+  latitude                 Float
+  longitude                Float
+  geofenceRadiusM          Float
+  code                     String?               @unique
+  phone                    String?
+  address                  String?
+  venueType                String?
+  staffRange               String?
+  weeklyLaborBudgetHours   Float?
+  schedulePublishedAt      DateTime?
+  schedulePublishedById    String?
+  scheduleUpdatedAfterPublishAt DateTime?
+  subscriptionStatus       SubscriptionStatus?
+  subscriptionPlatform     SubscriptionPlatform?
+  leadsWebhookSecret       String?
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  profiles                 Profile[]
+  shifts                   ScheduleShift[]
+  availability             Availability[]
+  conversations            Conversation[]
+  notifications            NotificationEvent[]
+  pushTokens               PushToken[]
+  staffRequests            StaffRequest[]
+  guests                   Guest[]
+  reservations             Reservation[]
+  floorPlans               FloorPlan[]
+  tables                   TableState[]
+  subscriptions            Subscription[]
+  crmLeads                 CrmLead[]
+  posChecks                PosCheck[]
+}
+
+model Profile {
+  id              String            @id @default(cuid())
+  userId          String?           @unique
+  tokenIdentifier String?
+  email           String
+  fullName        String
+  role            Role
+  jobTitle        String
+  venueId         String?
+  allAccess       Boolean           @default(false)
+  trialEndsAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  venue           Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  shifts          ScheduleShift[]
+  availability    Availability[]
+  pushTokens      PushToken[]
+  staffRequests   StaffRequest[]
+  sentMessages    Message[]
+  crmNotes        CrmNote[]
+
+  @@index([venueId])
+  @@index([email])
+  @@index([tokenIdentifier])
+}
+
+model ScheduleShift {
+  id           String      @id @default(cuid())
+  venueId      String
+  profileId    String?
+  dayIndex     Int
+  startMinutes Int
+  endMinutes   Int
+  jobTitle     String
+  station      String
+  notes        String?
+  status       ShiftStatus
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  venue        Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile      Profile?    @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([venueId])
+  @@index([profileId])
+  @@index([venueId, profileId, dayIndex])
+}
+
+model ScheduleTemplate {
+  id        String   @id @default(cuid())
+  venueId   String
+  name      String
+  shifts    Json
+  createdAt DateTime @default(now())
+
+  @@index([venueId])
+}
+
+model Availability {
+  id           String   @id @default(cuid())
+  venueId      String
+  profileId    String
+  dayIndex     Int
+  startMinutes Int
+  endMinutes   Int
+  available    Boolean
+  updatedAt    DateTime @updatedAt
+  venue        Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile      Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([venueId])
+  @@index([profileId, dayIndex])
+}
+
+model StaffRequest {
+  id                String        @id @default(cuid())
+  venueId           String
+  profileId         String
+  kind              String
+  status            RequestStatus
+  title             String
+  details           String
+  requestedForDate  String?
+  requestedShiftId  String?
+  requestedRangeStart String?
+  requestedRangeEnd String?
+  availability      Json?
+  reviewerId        String?
+  reviewedAt        DateTime?
+  responseNotes     String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  venue             Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile           Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
+  @@index([profileId])
+  @@index([status])
+}
+
+model Conversation {
+  id              String    @id @default(cuid())
+  venueId         String
+  type            String
+  name            String?
+  memberIds       String[]
+  lastMessageAt   DateTime?
+  lastMessageText String?
+  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  messages        Message[]
+
+  @@index([venueId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  venueId        String
+  senderId       String
+  text           String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         Profile      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model NotificationEvent {
+  id        String   @id @default(cuid())
+  venueId   String
+  profileId String?
+  audience  String
+  kind      String
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, createdAt])
+  @@index([profileId, createdAt])
+}
+
+model NotificationRead {
+  id             String   @id @default(cuid())
+  notificationId String
+  profileId      String
+  venueId        String
+  readAt         DateTime @default(now())
+
+  @@unique([notificationId, profileId])
+  @@index([profileId])
+}
+
+model PushToken {
+  id         String   @id @default(cuid())
+  venueId    String
+  profileId  String
+  token      String   @unique
+  platform   String
+  enabled    Boolean
+  lastSeenAt DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  venue      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile    Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([venueId])
+}
+
+model Guest {
+  id             String   @id @default(cuid())
+  venueId        String
+  fullName       String
+  phone          String?
+  email          String?
+  lifecycleStage String?
+  source         String?
+  birthday       String?
+  company        String?
+  marketingOptIn Boolean?
+  favoriteTable  String?
+  preferredServer String?
+  dietaryNotes   String?
+  tags           String[]
+  notes          String?
+  nameLower      String?
+  deletedAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  venue          Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
+  @@index([phone])
+  @@index([email])
+  @@index([venueId, nameLower])
+}
+
+model Reservation {
+  id                  String            @id @default(cuid())
+  venueId             String
+  guestId             String?
+  guestName           String
+  guestPhone          String?
+  guestEmail          String?
+  guestCompany        String?
+  partySize           Int
+  reservationTime     DateTime
+  durationMinutes     Int
+  source              ReservationSource
+  status              ReservationStatus
+  specialRequests     String?
+  occasion            String?
+  tags                String[]
+  isPrivateEvent      Boolean?
+  eventName           String?
+  eventStatus         String?
+  eventSpace          String?
+  setupStyle          String?
+  menuNotes           String?
+  beverageNotes       String?
+  billingNotes        String?
+  contractStatus      String?
+  beoStatus           String?
+  estimatedValueCents Int?
+  externalId          String?
+  notes               String?
+  deletedAt           DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  venue               Venue             @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, reservationTime])
+  @@index([venueId, status])
+  @@index([guestId])
+  @@index([externalId])
+  @@index([venueId, externalId])
+}
+
+model Waitlist {
+  id          String         @id @default(cuid())
+  venueId     String
+  guestId     String?
+  guestName   String
+  guestPhone  String?
+  partySize   Int
+  source      String
+  status      WaitlistStatus
+  requestedAt DateTime
+  readyAt     DateTime?
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([venueId, requestedAt])
+  @@index([venueId, status])
+}
+
+model FloorPlan {
+  id                 String       @id @default(cuid())
+  venueId            String
+  name               String
+  width              Float
+  height             Float
+  backgroundImageUrl String?
+  isActive           Boolean
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  venue              Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  tables             FloorTable[]
+  chairs             FloorChair[]
+
+  @@index([venueId])
+  @@index([venueId, isActive])
+}
+
+model FloorTable {
+  id             String       @id @default(cuid())
+  floorPlanId    String
+  label          String
+  shape          TableShape
+  seats          Int
+  seatLabelStyle String?
+  x              Float
+  y              Float
+  width          Float
+  height         Float
+  rotation       Float
+  section        TableSection
+  minSpend       Int
+  isReservable   Boolean
+  floorPlan      FloorPlan    @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
+
+  @@index([floorPlanId])
+  @@index([floorPlanId, section])
+}
+
+model FloorChair {
+  id          String    @id @default(cuid())
+  venueId     String
+  floorPlanId String
+  x           Float
+  y           Float
+  rotation    Float
+  label       String?
+  floorPlan   FloorPlan @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
+
+  @@index([floorPlanId])
+  @@index([venueId])
+}
+
+model TableState {
+  id             String      @id @default(cuid())
+  venueId        String
+  tableId        String
+  status         TableStatus
+  partySize      Int?
+  serverId       String?
+  toastCheckGuid String?
+  seatedAt       DateTime?
+  lastActivityAt DateTime
+  notes          String?
+  mergeGroupId   String?
+  venue          Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([tableId])
+  @@index([status])
+  @@index([serverId])
+  @@index([venueId])
+  @@index([venueId, mergeGroupId])
+}
+
+model TableAssignment {
+  id             String    @id @default(cuid())
+  venueId        String
+  reservationId  String?
+  waitlistId     String?
+  tableId        String
+  holdType       HoldType
+  startsAt       DateTime
+  endsAt         DateTime
+  createdAt      DateTime  @default(now())
+  releasedAt     DateTime?
+  releasedReason String?
+
+  @@index([tableId, startsAt])
+  @@index([reservationId])
+  @@index([waitlistId])
+  @@index([venueId, startsAt])
+}
+
+model PosConnection {
+  id                 String            @id @default(cuid())
+  venueId            String
+  provider           PosProvider
+  externalLocationId String?
+  status             IntegrationStatus
+  webhookSecret      String?
+  lastSyncAt         DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([venueId])
+  @@index([venueId, provider])
+}
+
+model PosCheck {
+  id                 String         @id @default(cuid())
+  venueId            String
+  provider           PosProvider
+  externalCheckId    String
+  tableLabel         String?
+  tableId            String?
+  serverName         String?
+  serverId           String?
+  guestName          String?
+  guestId            String?
+  openedAt           DateTime
+  closedAt           DateTime?
+  subtotalCents      Int
+  taxCents           Int?
+  tipCents           Int
+  totalCents         Int
+  discountCents      Int?
+  compCents          Int?
+  promoCents         Int?
+  guestCount         Int?
+  revenueCenter      String?
+  tenderType         String?
+  menuItems          Json?
+  status             PosCheckStatus
+  raw                Json?
+  updatedAt          DateTime       @updatedAt
+  venue              Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, openedAt])
+  @@index([provider, externalCheckId])
+  @@index([venueId, provider, externalCheckId])
+  @@index([guestId])
+}
+
+model PosLaborPunch {
+  id                 String      @id @default(cuid())
+  venueId            String
+  provider           PosProvider
+  externalEmployeeId String
+  employeeName       String
+  jobTitle           String?
+  clockInAt          DateTime
+  clockOutAt         DateTime?
+  regularMinutes     Int?
+  overtimeMinutes    Int?
+  declaredTipsCents  Int?
+  tipsCents          Int?
+  regularPayCents    Int?
+  overtimePayCents   Int?
+  totalPayCents      Int?
+  businessDate       String
+  updatedAt          DateTime    @updatedAt
+
+  @@index([venueId, businessDate])
+  @@index([venueId, externalEmployeeId])
+}
+
+model CrmLead {
+  id                  String        @id @default(cuid())
+  venueId             String
+  guestId             String?
+  fullName            String
+  email               String?
+  phone               String?
+  company             String?
+  source              String?
+  status              CrmLeadStatus
+  tags                String[]
+  assignedToId        String?
+  marketingOptIn      Boolean?
+  lastActivityAt      DateTime?
+  estimatedValueCents Int?
+  deletedAt           DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  venue               Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  notes               CrmNote[]
+  beos                CrmBeo[]
+  contracts           CrmContract[]
+
+  @@index([venueId])
+  @@index([venueId, status])
+  @@index([guestId])
+}
+
+model CrmNote {
+  id        String   @id @default(cuid())
+  venueId   String
+  leadId    String
+  authorId  String
+  text      String
+  createdAt DateTime @default(now())
+  lead      CrmLead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author    Profile  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([venueId])
+}
+
+model CrmBeo {
+  id                  String    @id @default(cuid())
+  venueId             String
+  leadId              String?
+  eventName           String
+  eventDate           DateTime?
+  eventType           String?
+  guestCount          Int?
+  venueSpace          String?
+  setupStyle          String?
+  fbMinimumCents      Int?
+  depositCents        Int?
+  depositDueDate      DateTime?
+  menuAppetizers      String?
+  menuEntrees         String?
+  menuDesserts        String?
+  menuBarPackage      String?
+  specialRequirements String?
+  internalNotes       String?
+  assignedRepId       String?
+  status              BeoStatus
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  lead                CrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([venueId])
+  @@index([leadId])
+  @@index([venueId, status])
+}
+
+model CrmContract {
+  id                  String         @id @default(cuid())
+  venueId             String
+  leadId              String?
+  beoId               String?
+  contractNumber      String
+  contractDate        DateTime?
+  eventName           String?
+  eventDate           DateTime?
+  guestCount          Int?
+  venueSpace          String?
+  fbMinimumCents      Int?
+  paymentSchedule     Json
+  cancellationPolicy  String?
+  forceMajeure        Boolean?
+  liabilityWaiver     Boolean?
+  customClauses       String[]
+  clientSignatureName String?
+  clientSignatureDate DateTime?
+  status              ContractStatus
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  lead                CrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([venueId])
+  @@index([leadId])
+  @@index([beoId])
+  @@index([venueId, status])
+}
+
+model Subscription {
+  id                     String                @id @default(cuid())
+  venueId                String
+  status                 SubscriptionStatus
+  platform               SubscriptionPlatform?
+  planId                 String
+  priceCents             Int
+  currency               String
+  trialStartedAt         DateTime
+  trialEndsAt            DateTime
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean
+  cancelledAt            DateTime?
+  externalSubscriptionId String?
+  externalCustomerId     String?
+  dataRetentionWarnedAt  DateTime?
+  lastStripeEventAt      DateTime?
+  lastRevenueCatEventAt  DateTime?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  venue                  Venue                 @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
+  @@index([status])
+  @@index([externalSubscriptionId])
+}
+
+model SubscriptionEvent {
+  id              String   @id @default(cuid())
+  venueId         String
+  source          String
+  externalEventId String
+  eventType       String
+  payload         Json
+  processedAt     DateTime?
+  status          String
+  errorMessage    String?
+
+  @@index([source, externalEventId])
+  @@index([venueId, processedAt])
+}
+
+model CosmicInsight {
+  id      String   @id @default(cuid())
+  kind    String
+  title   String
+  body    String
+  batchAt DateTime
+
+  @@index([batchAt])
+}
