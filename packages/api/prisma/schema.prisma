@@ -429,8 +429,10 @@ model TimeEntry {
   profile           Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([venueId])
+  @@index([venueId, clockInAt])
   @@index([profileId])
   @@index([profileId, isOpen])
+  @@index([isOpen])
 }
 
 model Guest {
