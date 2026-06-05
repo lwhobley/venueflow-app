@@ -39,4 +39,16 @@ export class NotificationsService {
       },
     });
   }
+
+  async notifyStaff(args: { venueId: string; kind: string; title: string; body: string }) {
+    await this.prisma.notificationEvent.create({
+      data: {
+        venueId: args.venueId,
+        audience: 'staff',
+        kind: args.kind,
+        title: args.title,
+        body: args.body,
+      },
+    });
+  }
 }

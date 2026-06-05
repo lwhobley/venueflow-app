@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable } 
 import { Reflector } from '@nestjs/core';
 import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
 import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.decorator';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * Guards routes behind an active subscription check, mirroring the behaviour
@@ -15,9 +16,12 @@ import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.
  */
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const tier = this.reflector.getAllAndOverride<SubscriptionTier | undefined>(
       SUBSCRIPTION_TIER_KEY,
       [context.getHandler(), context.getClass()],
@@ -27,7 +31,7 @@ export class SubscriptionGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<VenueScopedRequest>();
-    const scope = request.venueScope;
+    const scope = request.venueScope ?? (await this.resolveVenueScope(request));
 
     if (!scope) {
       throw new HttpException('No active venue subscription', HttpStatus.PAYMENT_REQUIRED);
@@ -57,6 +61,28 @@ export class SubscriptionGuard implements CanActivate {
     }
 
     return false;
+  }
+
+  private async resolveVenueScope(request: VenueScopedRequest) {
+    const user = request.user;
+    if (!user?.sub) return null;
+
+    const profile = await this.prisma.profile.findFirst({
+      where: { userId: user.sub },
+      include: { venue: { select: { id: true, subscriptionStatus: true } } },
+    });
+    if (!profile?.venueId || !profile.venue) return null;
+
+    request.venueScope = {
+      profileId: profile.id,
+      fullName: profile.fullName,
+      venueId: profile.venueId,
+      role: profile.role,
+      allAccess: profile.allAccess,
+      subscriptionStatus: profile.venue.subscriptionStatus ?? null,
+      trialEndsAt: profile.trialEndsAt ?? null,
+    };
+    return request.venueScope;
   }
 }
 

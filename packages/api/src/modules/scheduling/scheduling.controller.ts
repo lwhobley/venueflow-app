@@ -493,7 +493,7 @@ export class SchedulingController {
         scheduleUpdatedAfterPublishAt: null,
       },
     });
-    await this.notifications.notifyManagers({
+    await this.notifications.notifyStaff({
       venueId: scope!.venueId,
       kind: 'schedule_published',
       title: 'Schedule posted',
@@ -644,22 +644,28 @@ export class SchedulingController {
   @Post('restore-shifts')
   async restoreShifts(@VenueScope() scope: Scope, @Body() body: RestoreShiftsDto) {
     this.requireManager(scope);
-    const creates = body.shifts.map((shift) => {
+    const creates = [];
+    for (const shift of body.shifts) {
       ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
-      return this.prisma.scheduleShift.create({
+      let profileId = shift.profileId;
+      if (profileId) {
+        const member = await this.prisma.profile.findFirst({ where: { id: profileId, venueId: scope!.venueId } });
+        if (!member) profileId = undefined;
+      }
+      creates.push(this.prisma.scheduleShift.create({
         data: {
           venueId: scope!.venueId,
-          profileId: shift.profileId,
+          profileId,
           dayIndex: shift.dayIndex,
           startMinutes: shift.startMinutes,
           endMinutes: shift.endMinutes,
           jobTitle: shift.jobTitle,
           station: shift.station,
-          status: shift.profileId ? shift.status : 'open',
+          status: profileId ? shift.status : 'open',
           notes: shift.notes,
         },
-      });
-    });
+      }));
+    }
     await this.prisma.$transaction(creates);
     await this.markScheduleEdited(scope!.venueId);
     return { restored: creates.length };
@@ -727,6 +733,26 @@ export class SchedulingController {
     if (body.approve) {
       const requesterShift = await this.getVenueShift(scope!.venueId, swap.requesterShiftId);
       const targetShift = swap.targetShiftId ? await this.getVenueShift(scope!.venueId, swap.targetShiftId) : null;
+      await this.assertNoDoubleBook(
+        scope!.venueId,
+        swap.targetProfileId,
+        requesterShift.dayIndex,
+        requesterShift.startMinutes,
+        requesterShift.endMinutes,
+        requesterShift.id,
+        targetShift?.id,
+      );
+      if (targetShift) {
+        await this.assertNoDoubleBook(
+          scope!.venueId,
+          swap.requesterProfileId,
+          targetShift.dayIndex,
+          targetShift.startMinutes,
+          targetShift.endMinutes,
+          targetShift.id,
+          requesterShift.id,
+        );
+      }
       await this.prisma.$transaction([
         this.prisma.scheduleShift.update({ where: { id: requesterShift.id }, data: { profileId: swap.targetProfileId, status: 'scheduled' } }),
         ...(targetShift
@@ -798,13 +824,14 @@ export class SchedulingController {
     return shift;
   }
 
-  private async assertNoDoubleBook(venueId: string, profileId: string, dayIndex: number, startMinutes: number, endMinutes: number, excludeShiftId?: string) {
+  private async assertNoDoubleBook(venueId: string, profileId: string, dayIndex: number, startMinutes: number, endMinutes: number, ...excludeShiftIds: Array<string | undefined>) {
+    const excluded = excludeShiftIds.filter((id): id is string => Boolean(id));
     const overlapping = await this.prisma.scheduleShift.findFirst({
       where: {
         venueId,
         profileId,
         dayIndex,
-        ...(excludeShiftId ? { id: { not: excludeShiftId } } : {}),
+        ...(excluded.length > 0 ? { id: { notIn: excluded } } : {}),
         startMinutes: { lt: endMinutes },
         endMinutes: { gt: startMinutes },
       },

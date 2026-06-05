@@ -30,7 +30,7 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
 
-const REQUEST_KINDS = ['time_off', 'shift_swap', 'availability', 'open_shift', 'other'];
+const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'availability', 'shift_swap', 'open_shift', 'other'];
 const REVIEW_STATUSES = ['approved', 'denied', 'cancelled'];
 
 class AvailabilityBlockDto {
@@ -103,7 +103,11 @@ export class StaffRequestsController {
   async listStaffRequests(@VenueScope() scope: Scope) {
     if (!scope) return [];
     const requests = await this.prisma.staffRequest.findMany({
-      where: { venueId: scope.venueId },
+      where: {
+        venueId: scope.venueId,
+        ...(isAdminRole(scope.role) ? {} : { profileId: scope.profileId }),
+      },
+      orderBy: { createdAt: 'desc' },
     });
     return requests.map(mapStaffRequest);
   }

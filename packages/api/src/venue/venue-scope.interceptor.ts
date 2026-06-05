@@ -3,7 +3,6 @@ import {
   ExecutionContext,
   Injectable,
   NestInterceptor,
-  NotFoundException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Observable } from 'rxjs';
