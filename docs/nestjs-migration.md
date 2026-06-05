@@ -25,6 +25,26 @@ TestFlight/App Review does not lose working data flows.
 7. POS/payroll/reports
 8. CRM/guests/billing/webhooks
 
+## Ported So Far
+
+- **Auth/profile/venue**: `getMe`, `bootstrapProfile`, `updateVenue`, `deleteMyAccount`
+- **Time clock**: `getClockBoard`, `getMyTimeClock`, `clockIn`, `clockOut`
+- **Staff requests**: `listStaffRequests`, `createStaffRequest`, `reviewStaffRequest`
+- **Staff roster**: `listVenueStaff`, `upsertVenueStaff`, `deactivateVenueStaff`
+
+Shared infrastructure backing these:
+
+- `AuthGuard` registered globally (`APP_GUARD`); opt out with `@Public()`.
+- `VenueScopeInterceptor` (`APP_INTERCEPTOR`) resolves profile + venue once per
+  request into `request.venueScope`; read it with `@VenueScope()`. Routes that
+  run before a profile exists use `@SkipVenueScope()`.
+- `SubscriptionGuard` + `@RequireSubscription()` / `@RequireSubscription('paid')`
+  mirror `requireActiveSubscription` / `requirePaidSubscription`.
+
+New Prisma models added for these endpoints: `TimeEntry`, `BlackoutDate`. Run
+`npm run prisma:migrate:dev -w @venue-wrangler/api` against a database to create
+the migration before deploying.
+
 ## Convex Function Surface To Replace
 
 The Nest API exposes `/api/v1/compatibility/convex-surface` so we can track the

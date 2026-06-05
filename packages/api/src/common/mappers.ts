@@ -1,0 +1,118 @@
+// Response mappers that mirror the shapes returned by convex/app.ts, so the
+// NestJS API is wire-compatible with the existing clients during migration.
+
+type ClockProfile = { id: string; fullName: string; role: string; jobTitle: string };
+type ClockVenue = { id: string; name: string };
+type TimeEntryRow = {
+  id: string;
+  clockInAt: Date;
+  clockOutAt: Date | null;
+  clockInLat: number;
+  clockInLng: number;
+  clockInAccuracyM: number;
+  clockInMocked: boolean;
+  clockOutLat: number | null;
+  clockOutLng: number | null;
+  clockOutAccuracyM: number | null;
+  clockOutMocked: boolean | null;
+  isOpen: boolean;
+};
+
+export function dayLabel(index: number): string {
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index] ?? 'Day';
+}
+
+export function minutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60) % 24;
+  const mins = minutes % 60;
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+  return `${displayHour}:${mins.toString().padStart(2, '0')} ${suffix}`;
+}
+
+export function mapClockEntry(entry: TimeEntryRow, profile: ClockProfile, venue: ClockVenue) {
+  return {
+    _id: entry.id,
+    memberId: profile.id,
+    memberName: profile.fullName,
+    role: profile.role,
+    jobTitle: profile.jobTitle,
+    venueId: venue.id,
+    venueName: venue.name,
+    clockInAt: entry.clockInAt.getTime(),
+    clockOutAt: entry.clockOutAt?.getTime() ?? null,
+    clockInLat: entry.clockInLat,
+    clockInLng: entry.clockInLng,
+    clockInAccuracyM: entry.clockInAccuracyM,
+    clockInMocked: entry.clockInMocked,
+    clockOutLat: entry.clockOutLat ?? null,
+    clockOutLng: entry.clockOutLng ?? null,
+    clockOutAccuracyM: entry.clockOutAccuracyM ?? null,
+    clockOutMocked: entry.clockOutMocked ?? null,
+    isOpen: entry.isOpen,
+  };
+}
+
+type ProfileRow = {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  jobTitle: string;
+  venueId: string | null;
+  allAccess: boolean;
+};
+
+export function mapProfile(profile: ProfileRow) {
+  return {
+    _id: profile.id,
+    email: profile.email,
+    fullName: profile.fullName,
+    role: profile.role,
+    jobTitle: profile.jobTitle,
+    venueId: profile.venueId,
+    allAccess: profile.allAccess,
+  };
+}
+
+type StaffRequestRow = {
+  id: string;
+  venueId: string;
+  profileId: string;
+  kind: string;
+  status: string;
+  title: string;
+  details: string;
+  requestedForDate: string | null;
+  requestedShiftId: string | null;
+  requestedRangeStart: string | null;
+  requestedRangeEnd: string | null;
+  availability: unknown;
+  reviewerId: string | null;
+  reviewedAt: Date | null;
+  responseNotes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export function mapStaffRequest(request: StaffRequestRow) {
+  return {
+    _id: request.id,
+    venueId: request.venueId,
+    profileId: request.profileId,
+    kind: request.kind,
+    status: request.status,
+    title: request.title,
+    details: request.details,
+    requestedForDate: request.requestedForDate ?? null,
+    requestedShiftId: request.requestedShiftId ?? null,
+    requestedRangeStart: request.requestedRangeStart ?? null,
+    requestedRangeEnd: request.requestedRangeEnd ?? null,
+    availability: request.availability ?? null,
+    reviewerId: request.reviewerId ?? null,
+    reviewedAt: request.reviewedAt?.getTime() ?? null,
+    responseNotes: request.responseNotes ?? null,
+    createdAt: request.createdAt.getTime(),
+    updatedAt: request.updatedAt.getTime(),
+  };
+}

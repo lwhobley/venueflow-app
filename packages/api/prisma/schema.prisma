@@ -210,6 +210,8 @@ model Venue {
   conversations            Conversation[]
   notifications            NotificationEvent[]
   pushTokens               PushToken[]
+  timeEntries              TimeEntry[]
+  blackoutDates            BlackoutDate[]
   staffRequests            StaffRequest[]
   guests                   Guest[]
   reservations             Reservation[]
@@ -238,6 +240,7 @@ model Profile {
   shifts          ScheduleShift[]
   availability    Availability[]
   pushTokens      PushToken[]
+  timeEntries     TimeEntry[]
   staffRequests   StaffRequest[]
   sentMessages    Message[]
   crmNotes        CrmNote[]
@@ -266,6 +269,19 @@ model ScheduleShift {
   @@index([venueId])
   @@index([profileId])
   @@index([venueId, profileId, dayIndex])
+}
+
+model BlackoutDate {
+  id        String   @id @default(cuid())
+  venueId   String
+  startDate String
+  endDate   String
+  reason    String
+  createdBy String
+  createdAt DateTime @default(now())
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
 }
 
 model ScheduleTemplate {
@@ -389,6 +405,31 @@ model PushToken {
 
   @@index([profileId])
   @@index([venueId])
+}
+
+model TimeEntry {
+  id                String    @id @default(cuid())
+  venueId           String
+  profileId         String
+  clockInAt         DateTime
+  clockOutAt        DateTime?
+  clockInLat        Float
+  clockInLng        Float
+  clockInAccuracyM  Float
+  clockInMocked     Boolean
+  clockOutLat       Float?
+  clockOutLng       Float?
+  clockOutAccuracyM Float?
+  clockOutMocked    Boolean?
+  isOpen            Boolean
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  venue             Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile           Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
+  @@index([profileId])
+  @@index([profileId, isOpen])
 }
 
 model Guest {

@@ -5,11 +5,15 @@ import { AuthGuard } from './auth/auth.guard';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { HealthController } from './health.controller';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { VenueModule } from './venue/venue.module';
 import { VenueScopeInterceptor } from './venue/venue-scope.interceptor';
 import { AppController } from './modules/app/app.controller';
 import { CompatibilityController } from './modules/compatibility/compatibility.controller';
+import { StaffController } from './modules/staff/staff.controller';
+import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
+import { TimeClockController } from './modules/time-clock/time-clock.controller';
 
 @Module({
   imports: [
@@ -21,8 +25,16 @@ import { CompatibilityController } from './modules/compatibility/compatibility.c
     AuthModule,
     VenueModule,
     BillingModule,
+    NotificationsModule,
   ],
-  controllers: [HealthController, AppController, CompatibilityController],
+  controllers: [
+    HealthController,
+    AppController,
+    CompatibilityController,
+    TimeClockController,
+    StaffRequestsController,
+    StaffController,
+  ],
   providers: [
     // Protect every route by default. Opt out explicitly with @Public().
     { provide: APP_GUARD, useExisting: AuthGuard },
