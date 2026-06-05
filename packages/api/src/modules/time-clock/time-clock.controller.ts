@@ -14,7 +14,7 @@ import { assertWithinGeofence } from '../../common/geofence';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
-import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import type { VenueScopedRequest } from '../../venue/venue-scope.guard';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -44,7 +44,7 @@ export class TimeClockController {
     if (!venue) return null;
 
     const entries = await this.prisma.timeEntry.findMany({
-      where: { venueId: venue.id },
+      where: { venueId: venue.id, isOpen: true },
       include: { profile: true },
     });
 
@@ -120,6 +120,7 @@ export class TimeClockController {
     };
   }
 
+  @RequireSubscription()
   @Get('me')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
     const profile = await this.prisma.profile.findFirst({ where: { userId: user.sub } });

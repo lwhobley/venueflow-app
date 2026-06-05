@@ -1,6 +1,14 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  OnModuleInit,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import jwksRsa from 'jwks-rsa';
 import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
@@ -16,11 +24,27 @@ export type AuthenticatedRequest = Request & {
 };
 
 @Injectable()
-export class AuthGuard implements CanActivate {
+export class AuthGuard implements CanActivate, OnModuleInit {
+  private jwksClient: jwksRsa.JwksClient | null = null;
+
   constructor(
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
+    private readonly config: ConfigService,
   ) {}
+
+  onModuleInit() {
+    const convexSiteUrl = this.config.get<string>('CONVEX_SITE_URL');
+    if (convexSiteUrl) {
+      this.jwksClient = jwksRsa({
+        jwksUri: `${convexSiteUrl}/.well-known/jwks.json`,
+        cache: true,
+        cacheMaxEntries: 5,
+        cacheMaxAge: 10 * 60 * 1000,
+        rateLimit: true,
+      });
+    }
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -39,7 +63,7 @@ export class AuthGuard implements CanActivate {
 
     let payload: AuthUser;
     try {
-      payload = await this.jwt.verifyAsync<AuthUser>(token);
+      payload = await this.verifyToken(token);
     } catch {
       throw new UnauthorizedException('Invalid bearer token');
     }
@@ -50,6 +74,23 @@ export class AuthGuard implements CanActivate {
 
     request.user = payload;
     return true;
+  }
+
+  private async verifyToken(token: string): Promise<AuthUser> {
+    const decoded = this.jwt.decode(token, { complete: true }) as {
+      header: { alg?: string; kid?: string };
+    } | null;
+
+    if (decoded?.header?.alg === 'RS256' && this.jwksClient) {
+      const signingKey = await this.jwksClient.getSigningKey(decoded.header.kid);
+      const publicKey = signingKey.getPublicKey();
+      return await this.jwt.verifyAsync<AuthUser>(token, {
+        secret: publicKey,
+        algorithms: ['RS256'],
+      });
+    }
+
+    return await this.jwt.verifyAsync<AuthUser>(token);
   }
 
   private getBearerToken(request: Request): string | null {

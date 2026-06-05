@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { VenueScopeInterceptor } from './venue-scope.interceptor';
+import { VenueScopeGuard } from './venue-scope.guard';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
   imports: [PrismaModule],
-  providers: [VenueScopeInterceptor],
-  exports: [VenueScopeInterceptor],
+  providers: [VenueScopeGuard],
+  exports: [VenueScopeGuard],
 })
 export class VenueModule {}

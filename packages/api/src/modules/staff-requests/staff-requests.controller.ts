@@ -12,6 +12,7 @@ import {
 import {
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
   IsOptional,
@@ -26,7 +27,7 @@ import { mapStaffRequest } from '../../common/mappers';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
-import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import type { VenueScopedRequest } from '../../venue/venue-scope.guard';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -58,7 +59,7 @@ class CreateStaffRequestDto {
   @IsString()
   details!: string;
 
-  @IsString()
+  @IsDateString()
   @IsOptional()
   requestedForDate?: string;
 
@@ -66,11 +67,11 @@ class CreateStaffRequestDto {
   @IsOptional()
   requestedShiftId?: string;
 
-  @IsString()
+  @IsDateString()
   @IsOptional()
   requestedRangeStart?: string;
 
-  @IsString()
+  @IsDateString()
   @IsOptional()
   requestedRangeEnd?: string;
 

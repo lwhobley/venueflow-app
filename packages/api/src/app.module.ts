@@ -1,14 +1,15 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
+import { APP_GUARD, Reflector } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
+import { SubscriptionGuard } from './billing/subscription.guard';
 import { HealthController } from './health.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { VenueModule } from './venue/venue.module';
-import { VenueScopeInterceptor } from './venue/venue-scope.interceptor';
+import { VenueScopeGuard } from './venue/venue-scope.guard';
 import { AppController } from './modules/app/app.controller';
 import { CompatibilityController } from './modules/compatibility/compatibility.controller';
 import { StaffController } from './modules/staff/staff.controller';
@@ -36,11 +37,12 @@ import { TimeClockController } from './modules/time-clock/time-clock.controller'
     StaffController,
   ],
   providers: [
-    // Protect every route by default. Opt out explicitly with @Public().
+    // Guard 1: protect every route by default. Opt out with @Public().
     { provide: APP_GUARD, useExisting: AuthGuard },
-    // Resolve profile+venue once per request and expose via request.venueScope.
-    { provide: APP_INTERCEPTOR, useClass: VenueScopeInterceptor },
-    // Reflector must be provided at the module level for the interceptor DI.
+    // Guard 2: resolve profile+venue and attach to request.venueScope.
+    { provide: APP_GUARD, useClass: VenueScopeGuard },
+    // Guard 3: enforce subscription tier when @RequireSubscription() is present.
+    { provide: APP_GUARD, useClass: SubscriptionGuard },
     Reflector,
   ],
 })

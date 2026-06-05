@@ -10,10 +10,12 @@ import { AuthGuard } from './auth.guard';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const secret = config.get<string>('JWT_SECRET');
-        if (!secret) {
-          throw new Error('JWT_SECRET environment variable is required');
+        const convexSiteUrl = config.get<string>('CONVEX_SITE_URL');
+        // JWT_SECRET is required unless CONVEX_SITE_URL is set (RS256/JWKS path).
+        if (!secret && !convexSiteUrl) {
+          throw new Error('JWT_SECRET or CONVEX_SITE_URL environment variable is required');
         }
-        return { secret };
+        return { secret: secret ?? 'unused-rs256-verification-handled-by-jwks' };
       },
     }),
   ],

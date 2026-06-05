@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
+import type { VenueScopedRequest } from '../venue/venue-scope.guard';
 import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.decorator';
 
 /**

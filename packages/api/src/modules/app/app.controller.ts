@@ -14,7 +14,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
-import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import type { VenueScopedRequest } from '../../venue/venue-scope.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // Mirrors TRIAL_DURATION_MS in convex/app.ts. Keep in sync with the Convex backend.

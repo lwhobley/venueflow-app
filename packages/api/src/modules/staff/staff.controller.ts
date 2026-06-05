@@ -14,7 +14,7 @@ import { isAdminRole } from '../../auth/roles';
 import { mapProfile } from '../../common/mappers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
-import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import type { VenueScopedRequest } from '../../venue/venue-scope.guard';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -64,9 +64,9 @@ export class StaffController {
       throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
     }
 
-    const existing = await this.prisma.profile.findMany({ where: { venueId: scope.venueId } });
-    const member =
-      existing.find((item) => item.email.toLowerCase() === body.email.toLowerCase()) ?? null;
+    const member = await this.prisma.profile.findFirst({
+      where: { venueId: scope.venueId, email: { equals: body.email, mode: 'insensitive' } },
+    });
 
     if (member) {
       const updated = await this.prisma.profile.update({
