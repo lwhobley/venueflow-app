@@ -207,6 +207,7 @@ model Venue {
   updatedAt                DateTime              @updatedAt
   profiles                 Profile[]
   shifts                   ScheduleShift[]
+  shiftSwaps               ShiftSwap[]
   availability             Availability[]
   conversations            Conversation[]
   notifications            NotificationEvent[]
@@ -433,6 +434,24 @@ model TimeEntry {
   @@index([profileId])
   @@index([profileId, isOpen])
   @@index([isOpen])
+}
+
+model ShiftSwap {
+  id                 String   @id @default(cuid())
+  venueId            String
+  requesterProfileId String
+  requesterShiftId   String
+  targetProfileId    String
+  targetShiftId      String?
+  status             String
+  note               String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  venue              Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
+  @@index([requesterProfileId])
+  @@index([targetProfileId])
 }
 
 model Guest {

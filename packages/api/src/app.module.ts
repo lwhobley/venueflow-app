@@ -14,6 +14,7 @@ import { CompatibilityController } from './modules/compatibility/compatibility.c
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
+import { SchedulingController } from './modules/scheduling/scheduling.controller';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { TimeClockController } from './modules/time-clock/time-clock.controller'
     HealthController,
     AppController,
     CompatibilityController,
+    SchedulingController,
     TimeClockController,
     StaffRequestsController,
     StaffController,

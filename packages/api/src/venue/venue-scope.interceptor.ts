@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export type VenueScopedRequest = AuthenticatedRequest & {
   venueScope?: {
     profileId: string;
+    fullName: string;
     venueId: string;
     role: string;
     allAccess: boolean;
@@ -63,6 +64,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
     request.venueScope = {
       profileId: profile.id,
+      fullName: profile.fullName,
       venueId: profile.venueId,
       role: profile.role,
       allAccess: profile.allAccess,

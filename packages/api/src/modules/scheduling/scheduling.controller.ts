@@ -1,0 +1,882 @@
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
+import { Prisma, ShiftStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
+import { isAdminRole } from '../../auth/roles';
+import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { dayLabel, minutesToTime } from '../../common/mappers';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { VenueScope } from '../../venue/venue-scope.decorator';
+import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+
+type Scope = VenueScopedRequest['venueScope'];
+
+const SHIFT_STATUSES = ['scheduled', 'open', 'covered'];
+const SWAP_STATUSES = ['proposed', 'accepted', 'declined', 'approved', 'denied', 'cancelled'];
+
+class AvailabilityBlockDto {
+  @IsInt()
+  dayIndex!: number;
+
+  @IsInt()
+  startMinutes!: number;
+
+  @IsInt()
+  endMinutes!: number;
+
+  @IsBoolean()
+  available!: boolean;
+}
+
+class SetAvailabilityDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AvailabilityBlockDto)
+  rows!: AvailabilityBlockDto[];
+}
+
+class BlackoutDto {
+  @IsString()
+  startDate!: string;
+
+  @IsString()
+  @IsOptional()
+  endDate?: string;
+
+  @IsString()
+  reason!: string;
+}
+
+class ShiftDto {
+  @IsInt()
+  dayIndex!: number;
+
+  @IsInt()
+  startMinutes!: number;
+
+  @IsInt()
+  endMinutes!: number;
+
+  @IsString()
+  jobTitle!: string;
+
+  @IsString()
+  station!: string;
+
+  @IsString()
+  @IsOptional()
+  profileId?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
+
+class AssignShiftDto {
+  @IsString()
+  @IsOptional()
+  profileId?: string;
+}
+
+class LaborBudgetDto {
+  @IsInt()
+  @IsOptional()
+  weeklyLaborBudgetHours?: number;
+}
+
+class TemplateDto {
+  @IsString()
+  name!: string;
+}
+
+class ApplyTemplateDto {
+  @IsBoolean()
+  replace!: boolean;
+}
+
+class CopyDayDto {
+  @IsInt()
+  fromDay!: number;
+
+  @IsArray()
+  toDays!: number[];
+}
+
+class RestoreShiftDto extends ShiftDto {
+  @IsString()
+  @IsIn(SHIFT_STATUSES)
+  status!: ShiftStatus;
+}
+
+class RestoreShiftsDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RestoreShiftDto)
+  shifts!: RestoreShiftDto[];
+}
+
+class ProposeSwapDto {
+  @IsString()
+  myShiftId!: string;
+
+  @IsString()
+  targetProfileId!: string;
+
+  @IsString()
+  @IsOptional()
+  targetShiftId?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+}
+
+class RespondSwapDto {
+  @IsBoolean()
+  accept!: boolean;
+}
+
+class ReviewSwapDto {
+  @IsBoolean()
+  approve!: boolean;
+}
+
+function ensureValidShiftWindow(dayIndex: number, startMinutes: number, endMinutes: number) {
+  if (!Number.isInteger(dayIndex) || dayIndex < 0 || dayIndex > 6) {
+    throw new BadRequestException('dayIndex must be between 0 and 6');
+  }
+  if (!Number.isInteger(startMinutes) || startMinutes < 0 || startMinutes > 1440) {
+    throw new BadRequestException('Invalid start time');
+  }
+  if (!Number.isInteger(endMinutes) || endMinutes < 0 || endMinutes > 1440 || endMinutes <= startMinutes) {
+    throw new BadRequestException('End time must be after start time');
+  }
+}
+
+function schedulePublishState(venue: {
+  schedulePublishedAt: Date | null;
+  scheduleUpdatedAfterPublishAt: Date | null;
+}) {
+  const publishedAt = venue.schedulePublishedAt?.getTime() ?? null;
+  const updatedAfterPublishAt = venue.scheduleUpdatedAfterPublishAt?.getTime() ?? null;
+  return {
+    status: !publishedAt ? 'draft' : updatedAfterPublishAt && updatedAfterPublishAt > publishedAt ? 'edited_after_publish' : 'published',
+    publishedAt,
+    updatedAfterPublishAt,
+  };
+}
+
+type ShiftWithProfile = {
+  id: string;
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  jobTitle: string;
+  station: string;
+  notes: string | null;
+  status: ShiftStatus;
+  profileId: string | null;
+  profile?: { fullName: string } | null;
+};
+
+@Controller('v1/scheduling')
+export class SchedulingController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  @RequireSubscription()
+  @Get('availability/me')
+  async getMyAvailability(@VenueScope() scope: Scope) {
+    if (!scope) return [];
+    const rows = await this.prisma.availability.findMany({
+      where: { profileId: scope.profileId },
+      orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+    });
+    return rows.map((row) => ({
+      dayIndex: row.dayIndex,
+      startMinutes: row.startMinutes,
+      endMinutes: row.endMinutes,
+      available: row.available,
+    }));
+  }
+
+  @RequireSubscription()
+  @Post('availability/me')
+  async setMyAvailability(@VenueScope() scope: Scope, @Body() body: SetAvailabilityDto) {
+    if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
+    await this.prisma.$transaction([
+      this.prisma.availability.deleteMany({ where: { profileId: scope.profileId } }),
+      ...body.rows.map((row) =>
+        this.prisma.availability.create({
+          data: {
+            venueId: scope.venueId,
+            profileId: scope.profileId,
+            dayIndex: row.dayIndex,
+            startMinutes: row.startMinutes,
+            endMinutes: row.endMinutes,
+            available: row.available,
+          },
+        }),
+      ),
+    ]);
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Get('blackouts')
+  async listBlackouts(@VenueScope() scope: Scope) {
+    if (!scope) return [];
+    const rows = await this.prisma.blackoutDate.findMany({
+      where: { venueId: scope.venueId },
+      orderBy: { startDate: 'asc' },
+    });
+    return rows.map((row) => ({ _id: row.id, startDate: row.startDate, endDate: row.endDate, reason: row.reason }));
+  }
+
+  @RequireSubscription()
+  @Post('blackouts')
+  async addBlackout(@VenueScope() scope: Scope, @Body() body: BlackoutDto) {
+    this.requireManager(scope);
+    const startDate = body.startDate.trim();
+    const endDate = body.endDate?.trim() || startDate;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      throw new BadRequestException('Dates must be in YYYY-MM-DD format');
+    }
+    if (endDate < startDate) throw new BadRequestException('End date must be on or after the start date');
+    const row = await this.prisma.blackoutDate.create({
+      data: {
+        venueId: scope!.venueId,
+        startDate,
+        endDate,
+        reason: body.reason.trim() || 'Blackout',
+        createdBy: scope!.profileId,
+      },
+    });
+    return row.id;
+  }
+
+  @RequireSubscription()
+  @Delete('blackouts/:id')
+  async removeBlackout(@VenueScope() scope: Scope, @Param('id') id: string) {
+    this.requireManager(scope);
+    const row = await this.prisma.blackoutDate.findFirst({ where: { id, venueId: scope!.venueId } });
+    if (!row) throw new NotFoundException('Blackout not found');
+    await this.prisma.blackoutDate.delete({ where: { id: row.id } });
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Get('manager')
+  async getManagerSchedule(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const [venue, shifts, staff, availability] = await Promise.all([
+      this.prisma.venue.findUniqueOrThrow({ where: { id: scope!.venueId } }),
+      this.prisma.scheduleShift.findMany({
+        where: { venueId: scope!.venueId },
+        include: { profile: true },
+        orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+      }),
+      this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.availability.findMany({ where: { venueId: scope!.venueId } }),
+    ]);
+    const availabilityByProfile = new Map<string, typeof availability>();
+    for (const row of availability) {
+      const rows = availabilityByProfile.get(row.profileId) ?? [];
+      rows.push(row);
+      availabilityByProfile.set(row.profileId, rows);
+    }
+    const weeklyMinutes = new Map<string, number>();
+    for (const shift of shifts) {
+      if (!shift.profileId) continue;
+      weeklyMinutes.set(shift.profileId, (weeklyMinutes.get(shift.profileId) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes));
+    }
+    const totalScheduledMinutes = shifts.reduce((sum, shift) => sum + Math.max(0, shift.endMinutes - shift.startMinutes), 0);
+    return {
+      shifts: shifts.map((shift) => this.mapManagerShift(shift)),
+      staff: staff.map((member) => {
+        const mins = weeklyMinutes.get(member.id) ?? 0;
+        return {
+          _id: member.id,
+          fullName: member.fullName,
+          role: member.role,
+          jobTitle: member.jobTitle,
+          weeklyHours: Math.round((mins / 60) * 10) / 10,
+          overtime: mins > 40 * 60,
+          availability: (availabilityByProfile.get(member.id) ?? []).map((row) => ({
+            dayIndex: row.dayIndex,
+            startMinutes: row.startMinutes,
+            endMinutes: row.endMinutes,
+            available: row.available,
+          })),
+        };
+      }),
+      laborBudgetHours: venue.weeklyLaborBudgetHours ?? null,
+      totalScheduledHours: Math.round((totalScheduledMinutes / 60) * 10) / 10,
+      publishState: schedulePublishState(venue),
+    };
+  }
+
+  @RequireSubscription()
+  @Post('shifts')
+  async createShift(@VenueScope() scope: Scope, @Body() body: ShiftDto) {
+    this.requireManager(scope);
+    ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
+    if (body.profileId) await this.assertVenueMember(scope!.venueId, body.profileId);
+    if (body.profileId) await this.assertNoDoubleBook(scope!.venueId, body.profileId, body.dayIndex, body.startMinutes, body.endMinutes);
+    const shift = await this.prisma.scheduleShift.create({
+      data: {
+        venueId: scope!.venueId,
+        profileId: body.profileId,
+        dayIndex: body.dayIndex,
+        startMinutes: body.startMinutes,
+        endMinutes: body.endMinutes,
+        jobTitle: body.jobTitle.trim() || 'Staff',
+        station: body.station.trim() || 'Floor',
+        notes: body.notes?.trim() || null,
+        status: body.profileId ? 'scheduled' : 'open',
+      },
+    });
+    await this.markScheduleEdited(scope!.venueId);
+    if (body.profileId) {
+      await this.notifications.notifyProfile({
+        venueId: scope!.venueId,
+        profileId: body.profileId,
+        kind: 'shift_assigned',
+        title: 'New shift assigned',
+        body: `${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(body.endMinutes)} · ${body.jobTitle}`,
+      });
+    }
+    return shift.id;
+  }
+
+  @RequireSubscription()
+  @Patch('shifts/:id')
+  async updateShift(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ShiftDto) {
+    this.requireManager(scope);
+    ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
+    const shift = await this.getVenueShift(scope!.venueId, id);
+    if (shift.profileId) await this.assertNoDoubleBook(scope!.venueId, shift.profileId, body.dayIndex, body.startMinutes, body.endMinutes, shift.id);
+    await this.prisma.scheduleShift.update({
+      where: { id: shift.id },
+      data: {
+        dayIndex: body.dayIndex,
+        startMinutes: body.startMinutes,
+        endMinutes: body.endMinutes,
+        jobTitle: body.jobTitle.trim() || 'Staff',
+        station: body.station.trim() || 'Floor',
+        notes: body.notes?.trim() || null,
+      },
+    });
+    await this.markScheduleEdited(scope!.venueId);
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Patch('shifts/:id/assign')
+  async assignShift(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: AssignShiftDto) {
+    this.requireManager(scope);
+    const shift = await this.getVenueShift(scope!.venueId, id);
+    if (!body.profileId) {
+      await this.prisma.scheduleShift.update({ where: { id: shift.id }, data: { profileId: null, status: 'open' } });
+      await this.markScheduleEdited(scope!.venueId);
+      return { ok: true };
+    }
+    await this.assertVenueMember(scope!.venueId, body.profileId);
+    await this.assertNoDoubleBook(scope!.venueId, body.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
+    await this.prisma.scheduleShift.update({ where: { id: shift.id }, data: { profileId: body.profileId, status: 'scheduled' } });
+    await this.markScheduleEdited(scope!.venueId);
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Delete('shifts/:id')
+  async deleteShift(@VenueScope() scope: Scope, @Param('id') id: string) {
+    this.requireManager(scope);
+    const shift = await this.getVenueShift(scope!.venueId, id);
+    await this.prisma.scheduleShift.delete({ where: { id: shift.id } });
+    await this.markScheduleEdited(scope!.venueId);
+    return {
+      dayIndex: shift.dayIndex,
+      startMinutes: shift.startMinutes,
+      endMinutes: shift.endMinutes,
+      jobTitle: shift.jobTitle,
+      station: shift.station,
+      status: shift.status,
+      profileId: shift.profileId,
+      notes: shift.notes,
+    };
+  }
+
+  @RequireSubscription()
+  @Get('me')
+  async getMySchedule(@VenueScope() scope: Scope) {
+    if (!scope) return { mine: [], open: [], roster: [] };
+    const shifts = await this.prisma.scheduleShift.findMany({
+      where: { venueId: scope.venueId },
+      include: { profile: true },
+      orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+    });
+    const mine = shifts.filter((shift) => shift.profileId === scope.profileId);
+    const open = shifts.filter((shift) => shift.status === 'open' && !shift.profileId);
+    const roster = [0, 1, 2, 3, 4, 5, 6].map((dayIndex) => ({
+      dayIndex,
+      dayLabel: dayLabel(dayIndex),
+      coworkers: shifts
+        .filter((shift) => shift.dayIndex === dayIndex && shift.profileId && shift.profileId !== scope.profileId)
+        .map((shift) => ({
+          profileId: shift.profileId,
+          memberName: shift.profile?.fullName ?? 'Teammate',
+          jobTitle: shift.jobTitle,
+          startTime: minutesToTime(shift.startMinutes),
+          endTime: minutesToTime(shift.endMinutes),
+        })),
+    }));
+    return {
+      mine: mine.map((shift) => this.mapEmployeeShift(shift)),
+      open: open.map((shift) => this.mapEmployeeShift(shift)),
+      roster,
+    };
+  }
+
+  @RequireSubscription()
+  @Post('shifts/:id/claim')
+  async claimOpenShift(@VenueScope() scope: Scope, @Param('id') id: string) {
+    if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
+    const shift = await this.getVenueShift(scope.venueId, id);
+    if (shift.profileId || shift.status !== 'open') throw new BadRequestException('This shift is no longer open');
+    await this.assertNoDoubleBook(scope.venueId, scope.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
+    await this.prisma.scheduleShift.update({ where: { id: shift.id }, data: { profileId: scope.profileId, status: 'covered' } });
+    await this.markScheduleEdited(scope.venueId);
+    await this.notifications.notifyManagers({
+      venueId: scope.venueId,
+      kind: 'shift_assigned',
+      title: 'Open shift covered',
+      body: `${scope.fullName} picked up ${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)}.`,
+    });
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Post('publish')
+  async publishSchedule(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } });
+    const assigned = shifts.filter((shift) => shift.profileId).length;
+    const open = shifts.filter((shift) => shift.status === 'open').length;
+    await this.prisma.venue.update({
+      where: { id: scope!.venueId },
+      data: {
+        schedulePublishedAt: new Date(),
+        schedulePublishedById: scope!.profileId,
+        scheduleUpdatedAfterPublishAt: null,
+      },
+    });
+    await this.notifications.notifyManagers({
+      venueId: scope!.venueId,
+      kind: 'schedule_published',
+      title: 'Schedule posted',
+      body: `${assigned} shift${assigned === 1 ? '' : 's'} scheduled${open > 0 ? `, ${open} open to pick up` : ''}.`,
+    });
+    return { notified: assigned };
+  }
+
+  @RequireSubscription()
+  @Patch('labor-budget')
+  async setLaborBudget(@VenueScope() scope: Scope, @Body() body: LaborBudgetDto) {
+    this.requireManager(scope);
+    await this.prisma.venue.update({
+      where: { id: scope!.venueId },
+      data: { weeklyLaborBudgetHours: body.weeklyLaborBudgetHours ?? null },
+    });
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Get('templates')
+  async listScheduleTemplates(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const rows = await this.prisma.scheduleTemplate.findMany({
+      where: { venueId: scope!.venueId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => ({
+      _id: row.id,
+      name: row.name,
+      shiftCount: Array.isArray(row.shifts) ? row.shifts.length : 0,
+      createdAt: row.createdAt.getTime(),
+    }));
+  }
+
+  @RequireSubscription()
+  @Post('templates')
+  async saveScheduleTemplate(@VenueScope() scope: Scope, @Body() body: TemplateDto) {
+    this.requireManager(scope);
+    const name = body.name.trim();
+    if (!name) throw new BadRequestException('Enter a template name');
+    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } });
+    const row = await this.prisma.scheduleTemplate.create({
+      data: {
+        venueId: scope!.venueId,
+        name,
+        shifts: shifts.map((shift) => ({
+          dayIndex: shift.dayIndex,
+          startMinutes: shift.startMinutes,
+          endMinutes: shift.endMinutes,
+          jobTitle: shift.jobTitle,
+          station: shift.station,
+        })) as Prisma.InputJsonValue,
+      },
+    });
+    return row.id;
+  }
+
+  @RequireSubscription()
+  @Post('templates/:id/apply')
+  async applyScheduleTemplate(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ApplyTemplateDto) {
+    this.requireManager(scope);
+    const template = await this.prisma.scheduleTemplate.findFirst({ where: { id, venueId: scope!.venueId } });
+    if (!template) throw new NotFoundException('Template not found');
+    const slots = Array.isArray(template.shifts) ? template.shifts : [];
+    const creates = slots.map((slot) => {
+      const row = slot as { dayIndex: number; startMinutes: number; endMinutes: number; jobTitle: string; station: string };
+      return this.prisma.scheduleShift.create({
+        data: {
+          venueId: scope!.venueId,
+          dayIndex: row.dayIndex,
+          startMinutes: row.startMinutes,
+          endMinutes: row.endMinutes,
+          jobTitle: row.jobTitle,
+          station: row.station,
+          status: 'open',
+        },
+      });
+    });
+    await this.prisma.$transaction([
+      ...(body.replace ? [this.prisma.scheduleShift.deleteMany({ where: { venueId: scope!.venueId } })] : []),
+      ...creates,
+    ]);
+    await this.markScheduleEdited(scope!.venueId);
+    return { added: slots.length };
+  }
+
+  @RequireSubscription()
+  @Delete('templates/:id')
+  async deleteScheduleTemplate(@VenueScope() scope: Scope, @Param('id') id: string) {
+    this.requireManager(scope);
+    const template = await this.prisma.scheduleTemplate.findFirst({ where: { id, venueId: scope!.venueId } });
+    if (!template) throw new NotFoundException('Template not found');
+    await this.prisma.scheduleTemplate.delete({ where: { id: template.id } });
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Post('copy-day')
+  async copyDayShifts(@VenueScope() scope: Scope, @Body() body: CopyDayDto) {
+    this.requireManager(scope);
+    const source = await this.prisma.scheduleShift.findMany({
+      where: { venueId: scope!.venueId, dayIndex: body.fromDay },
+    });
+    const creates = body.toDays
+      .filter((day) => day !== body.fromDay)
+      .flatMap((day) =>
+        source.map((shift) =>
+          this.prisma.scheduleShift.create({
+            data: {
+              venueId: scope!.venueId,
+              dayIndex: day,
+              startMinutes: shift.startMinutes,
+              endMinutes: shift.endMinutes,
+              jobTitle: shift.jobTitle,
+              station: shift.station,
+              status: 'open',
+            },
+          }),
+        ),
+      );
+    await this.prisma.$transaction(creates);
+    await this.markScheduleEdited(scope!.venueId);
+    return { added: creates.length };
+  }
+
+  @RequireSubscription()
+  @Post('clear-week')
+  async clearWeek(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } });
+    const snapshots = shifts.map((shift) => ({
+      dayIndex: shift.dayIndex,
+      startMinutes: shift.startMinutes,
+      endMinutes: shift.endMinutes,
+      jobTitle: shift.jobTitle,
+      station: shift.station,
+      status: shift.status,
+      profileId: shift.profileId,
+      notes: shift.notes,
+    }));
+    await this.prisma.scheduleShift.deleteMany({ where: { venueId: scope!.venueId } });
+    await this.markScheduleEdited(scope!.venueId);
+    return { removed: shifts.length, shifts: snapshots };
+  }
+
+  @RequireSubscription()
+  @Post('restore-shifts')
+  async restoreShifts(@VenueScope() scope: Scope, @Body() body: RestoreShiftsDto) {
+    this.requireManager(scope);
+    const creates = body.shifts.map((shift) => {
+      ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
+      return this.prisma.scheduleShift.create({
+        data: {
+          venueId: scope!.venueId,
+          profileId: shift.profileId,
+          dayIndex: shift.dayIndex,
+          startMinutes: shift.startMinutes,
+          endMinutes: shift.endMinutes,
+          jobTitle: shift.jobTitle,
+          station: shift.station,
+          status: shift.profileId ? shift.status : 'open',
+          notes: shift.notes,
+        },
+      });
+    });
+    await this.prisma.$transaction(creates);
+    await this.markScheduleEdited(scope!.venueId);
+    return { restored: creates.length };
+  }
+
+  @RequireSubscription()
+  @Post('swaps')
+  async proposeShiftSwap(@VenueScope() scope: Scope, @Body() body: ProposeSwapDto) {
+    if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
+    const myShift = await this.getVenueShift(scope.venueId, body.myShiftId);
+    if (myShift.profileId !== scope.profileId) throw new ForbiddenException('That is not your shift');
+    const target = await this.assertVenueMember(scope.venueId, body.targetProfileId);
+    if (target.id === scope.profileId) throw new BadRequestException('Choose a teammate');
+    if (body.targetShiftId) {
+      const targetShift = await this.getVenueShift(scope.venueId, body.targetShiftId);
+      if (targetShift.profileId !== target.id) throw new BadRequestException("That is not the teammate's shift");
+    }
+    const swap = await this.prisma.shiftSwap.create({
+      data: {
+        venueId: scope.venueId,
+        requesterProfileId: scope.profileId,
+        requesterShiftId: myShift.id,
+        targetProfileId: target.id,
+        targetShiftId: body.targetShiftId,
+        status: 'proposed',
+        note: body.note?.trim() || null,
+      },
+    });
+    await this.notifications.notifyProfile({
+      venueId: scope.venueId,
+      profileId: target.id,
+      kind: 'swap_proposed',
+      title: 'Shift swap proposed',
+      body: `${scope.fullName} wants to swap ${this.shiftLabel(myShift)}.`,
+    });
+    return swap.id;
+  }
+
+  @RequireSubscription()
+  @Patch('swaps/:id/respond')
+  async respondToShiftSwap(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: RespondSwapDto) {
+    if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
+    const swap = await this.prisma.shiftSwap.findFirst({ where: { id, venueId: scope.venueId } });
+    if (!swap || swap.targetProfileId !== scope.profileId) throw new ForbiddenException('Not authorized');
+    if (swap.status !== 'proposed') throw new BadRequestException('This swap is no longer open');
+    await this.prisma.shiftSwap.update({ where: { id: swap.id }, data: { status: body.accept ? 'accepted' : 'declined' } });
+    if (body.accept) {
+      await this.notifications.notifyManagers({
+        venueId: scope.venueId,
+        kind: 'swap_proposed',
+        title: 'Swap needs approval',
+        body: `${scope.fullName} accepted a shift swap. Approve it in the schedule.`,
+      });
+    }
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Patch('swaps/:id/review')
+  async reviewShiftSwap(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ReviewSwapDto) {
+    this.requireManager(scope);
+    const swap = await this.prisma.shiftSwap.findFirst({ where: { id, venueId: scope!.venueId } });
+    if (!swap) throw new NotFoundException('Swap not found');
+    if (!['accepted', 'proposed'].includes(swap.status)) throw new BadRequestException('Swap is not pending');
+    if (body.approve) {
+      const requesterShift = await this.getVenueShift(scope!.venueId, swap.requesterShiftId);
+      const targetShift = swap.targetShiftId ? await this.getVenueShift(scope!.venueId, swap.targetShiftId) : null;
+      await this.prisma.$transaction([
+        this.prisma.scheduleShift.update({ where: { id: requesterShift.id }, data: { profileId: swap.targetProfileId, status: 'scheduled' } }),
+        ...(targetShift
+          ? [this.prisma.scheduleShift.update({ where: { id: targetShift.id }, data: { profileId: swap.requesterProfileId, status: 'scheduled' } })]
+          : []),
+        this.prisma.shiftSwap.update({ where: { id: swap.id }, data: { status: 'approved' } }),
+      ]);
+      await this.markScheduleEdited(scope!.venueId);
+    } else {
+      await this.prisma.shiftSwap.update({ where: { id: swap.id }, data: { status: 'denied' } });
+    }
+    await this.notifications.notifyProfile({
+      venueId: scope!.venueId,
+      profileId: swap.requesterProfileId,
+      kind: 'swap_reviewed',
+      title: `Swap ${body.approve ? 'approved' : 'denied'}`,
+      body: `Your shift swap was ${body.approve ? 'approved' : 'denied'}.`,
+    });
+    await this.notifications.notifyProfile({
+      venueId: scope!.venueId,
+      profileId: swap.targetProfileId,
+      kind: 'swap_reviewed',
+      title: `Swap ${body.approve ? 'approved' : 'denied'}`,
+      body: `A shift swap was ${body.approve ? 'approved' : 'denied'}.`,
+    });
+    return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Get('swaps/me')
+  async getMyShiftSwaps(@VenueScope() scope: Scope) {
+    if (!scope) return [];
+    const swaps = await this.prisma.shiftSwap.findMany({
+      where: {
+        venueId: scope.venueId,
+        OR: [{ requesterProfileId: scope.profileId }, { targetProfileId: scope.profileId }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return this.mapSwaps(scope.venueId, swaps, scope.profileId);
+  }
+
+  @RequireSubscription()
+  @Get('swaps')
+  async listShiftSwaps(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const swaps = await this.prisma.shiftSwap.findMany({
+      where: { venueId: scope!.venueId, status: { in: ['proposed', 'accepted'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return this.mapSwaps(scope!.venueId, swaps, null);
+  }
+
+  private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
+    if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+  }
+
+  private async assertVenueMember(venueId: string, profileId: string) {
+    const member = await this.prisma.profile.findFirst({ where: { id: profileId, venueId } });
+    if (!member) throw new BadRequestException('Staff member is not in this venue');
+    return member;
+  }
+
+  private async getVenueShift(venueId: string, shiftId: string) {
+    const shift = await this.prisma.scheduleShift.findFirst({ where: { id: shiftId, venueId } });
+    if (!shift) throw new NotFoundException('Shift not found');
+    return shift;
+  }
+
+  private async assertNoDoubleBook(venueId: string, profileId: string, dayIndex: number, startMinutes: number, endMinutes: number, excludeShiftId?: string) {
+    const overlapping = await this.prisma.scheduleShift.findFirst({
+      where: {
+        venueId,
+        profileId,
+        dayIndex,
+        ...(excludeShiftId ? { id: { not: excludeShiftId } } : {}),
+        startMinutes: { lt: endMinutes },
+        endMinutes: { gt: startMinutes },
+      },
+    });
+    if (overlapping) throw new BadRequestException('This assignment overlaps another shift.');
+  }
+
+  private markScheduleEdited(venueId: string) {
+    return this.prisma.venue.update({
+      where: { id: venueId },
+      data: { scheduleUpdatedAfterPublishAt: new Date() },
+    });
+  }
+
+  private mapManagerShift(shift: ShiftWithProfile) {
+    return {
+      _id: shift.id,
+      dayIndex: shift.dayIndex,
+      dayLabel: dayLabel(shift.dayIndex),
+      startMinutes: shift.startMinutes,
+      endMinutes: shift.endMinutes,
+      startTime: minutesToTime(shift.startMinutes),
+      endTime: minutesToTime(shift.endMinutes),
+      jobTitle: shift.jobTitle,
+      station: shift.station,
+      notes: shift.notes,
+      status: shift.status,
+      profileId: shift.profileId,
+      memberName: shift.profileId ? shift.profile?.fullName ?? null : null,
+      conflict: false,
+    };
+  }
+
+  private mapEmployeeShift(shift: ShiftWithProfile) {
+    return {
+      _id: shift.id,
+      dayIndex: shift.dayIndex,
+      dayLabel: dayLabel(shift.dayIndex),
+      startTime: minutesToTime(shift.startMinutes),
+      endTime: minutesToTime(shift.endMinutes),
+      memberId: shift.profileId,
+      memberName: shift.profile?.fullName ?? null,
+      jobTitle: shift.jobTitle,
+      station: shift.station,
+      status: shift.status,
+      notes: shift.notes ?? undefined,
+    };
+  }
+
+  private shiftLabel(shift: { dayIndex: number; startMinutes: number; endMinutes: number }) {
+    return `${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)}`;
+  }
+
+  private async mapSwaps(venueId: string, swaps: Array<{ id: string; status: string; note: string | null; requesterProfileId: string; targetProfileId: string; requesterShiftId: string; targetShiftId: string | null; createdAt: Date }>, meId: string | null) {
+    const [staff, shifts] = await Promise.all([
+      this.prisma.profile.findMany({ where: { venueId } }),
+      this.prisma.scheduleShift.findMany({ where: { venueId } }),
+    ]);
+    const nameById = new Map(staff.map((member) => [member.id, member.fullName]));
+    const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
+    return swaps
+      .filter((swap) => SWAP_STATUSES.includes(swap.status))
+      .map((swap) => ({
+        _id: swap.id,
+        status: swap.status,
+        note: swap.note,
+        requesterName: nameById.get(swap.requesterProfileId) ?? 'Teammate',
+        targetName: nameById.get(swap.targetProfileId) ?? 'Teammate',
+        requesterShift: this.shiftLabel(shiftById.get(swap.requesterShiftId) ?? { dayIndex: 0, startMinutes: 0, endMinutes: 0 }),
+        targetShift: swap.targetShiftId && shiftById.get(swap.targetShiftId) ? this.shiftLabel(shiftById.get(swap.targetShiftId)!) : null,
+        direction: meId === swap.targetProfileId ? 'incoming' : meId === swap.requesterProfileId ? 'outgoing' : 'other',
+        createdAt: swap.createdAt.getTime(),
+      }));
+  }
+}
