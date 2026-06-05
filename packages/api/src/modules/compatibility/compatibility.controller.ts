@@ -80,6 +80,11 @@ const convexSurface = {
   push: ['registerPushToken', 'disablePushToken', 'getMyPushTokens'],
 };
 
+const totalFunctions = Object.values(convexSurface).reduce(
+  (total, functions) => total + functions.length,
+  0,
+);
+
 @Controller('v1/compatibility')
 export class CompatibilityController {
   @Get('convex-surface')
@@ -87,7 +92,7 @@ export class CompatibilityController {
     return {
       status: 'migration-in-progress',
       modules: convexSurface,
-      totalFunctions: Object.values(convexSurface).reduce((total, functions) => total + functions.length, 0),
+      totalFunctions,
     };
   }
 }
