@@ -1,17 +1,43 @@
 import { useEffect, useRef } from 'react';
-import { useConvexAuth, useQuery } from 'convex/react';
-import { api } from '../convex/_generated/api';
+import { useConvexAuth } from 'convex/react';
+import { useQuery as useRQQuery } from '@tanstack/react-query';
+import { useAuthToken } from '@convex-dev/auth/react';
 import { useAuthStore, type AuthState } from './auth-store';
 import { canManageBilling, canManageVenue } from './permissions';
+import { useApiClient } from './api-client';
+
+type MeResponse = {
+  user: {
+    id: string;
+    email: string;
+    fullName: string;
+    role: string;
+    jobTitle: string;
+    allAccess: boolean;
+  } | null;
+  venue: unknown;
+};
 
 export function useAuthenticatedSession() {
   const hydrated = useAuthStore((state: AuthState) => state.hydrated);
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const auth = useConvexAuth();
+  const token = useAuthToken();
+  const request = useApiClient();
   const isReady = hydrated && Boolean(user) && auth.isAuthenticated;
 
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const meQuery = useRQQuery<MeResponse>({
+    queryKey: ['me'],
+    queryFn: async () => (await request('GET', '/v1/app/me')) as MeResponse,
+    enabled: isReady && Boolean(token),
+    staleTime: 30_000,
+  });
+
+  // Expose in the legacy { profile } shape that existing screens still read.
+  const me = meQuery.data?.user
+    ? { profile: { role: meQuery.data.user.role, allAccess: meQuery.data.user.allAccess } }
+    : undefined;
 
   const lastRole = useRef<string | null>(null);
   const lastAllAccess = useRef<boolean | null>(null);

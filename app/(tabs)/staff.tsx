@@ -1,18 +1,17 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, Share, View } from 'react-native';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
+import { useMutation as useRQMutation, useQuery as useRQQuery, useQueryClient } from '@tanstack/react-query';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useApiClient } from '../../lib/api-client';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
-// Access level = the permission tier an admin/manager assigns when adding a
-// teammate. Roles are never self-selected — they are set here on the roster.
 type AccessRole = 'manager' | 'staff';
 
 const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
@@ -25,7 +24,6 @@ const LINK_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
   { value: 'staff', label: 'Staff' },
 ];
 
-// Job titles / positions, selectable from a dropdown.
 const JOB_ROLES = [
   'Manager', 'Asst Manager', 'Supervisor', 'Server', 'Bartender', 'Host',
   'Chef', 'Cook', 'Dishwasher', 'Cleaner', 'Busser', 'Barback', 'Temp', 'Contractor',
@@ -44,7 +42,7 @@ function Dropdown({
   placeholder?: string;
   options: Array<{ value: string; label: string }>;
   onSelect: (value: string) => void;
-  style?: any;
+  style?: object;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value);
@@ -96,24 +94,40 @@ type StaffMember = {
 
 export default function StaffScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const { isReady, canManage } = useAuthenticatedSession();
+  const request = useApiClient();
+  const queryClient = useQueryClient();
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('staff');
   const [jobTitle, setJobTitle] = useState('Team Member');
 
-  const staffQuery = useQuery(api.app.listVenueStaff, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
-  const staff = useMemo(() => (staffQuery ?? []) as StaffMember[], [staffQuery]);
-  const upsertStaff = useMutation(api.app.upsertVenueStaff);
-  const deactivateStaff = useMutation(api.app.deactivateVenueStaff);
+  // Staff list — REST
+  const { data: staffData } = useRQQuery<StaffMember[]>({
+    queryKey: ['staff'],
+    queryFn: async () => (await request('GET', '/v1/staff')) as StaffMember[],
+    enabled: isReady && canManage,
+  });
+  const staff = staffData ?? [];
 
-  // Custom roles + PIN invite
-  const rolesQuery = useQuery(api.staffAuth.listVenueRoles, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
+  const upsertStaffMutation = useRQMutation({
+    mutationFn: (body: { email: string; fullName: string; role: string; jobTitle: string }) =>
+      request('POST', '/v1/staff', body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['staff'] }),
+  });
+
+  const deactivateStaffMutation = useRQMutation({
+    mutationFn: (id: string) => request('DELETE', `/v1/staff/${id}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['staff'] }),
+  });
+
+  // Custom roles + invite links — still on Convex (no NestJS endpoints yet)
+  const rolesQuery = useQuery(
+    api.staffAuth.listVenueRoles,
+    isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip',
+  );
   const customRoles = useMemo(() => (rolesQuery ?? []) as VenueRole[], [rolesQuery]);
-  // Dropdown options: the standard job titles plus any custom roles the venue added.
   const jobRoleOptions = useMemo(() => {
     const seen = new Set(JOB_ROLES.map((r) => r.toLowerCase()));
     const merged = [...JOB_ROLES];
@@ -127,13 +141,14 @@ export default function StaffScreen() {
   }, [customRoles]);
   const addVenueRole = useMutation(api.staffAuth.addVenueRole);
   const removeVenueRole = useMutation(api.staffAuth.removeVenueRole);
-
   const createInvite = useMutation(api.invites.createInvite);
+
   const [inviteLinkRole, setInviteLinkRole] = useState<'manager' | 'staff'>('staff');
   const [inviteLinkPosition, setInviteLinkPosition] = useState('');
   const [inviteLinkMsg, setInviteLinkMsg] = useState<string | null>(null);
   const [inviteLinkErr, setInviteLinkErr] = useState<string | null>(null);
   const [generatingLink, setGeneratingLink] = useState(false);
+  const [newRole, setNewRole] = useState('');
 
   const onGenerateInviteLink = async () => {
     if (!venue?.id) return;
@@ -155,19 +170,17 @@ export default function StaffScreen() {
     }
   };
 
-  const [newRole, setNewRole] = useState('');
-
   const onAddRole = async () => {
     if (!venue?.id || !newRole.trim()) return;
     try {
       await addVenueRole({ venueId: venue.id, name: newRole.trim() });
       setNewRole('');
     } catch {
-      // ignore (duplicate)
+      // ignore duplicate
     }
   };
 
-  const selectedStaff = staff.find((member: StaffMember) => member._id === selectedStaffId) ?? null;
+  const selectedStaff = staff.find((member) => member._id === selectedStaffId) ?? null;
 
   const fillFromStaff = (member: StaffMember) => {
     setSelectedStaffId(member._id);
@@ -186,20 +199,14 @@ export default function StaffScreen() {
   };
 
   const onSubmit = async () => {
-    if (!venue?.id || !canManage) return;
-    await upsertStaff({
-      venueId: venue.id,
-      fullName,
-      email,
-      role,
-      jobTitle,
-    });
+    if (!canManage) return;
+    await upsertStaffMutation.mutateAsync({ fullName, email, role, jobTitle });
     clearForm();
   };
 
   const onDeactivate = async (member: StaffMember) => {
     if (!canManage) return;
-    await deactivateStaff({ staffId: member._id as Id<'profiles'> });
+    await deactivateStaffMutation.mutateAsync(member._id);
     if (selectedStaffId === member._id) clearForm();
   };
 
@@ -240,7 +247,10 @@ export default function StaffScreen() {
               <Text style={{ color: colors.muted }}>No custom roles yet.</Text>
             ) : (
               customRoles.map((r) => (
-                <Chip key={r._id} onClose={() => venue?.id && void removeVenueRole({ venueId: venue.id, roleId: r._id as Id<'venueRoles'> })}>
+                <Chip
+                  key={r._id}
+                  onClose={() => venue?.id && void removeVenueRole({ venueId: venue.id, roleId: r._id as Id<'venueRoles'> })}
+                >
                   {r.name}
                 </Chip>
               ))
@@ -253,7 +263,7 @@ export default function StaffScreen() {
         </Card.Content>
       </Card>
 
-      {/* Invite staff via link (primary) */}
+      {/* Invite staff via link */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Invite staff via link</Text>
@@ -279,6 +289,7 @@ export default function StaffScreen() {
         </Card.Content>
       </Card>
 
+      {/* Add / edit staff by email */}
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium">Add staff by email</Text>
@@ -315,9 +326,7 @@ export default function StaffScreen() {
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium">Deactivate selected staff</Text>
-            <Text style={{ color: colors.muted }}>
-              Deactivate removes this staff member's access to the venue.
-            </Text>
+            <Text style={{ color: colors.muted }}>Deactivate removes this staff member's access to the venue.</Text>
             <Text style={{ fontWeight: '700' }}>{selectedStaff.fullName}</Text>
             <Text style={{ color: colors.muted }}>{selectedStaff.email}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -329,13 +338,14 @@ export default function StaffScreen() {
         </Card>
       ) : null}
 
+      {/* Venue staff list */}
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium">Venue staff</Text>
           {staff.length === 0 ? (
             <Text style={{ color: colors.muted }}>No staff added yet.</Text>
           ) : (
-            staff.map((member: StaffMember) => (
+            staff.map((member) => (
               <Card key={member._id} style={{ backgroundColor: member._id === selectedStaffId ? '#F6E8E4' : colors.cream }}>
                 <Card.Content style={{ gap: 6 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
@@ -347,16 +357,10 @@ export default function StaffScreen() {
                   </View>
                   <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    <Button mode="outlined" onPress={() => fillFromStaff(member)}>
-                      Edit
-                    </Button>
-                    <Button mode="outlined" onPress={() => void onDeactivate(member)}>
-                      Deactivate
-                    </Button>
+                    <Button mode="outlined" onPress={() => fillFromStaff(member)}>Edit</Button>
+                    <Button mode="outlined" onPress={() => void onDeactivate(member)}>Deactivate</Button>
                     {selectedStaffId === member._id ? (
-                      <Button mode="text" textColor={colors.primary} onPress={clearForm}>
-                        Deselect
-                      </Button>
+                      <Button mode="text" textColor={colors.primary} onPress={clearForm}>Deselect</Button>
                     ) : null}
                   </View>
                 </Card.Content>

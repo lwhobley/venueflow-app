@@ -3,11 +3,11 @@ import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { Card, Text } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { useApiClient } from '../../lib/api-client';
 import { canManageVenue } from '../../lib/permissions';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 
@@ -25,6 +25,22 @@ type ManagerAlert = {
   profileId: string;
   memberName: string;
   detail: string;
+};
+
+type ClockBoard = {
+  venue: { name: string; latitude: number; longitude: number; geofenceRadiusM: number } | null;
+  activeClockEntries: ActiveClockEntry[];
+  employeeEntry: ActiveClockEntry | null;
+  managerAlerts: ManagerAlert[];
+};
+
+type TimeClock = {
+  isClockedIn: boolean;
+  openSince: number | null;
+  regularHours: number;
+  sickHours: number;
+  totalHours: number;
+  punches: { type: 'in' | 'out'; at: number }[];
 };
 
 function fmtClock(d: Date) {
@@ -45,7 +61,8 @@ export default function ClockScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady } = useAuthenticatedSession();
-  // Admin/owner/manager are salaried: they don't punch a time clock.
+  const request = useApiClient();
+  const queryClient = useQueryClient();
   const salaried = canManageVenue(user?.role, user?.all_access);
   const isAdmin = salaried;
   const [location, setLocation] = useState<CurrentLocation | null>(null);
@@ -53,24 +70,50 @@ export default function ClockScreen() {
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState(false);
 
-  const clockBoard = useQuery(api.app.getClockBoard, isReady ? {} : 'skip');
-  const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
-  const timeClock = useQuery(api.app.getMyTimeClock, isReady ? {} : 'skip');
-  const clockIn = useMutation(api.app.clockIn);
-  const clockOut = useMutation(api.app.clockOut);
+  const { data: clockBoard } = useQuery<ClockBoard>({
+    queryKey: ['clock-board'],
+    queryFn: async () => (await request('GET', '/v1/time-clock/board')) as ClockBoard,
+    enabled: isReady,
+    refetchInterval: 30_000,
+  });
 
-  const rawVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
+  const { data: timeClock } = useQuery<TimeClock>({
+    queryKey: ['time-clock-me'],
+    queryFn: async () => (await request('GET', '/v1/time-clock/me')) as TimeClock,
+    enabled: isReady,
+    refetchInterval: 30_000,
+  });
+
+  const clockInMutation = useMutation({
+    mutationFn: (args: { lat: number; lng: number; accuracy: number; mocked: boolean }) =>
+      request('POST', '/v1/time-clock/clock-in', args),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['clock-board'] });
+      void queryClient.invalidateQueries({ queryKey: ['time-clock-me'] });
+    },
+  });
+
+  const clockOutMutation = useMutation({
+    mutationFn: (args: { lat: number; lng: number; accuracy: number; mocked: boolean }) =>
+      request('POST', '/v1/time-clock/clock-out', args),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['clock-board'] });
+      void queryClient.invalidateQueries({ queryKey: ['time-clock-me'] });
+    },
+  });
+
+  const rawVenue = venue ?? clockBoard?.venue ?? null;
   const activeVenue = useMemo(() => {
     if (!rawVenue) return null;
-    const geofenceRadiusM = 'geofenceRadiusM' in rawVenue ? rawVenue.geofenceRadiusM : rawVenue.geofence_radius_m;
+    const geofenceRadiusM =
+      ('geofenceRadiusM' in rawVenue ? rawVenue.geofenceRadiusM : (rawVenue as { geofence_radius_m?: number }).geofence_radius_m) ?? 120;
     return { name: rawVenue.name, latitude: rawVenue.latitude, longitude: rawVenue.longitude, geofenceRadiusM };
   }, [rawVenue]);
 
-  const activeClockEntries = (clockBoard?.activeClockEntries ?? []) as ActiveClockEntry[];
-  const managerAlerts = (clockBoard?.managerAlerts ?? []) as ManagerAlert[];
+  const activeClockEntries = clockBoard?.activeClockEntries ?? [];
+  const managerAlerts = clockBoard?.managerAlerts ?? [];
   const isClockedIn = timeClock?.isClockedIn ?? Boolean(clockBoard?.employeeEntry);
 
-  // Live ticking clock.
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
@@ -82,7 +125,8 @@ export default function ClockScreen() {
     getPreciseLocation()
       .then((next) => !cancelled && setLocation(next))
       .catch((error) => {
-        if (!cancelled) Alert.alert('Location needed', error instanceof Error ? error.message : 'Unable to get your location.');
+        if (!cancelled)
+          Alert.alert('Location needed', error instanceof Error ? error.message : 'Unable to get your location.');
       })
       .finally(() => !cancelled && setLoadingLocation(false));
     return () => {
@@ -97,8 +141,8 @@ export default function ClockScreen() {
     setBusy(true);
     try {
       const args = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
-      if (isClockedIn) await clockOut(args);
-      else await clockIn(args);
+      if (isClockedIn) await clockOutMutation.mutateAsync(args);
+      else await clockInMutation.mutateAsync(args);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert('Punch failed', error instanceof Error ? error.message : 'Unable to record punch.');
@@ -141,82 +185,85 @@ export default function ClockScreen() {
       ) : null}
 
       {!salaried ? (
-      <>
-      {/* Punch Now button */}
-      <Pressable
-        onPress={() => void onPunch()}
-        disabled={!canClock || busy}
-        style={{
-          backgroundColor: canClock ? (isClockedIn ? colors.danger : colors.secondary) : colors.border,
-          borderRadius: 18,
-          paddingVertical: 20,
-          alignItems: 'center',
-          opacity: busy ? 0.7 : 1,
-        }}
-      >
-        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800' }}>
-          {busy ? 'Working…' : isClockedIn ? 'Punch Out' : 'Punch Now'}
-        </Text>
-      </Pressable>
-      {!canClock ? (
-        <Text style={{ color: colors.muted, textAlign: 'center', marginTop: -4 }}>
-          {loadingLocation
-            ? 'Checking your location…'
-            : !location
-              ? 'Location unavailable — enable GPS to punch.'
-              : location.mocked
-                ? 'Mocked location detected — punching is disabled.'
-                : `You must be within ${activeVenue?.geofenceRadiusM ?? 120}m of ${activeVenue?.name ?? 'your venue'} to punch.`}
-        </Text>
-      ) : (
-        <Text style={{ color: accents[2].fg, textAlign: 'center', marginTop: -4 }}>
-          ✓ You're inside the geofence{timeClock?.openSince ? ` · in since ${fmtTime(timeClock.openSince)}` : ''}
-        </Text>
-      )}
-
-      {/* Period totals */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Period totals</Text>
-            <Text style={{ color: colors.primary, fontWeight: '800' }}>Total: {timeClock?.totalHours ?? 0}h</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: spacing.lg }}>
-            <View>
-              <Text style={{ color: colors.muted }}>Regular</Text>
-              <Text style={{ fontWeight: '700' }}>{timeClock?.regularHours ?? 0}h</Text>
-            </View>
-            <View>
-              <Text style={{ color: colors.muted }}>Sick</Text>
-              <Text style={{ fontWeight: '700' }}>{timeClock?.sickHours ?? 0}h</Text>
-            </View>
-          </View>
-        </Card.Content>
-      </Card>
-
-      {/* Daily punches */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Daily punches</Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>{fmtDate(now)}</Text>
-          </View>
-          {punches.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No punches yet today.</Text>
+        <>
+          {/* Punch Now button */}
+          <Pressable
+            onPress={() => void onPunch()}
+            disabled={!canClock || busy}
+            style={{
+              backgroundColor: canClock ? (isClockedIn ? colors.danger : colors.secondary) : colors.border,
+              borderRadius: 18,
+              paddingVertical: 20,
+              alignItems: 'center',
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800' }}>
+              {busy ? 'Working…' : isClockedIn ? 'Punch Out' : 'Punch Now'}
+            </Text>
+          </Pressable>
+          {!canClock ? (
+            <Text style={{ color: colors.muted, textAlign: 'center', marginTop: -4 }}>
+              {loadingLocation
+                ? 'Checking your location…'
+                : !location
+                  ? 'Location unavailable — enable GPS to punch.'
+                  : location.mocked
+                    ? 'Mocked location detected — punching is disabled.'
+                    : `You must be within ${activeVenue?.geofenceRadiusM ?? 120}m of ${activeVenue?.name ?? 'your venue'} to punch.`}
+            </Text>
           ) : (
-            punches.map((p, i) => (
-              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < punches.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <MaterialCommunityIcons name={p.type === 'in' ? 'login' : 'logout'} size={18} color={p.type === 'in' ? accents[2].fg : colors.danger} />
-                  <Text>{p.type === 'in' ? 'Clock In' : 'Clock Out'}</Text>
-                </View>
-                <Text style={{ color: colors.primary, fontWeight: '700' }}>{fmtTime(p.at)}</Text>
-              </View>
-            ))
+            <Text style={{ color: accents[2].fg, textAlign: 'center', marginTop: -4 }}>
+              ✓ You're inside the geofence{timeClock?.openSince ? ` · in since ${fmtTime(timeClock.openSince)}` : ''}
+            </Text>
           )}
-        </Card.Content>
-      </Card>
-      </>
+
+          {/* Period totals */}
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Period totals</Text>
+                <Text style={{ color: colors.primary, fontWeight: '800' }}>Total: {timeClock?.totalHours ?? 0}h</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: spacing.lg }}>
+                <View>
+                  <Text style={{ color: colors.muted }}>Regular</Text>
+                  <Text style={{ fontWeight: '700' }}>{timeClock?.regularHours ?? 0}h</Text>
+                </View>
+                <View>
+                  <Text style={{ color: colors.muted }}>Sick</Text>
+                  <Text style={{ fontWeight: '700' }}>{timeClock?.sickHours ?? 0}h</Text>
+                </View>
+              </View>
+            </Card.Content>
+          </Card>
+
+          {/* Daily punches */}
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Daily punches</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>{fmtDate(now)}</Text>
+              </View>
+              {punches.length === 0 ? (
+                <Text style={{ color: colors.muted }}>No punches yet today.</Text>
+              ) : (
+                punches.map((p, i) => (
+                  <View
+                    key={i}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < punches.length - 1 ? 1 : 0, borderBottomColor: colors.border }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <MaterialCommunityIcons name={p.type === 'in' ? 'login' : 'logout'} size={18} color={p.type === 'in' ? accents[2].fg : colors.danger} />
+                      <Text>{p.type === 'in' ? 'Clock In' : 'Clock Out'}</Text>
+                    </View>
+                    <Text style={{ color: colors.primary, fontWeight: '700' }}>{fmtTime(p.at)}</Text>
+                  </View>
+                ))
+              )}
+            </Card.Content>
+          </Card>
+        </>
       ) : null}
 
       {/* Manager board */}
