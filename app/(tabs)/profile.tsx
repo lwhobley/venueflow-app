@@ -1,4 +1,5 @@
-import { Alert, Platform, ScrollView } from 'react-native';
+import { Alert, Platform, ScrollView, View } from 'react-native';
+import { useState } from 'react';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { useMutation, useQuery } from 'convex/react';
@@ -21,6 +22,8 @@ export default function ProfileScreen() {
   const canViewBilling = canManageBilling(serverRole ?? user?.role, allAccess);
   const { signOut } = useAuthActions();
   const deleteAccount = useMutation(api.app.deleteMyAccount);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const onLogout = async () => {
     clearSession();
@@ -35,28 +38,18 @@ export default function ProfileScreen() {
     router.push(Platform.OS === 'web' ? '/billing' : '/billing/paywall');
   };
 
-  const onDeleteAccount = () => {
-    Alert.alert(
-      'Delete account',
-      'This permanently deletes your profile and all personal data from Venue Wrangler. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete permanently',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteAccount({});
-              clearSession();
-              try { await signOut(); } catch { /* already signed out */ }
-              router.replace('/sign-in');
-            } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : 'Could not delete account. Try again.');
-            }
-          },
-        },
-      ],
-    );
+  const onDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      await deleteAccount({});
+      clearSession();
+      try { await signOut(); } catch { /* already signed out */ }
+      router.replace('/sign-in');
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not delete account. Try again.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -93,9 +86,31 @@ export default function ProfileScreen() {
         Sign out
       </Button>
 
-      <Button mode="text" textColor={colors.danger} onPress={onDeleteAccount}>
-        Delete account
-      </Button>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16, marginTop: spacing.md }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.danger }}>Account deletion</Text>
+          <Text style={{ color: colors.muted }}>
+            Permanently delete your Venue Wrangler account, profile, availability, push tokens, and sign-in credentials. Assigned shifts are released back to the venue before deletion.
+          </Text>
+          {!confirmDelete ? (
+            <Button mode="outlined" textColor={colors.danger} icon="delete-outline" onPress={() => setConfirmDelete(true)}>
+              Start account deletion
+            </Button>
+          ) : (
+            <View style={{ gap: spacing.sm }}>
+              <Text style={{ color: colors.danger, fontWeight: '700' }}>
+                This cannot be undone. You will be signed out after deletion is complete.
+              </Text>
+              <Button mode="contained" buttonColor={colors.danger} icon="delete-forever-outline" loading={deleting} disabled={deleting} onPress={() => void onDeleteAccount()}>
+                Permanently delete my account
+              </Button>
+              <Button mode="text" textColor={colors.primary} disabled={deleting} onPress={() => setConfirmDelete(false)}>
+                Cancel
+              </Button>
+            </View>
+          )}
+        </Card.Content>
+      </Card>
     </ScrollView>
   );
 }

@@ -137,7 +137,7 @@ export function DateRangeBar({ selected, presets, onSelect }: Props) {
   const [open, setOpen] = useState(false);
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap', flexShrink: 1 }}>
       <Menu
         visible={open}
         onDismiss={() => setOpen(false)}
@@ -166,7 +166,7 @@ export function DateRangeBar({ selected, presets, onSelect }: Props) {
         ))}
       </Menu>
       {selected.startDate !== selected.endDate ? (
-        <Text style={{ color: colors.muted, fontSize: 12 }}>
+        <Text style={{ color: colors.muted, fontSize: 12, flexShrink: 1 }}>
           {selected.startDate} – {selected.endDate}
         </Text>
       ) : null}

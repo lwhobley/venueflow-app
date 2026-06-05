@@ -381,16 +381,19 @@ export default function SalesScreen() {
         </View>
 
         {/* Tab switcher */}
-        <SegmentedButtons
-          value={tab}
-          onValueChange={(v) => setTab(v as typeof tab)}
-          buttons={[
-            { value: 'summary', label: 'Summary' },
-            { value: 'servers', label: 'Servers' },
-            { value: 'items', label: 'Items' },
-            { value: 'labor', label: 'Labor' },
-          ]}
-        />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ minWidth: 620 }}>
+          <SegmentedButtons
+            value={tab}
+            onValueChange={(v) => setTab(v as typeof tab)}
+            style={{ minWidth: 620 }}
+            buttons={[
+              { value: 'summary', label: 'Summary' },
+              { value: 'servers', label: 'Servers' },
+              { value: 'items', label: 'Items' },
+              { value: 'labor', label: 'Labor' },
+            ]}
+          />
+        </ScrollView>
 
         {/* Content */}
         {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}

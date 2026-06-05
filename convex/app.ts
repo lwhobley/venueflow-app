@@ -1351,7 +1351,26 @@ export const deleteMyAccount = mutation({
       await (ctx as AnyCtx).db.delete(a._id);
     }
 
+    const sessions = await (ctx as AnyCtx).db.query('authSessions').withIndex('userId', (q: any) => q.eq('userId', userId)).take(100);
+    for (const session of sessions) {
+      const refreshTokens = await (ctx as AnyCtx).db.query('authRefreshTokens').withIndex('sessionId', (q: any) => q.eq('sessionId', session._id)).take(100);
+      for (const token of refreshTokens) {
+        await (ctx as AnyCtx).db.delete(token._id);
+      }
+      await (ctx as AnyCtx).db.delete(session._id);
+    }
+
+    const accounts = await (ctx as AnyCtx).db.query('authAccounts').take(1000);
+    for (const account of accounts.filter((row: Doc<'authAccounts'>) => row.userId === userId)) {
+      const codes = await (ctx as AnyCtx).db.query('authVerificationCodes').withIndex('accountId', (q: any) => q.eq('accountId', account._id)).take(100);
+      for (const code of codes) {
+        await (ctx as AnyCtx).db.delete(code._id);
+      }
+      await (ctx as AnyCtx).db.delete(account._id);
+    }
+
     await (ctx as AnyCtx).db.delete(profile._id);
+    await (ctx as AnyCtx).db.delete(userId);
     return null;
   },
 });
