@@ -2,7 +2,10 @@ import { BadRequestException, Body, Controller, Post, UnauthorizedException } fr
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'crypto';
+import { pbkdf2, randomBytes, timingSafeEqual } from 'crypto';
+import { promisify } from 'util';
+
+const pbkdf2Async = promisify(pbkdf2);
 import { Public } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -42,7 +45,7 @@ export class AuthController {
 
     const user = await this.prisma.user.findUnique({ where: { email }, include: { password: true } });
     if (body.flow === 'signIn') {
-      if (!user?.password || !verifyPassword(body.password, user.password.salt, user.password.passwordHash, user.password.iterations)) {
+      if (!user?.password || !(await verifyPassword(body.password, user.password.salt, user.password.passwordHash, user.password.iterations))) {
         throw new UnauthorizedException('Invalid email or password.');
       }
       return this.issueSession(user.id, email, body.fullName);
@@ -52,7 +55,7 @@ export class AuthController {
       throw new BadRequestException('An account already exists for this email. Sign in instead.');
     }
 
-    const result = hashPassword(body.password);
+    const result = await hashPassword(body.password);
     const nextUser = await this.prisma.user.upsert({
       where: { email },
       update: {},
@@ -101,14 +104,14 @@ export class AuthController {
   }
 }
 
-function hashPassword(password: string) {
+async function hashPassword(password: string) {
   const salt = randomBytes(16).toString('hex');
-  const hash = pbkdf2Sync(password, salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST).toString('hex');
-  return { salt, hash };
+  const derivedKey = await pbkdf2Async(password, salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST);
+  return { salt, hash: derivedKey.toString('hex') };
 }
 
-function verifyPassword(password: string, salt: string, expectedHash: string, iterations: number) {
-  const actual = pbkdf2Sync(password, salt, iterations, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST);
+async function verifyPassword(password: string, salt: string, expectedHash: string, iterations: number) {
+  const actual = await pbkdf2Async(password, salt, iterations, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST);
   const expected = Buffer.from(expectedHash, 'hex');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }

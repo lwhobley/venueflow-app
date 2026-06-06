@@ -4,20 +4,28 @@
 // or EXPO_PUBLIC_* env so no real keys live in source.
 import Purchases from 'react-native-purchases';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string | undefined>;
 const IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? extra.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
+const ANDROID_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? extra.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? '';
 const ENTITLEMENT = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? extra.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? 'pro';
+
+const API_KEY = Platform.select({
+  ios: IOS_KEY,
+  android: ANDROID_KEY,
+  default: '',
+});
 
 // RevenueCat Test Store keys (test_...) only work in development builds
 // (Expo Go / simulator). In a release/TestFlight build, Purchases.configure
 // crashes natively on a test key — which a JS try/catch can't catch. So we
 // only honor a test key when __DEV__ is true; release builds need a real
-// appl_ key. This keeps the app launchable even if a test key is shipped.
-const isTestKey = IOS_KEY.startsWith('test_');
+// key. This keeps the app launchable even if a test key is shipped.
+const isTestKey = API_KEY.startsWith('test_');
 const isDev = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__);
 // The effective key the SDK may be configured with. Empty => purchases off.
-const EFFECTIVE_KEY = isTestKey && !isDev ? '' : IOS_KEY;
+const EFFECTIVE_KEY = isTestKey && !isDev ? '' : API_KEY;
 
 export const PURCHASES_SUPPORTED = true;
 
@@ -33,9 +41,9 @@ let configured = false;
 export async function configurePurchases(appUserId?: string): Promise<void> {
   if (!EFFECTIVE_KEY) {
     if (isTestKey) {
-      console.warn('[purchases] Test Store key ignored in release build — purchases disabled. Use an appl_ key for TestFlight/production.');
+      console.warn('[purchases] Test Store key ignored in release build — purchases disabled. Use a production key for TestFlight/production.');
     } else {
-      console.warn('[purchases] EXPO_PUBLIC_REVENUECAT_IOS_KEY not set — purchases disabled.');
+      console.warn(`[purchases] EXPO_PUBLIC_REVENUECAT_${Platform.OS.toUpperCase()}_KEY not set — purchases disabled.`);
     }
     return;
   }

@@ -29,9 +29,8 @@ jobs:
       - name: Build web app
         run: npx expo export -p web
         env:
-          EXPO_PUBLIC_CONVEX_URL: https://dashing-eel-31.convex.cloud
-          EXPO_PUBLIC_CONVEX_SITE_URL: https://dashing-eel-31.convex.site
-          EXPO_PUBLIC_BILLING_ENABLED: "false"
+          EXPO_PUBLIC_API_URL: https://venue-wranglerapi-production.up.railway.app/api
+          EXPO_PUBLIC_BILLING_ENABLED: "true"
 
       - name: Deploy to Cloudflare Pages
         run: npx wrangler pages deploy dist --project-name venue-wrangler --branch codex/desktop-layout

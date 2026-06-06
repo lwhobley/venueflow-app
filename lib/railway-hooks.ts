@@ -221,6 +221,11 @@ const mutationRoutes: Record<string, Route> = {
   'payroll.recordPayrollExport': { path: '/v1/payroll/record-export', method: 'POST', body: stripVenue },
   'billing.createStripeCheckoutSession': { path: '/v1/billing-actions/checkout', method: 'POST', body: ({ successUrl, cancelUrl, priceId }) => ({ successUrl, cancelUrl, priceId }) },
   'billing.createStripeBillingPortalSession': { path: '/v1/billing-actions/portal', method: 'POST', body: ({ returnUrl }) => ({ returnUrl }) },
+  'push.registerPushToken': {
+    path: '/v1/push/token',
+    method: 'POST',
+    body: ({ token, platform }) => ({ token, platform }),
+  },
 };
 
 export function useQuery(ref: RailwayFunctionRef, args?: QueryArgs): any {

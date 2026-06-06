@@ -3,7 +3,7 @@ builder = "NIXPACKS"
 buildCommand = "npm run api:prisma:generate && npm run api:build"
 
 [deploy]
-startCommand = "npm run start:prod -w @venue-wrangler/api"
+startCommand = "npm run release -w @venue-wrangler/api && npm run start:prod -w @venue-wrangler/api"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

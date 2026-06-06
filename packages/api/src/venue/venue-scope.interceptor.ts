@@ -47,6 +47,10 @@ export class VenueScopeInterceptor implements NestInterceptor {
     }
 
     const request = context.switchToHttp().getRequest<VenueScopedRequest>();
+    if (request.venueScope) {
+      return next.handle();
+    }
+
     const user = request.user;
     if (!user?.sub) {
       return next.handle();

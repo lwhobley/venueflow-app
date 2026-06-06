@@ -1,6 +1,6 @@
 # Venue Wrangler
 
-Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and Convex.
+Venue Wrangler is a native iOS/Android venue ops app built with Expo Router, NestJS, and Prisma.
 
 ## Role model
 
@@ -9,7 +9,7 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and 
 
 ## What works now
 
-- Convex-backed auth bootstrap
+- NestJS-backed auth bootstrap
 - Venue assignment
 - Precise GPS geofenced clock-in and clock-out
 - Manager/admin live clock board
@@ -23,8 +23,8 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and 
 ## Local setup
 
 1. `npm install --legacy-peer-deps` (the `--legacy-peer-deps` flag is required; see `.npmrc`).
-2. Copy `.env.example` to `.env` and set `EXPO_PUBLIC_CONVEX_URL` to your Convex deployment URL.
-3. In one terminal: `npx convex dev` (keeps functions/types in sync with the backend).
+2. Copy `.env.example` to `.env` and set `EXPO_PUBLIC_API_URL` to your local NestJS server endpoint (e.g. `http://localhost:4000/api`).
+3. Set up the local NestJS server inside `packages/api` (see `packages/api/README.md`).
 4. In another terminal: `npm start` (Expo).
 5. Test the sign-in flow, geofenced clock actions, and role-specific screens.
 
@@ -32,8 +32,8 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and 
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `EXPO_PUBLIC_CONVEX_URL` | Convex deployment the client connects to | required |
-| `EXPO_PUBLIC_BILLING_ENABLED` | Enables the subscription gate. Keep `false` until a real in-app purchase provider is wired into `lib/a0-purchases-stub.tsx`. | `false` |
+| `EXPO_PUBLIC_API_URL` | NestJS API endpoint the client connects to | required |
+| `EXPO_PUBLIC_BILLING_ENABLED` | Enables the subscription gate. Keep `false` until Stripe billing or RevenueCat in-app purchase is active. | `false` |
 
 ## Quality gates
 
@@ -42,9 +42,9 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and 
 
 ## Production deploy
 
-1. **Provision a production Convex deployment** (separate from dev):
-   - `npx convex deploy` — this creates/pushes to your prod deployment and prints its URL.
-2. **Point the build at prod**: set `EXPO_PUBLIC_CONVEX_URL` in `eas.json`'s `production.env` to that URL (currently a `REPLACE-with-prod-deployment` placeholder).
+1. **Deploy the NestJS Backend** (e.g. to Railway):
+   - Set the required database and Stripe secret variables on your Railway dashboard.
+2. **Point the build at prod**: set `EXPO_PUBLIC_API_URL` in `eas.json` to the deployed server URL. Also set `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`.
 3. **Build & submit**:
    - `eas build -p ios --profile production`
    - `eas build -p android --profile production`
@@ -56,8 +56,8 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router and 
 
 ## Backend
 
-- Convex for auth, venue profiles, time clock data, floor plans, staff requests, and staff management
-- Push notifications remain handled by Convex internal actions
+- NestJS server backed by Prisma and PostgreSQL (running on Railway in production)
+- Push notifications registered via `POST /v1/push/token` and stored in the database
 
 ## Floor sync
 
