@@ -84,22 +84,33 @@ export default function ClockScreen() {
     refetchInterval: 30_000,
   });
 
+  const invalidatePunchQueries = () => {
+    void queryClient.invalidateQueries({ queryKey: ['clock-board'] });
+    void queryClient.invalidateQueries({ queryKey: ['time-clock-me'] });
+  };
+
+  const punchMutationOptions = (clockedIn: boolean) => ({
+    onMutate: () => {
+      // Optimistically flip isClockedIn so the button state is correct
+      // immediately — before the background refetch completes.
+      queryClient.setQueryData<TimeClock>(['time-clock-me'], (old) =>
+        old ? { ...old, isClockedIn: clockedIn } : old,
+      );
+    },
+    onSuccess: invalidatePunchQueries,
+    onError: invalidatePunchQueries, // refetch to restore truth on failure
+  });
+
   const clockInMutation = useMutation({
     mutationFn: (args: { lat: number; lng: number; accuracy: number; mocked: boolean }) =>
       request('POST', '/v1/time-clock/clock-in', args),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['clock-board'] });
-      void queryClient.invalidateQueries({ queryKey: ['time-clock-me'] });
-    },
+    ...punchMutationOptions(true),
   });
 
   const clockOutMutation = useMutation({
     mutationFn: (args: { lat: number; lng: number; accuracy: number; mocked: boolean }) =>
       request('POST', '/v1/time-clock/clock-out', args),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['clock-board'] });
-      void queryClient.invalidateQueries({ queryKey: ['time-clock-me'] });
-    },
+    ...punchMutationOptions(false),
   });
 
   const rawVenue = venue ?? clockBoard?.venue ?? null;

@@ -34,12 +34,14 @@ type SwapRow = {
 function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
   const request = useApiClient();
   const queryClient = useQueryClient();
+  const { isReady } = useAuthenticatedSession();
   const [toast, setToast] = useState<string | null>(null);
 
   // Staff requests — REST
   const { data: queueData } = useRQQuery<StaffRequest[]>({
     queryKey: ['staff-requests'],
     queryFn: async () => (await request('GET', '/v1/staff-requests')) as StaffRequest[],
+    enabled: isReady,
   });
   const queue = queueData ?? [];
 

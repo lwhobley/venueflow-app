@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useConvexAuth } from 'convex/react';
 import { useQuery as useRQQuery } from '@tanstack/react-query';
-import { useAuthToken } from '@convex-dev/auth/react';
 import { useAuthStore, type AuthState } from './auth-store';
 import { canManageBilling, canManageVenue } from './permissions';
 import { useApiClient } from './api-client';
@@ -23,14 +22,14 @@ export function useAuthenticatedSession() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const auth = useConvexAuth();
-  const token = useAuthToken();
   const request = useApiClient();
   const isReady = hydrated && Boolean(user) && auth.isAuthenticated;
 
+  // useApiClient already closes over the token; no need to read it separately.
   const meQuery = useRQQuery<MeResponse>({
     queryKey: ['me'],
     queryFn: async () => (await request('GET', '/v1/app/me')) as MeResponse,
-    enabled: isReady && Boolean(token),
+    enabled: isReady,
     staleTime: 30_000,
   });
 

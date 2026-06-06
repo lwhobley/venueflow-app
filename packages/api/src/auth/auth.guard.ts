@@ -82,6 +82,9 @@ export class AuthGuard implements CanActivate, OnModuleInit {
     } | null;
 
     if (decoded?.header?.alg === 'RS256' && this.jwksClient) {
+      if (!decoded.header.kid) {
+        throw new Error('RS256 token is missing kid header — cannot select signing key');
+      }
       const signingKey = await this.jwksClient.getSigningKey(decoded.header.kid);
       const publicKey = signingKey.getPublicKey();
       return await this.jwt.verifyAsync<AuthUser>(token, {

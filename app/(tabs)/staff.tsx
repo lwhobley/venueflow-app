@@ -104,7 +104,7 @@ export default function StaffScreen() {
   const [jobTitle, setJobTitle] = useState('Team Member');
 
   // Staff list — REST
-  const { data: staffData } = useRQQuery<StaffMember[]>({
+  const { data: staffData, isError: staffQueryError } = useRQQuery<StaffMember[]>({
     queryKey: ['staff'],
     queryFn: async () => (await request('GET', '/v1/staff')) as StaffMember[],
     enabled: isReady && canManage,
@@ -211,12 +211,17 @@ export default function StaffScreen() {
   };
 
   if (!canManage) {
+    const isLoadError = isReady && staffQueryError;
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: 8 }}>
             <Text variant="headlineSmall">Staff Management</Text>
-            <Text style={{ color: colors.muted }}>Only admins and managers can manage staff roles and access.</Text>
+            <Text style={{ color: colors.muted }}>
+              {isLoadError
+                ? 'Could not load your permissions. Check your connection and try again.'
+                : 'Only admins and managers can manage staff roles and access.'}
+            </Text>
           </Card.Content>
         </Card>
       </View>
