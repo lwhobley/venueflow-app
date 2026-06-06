@@ -2,16 +2,18 @@ import { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Snackbar, Text, TextInput } from 'react-native-paper';
+import { useMutation as useRQMutation, useQuery as useRQQuery, useQueryClient } from '@tanstack/react-query';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { useApiClient } from '../../lib/api-client';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
 
 type Shift = {
-  _id: Id<'scheduleShifts'>;
+  _id: string;
   dayIndex: number;
   dayLabel: string;
   startMinutes: number;
@@ -20,22 +22,56 @@ type Shift = {
   jobTitle: string;
   station: string;
   status: 'scheduled' | 'open' | 'covered';
-  mine: boolean;
   conflict: boolean;
 };
 
-type Blackout = { _id: Id<'blackoutDates'>; startDate: string; endDate: string; reason: string };
+type Blackout = { _id: string; startDate: string; endDate: string; reason: string };
 type Coworker = { profileId: Id<'profiles'>; name: string; jobTitle: string; startTime: string; endTime: string; withMe: boolean };
 type RosterDay = { dayIndex: number; dayLabel: string; coworkers: Coworker[] };
 
 export function MyShifts() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady } = useAuthenticatedSession();
-  const data = useQuery(api.scheduling.getMySchedule, isReady ? {} : 'skip');
-  const blackoutData = useQuery(api.scheduling.listBlackouts, isReady && venue?.id ? { venueId: venue.id } : 'skip');
-  const claimOpenShift = useMutation(api.scheduling.claimOpenShift);
+  const request = useApiClient();
+  const queryClient = useQueryClient();
+
+  // REST: my shifts (mine + open)
+  const { data: shiftsData, isLoading: shiftsLoading } = useRQQuery<{ mine: Shift[]; open: Shift[] }>({
+    queryKey: ['my-shifts'],
+    queryFn: async () => (await request('GET', '/v1/scheduling/shifts/mine')) as { mine: Shift[]; open: Shift[] },
+    enabled: isReady,
+  });
+
+  // REST: blackouts
+  const { data: blackoutData } = useRQQuery<Blackout[]>({
+    queryKey: ['blackouts'],
+    queryFn: async () => (await request('GET', '/v1/scheduling/blackouts')) as Blackout[],
+    enabled: isReady,
+  });
+
+  // Roster ("who you're working with") has no REST equivalent — stays on Convex.
+  const rosterQuery = useQuery(api.scheduling.getMySchedule, isReady ? {} : 'skip');
+
+  const claimOpenShiftMutation = useRQMutation({
+    mutationFn: (shiftId: string) => request('POST', `/v1/scheduling/shifts/${shiftId}/claim`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['my-shifts'] });
+    },
+  });
+
+  const createRequestMutation = useRQMutation({
+    mutationFn: (body: {
+      kind: string;
+      title: string;
+      details: string;
+      requestedRangeStart?: string;
+      requestedRangeEnd?: string;
+    }) => request('POST', '/v1/staff-requests', body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['staff-requests'] }),
+  });
+
+  // No REST endpoint for shift drop/swap mutations yet — stays on Convex.
   const requestDropShift = useMutation(api.scheduling.requestDropShift);
-  const createRequest = useMutation(api.app.createStaffRequest);
   const proposeSwap = useMutation(api.scheduling.proposeShiftSwap);
   const respondToSwap = useMutation(api.scheduling.respondToShiftSwap);
   const openDm = useMutation(api.chat.openDm);
@@ -80,10 +116,10 @@ export function MyShifts() {
       setSwapShiftId(null);
     }, 'Swap offered.');
 
-  const mine = useMemo(() => (data?.mine ?? []) as Shift[], [data]);
-  const open = useMemo(() => (data?.open ?? []) as Shift[], [data]);
-  const roster = useMemo(() => (data?.roster ?? []) as RosterDay[], [data]);
-  const blackouts = useMemo(() => (blackoutData ?? []) as Blackout[], [blackoutData]);
+  const mine = useMemo(() => shiftsData?.mine ?? [], [shiftsData]);
+  const open = useMemo(() => shiftsData?.open ?? [], [shiftsData]);
+  const roster = useMemo(() => (rosterQuery?.roster ?? []) as RosterDay[], [rosterQuery]);
+  const blackouts = useMemo(() => blackoutData ?? [], [blackoutData]);
 
   const weekDates = useMemo(() => {
     const today = new Date();
@@ -116,8 +152,7 @@ export function MyShifts() {
       return;
     }
     try {
-      await createRequest({
-        venueId: venue.id,
+      await createRequestMutation.mutateAsync({
         kind: 'time_off',
         title: `Time off ${offStart.trim()}${offEnd.trim() ? ` – ${offEnd.trim()}` : ''}`,
         details: offReason.trim() || 'Requesting time off.',
@@ -133,7 +168,7 @@ export function MyShifts() {
     }
   };
 
-  if (data === undefined) return <ScheduleSkeleton rows={3} />;
+  if (shiftsLoading) return <ScheduleSkeleton rows={3} />;
 
   return (
     <View style={{ gap: spacing.md }}>
@@ -166,7 +201,7 @@ export function MyShifts() {
                 </View>
                 <Text style={{ color: colors.charcoal }}>{s.jobTitle} · {s.station}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void run(() => requestDropShift({ shiftId: s._id }), 'Drop request sent.')}>
+                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void run(() => requestDropShift({ shiftId: s._id as Id<'scheduleShifts'> }), 'Drop request sent.')}>
                     Request to drop
                   </Button>
                   <Button compact mode={swapShiftId === s._id ? 'contained' : 'outlined'} buttonColor={swapShiftId === s._id ? colors.primary : undefined} textColor={swapShiftId === s._id ? '#fff' : colors.primary} onPress={() => setSwapShiftId(swapShiftId === s._id ? null : s._id)}>
@@ -274,7 +309,7 @@ export function MyShifts() {
                   {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Outside your availability</Chip> : null}
                 </View>
                 <Text>{s.jobTitle} · {s.station}</Text>
-                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => claimOpenShift({ shiftId: s._id }), 'Shift picked up.')}>
+                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => claimOpenShiftMutation.mutateAsync(s._id), 'Shift picked up.')}>
                   Pick up shift
                 </Button>
               </View>

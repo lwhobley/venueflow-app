@@ -1,26 +1,45 @@
 import { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
+import { useMutation as useRQMutation, useQuery as useRQQuery, useQueryClient } from '@tanstack/react-query';
 import { accents, colors, spacing } from '../../lib/theme';
+import { useApiClient } from '../../lib/api-client';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 
-type Blackout = { _id: Id<'blackoutDates'>; startDate: string; endDate: string; reason: string };
+type Blackout = { _id: string; startDate: string; endDate: string; reason: string };
 
-export function BlackoutManager({ venueId }: { venueId: Id<'venues'> }) {
-  const data = useQuery(api.scheduling.listBlackouts, { venueId });
-  const addBlackout = useMutation(api.scheduling.addBlackout);
-  const removeBlackout = useMutation(api.scheduling.removeBlackout);
+export function BlackoutManager({ venueId: _venueId }: { venueId: string }) {
+  const request = useApiClient();
+  const queryClient = useQueryClient();
+  const { isReady } = useAuthenticatedSession();
+
+  const { data, isLoading } = useRQQuery<Blackout[]>({
+    queryKey: ['blackouts'],
+    queryFn: async () => (await request('GET', '/v1/scheduling/blackouts')) as Blackout[],
+    enabled: isReady,
+  });
+
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['blackouts'] });
+
+  const addBlackoutMutation = useRQMutation({
+    mutationFn: (body: { startDate: string; endDate?: string; reason: string }) =>
+      request('POST', '/v1/scheduling/blackouts', body),
+    onSuccess: invalidate,
+  });
+
+  const removeBlackoutMutation = useRQMutation({
+    mutationFn: (id: string) => request('DELETE', `/v1/scheduling/blackouts/${id}`),
+    onSuccess: invalidate,
+  });
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const blackouts = useMemo(() => (data ?? []) as Blackout[], [data]);
+  const blackouts = useMemo(() => data ?? [], [data]);
 
   const onAdd = async () => {
     setError(null);
@@ -33,7 +52,11 @@ export function BlackoutManager({ venueId }: { venueId: Id<'venues'> }) {
       return;
     }
     try {
-      await addBlackout({ venueId, startDate: startDate.trim(), endDate: endDate.trim() || undefined, reason: reason.trim() });
+      await addBlackoutMutation.mutateAsync({
+        startDate: startDate.trim(),
+        endDate: endDate.trim() || undefined,
+        reason: reason.trim(),
+      });
       setStartDate('');
       setEndDate('');
       setReason('');
@@ -42,10 +65,10 @@ export function BlackoutManager({ venueId }: { venueId: Id<'venues'> }) {
     }
   };
 
-  const onRemove = async (blackoutId: Id<'blackoutDates'>) => {
+  const onRemove = async (blackoutId: string) => {
     setError(null);
     try {
-      await removeBlackout({ venueId, blackoutId });
+      await removeBlackoutMutation.mutateAsync(blackoutId);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not remove blackout.');
     }
@@ -80,7 +103,7 @@ export function BlackoutManager({ venueId }: { venueId: Id<'venues'> }) {
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Current blackouts</Text>
-          {data === undefined ? (
+          {isLoading ? (
             <Text style={{ color: colors.muted }}>Loading…</Text>
           ) : blackouts.length === 0 ? (
             <Text style={{ color: colors.muted }}>No blackout dates set.</Text>

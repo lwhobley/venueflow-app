@@ -4,10 +4,13 @@ import { router } from 'expo-router';
 import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, Snackbar, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from 'convex/react';
+import { useMutation as useRQMutation, useQuery as useRQQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useIsDesktop } from '../../lib/responsive';
+import { useApiClient } from '../../lib/api-client';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { AutoScheduleModal } from './AutoScheduleModal';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
 
@@ -95,7 +98,7 @@ type Staff = {
   availability: AvailabilityRow[];
 };
 type Template = { _id: Id<'scheduleTemplates'>; name: string; shiftCount: number };
-type StaffRequest = { _id: Id<'staffRequests'>; kind: string; status: string; title: string; details: string };
+type StaffRequest = { _id: string; kind: string; status: string; title: string; details: string };
 type PanelMode = 'create' | 'edit';
 
 function roleKey(role: string) {
@@ -123,15 +126,132 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
 
 export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const isDesktop = useIsDesktop();
+  const request = useApiClient();
+  const queryClient = useQueryClient();
+  const { isReady } = useAuthenticatedSession();
+
+  // getManagerSchedule + listScheduleTemplates have no REST equivalent —
+  // they include derived data (weekly hours, totals, templates) that the
+  // NestJS scheduling controller does not yet expose. Stay on Convex.
   const data = useQuery(api.scheduling.getManagerSchedule, { venueId });
   const templates = useQuery(api.scheduling.listScheduleTemplates, { venueId });
-  const requestRows = useQuery(api.app.listStaffRequests, { venueId });
 
-  const createShift = useMutation(api.scheduling.createShift);
-  const updateShift = useMutation(api.scheduling.updateShift);
-  const assignShift = useMutation(api.scheduling.assignShift);
+  // Staff requests have a REST equivalent.
+  const { data: requestRows } = useRQQuery<StaffRequest[]>({
+    queryKey: ['staff-requests'],
+    queryFn: async () => (await request('GET', '/v1/staff-requests')) as StaffRequest[],
+    enabled: isReady,
+  });
+
+  // Shift CRUD / assign / delete have REST equivalents.
+  // We still invalidate Convex's getManagerSchedule via a Convex no-op? No —
+  // Convex auto-refreshes from its own DB. Since the REST and Convex backends
+  // currently both read the same underlying data store during the migration,
+  // a full window focus / refetch will keep things in sync.
+  type ShiftWire = {
+    _id: string;
+    venueId: string;
+    profileId: string | null;
+    dayIndex: number;
+    startMinutes: number;
+    endMinutes: number;
+    jobTitle: string;
+    station: string;
+    notes: string | null;
+    status: string;
+  };
+
+  const invalidateShifts = () => {
+    void queryClient.invalidateQueries({ queryKey: ['scheduling-shifts'] });
+  };
+
+  const createShiftMutation = useRQMutation({
+    mutationFn: (body: {
+      dayIndex: number;
+      startMinutes: number;
+      endMinutes: number;
+      jobTitle: string;
+      station: string;
+      notes?: string;
+      profileId?: string;
+    }) => request('POST', '/v1/scheduling/shifts', body) as Promise<ShiftWire>,
+    onSuccess: invalidateShifts,
+  });
+  const createShift = async (args: {
+    venueId: Id<'venues'>;
+    dayIndex: number;
+    startMinutes: number;
+    endMinutes: number;
+    jobTitle: string;
+    station: string;
+    profileId?: Id<'profiles'>;
+  }) => {
+    const created = await createShiftMutation.mutateAsync({
+      dayIndex: args.dayIndex,
+      startMinutes: args.startMinutes,
+      endMinutes: args.endMinutes,
+      jobTitle: args.jobTitle,
+      station: args.station,
+      profileId: args.profileId ?? undefined,
+    });
+    return created._id as Id<'scheduleShifts'>;
+  };
+
+  const updateShiftMutation = useRQMutation({
+    mutationFn: ({
+      shiftId,
+      ...body
+    }: {
+      shiftId: string;
+      dayIndex: number;
+      startMinutes: number;
+      endMinutes: number;
+      jobTitle: string;
+      station: string;
+      notes?: string;
+    }) => request('PUT', `/v1/scheduling/shifts/${shiftId}`, body),
+    onSuccess: invalidateShifts,
+  });
+  const updateShift = (args: {
+    venueId: Id<'venues'>;
+    shiftId: Id<'scheduleShifts'>;
+    dayIndex: number;
+    startMinutes: number;
+    endMinutes: number;
+    jobTitle: string;
+    station: string;
+    notes?: string;
+  }) =>
+    updateShiftMutation.mutateAsync({
+      shiftId: args.shiftId,
+      dayIndex: args.dayIndex,
+      startMinutes: args.startMinutes,
+      endMinutes: args.endMinutes,
+      jobTitle: args.jobTitle,
+      station: args.station,
+      notes: args.notes,
+    });
+
+  const assignShiftMutation = useRQMutation({
+    mutationFn: ({ shiftId, profileId }: { shiftId: string; profileId: string }) =>
+      request('POST', `/v1/scheduling/shifts/${shiftId}/assign`, { profileId }),
+    onSuccess: invalidateShifts,
+  });
+  const assignShift = (args: { venueId: Id<'venues'>; shiftId: Id<'scheduleShifts'>; profileId: Id<'profiles'> }) =>
+    assignShiftMutation.mutateAsync({ shiftId: args.shiftId, profileId: args.profileId });
+
+  const deleteShiftMutation = useRQMutation({
+    mutationFn: (shiftId: string) => request('DELETE', `/v1/scheduling/shifts/${shiftId}`),
+    onSuccess: invalidateShifts,
+  });
+  const deleteShift = (args: { venueId: Id<'venues'>; shiftId: Id<'scheduleShifts'> }) =>
+    deleteShiftMutation.mutateAsync(args.shiftId);
+
+  // The following have no REST equivalent yet — keep on Convex:
+  // unassignShift, publishSchedule, saveScheduleTemplate, applyScheduleTemplate,
+  // deleteScheduleTemplate, copyDayShifts, clearWeek, setLaborBudget,
+  // restoreShifts, chat.openDm.
   const unassignShift = useMutation(api.scheduling.unassignShift);
-  const deleteShift = useMutation(api.scheduling.deleteShift);
   const publishSchedule = useMutation(api.scheduling.publishSchedule);
   const saveTemplate = useMutation(api.scheduling.saveScheduleTemplate);
   const applyTemplate = useMutation(api.scheduling.applyScheduleTemplate);

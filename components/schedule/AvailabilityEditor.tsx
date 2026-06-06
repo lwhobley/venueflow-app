@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Button, Card, Switch, Text, TextInput } from 'react-native-paper';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
+import { useMutation as useRQMutation, useQuery as useRQQuery, useQueryClient } from '@tanstack/react-query';
 import { accents, colors, spacing } from '../../lib/theme';
+import { useApiClient } from '../../lib/api-client';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -23,13 +23,33 @@ function fmt(minutes: number) {
 }
 
 type DayState = { available: boolean; start: string; end: string };
+type AvailabilityRow = {
+  _id: string;
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  available: boolean;
+};
 
 const defaultDay = (): DayState => ({ available: true, start: '09:00', end: '17:00' });
 
 export function AvailabilityEditor() {
   const { isReady } = useAuthenticatedSession();
-  const saved = useQuery(api.scheduling.getMyAvailability, isReady ? {} : 'skip');
-  const setAvailability = useMutation(api.scheduling.setMyAvailability);
+  const request = useApiClient();
+  const queryClient = useQueryClient();
+
+  const { data: saved } = useRQQuery<AvailabilityRow[]>({
+    queryKey: ['availability'],
+    queryFn: async () => (await request('GET', '/v1/scheduling/availability')) as AvailabilityRow[],
+    enabled: isReady,
+  });
+
+  const setAvailabilityMutation = useRQMutation({
+    mutationFn: (rows: { dayIndex: number; startMinutes: number; endMinutes: number; available: boolean }[]) =>
+      request('PUT', '/v1/scheduling/availability', { rows }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['availability'] }),
+  });
+
   const [days, setDays] = useState<DayState[]>(dayLabels.map(defaultDay));
   const [savedNote, setSavedNote] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -72,7 +92,7 @@ export function AvailabilityEditor() {
       return { dayIndex, startMinutes: s, endMinutes: Math.max(e, s + 30), available: d.available };
     });
     try {
-      await setAvailability({ rows });
+      await setAvailabilityMutation.mutateAsync(rows);
       setSavedNote(true);
       setTimeout(() => setSavedNote(false), 2500);
     } catch (e) {
