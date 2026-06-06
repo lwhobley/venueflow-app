@@ -2,9 +2,6 @@ import { useMemo, useState } from 'react';
 import { ScrollView, Share, View } from 'react-native';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { useMutation as useRQMutation, useQuery as useRQQuery, useQueryClient } from '@tanstack/react-query';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
@@ -122,12 +119,13 @@ export default function StaffScreen() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['staff'] }),
   });
 
-  // Custom roles + invite links — still on Convex (no NestJS endpoints yet)
-  const rolesQuery = useQuery(
-    api.staffAuth.listVenueRoles,
-    isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip',
-  );
-  const customRoles = useMemo(() => (rolesQuery ?? []) as VenueRole[], [rolesQuery]);
+  // Custom roles + invite links — REST
+  const { data: rolesData } = useRQQuery<VenueRole[]>({
+    queryKey: ['venue-roles'],
+    queryFn: async () => (await request('GET', '/v1/venue-roles')) as VenueRole[],
+    enabled: isReady && canManage && !!venue?.id,
+  });
+  const customRoles = useMemo(() => rolesData ?? [], [rolesData]);
   const jobRoleOptions = useMemo(() => {
     const seen = new Set(JOB_ROLES.map((r) => r.toLowerCase()));
     const merged = [...JOB_ROLES];
@@ -139,9 +137,19 @@ export default function StaffScreen() {
     }
     return merged.map((name) => ({ value: name, label: name }));
   }, [customRoles]);
-  const addVenueRole = useMutation(api.staffAuth.addVenueRole);
-  const removeVenueRole = useMutation(api.staffAuth.removeVenueRole);
-  const createInvite = useMutation(api.invites.createInvite);
+
+  const addVenueRoleMutation = useRQMutation({
+    mutationFn: (body: { name: string }) => request('POST', '/v1/venue-roles', body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['venue-roles'] }),
+  });
+  const removeVenueRoleMutation = useRQMutation({
+    mutationFn: (id: string) => request('DELETE', `/v1/venue-roles/${id}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['venue-roles'] }),
+  });
+  const createInviteMutation = useRQMutation({
+    mutationFn: (body: { role: 'manager' | 'staff'; jobTitle: string }) =>
+      request('POST', '/v1/invites', body) as Promise<{ inviteUrl: string; token: string; expiresAt: number }>,
+  });
 
   const [inviteLinkRole, setInviteLinkRole] = useState<'manager' | 'staff'>('staff');
   const [inviteLinkPosition, setInviteLinkPosition] = useState('');
@@ -156,8 +164,7 @@ export default function StaffScreen() {
     setInviteLinkMsg(null);
     setGeneratingLink(true);
     try {
-      const { inviteUrl } = await createInvite({
-        venueId: venue.id,
+      const { inviteUrl } = await createInviteMutation.mutateAsync({
         role: inviteLinkRole,
         jobTitle: inviteLinkPosition.trim() || 'Team Member',
       });
@@ -173,7 +180,7 @@ export default function StaffScreen() {
   const onAddRole = async () => {
     if (!venue?.id || !newRole.trim()) return;
     try {
-      await addVenueRole({ venueId: venue.id, name: newRole.trim() });
+      await addVenueRoleMutation.mutateAsync({ name: newRole.trim() });
       setNewRole('');
     } catch {
       // ignore duplicate
@@ -254,7 +261,7 @@ export default function StaffScreen() {
               customRoles.map((r) => (
                 <Chip
                   key={r._id}
-                  onClose={() => venue?.id && void removeVenueRole({ venueId: venue.id, roleId: r._id as Id<'venueRoles'> })}
+                  onClose={() => void removeVenueRoleMutation.mutate(r._id)}
                 >
                   {r.name}
                 </Chip>
