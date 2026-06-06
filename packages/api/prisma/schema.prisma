@@ -840,3 +840,26 @@ model CosmicInsight {
 
   @@index([batchAt])
 }
+
+model Invite {
+  id          String    @id @default(cuid())
+  venueId     String
+  token       String    @unique
+  role        Role
+  jobTitle    String
+  createdById String
+  usedById    String?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([venueId])
+}
+
+model VenueRole {
+  id        String   @id @default(cuid())
+  venueId   String
+  name      String
+  createdAt DateTime @default(now())
+
+  @@index([venueId])
+}
