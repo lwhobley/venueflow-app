@@ -45,6 +45,41 @@ New Prisma models added for these endpoints: `TimeEntry`, `BlackoutDate`. Run
 `npm run prisma:migrate:dev -w @venue-wrangler/api` against a database to create
 the migration before deploying.
 
+## Convex Data Migration To Railway Postgres
+
+The Prisma schema now includes the remaining Convex app tables and widened
+reservation fields in migration
+`packages/api/prisma/migrations/20260606185000_complete_convex_surface`.
+
+Railway runs Prisma migrations during deploy via `railway.toml`:
+
+```toml
+releaseCommand = "npm run release -w @venue-wrangler/api"
+```
+
+For a manual migration against the linked Railway database, refresh Railway CLI
+auth and run:
+
+```bash
+railway login
+railway run npm run prisma:migrate:deploy -w @venue-wrangler/api
+```
+
+Then import a Convex export directory containing `table.json` arrays or
+`table.jsonl` files. The importer preserves Convex `_id` values as Postgres
+primary keys so existing cross-table references stay intact.
+
+```bash
+railway run npm run api:convex:import -- /path/to/convex-export --dry-run
+railway run npm run api:convex:import -- /path/to/convex-export
+```
+
+The importer handles the app tables defined in `convex/schema.ts`, including
+bar inventory, reservation integrations, manager goals/events, payroll exports,
+payment methods, invoices, invites, and table state history. Keep Convex live
+until each client surface is switched to REST routes and the imported row counts
+are verified against the Convex export.
+
 ## Convex Function Surface To Replace
 
 The Nest API exposes `/api/v1/compatibility/convex-surface` so we can track the

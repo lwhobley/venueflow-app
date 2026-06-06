@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { HelperText, IconButton, Text, TextInput } from 'react-native-paper';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
+import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
+import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
@@ -28,7 +28,7 @@ export default function ConversationScreen() {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
-  const messages = data?.messages ?? [];
+  const messages = (data?.messages ?? []) as any[];
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);

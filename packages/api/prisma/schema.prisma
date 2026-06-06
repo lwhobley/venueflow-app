@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")        // pooled (PgBouncer) — used at runtime
-  directUrl = env("DATABASE_DIRECT_URL") // direct — used by prisma migrate / prisma studio
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -85,6 +84,7 @@ enum ReservationSource {
   sevenrooms
   tock
   google
+  generic
 }
 
 enum PosProvider {
@@ -152,14 +152,45 @@ enum ContractStatus {
   disputed
 }
 
+enum BarStockCategory {
+  spirit
+  wine
+  beer
+  mixer
+  garnish
+  supply
+  other
+}
+
+enum BarStockMovementType {
+  count
+  received
+  waste
+  comp
+  transfer
+  correction
+}
+
+enum ManagerGoalPeriod {
+  day
+  week
+}
+
+enum ManagerGoalStatus {
+  open
+  done
+  cancelled
+}
+
 model User {
-  id        String    @id @default(cuid())
-  email     String?   @unique
-  phone     String?   @unique
-  createdAt DateTime  @default(now())
+  id        String              @id @default(cuid())
+  email     String?             @unique
+  phone     String?             @unique
+  createdAt DateTime            @default(now())
   profiles  Profile[]
   sessions  Session[]
   accounts  AuthAccount[]
+  password  PasswordCredential?
 }
 
 model Session {
@@ -185,60 +216,71 @@ model AuthAccount {
   @@index([userId, provider])
 }
 
+model PasswordCredential {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  passwordHash String
+  salt         String
+  iterations   Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 model Venue {
-  id                       String                @id @default(cuid())
-  name                     String
-  latitude                 Float
-  longitude                Float
-  geofenceRadiusM          Float
-  code                     String?               @unique
-  phone                    String?
-  address                  String?
-  venueType                String?
-  staffRange               String?
-  weeklyLaborBudgetHours   Float?
-  schedulePublishedAt      DateTime?
-  schedulePublishedById    String?
+  id                            String                @id @default(cuid())
+  name                          String
+  latitude                      Float
+  longitude                     Float
+  geofenceRadiusM               Float
+  code                          String?               @unique
+  phone                         String?
+  address                       String?
+  venueType                     String?
+  staffRange                    String?
+  weeklyLaborBudgetHours        Float?
+  schedulePublishedAt           DateTime?
+  schedulePublishedById         String?
   scheduleUpdatedAfterPublishAt DateTime?
-  subscriptionStatus       SubscriptionStatus?
-  subscriptionPlatform     SubscriptionPlatform?
-  leadsWebhookSecret       String?
-  createdAt                DateTime              @default(now())
-  updatedAt                DateTime              @updatedAt
-  profiles                 Profile[]
-  shifts                   ScheduleShift[]
-  shiftSwaps               ShiftSwap[]
-  availability             Availability[]
-  conversations            Conversation[]
-  notifications            NotificationEvent[]
-  pushTokens               PushToken[]
-  timeEntries              TimeEntry[]
-  blackoutDates            BlackoutDate[]
-  staffRequests            StaffRequest[]
-  guests                   Guest[]
-  reservations             Reservation[]
-  floorPlans               FloorPlan[]
-  tables                   TableState[]
-  subscriptions            Subscription[]
-  crmLeads                 CrmLead[]
-  posChecks                PosCheck[]
+  subscriptionStatus            SubscriptionStatus?
+  subscriptionPlatform          SubscriptionPlatform?
+  leadsWebhookSecret            String?
+  createdAt                     DateTime              @default(now())
+  updatedAt                     DateTime              @updatedAt
+  profiles                      Profile[]
+  shifts                        ScheduleShift[]
+  shiftSwaps                    ShiftSwap[]
+  availability                  Availability[]
+  conversations                 Conversation[]
+  notifications                 NotificationEvent[]
+  pushTokens                    PushToken[]
+  timeEntries                   TimeEntry[]
+  blackoutDates                 BlackoutDate[]
+  staffRequests                 StaffRequest[]
+  guests                        Guest[]
+  reservations                  Reservation[]
+  floorPlans                    FloorPlan[]
+  tables                        TableState[]
+  subscriptions                 Subscription[]
+  crmLeads                      CrmLead[]
+  posChecks                     PosCheck[]
 }
 
 model Profile {
-  id              String            @id @default(cuid())
-  userId          String?           @unique
+  id              String          @id @default(cuid())
+  userId          String?         @unique
   tokenIdentifier String?
   email           String
   fullName        String
   role            Role
   jobTitle        String
   venueId         String?
-  allAccess       Boolean           @default(false)
+  allAccess       Boolean         @default(false)
   trialEndsAt     DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
-  venue           Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  user            User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  venue           Venue?          @relation(fields: [venueId], references: [id], onDelete: SetNull)
   shifts          ScheduleShift[]
   availability    Availability[]
   pushTokens      PushToken[]
@@ -314,25 +356,25 @@ model Availability {
 }
 
 model StaffRequest {
-  id                String        @id @default(cuid())
-  venueId           String
-  profileId         String
-  kind              String
-  status            RequestStatus
-  title             String
-  details           String
-  requestedForDate  String?
-  requestedShiftId  String?
+  id                  String        @id @default(cuid())
+  venueId             String
+  profileId           String
+  kind                String
+  status              RequestStatus
+  title               String
+  details             String
+  requestedForDate    String?
+  requestedShiftId    String?
   requestedRangeStart String?
-  requestedRangeEnd String?
-  availability      Json?
-  reviewerId        String?
-  reviewedAt        DateTime?
-  responseNotes     String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  venue             Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  profile           Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  requestedRangeEnd   String?
+  availability        Json?
+  reviewerId          String?
+  reviewedAt          DateTime?
+  responseNotes       String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  venue               Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile             Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([venueId])
   @@index([profileId])
@@ -455,26 +497,26 @@ model ShiftSwap {
 }
 
 model Guest {
-  id             String   @id @default(cuid())
-  venueId        String
-  fullName       String
-  phone          String?
-  email          String?
-  lifecycleStage String?
-  source         String?
-  birthday       String?
-  company        String?
-  marketingOptIn Boolean?
-  favoriteTable  String?
+  id              String    @id @default(cuid())
+  venueId         String
+  fullName        String
+  phone           String?
+  email           String?
+  lifecycleStage  String?
+  source          String?
+  birthday        String?
+  company         String?
+  marketingOptIn  Boolean?
+  favoriteTable   String?
   preferredServer String?
-  dietaryNotes   String?
-  tags           String[]
-  notes          String?
-  nameLower      String?
-  deletedAt      DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  venue          Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  dietaryNotes    String?
+  tags            String[]
+  notes           String?
+  nameLower       String?
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId])
   @@index([phone])
@@ -509,7 +551,14 @@ model Reservation {
   contractStatus      String?
   beoStatus           String?
   estimatedValueCents Int?
+  depositDueCents     Int?
   externalId          String?
+  toastCheckGuid      String?
+  depositStatus       String?
+  depositAmount       Float?
+  checkInAt           DateTime?
+  seatedAt            DateTime?
+  completedAt         DateTime?
   notes               String?
   deletedAt           DateTime?
   createdAt           DateTime          @default(now())
@@ -651,33 +700,33 @@ model PosConnection {
 }
 
 model PosCheck {
-  id                 String         @id @default(cuid())
-  venueId            String
-  provider           PosProvider
-  externalCheckId    String
-  tableLabel         String?
-  tableId            String?
-  serverName         String?
-  serverId           String?
-  guestName          String?
-  guestId            String?
-  openedAt           DateTime
-  closedAt           DateTime?
-  subtotalCents      Int
-  taxCents           Int?
-  tipCents           Int
-  totalCents         Int
-  discountCents      Int?
-  compCents          Int?
-  promoCents         Int?
-  guestCount         Int?
-  revenueCenter      String?
-  tenderType         String?
-  menuItems          Json?
-  status             PosCheckStatus
-  raw                Json?
-  updatedAt          DateTime       @updatedAt
-  venue              Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  id              String         @id @default(cuid())
+  venueId         String
+  provider        PosProvider
+  externalCheckId String
+  tableLabel      String?
+  tableId         String?
+  serverName      String?
+  serverId        String?
+  guestName       String?
+  guestId         String?
+  openedAt        DateTime
+  closedAt        DateTime?
+  subtotalCents   Int
+  taxCents        Int?
+  tipCents        Int
+  totalCents      Int
+  discountCents   Int?
+  compCents       Int?
+  promoCents      Int?
+  guestCount      Int?
+  revenueCenter   String?
+  tenderType      String?
+  menuItems       Json?
+  status          PosCheckStatus
+  raw             Json?
+  updatedAt       DateTime       @updatedAt
+  venue           Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, openedAt])
   @@index([provider, externalCheckId])
@@ -810,6 +859,19 @@ model CrmContract {
   @@index([venueId, status])
 }
 
+model CrmActivityLog {
+  id        String   @id @default(cuid())
+  venueId   String
+  leadId    String
+  actorId   String?
+  kind      String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([venueId, createdAt])
+}
+
 model Subscription {
   id                     String                @id @default(cuid())
   venueId                String
@@ -839,7 +901,7 @@ model Subscription {
 }
 
 model SubscriptionEvent {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   venueId         String
   source          String
   externalEventId String
@@ -853,6 +915,38 @@ model SubscriptionEvent {
   @@index([venueId, processedAt])
 }
 
+model PaymentMethod {
+  id                    String   @id @default(cuid())
+  venueId               String
+  stripePaymentMethodId String
+  brand                 String
+  last4                 String
+  expMonth              Int
+  expYear               Int
+  isDefault             Boolean
+  createdAt             DateTime @default(now())
+
+  @@index([venueId])
+}
+
+model Invoice {
+  id               String    @id @default(cuid())
+  venueId          String
+  stripeInvoiceId  String
+  amountCents      Int
+  currency         String
+  status           String
+  invoiceUrl       String?
+  hostedInvoiceUrl String?
+  periodStart      DateTime
+  periodEnd        DateTime
+  createdAt        DateTime  @default(now())
+  paidAt           DateTime?
+
+  @@index([venueId, createdAt])
+  @@index([stripeInvoiceId])
+}
+
 model CosmicInsight {
   id      String   @id @default(cuid())
   kind    String
@@ -861,4 +955,195 @@ model CosmicInsight {
   batchAt DateTime
 
   @@index([batchAt])
+}
+
+model VenueRole {
+  id      String @id @default(cuid())
+  venueId String
+  name    String
+
+  @@index([venueId])
+}
+
+model Team {
+  id          String @id @default(cuid())
+  venueId     String
+  name        String
+  memberCount Int
+
+  @@index([venueId])
+}
+
+model ScheduleEmailEvent {
+  id        String   @id @default(cuid())
+  venueId   String
+  profileId String
+  shiftId   String?
+  kind      String
+  email     String
+  subject   String
+  sentAt    DateTime
+
+  @@index([venueId, sentAt])
+  @@index([profileId, sentAt])
+}
+
+model PayrollExport {
+  id          String   @id @default(cuid())
+  venueId     String
+  provider    String
+  periodStart DateTime
+  periodEnd   DateTime
+  rowCount    Int
+  totalHours  Float
+  createdBy   String
+  createdAt   DateTime @default(now())
+
+  @@index([venueId, createdAt])
+}
+
+model ReservationConnection {
+  id              String            @id @default(cuid())
+  venueId         String
+  provider        ReservationSource
+  externalVenueId String?
+  status          IntegrationStatus
+  webhookSecret   String?
+  lastSyncAt      DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([venueId])
+  @@index([venueId, provider])
+}
+
+model ReservationSyncEvent {
+  id              String            @id @default(cuid())
+  venueId         String
+  provider        ReservationSource
+  externalEventId String
+  eventType       String
+  reservationId   String?
+  payload         Json
+  processedAt     DateTime
+  status          String
+  errorMessage    String?
+
+  @@index([provider, externalEventId])
+  @@index([venueId, provider, externalEventId])
+  @@index([venueId, processedAt])
+}
+
+model BarInventoryItem {
+  id            String           @id @default(cuid())
+  venueId       String
+  name          String
+  category      BarStockCategory
+  area          String?
+  unit          String
+  parLevel      Float
+  onHand        Float
+  unitCostCents Int?
+  supplier      String?
+  sku           String?
+  notes         String?
+  lastCountedAt DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([venueId])
+  @@index([venueId, category])
+  @@index([venueId, name])
+}
+
+model BarInventoryMovement {
+  id             String               @id @default(cuid())
+  venueId        String
+  itemId         String
+  movementType   BarStockMovementType
+  quantity       Float
+  previousOnHand Float
+  nextOnHand     Float
+  notes          String?
+  createdBy      String
+  createdAt      DateTime             @default(now())
+
+  @@index([venueId, createdAt])
+  @@index([itemId, createdAt])
+}
+
+model ManagerGoal {
+  id          String            @id @default(cuid())
+  venueId     String
+  title       String
+  details     String?
+  period      ManagerGoalPeriod
+  targetDate  String
+  status      ManagerGoalStatus
+  createdBy   String
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([venueId, targetDate])
+  @@index([venueId, status])
+}
+
+model VenueEvent {
+  id             String    @id @default(cuid())
+  venueId        String
+  title          String
+  startsAt       DateTime
+  endsAt         DateTime?
+  expectedGuests Int?
+  notes          String?
+  reservationId  String?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([venueId, startsAt])
+  @@index([reservationId])
+}
+
+model ReservationSetting {
+  id                   String   @id @default(cuid())
+  venueId              String
+  defaultDiningMinutes Int
+  defaultTurnMinutes   Int
+  bookingWindowDays    Int
+  minLeadHours         Int
+  updatedAt            DateTime @updatedAt
+
+  @@index([venueId])
+}
+
+model TableStateHistory {
+  id         String      @id @default(cuid())
+  venueId    String
+  tableId    String
+  fromStatus TableStatus
+  toStatus   TableStatus
+  actorId    String?
+  partySize  Int?
+  timestamp  DateTime
+  metadata   Json?
+
+  @@index([tableId, timestamp])
+  @@index([venueId, timestamp])
+}
+
+model Invite {
+  id        String   @id @default(cuid())
+  venueId   String
+  token     String
+  role      Role
+  jobTitle  String
+  createdBy String
+  usedBy    String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([venueId])
 }

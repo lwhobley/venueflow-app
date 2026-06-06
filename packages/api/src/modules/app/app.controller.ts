@@ -328,6 +328,56 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Get('manager-insights')
+  async getManagerInsights(@CurrentUser() user: AuthUser) {
+    const profile = await this.getProfile(user);
+    if (!profile?.venueId || !isAdminRole(profile.role)) return null;
+    const venueId = profile.venueId;
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [completedEntries, scheduledShifts, openRequests] = await Promise.all([
+      this.prisma.timeEntry.findMany({
+        where: { venueId, isOpen: false, clockOutAt: { gte: weekAgo } },
+        select: { clockInAt: true, clockOutAt: true },
+      }),
+      this.prisma.scheduleShift.count({ where: { venueId, status: 'scheduled' } }),
+      this.prisma.staffRequest.count({ where: { venueId, status: 'pending' } }),
+    ]);
+    const laborMs = completedEntries.reduce((sum, e) => sum + (e.clockOutAt!.getTime() - e.clockInAt.getTime()), 0);
+    const laborHours = Math.round((laborMs / 3600000) * 10) / 10;
+    return { laborHours, scheduledShifts, openRequests };
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('time-entries/csv')
+  async exportTimeEntriesCsv(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const entries = await this.prisma.timeEntry.findMany({
+      where: { venueId },
+      include: { profile: true },
+      orderBy: { clockInAt: 'desc' },
+      take: 1000,
+    });
+    const header = 'id,memberId,memberName,clockInAt,clockOutAt,hoursWorked\n';
+    const rows = entries
+      .map((e) => {
+        const hours = e.clockOutAt
+          ? Math.round(((e.clockOutAt.getTime() - e.clockInAt.getTime()) / 3600000) * 100) / 100
+          : '';
+        return [
+          e.id,
+          e.profileId,
+          `"${e.profile.fullName.replace(/"/g, '""')}"`,
+          e.clockInAt.toISOString(),
+          e.clockOutAt?.toISOString() ?? '',
+          hours,
+        ].join(',');
+      })
+      .join('\n');
+    return header + rows;
+  }
+
+  @UseGuards(AuthGuard)
   @Get('notifications')
   async getNotifications(@CurrentUser() user: AuthUser) {
     const profile = await this.getProfile(user);

@@ -8,5 +8,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"],
-  "exclude": ["packages/api/**"]
+  "exclude": ["packages/api/**", "convex/**"]
 }

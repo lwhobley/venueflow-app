@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=20.19.4"
+  },
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",

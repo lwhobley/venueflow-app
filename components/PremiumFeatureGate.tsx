@@ -1,8 +1,8 @@
 import { Platform, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { useQuery } from 'convex/react';
-import { api } from '../convex/_generated/api';
+import { useQuery } from '../lib/railway-hooks';
+import { api } from '../lib/railway-api';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { getTrialState } from '../lib/trial';
 import { colors, spacing } from '../lib/theme';

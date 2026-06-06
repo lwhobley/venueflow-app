@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = [
+  "npm run api:prisma:generate",
+  "npm run api:build"
+]
+
+[start]
+cmd = "npm run start:prod -w @venue-wrangler/api"

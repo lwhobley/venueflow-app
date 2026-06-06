@@ -1,9 +1,8 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm ci && npm run build -w @venue-wrangler/api && npm run prisma:generate -w @venue-wrangler/api"
+buildCommand = "npm run api:prisma:generate && npm run api:build"
 
 [deploy]
-releaseCommand = "npm run release -w @venue-wrangler/api"
 startCommand = "npm run start:prod -w @venue-wrangler/api"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30

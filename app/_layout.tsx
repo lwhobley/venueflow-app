@@ -7,40 +7,12 @@ import { PaperProvider } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
 import { A0PurchaseProvider } from '../lib/a0-purchases-stub';
-import { ConvexReactClient } from 'convex/react';
-import { ConvexAuthProvider } from '@convex-dev/auth/react';
-import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { makePaperTheme, useAppearanceStore, designPalettes } from '../lib/theme';
 import { SubscriptionGate } from '../components/SubscriptionGate';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { configurePurchases } from '../lib/purchases';
-
-const convexUrl =
-  process.env.EXPO_PUBLIC_CONVEX_URL ??
-  // Fall back to the value baked into app.json -> expo.extra. This keeps web
-  // builds working even when a gitignored .env.local is absent (e.g. a fresh
-  // clone or git worktree), where EXPO_PUBLIC_* vars are not inlined.
-  (Constants.expoConfig?.extra?.EXPO_PUBLIC_CONVEX_URL as string | undefined) ??
-  (globalThis as typeof globalThis & { EXPO_PUBLIC_CONVEX_URL?: string }).EXPO_PUBLIC_CONVEX_URL;
-
-if (!convexUrl) {
-  // Surface a clear error rather than letting ConvexReactClient throw a less obvious one.
-  // EXPO_PUBLIC_CONVEX_URL must be set in .env (or app.config).
-  console.warn('[Venue Wrangler] EXPO_PUBLIC_CONVEX_URL is not set; Convex queries will fail.');
-}
-
-const convexClient = new ConvexReactClient(convexUrl ?? 'https://missing-convex-url.invalid', {
-  unsavedChangesWarning: false,
-});
-
-const secureStorage = {
-  getItem: (key: string) => SecureStore.getItemAsync(key),
-  setItem: (key: string, value: string) => SecureStore.setItemAsync(key, value),
-  removeItem: (key: string) => SecureStore.deleteItemAsync(key),
-};
 
 const shouldIgnoreWebError = (message: string) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||
@@ -110,23 +82,21 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ConvexAuthProvider client={convexClient} storage={Platform.OS === 'web' ? undefined : secureStorage}>
-          <QueryClientProvider client={queryClient}>
-            <PaperProvider theme={makePaperTheme(themeMode)}>
-              <A0PurchaseProvider config={{ appUserId: venueId ?? undefined, debug }}>
-                {/* Top inset keeps content below the status bar / notch; the tab
-                    bar and screens handle the bottom inset. */}
-                <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={['top', 'left', 'right']}>
-                  <ErrorBoundary>
-                    <SubscriptionGate>
-                      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: palette.background } }} />
-                    </SubscriptionGate>
-                  </ErrorBoundary>
-                </SafeAreaView>
-              </A0PurchaseProvider>
-            </PaperProvider>
-          </QueryClientProvider>
-        </ConvexAuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <PaperProvider theme={makePaperTheme(themeMode)}>
+            <A0PurchaseProvider config={{ appUserId: venueId ?? undefined, debug }}>
+              {/* Top inset keeps content below the status bar / notch; the tab
+                  bar and screens handle the bottom inset. */}
+              <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={['top', 'left', 'right']}>
+                <ErrorBoundary>
+                  <SubscriptionGate>
+                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: palette.background } }} />
+                  </SubscriptionGate>
+                </ErrorBoundary>
+              </SafeAreaView>
+            </A0PurchaseProvider>
+          </PaperProvider>
+        </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

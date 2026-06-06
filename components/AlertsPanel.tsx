@@ -3,7 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CommandButton, CommandSurface, CommandText, StatusPill } from './FutureUI';
 import type { DesignPalette } from '../lib/theme';
 import { spacing } from '../lib/theme';
-import type { Id } from '../convex/_generated/dataModel';
+import type { Id } from '../lib/ids';
 
 type NotificationItem = {
   _id: Id<'notificationEvents'>;

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Button, Card, Switch, Text, TextInput } from 'react-native-paper';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
+import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 

@@ -1,8 +1,8 @@
 import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ColorValue } from 'react-native';
-import { useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
+import { useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
 import { useDesignTheme } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { CarouselTabBar } from '../../components/CarouselTabBar';

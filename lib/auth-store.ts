@@ -7,6 +7,7 @@ import type { UserSummary, Venue } from './types';
 type SessionState = {
   user: UserSummary | null;
   venue: Venue | null;
+  token: string | null;
 };
 
 export type AuthState = SessionState & {
@@ -15,6 +16,7 @@ export type AuthState = SessionState & {
   setSession: (session: {
     user: UserSummary;
     venue: Venue | null;
+    token?: string | null;
   }) => void;
   setVenue: (venue: Venue) => void;
   clearSession: () => void;
@@ -72,14 +74,16 @@ const createAuthStore = (set: (partial: Partial<AuthState>) => void): AuthState 
   hydrated: false,
   user: null,
   venue: null,
+  token: null,
   setHydrated: (hydrated: boolean) => set({ hydrated }),
-  setSession: (session: { user: UserSummary; venue: Venue | null }) =>
+  setSession: (session: { user: UserSummary; venue: Venue | null; token?: string | null }) =>
     set({
       user: session.user,
       venue: session.venue,
+      ...(session.token !== undefined ? { token: session.token } : {}),
     }),
   setVenue: (venue: Venue) => set({ venue }),
-  clearSession: () => set({ user: null, venue: null }),
+  clearSession: () => set({ user: null, venue: null, token: null }),
 });
 
 export const useAuthStore = create<AuthState>()(
@@ -89,6 +93,7 @@ export const useAuthStore = create<AuthState>()(
     partialize: (state: AuthState): SessionState => ({
       user: state.user,
       venue: state.venue,
+      token: state.token,
     }),
     onRehydrateStorage: () => (state: AuthState | undefined) => {
       state?.setHydrated(true);

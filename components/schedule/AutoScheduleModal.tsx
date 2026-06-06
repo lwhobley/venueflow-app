@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Divider, Menu, Modal, Portal, Text } from 'react-native-paper';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
+import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
+import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
 
 type StaffOption = { _id: Id<'profiles'>; fullName: string; jobTitle: string; role: string; weeklyHours: number };
@@ -50,7 +50,7 @@ export function AutoScheduleModal({
   useEffect(() => {
     if (!preview) return;
     const seed: Record<string, string> = {};
-    for (const p of preview.proposals) seed[p.shiftId] = p.profileId ?? '';
+    for (const p of (preview.proposals ?? []) as any[]) seed[p.shiftId] = p.profileId ?? '';
     setChoice(seed);
   }, [preview]);
 
@@ -103,7 +103,7 @@ export function AutoScheduleModal({
                 <Divider />
                 <ScrollView style={{ maxHeight: 420 }}>
                   <View style={{ gap: 8 }}>
-                    {preview.proposals.map((p) => {
+                    {((preview.proposals ?? []) as any[]).map((p) => {
                       const chosen = choice[p.shiftId] ?? '';
                       const unfilled = !p.profileId;
                       return (

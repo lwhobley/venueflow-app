@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Card, Chip, SegmentedButtons, Text } from 'react-native-paper';
-import { useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
+import { useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
+import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
@@ -57,7 +57,7 @@ function KpiTile({ label, value, sub, accent }: { label: string; value: string; 
 type SalesTabProps = { venueId: Id<'venues'>; days: number; startTs: number; endTs: number };
 
 function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
-  const dashboard = useQuery(api.pos.getSalesSummaryDashboard, { venueId, windowDays: days, startTs, endTs });
+  const dashboard = useQuery(api.pos.getSalesSummaryDashboard, { venueId, windowDays: days, startTs, endTs }) as any;
 
   if (dashboard === undefined) return <ScheduleSkeleton rows={5} />;
 
@@ -71,7 +71,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
     );
   }
 
-  const { summary, byDay, byTender, byRevenueCenter } = dashboard;
+  const { summary, byDay, byTender, byRevenueCenter } = dashboard as { summary: any; byDay: any[]; byTender: any[]; byRevenueCenter: any[] };
   const netSales = summary.salesCents - (summary.discountCents + summary.compCents + summary.promoCents);
   const maxDay = Math.max(...byDay.map((d) => d.salesCents), 1);
 
@@ -179,7 +179,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 }
 
 function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
-  const data = useQuery(api.pos.getSalesByServer, { venueId, windowDays: days, startTs, endTs });
+  const data = useQuery(api.pos.getSalesByServer, { venueId, windowDays: days, startTs, endTs }) as any[] | undefined;
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
@@ -232,7 +232,7 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 }
 
 function ItemsTab({ venueId, days, startTs, endTs }: SalesTabProps) {
-  const data = useQuery(api.pos.getTopMenuItems, { venueId, windowDays: days, limit: 30, startTs, endTs });
+  const data = useQuery(api.pos.getTopMenuItems, { venueId, windowDays: days, limit: 30, startTs, endTs }) as any[] | undefined;
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
@@ -280,7 +280,7 @@ function ItemRow({ r, i, maxSales }: { r: { name: string; category: string | nul
 }
 
 function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
-  const data = useQuery(api.pos.getLaborSummary, { venueId, windowDays: days, startTs, endTs });
+  const data = useQuery(api.pos.getLaborSummary, { venueId, windowDays: days, startTs, endTs }) as any;
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.byEmployee.length === 0) {
@@ -303,7 +303,7 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.md }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>By employee</Text>
-          {data.byEmployee.map((emp, i) => (
+          {((data.byEmployee ?? []) as any[]).map((emp, i) => (
             <View key={emp.employeeName + i} style={{ gap: 6, paddingBottom: spacing.sm, borderBottomWidth: i < data.byEmployee.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View style={{ flex: 1 }}>

@@ -1,4 +1,4 @@
-import type { Id } from '../convex/_generated/dataModel';
+import type { Id } from './ids';
 
 export type Role = 'admin' | 'owner' | 'manager' | 'server' | 'staff';
 

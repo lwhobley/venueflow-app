@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Divider, IconButton, SegmentedButtons, Text, TextInput } from 'react-native-paper';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../convex/_generated/api';
-import type { Id } from '../convex/_generated/dataModel';
+import { useMutation, useQuery } from '../lib/railway-hooks';
+import { api } from '../lib/railway-api';
+import type { Id } from '../lib/ids';
 import { accents, colors, spacing } from '../lib/theme';
 import { useIsDesktop } from '../lib/responsive';
 

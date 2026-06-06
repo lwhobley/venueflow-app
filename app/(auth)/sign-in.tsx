@@ -1,16 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
-import { useAuthActions } from '@convex-dev/auth/react';
-import { useConvexAuth, useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
+import { appApi } from '../../lib/api-client';
 import { spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
 
-type SessionPayload = { profile: any; venue: any | null };
+type InvitePreview = { expired?: boolean; venueName?: string; jobTitle?: string };
 
 const logoSource = require('../../assets/venue-wrangler-logo.jpg');
 const authColors = {
@@ -25,11 +23,6 @@ const authColors = {
 };
 
 export default function SignInScreen() {
-  const { signIn, signOut } = useAuthActions();
-  const { isAuthenticated } = useConvexAuth();
-  const isAuthenticatedRef = useRef(isAuthenticated);
-  const bootstrapProfile = useMutation(api.app.bootstrapProfile);
-  const redeemInvite = useMutation(api.invites.redeemInvite);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
   const { t } = useI18n();
@@ -51,21 +44,15 @@ export default function SignInScreen() {
     },
   };
 
-  // Read invite token from URL params (deep link: venuewrangler://join?invite=TOKEN).
   const { invite: inviteParam } = useLocalSearchParams<{ invite?: string }>();
   const inviteToken = typeof inviteParam === 'string' ? inviteParam : undefined;
-  const invitePreview = useQuery(
-    api.invites.getInvitePreview,
-    inviteToken ? { token: inviteToken } : 'skip',
-  );
+  const [invitePreview] = useState<InvitePreview | null>(null);
 
   const [flow, setFlow] = useState<'signIn' | 'signUp'>('signUp');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  // Inline error surface. On React Native Web, Alert.alert is a no-op, so an
-  // alert-only failure path looks like "nothing happened". Mirror errors here.
   const [formError, setFormError] = useState<string | null>(null);
 
   const showError = (title: string, message: string) => {
@@ -73,62 +60,49 @@ export default function SignInScreen() {
     Alert.alert(title, message);
   };
 
-  useEffect(() => {
-    isAuthenticatedRef.current = isAuthenticated;
-  }, [isAuthenticated]);
-
-  const waitForConvexAuth = async () => {
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      if (isAuthenticatedRef.current) return;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    throw new Error('Sign-in did not complete. Please try again.');
-  };
-
   const finishSession = async (options?: { inviteToken?: string }) => {
-    let last: SessionPayload | null = null;
-    let lastError: unknown = null;
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      try {
-        last = await bootstrapProfile({ fullName: fullName.trim() || undefined });
-        break;
-      } catch (e) {
-        lastError = e;
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-    }
-    if (!last) {
-      throw lastError instanceof Error ? lastError : new Error('Sign-in did not complete. Please try again.');
-    }
+    const last = await appApi.passwordAuth({
+      email: email.trim(),
+      password,
+      flow,
+      fullName: fullName.trim() || undefined,
+    });
 
-    // If the user arrived via an invite link and has no venue yet, redeem it.
     if (options?.inviteToken && !last.venue) {
-      try {
-        last = await redeemInvite({ token: options.inviteToken });
-      } catch (e) {
-        Alert.alert(
-          'Invite error',
-          e instanceof Error ? e.message : 'Could not redeem invite. Ask your manager to add you to the team.',
-        );
-      }
+      Alert.alert(
+        'Invite pending',
+        'Invite links are being moved to the Railway API. Ask your manager to add your email to the roster for now.',
+      );
     }
 
-    const { profile, venue } = last;
+    const { profile, venue, token } = last;
     setSession({
-      user: { id: profile._id, email: profile.email, full_name: profile.fullName, role: profile.role, job_title: profile.jobTitle, venue_id: profile.venueId ?? null, all_access: profile.allAccess === true },
-      venue: venue ? { id: venue._id, name: venue.name, latitude: venue.latitude, longitude: venue.longitude, geofence_radius_m: venue.geofenceRadiusM } : null,
+      user: {
+        id: profile._id,
+        email: profile.email,
+        full_name: profile.fullName,
+        role: profile.role,
+        job_title: profile.jobTitle,
+        venue_id: profile.venueId ?? null,
+        all_access: profile.allAccess === true,
+      },
+      venue: venue
+        ? {
+            id: venue._id,
+            name: venue.name,
+            latitude: venue.latitude,
+            longitude: venue.longitude,
+            geofence_radius_m: venue.geofenceRadiusM,
+          }
+        : null,
+      token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     router.replace('/(tabs)/home');
   };
 
-  const resetExistingSession = async () => {
+  const resetExistingSession = () => {
     clearSession();
-    try {
-      await signOut();
-    } catch {
-      // No active session to clear — ignore.
-    }
   };
 
   const submit = async () => {
@@ -144,9 +118,7 @@ export default function SignInScreen() {
     setSubmitting(true);
     setFormError(null);
     try {
-      await resetExistingSession();
-      await signIn('password', { email: trimmed, password, flow });
-      await waitForConvexAuth();
+      resetExistingSession();
       await finishSession({ inviteToken });
     } catch (e) {
       showError(flow === 'signUp' ? 'Could not create account' : 'Sign in failed', e instanceof Error ? e.message : 'Try again.');
@@ -167,14 +139,6 @@ export default function SignInScreen() {
     </View>
   ) : null;
 
-  const inviteError = inviteToken && (invitePreview === null || invitePreview?.expired) ? (
-    <Text style={{ color: authColors.danger, textAlign: 'center', marginBottom: spacing.sm }}>
-      {invitePreview === null
-        ? 'This invite link is invalid.'
-        : 'This invite link has expired or was already used. Ask your manager to add your email to the team.'}
-    </Text>
-  ) : null;
-
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: authColors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
@@ -183,7 +147,7 @@ export default function SignInScreen() {
           <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
           {!inviteToken ? (
             <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>
-              Time tracking, scheduling, reservations, and team chat. Create a free account to get started — your 14-day trial begins right away.
+              Time tracking, scheduling, reservations, and team chat. Create a free account to get started - your 14-day trial begins right away.
             </Text>
           ) : null}
         </View>
@@ -191,7 +155,11 @@ export default function SignInScreen() {
         <Card style={styles.authCard}>
           <Card.Content style={{ gap: spacing.md }}>
             {inviteBanner}
-            {inviteError}
+            {inviteToken ? (
+              <Text style={{ color: authColors.muted, textAlign: 'center', marginBottom: spacing.sm }}>
+                Invite links are moving to Railway. Create or sign in to your account, then ask your manager to add your email to the roster.
+              </Text>
+            ) : null}
             {formError ? (
               <Text style={{ color: authColors.danger, textAlign: 'center' }}>{formError}</Text>
             ) : null}

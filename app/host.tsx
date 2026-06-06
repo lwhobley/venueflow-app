@@ -1,8 +1,8 @@
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Text } from 'react-native-paper';
 import { useRouter } from 'expo-router';
-import { useQuery } from 'convex/react';
-import { api } from '../convex/_generated/api';
+import { useQuery } from '../lib/railway-hooks';
+import { api } from '../lib/railway-api';
 import { colors, spacing } from '../lib/theme';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 
@@ -36,7 +36,7 @@ export default function HostStandScreen() {
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium">Quick seat map</Text>
-            {floor.tables.slice(0, 10).map(({ table, state }) => (
+            {((floor.tables ?? []) as any[]).slice(0, 10).map(({ table, state }: { table: any; state: any }) => (
               <View key={table._id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ fontWeight: '700' }}>{table.label}</Text>

@@ -3,9 +3,9 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, HelperText, IconButton, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
+import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
+import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
@@ -73,13 +73,13 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!isReady || !venue?.id) return;
     setError(null);
-    void ensureSetup({ venueId: venue.id }).catch((e) => {
+    void ensureSetup({ venueId: venue.id }).catch((e: unknown) => {
       setError(e instanceof Error ? e.message : 'Could not prepare chat.');
     });
   }, [isReady, venue?.id, ensureSetup]);
 
-  const groups = conversations?.groups ?? [];
-  const dms = conversations?.dms ?? [];
+  const groups = (conversations?.groups ?? []) as any[];
+  const dms = (conversations?.dms ?? []) as any[];
   const dmByName = useMemo(() => new Map(dms.map((d) => [d.title, d])), [dms]);
   const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
 
@@ -89,7 +89,7 @@ export default function ChatScreen() {
   // Group teammates by their position (jobTitle) for the left-hand team list.
   const byPosition = useMemo(() => {
     const map = new Map<string, DirectoryEntry[]>();
-    for (const person of directory ?? []) {
+    for (const person of (directory ?? []) as DirectoryEntry[]) {
       const key = person.jobTitle?.trim() || 'Team';
       const list = map.get(key) ?? [];
       list.push(person);

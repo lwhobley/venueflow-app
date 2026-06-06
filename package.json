@@ -14,17 +14,14 @@
     "api:build": "npm run build -w @venue-wrangler/api",
     "api:prisma:generate": "npm run prisma:generate -w @venue-wrangler/api",
     "api:migrate:dev": "npm run prisma:migrate:dev -w @venue-wrangler/api",
-    "convex:dev": "convex dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@auth/core": "^0.37.4",
-    "@convex-dev/auth": "^0.0.80",
     "@expo/vector-icons": "^15.0.2",
     "@tanstack/react-query": "^5.59.0",
-    "convex": "^1.40.0",
     "expo": "~54.0.35",
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",

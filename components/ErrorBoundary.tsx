@@ -8,7 +8,7 @@ type Props = { children: ReactNode };
 type State = { error: Error | null };
 
 // App-wide error boundary. A thrown error during render (e.g. a failing
-// Convex useQuery) would otherwise unmount the whole tree — which is a hard
+// A failed async data hook would otherwise unmount the whole tree, which is a hard
 // crash in a release build. This catches it and shows a recoverable screen
 // instead, so a single screen's data error never takes down the app.
 export class ErrorBoundary extends Component<Props, State> {

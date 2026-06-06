@@ -3,13 +3,12 @@ import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { Card, Text } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
+import { appApi, useApiMutation, useApiQuery } from '../../lib/api-client';
 
 type ActiveClockEntry = {
   _id: string;
@@ -25,6 +24,11 @@ type ManagerAlert = {
   profileId: string;
   memberName: string;
   detail: string;
+};
+
+type PunchRow = {
+  type: 'in' | 'out';
+  at: number;
 };
 
 function fmtClock(d: Date) {
@@ -53,11 +57,11 @@ export default function ClockScreen() {
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState(false);
 
-  const clockBoard = useQuery(api.app.getClockBoard, isReady ? {} : 'skip');
-  const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
-  const timeClock = useQuery(api.app.getMyTimeClock, isReady ? {} : 'skip');
-  const clockIn = useMutation(api.app.clockIn);
-  const clockOut = useMutation(api.app.clockOut);
+  const { data: clockBoard } = useApiQuery<any | null>(['app', 'clock-board'], '/v1/app/clock-board', isReady);
+  const { data: dashboard } = useApiQuery<any | null>(['app', 'dashboard'], '/v1/app/dashboard', isReady);
+  const { data: timeClock } = useApiQuery<any | null>(['app', 'time-clock'], '/v1/app/time-clock', isReady);
+  const clockIn = useApiMutation(appApi.clockIn, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
+  const clockOut = useApiMutation(appApi.clockOut, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
 
   const rawVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
   const activeVenue = useMemo(() => {
@@ -97,8 +101,8 @@ export default function ClockScreen() {
     setBusy(true);
     try {
       const args = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
-      if (isClockedIn) await clockOut(args);
-      else await clockIn(args);
+      if (isClockedIn) await clockOut.mutateAsync(args);
+      else await clockIn.mutateAsync(args);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert('Punch failed', error instanceof Error ? error.message : 'Unable to record punch.');
@@ -108,7 +112,7 @@ export default function ClockScreen() {
   };
 
   const { time, ampm } = fmtClock(now);
-  const punches = timeClock?.punches ?? [];
+  const punches = (timeClock?.punches ?? []) as PunchRow[];
 
   return (
     <ScrollView

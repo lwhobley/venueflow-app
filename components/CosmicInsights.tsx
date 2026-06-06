@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { View } from 'react-native';
 import { Card, Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useQuery } from 'convex/react';
-import { api } from '../convex/_generated/api';
+import { useQuery } from '../lib/railway-hooks';
+import { api } from '../lib/railway-api';
 import { accents, colors, spacing } from '../lib/theme';
 
 type Insight = { kind: string; title: string; body: string };
@@ -44,7 +44,7 @@ function pick<T>(arr: T[], windowIndex: number, salt: number) {
 
 export function CosmicInsights() {
   const aiInsights = useQuery(api.cosmicInsights.getLatestInsights, {});
-  const items = useMemo(() => {
+  const items = useMemo<Insight[]>(() => {
     if (aiInsights && aiInsights.length > 0) return aiInsights;
     const windowIndex = Math.floor(Date.now() / (8 * 60 * 60 * 1000));
     return [pick(TIPS, windowIndex, 0), pick(FACTS, windowIndex, 1), pick(JOKES, windowIndex, 2)];

@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { useMutation } from 'convex/react';
-import { api } from '../convex/_generated/api';
+import { useMutation } from './railway-hooks';
+import { api } from './railway-api';
 import { useAuthStore, type AuthState } from './auth-store';
 
 Notifications.setNotificationHandler({

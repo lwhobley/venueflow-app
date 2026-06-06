@@ -1,17 +1,16 @@
 import { useEffect, useRef } from 'react';
-import { useConvexAuth, useQuery } from 'convex/react';
-import { api } from '../convex/_generated/api';
 import { useAuthStore, type AuthState } from './auth-store';
 import { canManageBilling, canManageVenue } from './permissions';
+import { useApiQuery } from './api-client';
 
 export function useAuthenticatedSession() {
   const hydrated = useAuthStore((state: AuthState) => state.hydrated);
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const auth = useConvexAuth();
-  const isReady = hydrated && Boolean(user) && auth.isAuthenticated;
+  const token = useAuthStore((state: AuthState) => state.token);
+  const isReady = hydrated && Boolean(user) && Boolean(token);
 
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const { data: me, isLoading } = useApiQuery<any | null>(['app', 'me'], '/v1/app/me', isReady);
 
   const lastRole = useRef<string | null>(null);
   const lastAllAccess = useRef<boolean | null>(null);
@@ -36,8 +35,8 @@ export function useAuthenticatedSession() {
     allAccess,
     canManage,
     canManageBilling: canViewBilling,
-    isAuthenticated: auth.isAuthenticated,
-    isAuthLoading: auth.isLoading,
+    isAuthenticated: Boolean(token),
+    isAuthLoading: isLoading,
     isReady,
   };
 }

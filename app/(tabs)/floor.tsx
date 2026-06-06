@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Text } from 'react-native-paper';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../convex/_generated/api';
-import type { Id } from '../../convex/_generated/dataModel';
+import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
+import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
