@@ -12,11 +12,14 @@ import { VenueModule } from './venue/venue.module';
 import { VenueScopeGuard } from './venue/venue-scope.guard';
 import { AppController } from './modules/app/app.controller';
 import { CompatibilityController } from './modules/compatibility/compatibility.controller';
+import { InvitesController } from './modules/invites/invites.controller';
 import { NotificationsController } from './modules/notifications/notifications.controller';
 import { PushController } from './modules/push/push.controller';
+import { SchedulingController } from './modules/scheduling/scheduling.controller';
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
+import { VenueRolesController } from './modules/venue-roles/venue-roles.controller';
 
 @Module({
   imports: [
@@ -35,10 +38,13 @@ import { TimeClockController } from './modules/time-clock/time-clock.controller'
     AppController,
     CompatibilityController,
     TimeClockController,
+    SchedulingController,
     StaffRequestsController,
     StaffController,
     PushController,
     NotificationsController,
+    InvitesController,
+    VenueRolesController,
   ],
   providers: [
     // Guard 1: protect every route by default. Opt out with @Public().
