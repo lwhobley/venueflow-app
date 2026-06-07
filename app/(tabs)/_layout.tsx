@@ -1,11 +1,12 @@
 import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import type { ColorValue } from 'react-native';
+import { Platform, useWindowDimensions, type ColorValue } from 'react-native';
 import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { useDesignTheme } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { CarouselTabBar } from '../../components/CarouselTabBar';
+import { DESKTOP_BREAKPOINT } from '../../lib/responsive';
 import { useI18n } from '../../lib/i18n';
 import { canManageVenue } from '../../lib/permissions';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
@@ -18,6 +19,8 @@ export default function TabsLayout() {
   const fullName = localUser?.full_name ?? 'Profile';
   const { t } = useI18n();
   const palette = useDesignTheme();
+  const { width } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && width >= DESKTOP_BREAKPOINT;
   // Server-authoritative role so a stale/incorrect persisted role can never
   // expose manager-only tabs. While loading, hide gated tabs.
   const { isReady } = useAuthenticatedSession();
@@ -32,7 +35,9 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: palette.primary,
         tabBarInactiveTintColor: palette.muted,
-      }}
+        tabBarPosition: isDesktop ? 'left' : 'bottom',
+        sceneStyle: { backgroundColor: palette.background },
+      } as any}
     >
       <Tabs.Screen name="home" options={{ title: t('nav.home'), tabBarIcon: icon('view-dashboard') }} />
       <Tabs.Screen name="clock" options={{ title: t('nav.clock'), tabBarIcon: icon('clock-outline') }} />
