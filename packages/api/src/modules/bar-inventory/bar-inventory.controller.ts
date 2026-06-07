@@ -362,80 +362,122 @@ export class BarInventoryController {
       throw new BadRequestException('Photo imports must be JPEG, PNG, WebP, HEIC, or HEIF');
     }
 
-    const content: Array<Record<string, unknown>> = [
-      {
-        type: 'input_text',
-        text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present.\n\n${inputText}`,
-      },
-    ];
-    if (body.imageBase64) {
-      content.push({
-        type: 'input_image',
-        image_url: `data:${imageMimeType};base64,${body.imageBase64}`,
-        detail: 'high',
+    let parsed: any;
+    if (apiKey.startsWith('sk-or-')) {
+      const model = process.env.OPENAI_INVENTORY_MODEL ?? 'meta-llama/llama-3.2-11b-vision-instruct:free';
+      const promptContent: any[] = [
+        {
+          type: 'text',
+          text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present. Return STRICT JSON matching schema: {"notes": "string", "items": [{"name": "string", "category": "spirit|wine|beer|mixer|garnish|supply|other", "area": "string", "unit": "string", "parLevel": number, "onHand": number, "unitCostCents": number, "supplier": "string", "sku": "string", "notes": "string"}]}`,
+        },
+      ];
+      if (inputText) {
+        promptContent.push({ type: 'text', text: inputText });
+      }
+      if (body.imageBase64) {
+        promptContent.push({
+          type: 'image_url',
+          image_url: {
+            url: `data:${imageMimeType};base64,${body.imageBase64}`,
+          },
+        });
+      }
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://venue-wrangler.pages.dev',
+          'X-Title': 'Venue Wrangler',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: promptContent }],
+          response_format: { type: 'json_object' },
+        }),
       });
-    }
+      const json: any = await response.json();
+      if (!response.ok) {
+        throw new BadRequestException(json?.error?.message ?? 'OpenRouter inventory parse failed');
+      }
+      const rawText = json?.choices?.[0]?.message?.content ?? '{"notes":"","items":[]}';
+      parsed = JSON.parse(rawText);
+    } else {
+      const content: Array<Record<string, unknown>> = [
+        {
+          type: 'input_text',
+          text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present.\n\n${inputText}`,
+        },
+      ];
+      if (body.imageBase64) {
+        content.push({
+          type: 'input_image',
+          image_url: `data:${imageMimeType};base64,${body.imageBase64}`,
+          detail: 'high',
+        });
+      }
 
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_INVENTORY_MODEL ?? 'gpt-4.1-mini',
-        input: [{ role: 'user', content }],
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'bar_inventory_import',
-            strict: true,
-            schema: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                notes: { type: 'string' },
-                items: {
-                  type: 'array',
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: process.env.OPENAI_INVENTORY_MODEL ?? 'gpt-4.1-mini',
+          input: [{ role: 'user', content }],
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'bar_inventory_import',
+              strict: true,
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  notes: { type: 'string' },
                   items: {
-                    type: 'object',
-                    additionalProperties: false,
-                    properties: {
-                      name: { type: 'string' },
-                      category: {
-                        type: 'string',
-                        enum: ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'],
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: 'string' },
+                        category: {
+                          type: 'string',
+                          enum: ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'],
+                        },
+                        area: { type: 'string' },
+                        unit: { type: 'string' },
+                        parLevel: { type: 'number' },
+                        onHand: { type: 'number' },
+                        unitCostCents: { type: 'number' },
+                        supplier: { type: 'string' },
+                        sku: { type: 'string' },
+                        notes: { type: 'string' },
                       },
-                      area: { type: 'string' },
-                      unit: { type: 'string' },
-                      parLevel: { type: 'number' },
-                      onHand: { type: 'number' },
-                      unitCostCents: { type: 'number' },
-                      supplier: { type: 'string' },
-                      sku: { type: 'string' },
-                      notes: { type: 'string' },
+                      required: ['name', 'category', 'unit'],
                     },
-                    required: ['name', 'category', 'unit'],
                   },
                 },
+                required: ['notes', 'items'],
               },
-              required: ['notes', 'items'],
             },
           },
-        },
-      }),
-    });
+        }),
+      });
 
-    const json: any = await response.json();
-    if (!response.ok) {
-      throw new BadRequestException(json?.error?.message ?? 'OpenAI inventory parse failed');
+      const json: any = await response.json();
+      if (!response.ok) {
+        throw new BadRequestException(json?.error?.message ?? 'OpenAI inventory parse failed');
+      }
+      const outputText =
+        json.output_text ??
+        json.output
+          ?.flatMap((part: any) => part.content ?? [])
+          .find((part: any) => part.type === 'output_text')?.text;
+      parsed = JSON.parse(outputText ?? '{"notes":"No output","items":[]}');
     }
-    const outputText =
-      json.output_text ??
-      json.output
-        ?.flatMap((part: any) => part.content ?? [])
-        .find((part: any) => part.type === 'output_text')?.text;
-    const parsed = JSON.parse(outputText ?? '{"notes":"No output","items":[]}');
     return {
       notes: parsed.notes ?? '',
       items: (parsed.items ?? []).slice(0, 100).map((item: any) => ({

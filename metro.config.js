@@ -3,10 +3,10 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-const apiPath = path.join(__dirname, 'apps/api').replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+const apiPath = path.join(__dirname, 'packages/api').replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 
 config.resolver.blockList = [
-  /(?:^|[\\/])apps[\\/]api[\\/].*/,
+  /(?:^|[\\/])packages[\\/]api[\\/].*/,
   new RegExp(`${apiPath}/.*`),
 ];
 
