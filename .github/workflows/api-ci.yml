@@ -48,14 +48,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma client
+        run: npm run prisma:generate -w @venue-wrangler/api
+
       - name: Typecheck
         run: npm run lint -w @venue-wrangler/api
 
       - name: Build
         run: npm run build -w @venue-wrangler/api
-
-      - name: Generate Prisma client
-        run: npm run prisma:generate -w @venue-wrangler/api
 
       - name: Apply migrations
         run: npm run prisma:migrate:deploy -w @venue-wrangler/api
