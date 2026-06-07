@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { Role } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
@@ -95,6 +96,20 @@ class StaffDto {
 
   @IsString()
   jobTitle!: string;
+}
+
+class VenueRoleDto {
+  @IsString()
+  name!: string;
+}
+
+class CreateInviteDto {
+  @IsIn(['manager', 'staff'])
+  role!: 'manager' | 'staff';
+
+  @IsString()
+  @IsOptional()
+  jobTitle?: string;
 }
 
 function isAdminRole(role: Role) {
@@ -560,6 +575,65 @@ export class AppController {
     if (!staff) throw new NotFoundException('Staff member not found');
     const updated = await this.prisma.profile.update({ where: { id: staff.id }, data: { venueId: null } });
     return this.mapProfile(updated);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('venue-roles')
+  async listVenueRoles(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const roles = await this.prisma.venueRole.findMany({
+      where: { venueId: profile.venueId! },
+      orderBy: { name: 'asc' },
+    });
+    return roles.map((role) => ({ _id: role.id, id: role.id, name: role.name }));
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('venue-roles')
+  async addVenueRole(@CurrentUser() user: AuthUser, @Body() body: VenueRoleDto) {
+    const profile = await this.requireManagerProfile(user);
+    const name = body.name.trim();
+    if (!name) throw new Error('Enter a role name');
+    const existing = await this.prisma.venueRole.findFirst({
+      where: { venueId: profile.venueId!, name: { equals: name, mode: 'insensitive' } },
+    });
+    if (existing) return { _id: existing.id, id: existing.id, name: existing.name };
+    const role = await this.prisma.venueRole.create({
+      data: { venueId: profile.venueId!, name },
+    });
+    return { _id: role.id, id: role.id, name: role.name };
+  }
+
+  @UseGuards(AuthGuard)
+  @Delete('venue-roles/:id')
+  async removeVenueRole(@CurrentUser() user: AuthUser, @Param('id') roleId: string) {
+    const profile = await this.requireManagerProfile(user);
+    const role = await this.prisma.venueRole.findFirst({ where: { id: roleId, venueId: profile.venueId! } });
+    if (!role) throw new NotFoundException('Role not found');
+    await this.prisma.venueRole.delete({ where: { id: role.id } });
+    return { ok: true };
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('invites')
+  async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
+    const profile = await this.requireManagerProfile(user);
+    const token = randomBytes(18).toString('base64url');
+    const invite = await this.prisma.invite.create({
+      data: {
+        venueId: profile.venueId!,
+        token,
+        role: body.role === 'manager' ? 'manager' : 'staff',
+        jobTitle: body.jobTitle?.trim() || 'Team Member',
+        createdBy: profile.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+    return {
+      token: invite.token,
+      inviteUrl: `venuewrangler://join?invite=${encodeURIComponent(invite.token)}`,
+      expiresAt: invite.expiresAt.getTime(),
+    };
   }
 
   @UseGuards(AuthGuard)

@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Writes NotificationEvent rows. Mirrors notifyManagers / notifyProfile in
- * convex/app.ts. Visibility is enforced at read time via the `audience` field.
+ * Writes NotificationEvent rows. Visibility is enforced at read time via the
+ * `audience` field.
  */
 @Injectable()
 export class NotificationsService {

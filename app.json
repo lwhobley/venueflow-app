@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
-      "image": "./assets/venue-wrangler-logo.jpg",
+      "image": "./assets/venue-wrangler-splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#F4FAFC"
     },

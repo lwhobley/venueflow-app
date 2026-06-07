@@ -9,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { Prisma, ShiftStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -133,6 +134,21 @@ class RestoreShiftsDto {
   @ValidateNested({ each: true })
   @Type(() => RestoreShiftDto)
   shifts!: RestoreShiftDto[];
+}
+
+class AutoScheduleAssignmentDto {
+  @IsString()
+  shiftId!: string;
+
+  @IsString()
+  profileId!: string;
+}
+
+class ApplyAutoScheduleDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AutoScheduleAssignmentDto)
+  assignments!: AutoScheduleAssignmentDto[];
 }
 
 class ProposeSwapDto {
@@ -669,6 +685,85 @@ export class SchedulingController {
     await this.prisma.$transaction(creates);
     await this.markScheduleEdited(scope!.venueId);
     return { restored: creates.length };
+  }
+
+  @RequireSubscription()
+  @Get('auto-schedule/preview')
+  async previewAutoSchedule(@VenueScope() scope: Scope, @Query('weekStartDate') _weekStartDate?: string) {
+    this.requireManager(scope);
+    const [shifts, staff] = await Promise.all([
+      this.prisma.scheduleShift.findMany({
+        where: { venueId: scope!.venueId },
+        include: { profile: true },
+        orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+      }),
+      this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
+    ]);
+    const openShifts = shifts.filter((shift) => shift.status === 'open' && !shift.profileId);
+    const assignments = new Map<string, number>();
+    const proposals = openShifts.map((shift) => {
+      const candidate = staff.find((member) => {
+        const assignedMinutes = assignments.get(member.id) ?? 0;
+        const roleMatch =
+          member.jobTitle.toLowerCase().includes(shift.jobTitle.toLowerCase()) ||
+          shift.jobTitle.toLowerCase().includes(member.jobTitle.toLowerCase()) ||
+          member.role === 'staff' ||
+          member.role === 'server';
+        const overlaps = shifts.some((other) =>
+          other.profileId === member.id &&
+          other.dayIndex === shift.dayIndex &&
+          other.startMinutes < shift.endMinutes &&
+          other.endMinutes > shift.startMinutes,
+        );
+        return roleMatch && !overlaps && assignedMinutes < 40 * 60;
+      });
+      if (candidate) assignments.set(candidate.id, (assignments.get(candidate.id) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes));
+      return {
+        shiftId: shift.id,
+        dayLabel: dayLabel(shift.dayIndex),
+        startTime: minutesToTime(shift.startMinutes),
+        endTime: minutesToTime(shift.endMinutes),
+        jobTitle: shift.jobTitle,
+        profileId: candidate?.id ?? null,
+        reason: candidate ? 'assigned' : 'no_role_match',
+      };
+    });
+    const filled = proposals.filter((proposal) => proposal.profileId).length;
+    return {
+      openCount: openShifts.length,
+      filled,
+      unfilled: openShifts.length - filled,
+      proposals,
+    };
+  }
+
+  @RequireSubscription()
+  @Post('auto-schedule/apply')
+  async applyAutoSchedule(@VenueScope() scope: Scope, @Body() body: ApplyAutoScheduleDto) {
+    this.requireManager(scope);
+    let assigned = 0;
+    let skipped = 0;
+    for (const assignment of body.assignments) {
+      const shift = await this.getVenueShift(scope!.venueId, assignment.shiftId);
+      if (shift.profileId || shift.status !== 'open') {
+        skipped += 1;
+        continue;
+      }
+      await this.assertVenueMember(scope!.venueId, assignment.profileId);
+      try {
+        await this.assertNoDoubleBook(scope!.venueId, assignment.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
+      } catch {
+        skipped += 1;
+        continue;
+      }
+      await this.prisma.scheduleShift.update({
+        where: { id: shift.id },
+        data: { profileId: assignment.profileId, status: 'scheduled' },
+      });
+      assigned += 1;
+    }
+    if (assigned > 0) await this.markScheduleEdited(scope!.venueId);
+    return { assigned, skipped };
   }
 
   @RequireSubscription()

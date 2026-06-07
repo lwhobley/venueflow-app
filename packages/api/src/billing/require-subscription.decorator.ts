@@ -4,9 +4,9 @@ import { SubscriptionGuard } from './subscription.guard';
 export const SUBSCRIPTION_TIER_KEY = 'subscriptionTier';
 
 /**
- * Tier options mirror the two checks in convex/billing/shared.ts:
- *  - 'active'  → requireActiveSubscription  (trialing + active pass)
- *  - 'paid'    → requirePaidSubscription     (active only; trial blocked)
+ * Tier options:
+ *  - 'active' allows trialing and active subscriptions
+ *  - 'paid' requires an active paid subscription
  */
 export type SubscriptionTier = 'active' | 'paid';
 

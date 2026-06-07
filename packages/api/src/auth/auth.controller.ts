@@ -28,6 +28,10 @@ class PasswordAuthDto {
   @IsString()
   @IsOptional()
   fullName?: string;
+
+  @IsString()
+  @IsOptional()
+  inviteToken?: string;
 }
 
 @Controller('v1/auth')
@@ -48,7 +52,7 @@ export class AuthController {
       if (!user?.password || !(await verifyPassword(body.password, user.password.salt, user.password.passwordHash, user.password.iterations))) {
         throw new UnauthorizedException('Invalid email or password.');
       }
-      return this.issueSession(user.id, email, body.fullName);
+      return this.issueSession(user.id, email, body.fullName, body.inviteToken);
     }
 
     if (user?.password) {
@@ -69,26 +73,46 @@ export class AuthController {
         iterations: PASSWORD_ITERATIONS,
       },
     });
-    return this.issueSession(nextUser.id, email, body.fullName);
+    return this.issueSession(nextUser.id, email, body.fullName, body.inviteToken);
   }
 
-  private async issueSession(userId: string, email: string, fullName?: string) {
+  private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string) {
+    const invite = inviteToken
+      ? await this.prisma.invite.findFirst({
+          where: { token: inviteToken, usedBy: null, expiresAt: { gt: new Date() } },
+        })
+      : null;
     const profile = await this.prisma.profile.upsert({
       where: { userId },
       update: {
         email,
         ...(fullName?.trim() ? { fullName: fullName.trim() } : {}),
+        ...(invite
+          ? {
+              venueId: invite.venueId,
+              role: invite.role,
+              jobTitle: invite.jobTitle,
+            }
+          : {}),
       },
       create: {
         userId,
         email,
         fullName: fullName?.trim() || email.split('@')[0] || 'Team Member',
-        role: 'staff',
-        jobTitle: 'Staff',
+        role: invite?.role ?? 'staff',
+        jobTitle: invite?.jobTitle ?? 'Staff',
+        venueId: invite?.venueId ?? undefined,
         trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
       },
       include: { venue: true },
     });
+
+    if (invite && !invite.usedBy) {
+      await this.prisma.invite.update({
+        where: { id: invite.id },
+        data: { usedBy: profile.id },
+      });
+    }
 
     const token = await this.jwt.signAsync({
       sub: userId,

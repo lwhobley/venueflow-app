@@ -1,5 +1,5 @@
-// Response mappers that mirror the shapes returned by convex/app.ts, so the
-// NestJS API is wire-compatible with the existing clients during migration.
+// Response mappers keep API payloads stable so the Expo client can share one
+// data shape across screens.
 
 type ClockProfile = { id: string; fullName: string; role: string; jobTitle: string };
 type ClockVenue = { id: string; name: string };
