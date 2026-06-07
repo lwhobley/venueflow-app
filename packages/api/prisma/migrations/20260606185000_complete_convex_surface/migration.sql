@@ -1,13 +1,13 @@
--- Add enum values used by the remaining Convex-backed modules.
+-- Add enum values used by the remaining production modules.
 ALTER TYPE "ReservationSource" ADD VALUE IF NOT EXISTS 'generic';
 CREATE TYPE "BarStockCategory" AS ENUM ('spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other');
 CREATE TYPE "BarStockMovementType" AS ENUM ('count', 'received', 'waste', 'comp', 'transfer', 'correction');
 CREATE TYPE "ManagerGoalPeriod" AS ENUM ('day', 'week');
 CREATE TYPE "ManagerGoalStatus" AS ENUM ('open', 'done', 'cancelled');
 
--- Preserve Convex reservation fields that were not represented in the first
--- Postgres mirror. These are nullable so existing Railway databases can widen
--- without rewriting data.
+-- Preserve reservation fields that were not represented in the first Postgres
+-- schema. These are nullable so existing Railway databases can widen without
+-- rewriting data.
 ALTER TABLE "Reservation" ADD COLUMN "depositDueCents" INTEGER;
 ALTER TABLE "Reservation" ADD COLUMN "toastCheckGuid" TEXT;
 ALTER TABLE "Reservation" ADD COLUMN "depositStatus" TEXT;

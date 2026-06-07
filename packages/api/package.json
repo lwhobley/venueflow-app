@@ -12,7 +12,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
     "release": "prisma migrate deploy",
-    "lint": "tsc --noEmit",
+    "lint": "prisma generate && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",

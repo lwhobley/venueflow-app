@@ -5,8 +5,7 @@ import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Guards routes behind an active subscription check, mirroring the behaviour
- * of requireActiveSubscription / requirePaidSubscription in convex/billing/shared.ts.
+ * Guards routes behind active or paid subscription checks.
  *
  * Requires VenueScopeInterceptor to have run first (reads request.venueScope).
  *

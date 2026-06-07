@@ -11,7 +11,6 @@ import { PrismaModule } from './prisma/prisma.module';
 import { VenueModule } from './venue/venue.module';
 import { VenueScopeInterceptor } from './venue/venue-scope.interceptor';
 import { AppController } from './modules/app/app.controller';
-import { CompatibilityController } from './modules/compatibility/compatibility.controller';
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
@@ -57,7 +56,6 @@ import { BillingActionsModule } from './modules/billing-actions/billing-actions.
     HealthController,
     AuthController,
     AppController,
-    CompatibilityController,
     SchedulingController,
     TimeClockController,
     StaffRequestsController,

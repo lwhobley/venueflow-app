@@ -15,8 +15,7 @@ config.resolver.blockList = [
 // throws "Cannot use 'import.meta' outside a module" when the browser loads it
 // as a classic script. zustand's CJS build is import.meta-free, so resolve the
 // CJS entry points explicitly. Scoped to zustand to avoid disabling package
-// exports globally (which would break subpath-only packages like
-// @convex-dev/auth).
+// exports globally.
 const zustandCjs = {
   zustand: path.resolve(__dirname, 'node_modules/zustand/index.js'),
   'zustand/middleware': path.resolve(__dirname, 'node_modules/zustand/middleware.js'),

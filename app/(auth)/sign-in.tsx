@@ -66,12 +66,13 @@ export default function SignInScreen() {
       password,
       flow,
       fullName: fullName.trim() || undefined,
+      inviteToken: options?.inviteToken,
     });
 
     if (options?.inviteToken && !last.venue) {
       Alert.alert(
         'Invite pending',
-        'Invite links are being moved to the Railway API. Ask your manager to add your email to the roster for now.',
+        'This invite could not be applied. Ask your manager for a fresh invite or to add your email to the roster.',
       );
     }
 
@@ -157,7 +158,7 @@ export default function SignInScreen() {
             {inviteBanner}
             {inviteToken ? (
               <Text style={{ color: authColors.muted, textAlign: 'center', marginBottom: spacing.sm }}>
-                Invite links are moving to Railway. Create or sign in to your account, then ask your manager to add your email to the roster.
+                Create or sign in to your account and this invite will attach you to the venue.
               </Text>
             ) : null}
             {formError ? (
