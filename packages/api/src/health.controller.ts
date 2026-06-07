@@ -7,6 +7,15 @@ export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Public()
+  @Get()
+  root() {
+    return {
+      message: 'Venue Wrangler API is running',
+      health: '/api/health',
+    };
+  }
+
+  @Public()
   @Get('health')
   async health() {
     await this.prisma.$queryRaw`SELECT 1`;

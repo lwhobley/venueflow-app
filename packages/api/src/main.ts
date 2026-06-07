@@ -26,7 +26,9 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', {
+    exclude: ['/'],
+  });
 
   const port = config.get<number>('PORT') ?? config.get<number>('API_PORT', 4000);
   await app.listen(port);
