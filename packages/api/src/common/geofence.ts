@@ -8,7 +8,7 @@ type GeofenceVenue = {
 
 /**
  * Asserts a clock punch is physically within the venue geofence.
- * Mirrors assertWithinGeofence in convex/app.ts (Haversine distance).
+ * Uses Haversine distance.
  *
  * @throws BadRequestException on mocked location, poor accuracy, or out-of-range.
  */

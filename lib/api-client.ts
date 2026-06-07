@@ -72,7 +72,7 @@ export function useApiMutation<TArgs, TResult>(
 }
 
 export const appApi = {
-  passwordAuth: (body: { email: string; password: string; flow: 'signIn' | 'signUp'; fullName?: string }) =>
+  passwordAuth: (body: { email: string; password: string; flow: 'signIn' | 'signUp'; fullName?: string; inviteToken?: string }) =>
     apiRequest<{ token: string; profile: any; venue: any | null }>('/v1/auth/password', { method: 'POST', body }),
   getMe: () => apiRequest<{ profile: any; venue: any | null } | null>('/v1/app/me'),
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
