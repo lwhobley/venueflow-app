@@ -45,7 +45,7 @@ export default function HomeScreen() {
   const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? '';
   const role = dashboard?.profile.role ?? 'staff';
   const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
-  const venueName = dashboard?.venue.name ?? venue?.name ?? '';
+  const venueName = dashboard?.venue.name ?? venue?.name ?? 'Individual account';
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
   const canManage = canManageVenue(role, dashboard?.profile.allAccess ?? user?.all_access);
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
@@ -134,6 +134,15 @@ export default function HomeScreen() {
             </CommandButton>
           </View>
         </View>
+
+        {!venue?.id ? (
+          <CommandSurface palette={palette} style={{ gap: spacing.xs }}>
+            <CommandText palette={palette} variant="title">Individual account</CommandText>
+            <CommandText palette={palette} variant="caption">
+              You can keep this account ready for your next team invite. When a venue owner invites you, sign in with this same email to join their workspace.
+            </CommandText>
+          </CommandSurface>
+        ) : null}
 
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
           <TextInput

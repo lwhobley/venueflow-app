@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
-import { Role } from '@prisma/client';
+import { Role, SubscriptionStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -101,6 +101,15 @@ class StaffDto {
 class VenueRoleDto {
   @IsString()
   name!: string;
+}
+
+class AppleSubscriptionSyncDto {
+  @IsString()
+  productId!: string;
+
+  @IsString()
+  @IsOptional()
+  entitlementId?: string;
 }
 
 class CreateInviteDto {
@@ -298,6 +307,56 @@ export class AppController {
       priceCents: subscription.priceCents,
       currency: subscription.currency,
     };
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('billing/apple/sync')
+  async syncAppleSubscription(@CurrentUser() user: AuthUser, @Body() body: AppleSubscriptionSyncDto) {
+    const profile = await this.requireBillingProfile(user);
+    const status: SubscriptionStatus = 'active';
+    const now = new Date();
+    const existing = await this.prisma.subscription.findFirst({ where: { venueId: profile.venueId! } });
+    await this.prisma.$transaction([
+      this.prisma.venue.update({
+        where: { id: profile.venueId! },
+        data: {
+          subscriptionStatus: status,
+          subscriptionPlatform: 'apple',
+        },
+      }),
+      existing
+        ? this.prisma.subscription.update({
+            where: { id: existing.id },
+            data: {
+              status,
+              platform: 'apple',
+              planId: body.productId,
+              currentPeriodStart: existing.currentPeriodStart ?? now,
+              cancelAtPeriodEnd: false,
+              cancelledAt: null,
+              externalCustomerId: profile.venueId!,
+              lastRevenueCatEventAt: now,
+            },
+          })
+        : this.prisma.subscription.create({
+            data: {
+              venueId: profile.venueId!,
+              status,
+              platform: 'apple',
+              planId: body.productId,
+              priceCents: 0,
+              currency: 'USD',
+              trialStartedAt: now,
+              trialEndsAt: now,
+              currentPeriodStart: now,
+              cancelAtPeriodEnd: false,
+              externalCustomerId: profile.venueId!,
+              lastRevenueCatEventAt: now,
+            },
+          }),
+    ]);
+
+    return this.getMyVenueBilling(user);
   }
 
   @UseGuards(AuthGuard)
@@ -675,6 +734,14 @@ export class AppController {
   private async requireManagerProfile(user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
     if (!isAdminRole(profile.role)) throw new Error('Not authorized');
+    return profile;
+  }
+
+  private async requireBillingProfile(user: AuthUser) {
+    const profile = await this.requireVenueProfile(user);
+    if (!(profile.role === 'admin' || profile.role === 'owner' || profile.allAccess)) {
+      throw new Error('Not authorized');
+    }
     return profile;
   }
 

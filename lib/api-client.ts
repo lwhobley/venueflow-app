@@ -76,6 +76,8 @@ export const appApi = {
     apiRequest<{ token: string; profile: any; venue: any | null }>('/v1/auth/password', { method: 'POST', body }),
   getMe: () => apiRequest<{ profile: any; venue: any | null } | null>('/v1/app/me'),
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
+  syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
+    apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),
   getNotifications: () => apiRequest<any[]>('/v1/app/notifications'),
   markNotificationRead: (notificationId: string) => apiRequest('/v1/app/notifications/' + notificationId + '/read', { method: 'POST' }),

@@ -60,7 +60,7 @@ export default function ProfileScreen() {
           <Text>{user?.full_name}</Text>
           <Text style={{ color: colors.muted }}>{user?.email}</Text>
           <Text style={{ color: colors.muted }}>{user?.job_title}</Text>
-          <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue assigned'}</Text>
+          <Text style={{ color: colors.muted }}>{venue?.name ?? 'Individual account'}</Text>
         </Card.Content>
       </Card>
 

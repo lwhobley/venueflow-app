@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
+import { appApi } from '../../lib/api-client';
 import { colors, spacing, radius, shadow } from '../../lib/theme';
 import {
   PURCHASES_SUPPORTED,
@@ -51,8 +52,14 @@ export default function PaywallScreen() {
     setBusy(id);
     setError(null);
     try {
+      const selected = (packages.length ? packages : FALLBACK_TIERS).find((pkg) => pkg.id === id);
       const active = await purchasePackageById(id);
-      if (active) router.replace('/(tabs)/home');
+      if (active) {
+        if (selected?.productId) {
+          await appApi.syncAppleSubscription({ productId: selected.productId });
+        }
+        router.replace('/(tabs)/home');
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Purchase failed.';
       // Swallow the user-cancelled case quietly.
@@ -67,7 +74,10 @@ export default function PaywallScreen() {
     setError(null);
     try {
       const active = await restorePurchases();
-      if (active) router.replace('/(tabs)/home');
+      if (active) {
+        await appApi.syncAppleSubscription({ productId: 'restored_apple_subscription' });
+        router.replace('/(tabs)/home');
+      }
       else setError('No active subscription found to restore.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Restore failed.');
