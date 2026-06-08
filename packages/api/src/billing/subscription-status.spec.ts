@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { resolveVenueSubscriptionStatus } from './subscription-status';
 import type { PrismaService } from '../prisma/prisma.service';
 
