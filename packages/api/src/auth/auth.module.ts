@@ -14,7 +14,7 @@ import { AuthGuard } from './auth.guard';
         if (!secret) {
           throw new Error('JWT_SECRET environment variable is required');
         }
-        return { secret };
+        return { secret, signOptions: { expiresIn: '30d' } };
       },
     }),
   ],

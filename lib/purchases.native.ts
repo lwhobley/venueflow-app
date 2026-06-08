@@ -1,21 +1,17 @@
-// Native (iOS/Android) in-app purchases via RevenueCat. A single "pro"
-// entitlement unlocks the app; all tiers grant it (they differ only by the
-// staff-count limit shown at signup). Configure values via app.json -> extra
-// or EXPO_PUBLIC_* env so no real keys live in source.
+// iOS in-app purchases via RevenueCat. A single "pro" entitlement unlocks the
+// app; all tiers grant it (they differ only by the staff-count limit shown at
+// signup). Configure values via app.json -> extra or EXPO_PUBLIC_* env so no
+// real keys live in source. Android is not a purchase platform — on Android the
+// key is empty and purchases are disabled.
 import Purchases from 'react-native-purchases';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string | undefined>;
 const IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? extra.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
-const ANDROID_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? extra.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? '';
 const ENTITLEMENT = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? extra.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? 'pro';
 
-const API_KEY = Platform.select({
-  ios: IOS_KEY,
-  android: ANDROID_KEY,
-  default: '',
-});
+const API_KEY = Platform.OS === 'ios' ? IOS_KEY : '';
 
 // RevenueCat Test Store keys (test_...) only work in development builds
 // (Expo Go / simulator). In a release/TestFlight build, Purchases.configure

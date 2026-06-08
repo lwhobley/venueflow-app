@@ -1,21 +1,12 @@
-import { useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { useAction } from '../../lib/railway-hooks';
-import { api } from '../../lib/railway-api';
 import { colors, spacing } from '../../lib/theme';
 import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { canManageBilling } from '../../lib/permissions';
 
-const plans = [
-  { id: 'venueflow_starter_15_monthly', name: 'Starter', users: 'Up to 15 users', price: '$79.99' },
-  { id: 'venueflow_growth_30_monthly', name: 'Pro', users: 'Up to 30 users', price: '$149.99' },
-  { id: 'venueflow_pro_50_monthly', name: 'Enterprise', users: 'Up to 50 users', price: '$299.99' },
-] as const;
-
-type PlanId = (typeof plans)[number]['id'];
+const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
 const headlineByReason: Record<string, string> = {
   trial_expired: 'Your 14-day trial has ended',
@@ -31,36 +22,6 @@ export default function BillingLockedScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const reason = Array.isArray(params.reason) ? params.reason[0] : params.reason ?? 'never_subscribed';
   const canPay = canManageBilling(user?.role, user?.all_access);
-  const createCheckout = useAction(api.billing.createStripeCheckoutSession);
-  const createPortal = useAction(api.billing.createStripeBillingPortalSession);
-  const [loading, setLoading] = useState<PlanId | 'portal' | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const openCheckout = async (planId: PlanId) => {
-    setLoading(planId);
-    setError(null);
-    try {
-      const session = await createCheckout({ planId });
-      await Linking.openURL(session.url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not open Stripe billing.');
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const openPortal = async () => {
-    setLoading('portal');
-    setError(null);
-    try {
-      const session = await createPortal({});
-      await Linking.openURL(session.url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not open Stripe billing.');
-    } finally {
-      setLoading(null);
-    }
-  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -75,21 +36,10 @@ export default function BillingLockedScreen() {
             <Text style={{ color: colors.muted }}>Signed in as {user?.email ?? 'unknown'}</Text>
 
             <Text variant="titleMedium">14-day free trial</Text>
-            <Text style={{ color: colors.muted }}>Choose the user tier that fits this venue. Subscriptions renew monthly and unlock the full app.</Text>
-
-            {plans.map((plan) => (
-              <View key={plan.id} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: spacing.md, gap: spacing.xs, backgroundColor: colors.background }}>
-                <Text variant="titleMedium" style={{ color: colors.primary, fontWeight: '800' }}>{plan.name}</Text>
-                <Text style={{ color: colors.charcoal, fontSize: 26, fontWeight: '800' }}>{plan.price}<Text style={{ fontSize: 14 }}> / month</Text></Text>
-                <Text style={{ color: colors.muted }}>{plan.users}</Text>
-                <Text style={{ color: colors.muted }}>Scheduling, time clock, reservations, floor plan, bar stock, reports, and integrations.</Text>
-                {config.billingEnabled && canPay ? (
-                  <Button mode="contained" buttonColor={colors.primary} loading={loading === plan.id} onPress={() => void openCheckout(plan.id)}>
-                    Choose {plan.name}
-                  </Button>
-                ) : null}
-              </View>
-            ))}
+            <Text style={{ color: colors.muted }}>
+              Subscribe to invite staff and unlock scheduling, the live floor, time clock, reservations, bar stock,
+              reports, and integrations across your whole team.
+            </Text>
 
             {!config.billingEnabled ? (
               <>
@@ -102,14 +52,16 @@ export default function BillingLockedScreen() {
               </>
             ) : canPay ? (
               <>
-                {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                <Button mode="outlined" textColor={colors.primary} loading={loading === 'portal'} onPress={() => void openPortal()}>
-                  Manage billing
+                <Button mode="contained" buttonColor={colors.primary} onPress={() => router.push('/billing/paywall')}>
+                  See plans
+                </Button>
+                <Button mode="outlined" textColor={colors.primary} onPress={() => void Linking.openURL(APPLE_SUBSCRIPTIONS_URL)}>
+                  Manage subscription
                 </Button>
               </>
             ) : (
               <Text style={{ color: colors.muted }}>
-                This venue's subscription is inactive. Please ask the owner to reactivate at /settings/billing.
+                This venue's subscription is inactive. Please ask the owner to reactivate from Settings → Billing.
               </Text>
             )}
 

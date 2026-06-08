@@ -260,8 +260,6 @@ const mutationRoutes: Record<string, Route> = {
   'reservations.saveReservation': { path: '/v1/reservations', method: 'POST', body: stripVenue, invalidate: [['reservations', 'page']] },
   'reservations.removeReservation': { path: (args) => `/v1/reservations/${args.reservationId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['reservations', 'page']] },
   'payroll.recordPayrollExport': { path: '/v1/payroll/record-export', method: 'POST', body: stripVenue },
-  'billing.createStripeCheckoutSession': { path: '/v1/billing-actions/checkout', method: 'POST', body: ({ successUrl, cancelUrl, priceId }) => ({ successUrl, cancelUrl, priceId }) },
-  'billing.createStripeBillingPortalSession': { path: '/v1/billing-actions/portal', method: 'POST', body: ({ returnUrl }) => ({ returnUrl }) },
   'push.registerPushToken': {
     path: '/v1/push/token',
     method: 'POST',

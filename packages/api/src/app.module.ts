@@ -26,7 +26,6 @@ import { FloorModule } from './modules/floor/floor.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
-import { BillingActionsModule } from './modules/billing-actions/billing-actions.module';
 
 @Module({
   imports: [
@@ -50,7 +49,6 @@ import { BillingActionsModule } from './modules/billing-actions/billing-actions.
     ChatModule,
     CrmModule,
     IntegrationsModule,
-    BillingActionsModule,
   ],
   controllers: [
     HealthController,
