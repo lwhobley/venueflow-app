@@ -48,15 +48,15 @@ export class BillingController {
   @Post('revenuecat/webhook')
   async revenueCatWebhook(@Req() request: Request, @Headers('authorization') authorization: string | undefined, @Body() body: RevenueCatWebhookBody) {
     assertWithinRateLimit(`revenuecat:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS);
+    // Fail closed: the webhook is @Public(), so without a configured secret
+    // anyone could forge subscription state for any venue. Always require it.
     const expectedSecret = this.config.get<string>('REVENUECAT_WEBHOOK_SECRET');
-    if (!expectedSecret && this.config.get<string>('NODE_ENV') === 'production') {
+    if (!expectedSecret) {
       throw new UnauthorizedException('RevenueCat webhook secret is not configured');
     }
-    if (expectedSecret) {
-      const token = authorization?.replace(/^Bearer\s+/i, '').trim();
-      if (token !== expectedSecret) {
-        throw new UnauthorizedException('Invalid RevenueCat webhook secret');
-      }
+    const token = authorization?.replace(/^Bearer\s+/i, '').trim();
+    if (token !== expectedSecret) {
+      throw new UnauthorizedException('Invalid RevenueCat webhook secret');
     }
 
     const event = body.event;

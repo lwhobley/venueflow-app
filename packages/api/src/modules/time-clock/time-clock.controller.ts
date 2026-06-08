@@ -43,8 +43,10 @@ export class TimeClockController {
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) return null;
 
+    // The board only surfaces open entries and alerts derived from them, so we
+    // never need the venue's full (unbounded) time-entry history.
     const entries = await this.prisma.timeEntry.findMany({
-      where: { venueId: venue.id },
+      where: { venueId: venue.id, isOpen: true },
       include: { profile: true },
     });
 
@@ -125,7 +127,13 @@ export class TimeClockController {
     const profile = await this.prisma.profile.findFirst({ where: { userId: user.sub } });
     if (!profile) return null;
 
-    const all = await this.prisma.timeEntry.findMany({ where: { profileId: profile.id } });
+    // Only today's punches and the last week of hours are reported, so bound
+    // the query to the last 8 days (plus any still-open entry) instead of the
+    // profile's entire history.
+    const windowStart = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    const all = await this.prisma.timeEntry.findMany({
+      where: { profileId: profile.id, OR: [{ isOpen: true }, { clockInAt: { gte: windowStart } }] },
+    });
     const open = all.filter((entry) => entry.isOpen);
     const closed = all.filter((entry) => !entry.isOpen);
 
@@ -172,19 +180,26 @@ export class TimeClockController {
     if (active) throw new BadRequestException('Already clocked in');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const entry = await this.prisma.timeEntry.create({
-      data: {
-        profileId: scope.profileId,
-        venueId: venue.id,
-        clockInAt: new Date(),
-        clockInLat: body.lat,
-        clockInLng: body.lng,
-        clockInAccuracyM: body.accuracy,
-        clockInMocked: body.mocked,
-        isOpen: true,
-      },
-    });
-    return mapClockEntry(entry, profile, venue);
+    try {
+      const entry = await this.prisma.timeEntry.create({
+        data: {
+          profileId: scope.profileId,
+          venueId: venue.id,
+          clockInAt: new Date(),
+          clockInLat: body.lat,
+          clockInLng: body.lng,
+          clockInAccuracyM: body.accuracy,
+          clockInMocked: body.mocked,
+          isOpen: true,
+        },
+      });
+      return mapClockEntry(entry, profile, venue);
+    } catch (error: any) {
+      // Partial unique index (one open entry per profile) — a concurrent
+      // double-tap loses the race here instead of creating a second open entry.
+      if (error?.code === 'P2002') throw new BadRequestException('Already clocked in');
+      throw error;
+    }
   }
 
   @RequireSubscription()

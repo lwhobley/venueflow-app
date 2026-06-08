@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { useMutation } from './railway-hooks';
 import { api } from './railway-api';
@@ -35,7 +36,11 @@ export function usePushNotifications() {
       const permission = await Notifications.getPermissionsAsync();
       const finalPermission = permission.status === 'granted' ? permission : await Notifications.requestPermissionsAsync();
       if (cancelled || finalPermission.status !== 'granted') return;
-      const token = await Notifications.getDevicePushTokenAsync();
+      // Expo push token (ExponentPushToken[...]) — required by the server's
+      // Expo push delivery. The raw device token is not usable by exp.host.
+      const projectId =
+        Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+      const token = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
       if (cancelled || !token.data) return;
       await registerPushToken({ token: token.data, platform: platformName() });
     }

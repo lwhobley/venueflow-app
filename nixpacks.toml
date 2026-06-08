@@ -1,3 +1,6 @@
+[variables]
+NODE_ENV = "production"
+
 [phases.setup]
 nixPkgs = ["nodejs_20"]
 

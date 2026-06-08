@@ -5,6 +5,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -18,10 +19,14 @@ async function bootstrap() {
   app.use(helmet());
   app.use(json({ limit: config.get<string>('JSON_BODY_LIMIT', '8mb') }));
   app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
+  // Fail closed: only origins explicitly listed in CORS_ORIGINS are allowed.
+  // Native mobile clients don't send an Origin header, so this does not affect
+  // them; it only restricts browsers. Set CORS_ORIGINS for web/dev.
   app.enableCors({
-    origin: origins.length > 0 ? origins : config.get<string>('NODE_ENV') === 'production' ? false : true,
+    origin: origins.length > 0 ? origins : false,
     credentials: true,
   });
+  app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

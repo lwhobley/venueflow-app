@@ -1,21 +1,14 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Post, Query } from '@nestjs/common';
 import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
-import { AuthGuard } from '../../auth/auth.guard';
-import { CurrentUser } from '../../auth/current-user.decorator';
-import type { AuthUser } from '../../auth/auth.guard';
+import { isAdminRole } from '../../auth/roles';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { VenueScope } from '../../venue/venue-scope.decorator';
+import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
-function isAdminRole(role: string) {
-  return role === 'admin' || role === 'owner' || role === 'manager';
-}
-
-function isoDate(ts: number) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+type Scope = VenueScopedRequest['venueScope'];
 
 function dayBounds(offsetDays: number) {
   const d = new Date();
@@ -24,19 +17,12 @@ function dayBounds(offsetDays: number) {
   return { start: d.getTime(), end: d.getTime() + 86_400_000 };
 }
 
-function accumulateCheck(
-  acc: { salesCents: number; taxCents: number; tipCents: number; discountCents: number; compCents: number; promoCents: number; checkCount: number; coverCount: number },
-  c: { totalCents: number; taxCents: number | null; tipCents: number; discountCents: number | null; compCents: number | null; promoCents: number | null; guestCount: number | null },
-) {
-  acc.salesCents += c.totalCents;
-  acc.taxCents += c.taxCents ?? 0;
-  acc.tipCents += c.tipCents;
-  acc.discountCents += c.discountCents ?? 0;
-  acc.compCents += c.compCents ?? 0;
-  acc.promoCents += c.promoCents ?? 0;
-  acc.checkCount += 1;
-  acc.coverCount += c.guestCount ?? 1;
+function isoDate(ts: number) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+const num = (v: unknown) => (v == null ? 0 : Number(v));
 
 class SalesWindowQueryDto {
   @IsOptional()
@@ -80,25 +66,36 @@ class UpsertPosConnectionDto {
 export class PosController {
   constructor(private readonly prisma: PrismaService) {}
 
-  @UseGuards(AuthGuard)
+  private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
+    if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+  }
+
+  // Resolve the [start, end) window for a sales query, defaulting to the last
+  // `windowDays` days (inclusive of today).
+  private resolveWindow(query: SalesWindowQueryDto) {
+    const windowDays = Math.min(Math.max(1, Math.round(query.windowDays ?? 7)), 90);
+    const start = query.startTs ?? dayBounds(-windowDays + 1).start;
+    const end = query.endTs !== undefined ? query.endTs + 1 : dayBounds(1).start;
+    return { start: new Date(start), end: new Date(end) };
+  }
+
   @RequireSubscription('paid')
   @Get('overview')
-  async getPosOverview(@CurrentUser() user: AuthUser) {
-    const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
-
-    const [connections, checks] = await Promise.all([
-      this.prisma.posConnection.findMany({ where: { venueId }, take: 10 }),
-      this.prisma.posCheck.findMany({
-        where: { venueId },
-        orderBy: { openedAt: 'desc' },
-        take: 50,
-      }),
-    ]);
-
+  async getPosOverview(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const venueId = scope.venueId;
     const { start: dayStart } = dayBounds(0);
     const dayStartDate = new Date(dayStart);
-    const todaysChecks = checks.filter((c) => c.openedAt >= dayStartDate);
+
+    const [connections, recentChecks, todayTotals, openChecks] = await Promise.all([
+      this.prisma.posConnection.findMany({ where: { venueId }, take: 10 }),
+      this.prisma.posCheck.findMany({ where: { venueId }, orderBy: { openedAt: 'desc' }, take: 50 }),
+      this.prisma.posCheck.aggregate({
+        where: { venueId, openedAt: { gte: dayStartDate }, status: { not: 'void' } },
+        _sum: { totalCents: true, tipCents: true },
+      }),
+      this.prisma.posCheck.count({ where: { venueId, status: 'open' } }),
+    ]);
 
     const lastSyncAt = connections.reduce<number | null>((latest, conn) => {
       if (!conn.lastSyncAt) return latest;
@@ -108,242 +105,223 @@ export class PosController {
 
     return {
       connections: connections.map((c) => this.mapConnection(c)),
-      recentChecks: checks.map((c) => this.mapCheck(c)),
-      todaySalesCents: todaysChecks.reduce((s, c) => s + c.totalCents, 0),
-      todayTipsCents: todaysChecks.reduce((s, c) => s + c.tipCents, 0),
-      openChecks: checks.filter((c) => c.status === 'open').length,
+      recentChecks: recentChecks.map((c) => this.mapCheck(c)),
+      todaySalesCents: num(todayTotals._sum.totalCents),
+      todayTipsCents: num(todayTotals._sum.tipCents),
+      openChecks,
       lastSyncAt,
     };
   }
 
-  @UseGuards(AuthGuard)
   @RequireSubscription('paid')
   @Get('sales/summary')
-  async getSalesSummaryDashboard(@CurrentUser() user: AuthUser, @Query() query: SalesWindowQueryDto) {
-    const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
+  async getSalesSummaryDashboard(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
+    this.requireManager(scope);
+    const venueId = scope.venueId;
+    const { start, end } = this.resolveWindow(query);
 
-    const windowDays = Math.min(Math.max(1, Math.round(query.windowDays ?? 7)), 90);
-    const start = query.startTs ?? dayBounds(-windowDays + 1).start;
-    const end = query.endTs !== undefined ? query.endTs + 1 : dayBounds(1).start;
+    // Aggregate in SQL so totals are correct regardless of volume (no row cap).
+    const [totalsRows, byDayRows, byTender, byRevenueCenter] = await Promise.all([
+      this.prisma.$queryRaw<
+        Array<{
+          salesCents: bigint; taxCents: bigint; tipCents: bigint; discountCents: bigint;
+          compCents: bigint; promoCents: bigint; checkCount: number; coverCount: bigint;
+          avgCheckTimeMins: number | string | null;
+        }>
+      >`
+        SELECT
+          COALESCE(SUM("totalCents"), 0)::bigint AS "salesCents",
+          COALESCE(SUM("taxCents"), 0)::bigint AS "taxCents",
+          COALESCE(SUM("tipCents"), 0)::bigint AS "tipCents",
+          COALESCE(SUM("discountCents"), 0)::bigint AS "discountCents",
+          COALESCE(SUM("compCents"), 0)::bigint AS "compCents",
+          COALESCE(SUM("promoCents"), 0)::bigint AS "promoCents",
+          COUNT(*)::int AS "checkCount",
+          COALESCE(SUM(COALESCE("guestCount", 1)), 0)::bigint AS "coverCount",
+          AVG(EXTRACT(EPOCH FROM ("closedAt" - "openedAt")) / 60.0)
+            FILTER (WHERE "closedAt" IS NOT NULL) AS "avgCheckTimeMins"
+        FROM "PosCheck"
+        WHERE "venueId" = ${venueId}
+          AND "openedAt" >= ${start} AND "openedAt" < ${end}
+          AND "status"::text <> 'void'
+      `,
+      this.prisma.$queryRaw<
+        Array<{ date: string; salesCents: bigint; checkCount: number; coverCount: bigint }>
+      >`
+        SELECT to_char("openedAt", 'YYYY-MM-DD') AS date,
+          COALESCE(SUM("totalCents"), 0)::bigint AS "salesCents",
+          COUNT(*)::int AS "checkCount",
+          COALESCE(SUM(COALESCE("guestCount", 1)), 0)::bigint AS "coverCount"
+        FROM "PosCheck"
+        WHERE "venueId" = ${venueId}
+          AND "openedAt" >= ${start} AND "openedAt" < ${end}
+          AND "status"::text <> 'void'
+        GROUP BY 1 ORDER BY 1
+      `,
+      this.prisma.posCheck.groupBy({
+        by: ['tenderType'],
+        where: { venueId, openedAt: { gte: start, lt: end }, status: { not: 'void' } },
+        _sum: { totalCents: true },
+        _count: { _all: true },
+      }),
+      this.prisma.posCheck.groupBy({
+        by: ['revenueCenter'],
+        where: { venueId, openedAt: { gte: start, lt: end }, status: { not: 'void' } },
+        _sum: { totalCents: true, guestCount: true },
+        _count: { _all: true },
+      }),
+    ]);
 
-    const checks = await this.prisma.posCheck.findMany({
-      where: {
-        venueId,
-        openedAt: { gte: new Date(start), lt: new Date(end) },
-      },
-      orderBy: { openedAt: 'asc' },
-      take: 5000,
-    });
-
-    const acc = { salesCents: 0, taxCents: 0, tipCents: 0, discountCents: 0, compCents: 0, promoCents: 0, checkCount: 0, coverCount: 0 };
-    const byDay = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
-    const byTender = new Map<string, { salesCents: number; checkCount: number }>();
-    const byRevenueCenter = new Map<string, { salesCents: number; checkCount: number; coverCount: number }>();
-    let totalTimeMins = 0;
-    let timedChecks = 0;
-
-    for (const check of checks) {
-      if (check.status === 'void') continue;
-      accumulateCheck(acc, check);
-      if (check.closedAt) {
-        totalTimeMins += (check.closedAt.getTime() - check.openedAt.getTime()) / 60_000;
-        timedChecks += 1;
-      }
-
-      const date = isoDate(check.openedAt.getTime());
-      const dayRow = byDay.get(date) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
-      dayRow.salesCents += check.totalCents;
-      dayRow.checkCount += 1;
-      dayRow.coverCount += check.guestCount ?? 1;
-      byDay.set(date, dayRow);
-
-      const tender = (check as any).tenderType?.trim() || 'Unknown';
-      const tenderRow = byTender.get(tender) ?? { salesCents: 0, checkCount: 0 };
-      tenderRow.salesCents += check.totalCents;
-      tenderRow.checkCount += 1;
-      byTender.set(tender, tenderRow);
-
-      const revenueCenter = (check as any).revenueCenter?.trim() || 'Default';
-      const revenueCenterRow = byRevenueCenter.get(revenueCenter) ?? { salesCents: 0, checkCount: 0, coverCount: 0 };
-      revenueCenterRow.salesCents += check.totalCents;
-      revenueCenterRow.checkCount += 1;
-      revenueCenterRow.coverCount += check.guestCount ?? 1;
-      byRevenueCenter.set(revenueCenter, revenueCenterRow);
-    }
+    const totals = totalsRows[0];
+    const checkCount = num(totals?.checkCount);
+    const salesCents = num(totals?.salesCents);
 
     return {
       summary: {
-        ...acc,
-        avgCheckCents: acc.checkCount ? Math.round(acc.salesCents / acc.checkCount) : 0,
-        avgCheckTimeMins: timedChecks ? Math.round(totalTimeMins / timedChecks) : null,
+        salesCents,
+        taxCents: num(totals?.taxCents),
+        tipCents: num(totals?.tipCents),
+        discountCents: num(totals?.discountCents),
+        compCents: num(totals?.compCents),
+        promoCents: num(totals?.promoCents),
+        checkCount,
+        coverCount: num(totals?.coverCount),
+        avgCheckCents: checkCount ? Math.round(salesCents / checkCount) : 0,
+        avgCheckTimeMins: totals?.avgCheckTimeMins != null ? Math.round(num(totals.avgCheckTimeMins)) : null,
       },
-      byDay: Array.from(byDay.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, value]) => ({ date, ...value })),
-      byTender: Array.from(byTender.entries())
-        .map(([tenderType, value]) => ({ tenderType, ...value }))
+      byDay: byDayRows.map((r) => ({
+        date: r.date,
+        salesCents: num(r.salesCents),
+        checkCount: num(r.checkCount),
+        coverCount: num(r.coverCount),
+      })),
+      byTender: byTender
+        .map((r) => ({
+          tenderType: r.tenderType?.trim() || 'Unknown',
+          salesCents: num(r._sum.totalCents),
+          checkCount: r._count._all,
+        }))
         .sort((a, b) => b.salesCents - a.salesCents),
-      byRevenueCenter: Array.from(byRevenueCenter.entries())
-        .map(([revenueCenter, value]) => ({ revenueCenter, ...value }))
+      byRevenueCenter: byRevenueCenter
+        .map((r) => ({
+          revenueCenter: r.revenueCenter?.trim() || 'Default',
+          salesCents: num(r._sum.totalCents),
+          checkCount: r._count._all,
+          coverCount: num(r._sum.guestCount),
+        }))
         .sort((a, b) => b.salesCents - a.salesCents),
     };
   }
 
-  @UseGuards(AuthGuard)
   @RequireSubscription('paid')
   @Get('sales/by-server')
-  async getSalesByServer(@CurrentUser() user: AuthUser, @Query() query: SalesWindowQueryDto) {
-    const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
+  async getSalesByServer(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
+    this.requireManager(scope);
+    const { start, end } = this.resolveWindow(query);
 
-    const windowDays = Math.min(Math.max(1, Math.round(query.windowDays ?? 7)), 90);
-    const start = query.startTs ?? dayBounds(-windowDays + 1).start;
-    const end = query.endTs !== undefined ? query.endTs + 1 : dayBounds(1).start;
-
-    const checks = await this.prisma.posCheck.findMany({
-      where: {
-        venueId,
-        openedAt: { gte: new Date(start), lt: new Date(end) },
-      },
-      orderBy: { openedAt: 'asc' },
-      take: 5000,
+    const rows = await this.prisma.posCheck.groupBy({
+      by: ['serverName'],
+      where: { venueId: scope.venueId, openedAt: { gte: start, lt: end }, status: { not: 'void' } },
+      _sum: { totalCents: true, tipCents: true, discountCents: true, compCents: true, guestCount: true },
+      _count: { _all: true },
     });
 
-    type Row = { salesCents: number; tipCents: number; discountCents: number; compCents: number; checkCount: number; coverCount: number };
-    const byServer = new Map<string, Row>();
-    for (const c of checks) {
-      if (c.status === 'void') continue;
-      const name = c.serverName?.trim() || 'Unknown';
-      const row = byServer.get(name) ?? { salesCents: 0, tipCents: 0, discountCents: 0, compCents: 0, checkCount: 0, coverCount: 0 };
-      row.salesCents += c.totalCents;
-      row.tipCents += c.tipCents;
-      row.discountCents += c.discountCents ?? 0;
-      row.compCents += c.compCents ?? 0;
-      row.checkCount += 1;
-      row.coverCount += c.guestCount ?? 1;
-      byServer.set(name, row);
-    }
-
-    return Array.from(byServer.entries())
-      .map(([serverName, r]) => ({ serverName, ...r, avgCheckCents: r.checkCount ? Math.round(r.salesCents / r.checkCount) : 0 }))
+    return rows
+      .map((r) => {
+        const salesCents = num(r._sum.totalCents);
+        const checkCount = r._count._all;
+        return {
+          serverName: r.serverName?.trim() || 'Unknown',
+          salesCents,
+          tipCents: num(r._sum.tipCents),
+          discountCents: num(r._sum.discountCents),
+          compCents: num(r._sum.compCents),
+          checkCount,
+          coverCount: num(r._sum.guestCount),
+          avgCheckCents: checkCount ? Math.round(salesCents / checkCount) : 0,
+        };
+      })
       .sort((a, b) => b.salesCents - a.salesCents);
   }
 
-  @UseGuards(AuthGuard)
   @RequireSubscription('paid')
   @Get('sales/top-items')
-  async getTopMenuItems(@CurrentUser() user: AuthUser, @Query() query: TopItemsQueryDto) {
-    const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
+  async getTopMenuItems(@VenueScope() scope: Scope, @Query() query: TopItemsQueryDto) {
+    this.requireManager(scope);
+    const { start, end } = this.resolveWindow(query);
+    const cap = Math.min(Math.max(1, Math.round(query.limit ?? 20)), 50);
 
-    const windowDays = Math.min(Math.max(1, Math.round(query.windowDays ?? 7)), 90);
-    const cap = Math.min(query.limit ?? 20, 50);
-    const start = query.startTs ?? dayBounds(-windowDays + 1).start;
-    const end = query.endTs !== undefined ? query.endTs + 1 : dayBounds(1).start;
+    // Unnest the menuItems JSON array and aggregate in SQL (no row cap).
+    const rows = await this.prisma.$queryRaw<
+      Array<{ name: string; category: string | null; quantity: number | string; salesCents: bigint }>
+    >`
+      SELECT item->>'name' AS name,
+        MAX(item->>'category') AS category,
+        COALESCE(SUM((item->>'quantity')::numeric), 0)::float8 AS quantity,
+        COALESCE(SUM((item->>'priceCents')::numeric * (item->>'quantity')::numeric), 0)::bigint AS "salesCents"
+      FROM "PosCheck" c, jsonb_array_elements(c."menuItems") AS item
+      WHERE c."venueId" = ${scope.venueId}
+        AND c."openedAt" >= ${start} AND c."openedAt" < ${end}
+        AND c."status"::text <> 'void'
+        AND c."menuItems" IS NOT NULL
+        AND jsonb_typeof(c."menuItems") = 'array'
+        AND item->>'name' IS NOT NULL
+      GROUP BY item->>'name'
+      ORDER BY "salesCents" DESC
+      LIMIT ${cap}
+    `;
 
-    const checks = await this.prisma.posCheck.findMany({
-      where: {
-        venueId,
-        openedAt: { gte: new Date(start), lt: new Date(end) },
-      },
-      orderBy: { openedAt: 'asc' },
-      take: 5000,
-    });
-
-    const byItem = new Map<string, { name: string; category: string | null; quantity: number; salesCents: number }>();
-    for (const c of checks) {
-      if (c.status === 'void' || !c.menuItems) continue;
-      const items = c.menuItems as any[];
-      for (const it of items) {
-        const key = String(it.name).toLowerCase();
-        const row = byItem.get(key) ?? { name: it.name, category: it.category ?? null, quantity: 0, salesCents: 0 };
-        row.quantity += it.quantity;
-        row.salesCents += it.priceCents * it.quantity;
-        byItem.set(key, row);
-      }
-    }
-
-    return Array.from(byItem.values())
-      .sort((a, b) => b.salesCents - a.salesCents)
-      .slice(0, cap);
+    return rows.map((r) => ({
+      name: r.name,
+      category: r.category ?? null,
+      quantity: num(r.quantity),
+      salesCents: num(r.salesCents),
+    }));
   }
 
-  @UseGuards(AuthGuard)
   @RequireSubscription('paid')
   @Get('labor')
-  async getLaborSummary(@CurrentUser() user: AuthUser, @Query() query: SalesWindowQueryDto) {
-    const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
-
+  async getLaborSummary(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
+    this.requireManager(scope);
     const windowDays = Math.min(Math.max(1, Math.round(query.windowDays ?? 7)), 90);
-    const rawStart = query.startTs ?? dayBounds(-windowDays + 1).start;
-    const rawEnd = query.endTs ?? dayBounds(0).start;
+    const startDate = isoDate(query.startTs ?? dayBounds(-windowDays + 1).start);
+    const endDate = isoDate(query.endTs ?? dayBounds(0).start);
 
-    const dates: string[] = [];
-    for (let cur = rawStart; cur <= rawEnd; cur += 86_400_000) {
-      dates.push(isoDate(cur));
-    }
-
-    if (dates.length === 0) {
-      return { totalRegularMins: 0, totalOvertimeMins: 0, totalPayCents: 0, totalTipsCents: 0, byEmployee: [] };
-    }
-
-    const dateSet = new Set(dates);
-    const punches = await this.prisma.posLaborPunch.findMany({
-      where: {
-        venueId,
-        businessDate: { gte: dates[0], lte: dates[dates.length - 1] },
+    const rows = await this.prisma.posLaborPunch.groupBy({
+      by: ['externalEmployeeId', 'employeeName', 'jobTitle'],
+      where: { venueId: scope.venueId, businessDate: { gte: startDate, lte: endDate } },
+      _sum: {
+        regularMinutes: true,
+        overtimeMinutes: true,
+        totalPayCents: true,
+        tipsCents: true,
+        declaredTipsCents: true,
       },
-      orderBy: { businessDate: 'asc' },
-      take: 2000,
     });
 
-    type EmpRow = { employeeName: string; jobTitle: string | null; regularMins: number; overtimeMins: number; payCents: number; tipsCents: number };
-    const byEmp = new Map<string, EmpRow>();
     let totalRegularMins = 0, totalOvertimeMins = 0, totalPayCents = 0, totalTipsCents = 0;
+    const byEmployee = rows
+      .map((r) => {
+        const regularMins = num(r._sum.regularMinutes);
+        const overtimeMins = num(r._sum.overtimeMinutes);
+        const payCents = num(r._sum.totalPayCents);
+        const tipsCents = num(r._sum.tipsCents) + num(r._sum.declaredTipsCents);
+        totalRegularMins += regularMins;
+        totalOvertimeMins += overtimeMins;
+        totalPayCents += payCents;
+        totalTipsCents += tipsCents;
+        return { employeeName: r.employeeName, jobTitle: r.jobTitle ?? null, regularMins, overtimeMins, payCents, tipsCents };
+      })
+      .sort((a, b) => b.payCents - a.payCents);
 
-    for (const p of punches) {
-      if (!dateSet.has(p.businessDate)) continue;
-      const row = byEmp.get(p.externalEmployeeId) ?? {
-        employeeName: p.employeeName,
-        jobTitle: p.jobTitle ?? null,
-        regularMins: 0,
-        overtimeMins: 0,
-        payCents: 0,
-        tipsCents: 0,
-      };
-      const reg = p.regularMinutes ?? 0;
-      const ot = p.overtimeMinutes ?? 0;
-      const pay = p.totalPayCents ?? 0;
-      const tips = (p.tipsCents ?? 0) + (p.declaredTipsCents ?? 0);
-      row.regularMins += reg;
-      row.overtimeMins += ot;
-      row.payCents += pay;
-      row.tipsCents += tips;
-      totalRegularMins += reg;
-      totalOvertimeMins += ot;
-      totalPayCents += pay;
-      totalTipsCents += tips;
-      byEmp.set(p.externalEmployeeId, row);
-    }
-
-    return {
-      totalRegularMins,
-      totalOvertimeMins,
-      totalPayCents,
-      totalTipsCents,
-      byEmployee: Array.from(byEmp.values()).sort((a, b) => b.payCents - a.payCents),
-    };
+    return { totalRegularMins, totalOvertimeMins, totalPayCents, totalTipsCents, byEmployee };
   }
 
-  @UseGuards(AuthGuard)
   @RequireSubscription('paid')
   @Post('connections')
-  async upsertPosConnection(@CurrentUser() user: AuthUser, @Body() body: UpsertPosConnectionDto) {
-    const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
-
+  async upsertPosConnection(@VenueScope() scope: Scope, @Body() body: UpsertPosConnectionDto) {
+    this.requireManager(scope);
+    const venueId = scope.venueId;
     const externalLocationId = body.externalLocationId?.trim() || null;
     const now = new Date();
 
@@ -383,16 +361,6 @@ export class PosController {
     });
 
     return { ...this.mapConnection(created), webhookSecret: secret };
-  }
-
-  private async requireManagerProfile(user: AuthUser) {
-    const profile = await this.prisma.profile.findFirst({
-      where: { userId: user.sub },
-      include: { venue: true },
-    });
-    if (!profile?.venueId) throw new Error('Profile is not initialized');
-    if (!isAdminRole(profile.role)) throw new Error('Not authorized');
-    return profile;
   }
 
   private mapConnection(conn: {
