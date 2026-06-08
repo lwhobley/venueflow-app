@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { Role, SubscriptionStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
@@ -113,6 +114,10 @@ class AppleSubscriptionSyncDto {
 }
 
 class CreateInviteDto {
+  @IsEmail()
+  @IsOptional()
+  email?: string;
+
   @IsIn(['manager', 'staff'])
   role!: 'manager' | 'staff';
 
@@ -163,7 +168,10 @@ function assertWithinGeofence(lat: number, lng: number, accuracy: number, mocked
 
 @Controller('v1/app')
 export class AppController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
 
   @UseGuards(AuthGuard)
   @Get('me')
@@ -313,6 +321,10 @@ export class AppController {
   @Post('billing/apple/sync')
   async syncAppleSubscription(@CurrentUser() user: AuthUser, @Body() body: AppleSubscriptionSyncDto) {
     const profile = await this.requireBillingProfile(user);
+    const verified = await this.verifyRevenueCatEntitlement(profile.venueId!, body.productId, body.entitlementId);
+    if (!verified) {
+      return this.getMyVenueBilling(user);
+    }
     const status: SubscriptionStatus = 'active';
     const now = new Date();
     const existing = await this.prisma.subscription.findFirst({ where: { venueId: profile.venueId! } });
@@ -331,7 +343,8 @@ export class AppController {
               status,
               platform: 'apple',
               planId: body.productId,
-              currentPeriodStart: existing.currentPeriodStart ?? now,
+              currentPeriodStart: verified.currentPeriodStart ?? existing.currentPeriodStart ?? now,
+              currentPeriodEnd: verified.currentPeriodEnd ?? existing.currentPeriodEnd,
               cancelAtPeriodEnd: false,
               cancelledAt: null,
               externalCustomerId: profile.venueId!,
@@ -348,7 +361,8 @@ export class AppController {
               currency: 'USD',
               trialStartedAt: now,
               trialEndsAt: now,
-              currentPeriodStart: now,
+              currentPeriodStart: verified.currentPeriodStart ?? now,
+              currentPeriodEnd: verified.currentPeriodEnd,
               cancelAtPeriodEnd: false,
               externalCustomerId: profile.venueId!,
               lastRevenueCatEventAt: now,
@@ -677,10 +691,12 @@ export class AppController {
   @Post('invites')
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
+    const email = body.email?.trim().toLowerCase() || null;
     const token = randomBytes(18).toString('base64url');
     const invite = await this.prisma.invite.create({
       data: {
         venueId: profile.venueId!,
+        email,
         token,
         role: body.role === 'manager' ? 'manager' : 'staff',
         jobTitle: body.jobTitle?.trim() || 'Team Member',
@@ -743,6 +759,40 @@ export class AppController {
       throw new Error('Not authorized');
     }
     return profile;
+  }
+
+  private async verifyRevenueCatEntitlement(venueId: string, productId: string, entitlementId?: string) {
+    const apiKey = this.config.get<string>('REVENUECAT_API_KEY') ?? this.config.get<string>('REVENUECAT_SECRET_API_KEY');
+    if (!apiKey) {
+      return null;
+    }
+
+    const response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(venueId)}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+      },
+    });
+    const json: any = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new BadRequestException(json?.message ?? 'Could not verify RevenueCat subscription.');
+    }
+
+    const subscriber = json?.subscriber ?? {};
+    const entitlements = subscriber.entitlements ?? {};
+    const subscriptions = subscriber.subscriptions ?? {};
+    const matchingEntitlement = entitlementId
+      ? entitlements[entitlementId]
+      : Object.values(entitlements).find((entitlement: any) => entitlement?.product_identifier === productId);
+    const matchingSubscription = subscriptions[productId];
+    const expiresAt = parseRevenueCatDate(matchingEntitlement?.expires_date ?? matchingSubscription?.expires_date);
+    const purchasedAt = parseRevenueCatDate(matchingEntitlement?.purchase_date ?? matchingSubscription?.purchase_date);
+    const isActive = Boolean(matchingEntitlement || matchingSubscription) && (!expiresAt || expiresAt.getTime() > Date.now());
+    if (!isActive) {
+      throw new BadRequestException('No active RevenueCat entitlement found for this Apple subscription.');
+    }
+
+    return { currentPeriodStart: purchasedAt, currentPeriodEnd: expiresAt };
   }
 
   private mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number }) {
@@ -856,4 +906,10 @@ export class AppController {
       is_open: entry.isOpen,
     };
   }
+}
+
+function parseRevenueCatDate(value: unknown) {
+  if (typeof value !== 'string' || !value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }

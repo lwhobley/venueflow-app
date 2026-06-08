@@ -1,6 +1,7 @@
-import { Body, Controller, Headers, Post, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Headers, HttpException, HttpStatus, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
+import type { Request } from 'express';
 import { Public } from '../auth/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -32,6 +33,9 @@ const INACTIVE_REVENUECAT_EVENTS: Record<string, SubscriptionStatus> = {
   EXPIRATION: 'expired',
   SUBSCRIPTION_PAUSED: 'paused',
 };
+const WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
+const WEBHOOK_RATE_LIMIT_MAX = 120;
+const webhookAttempts = new Map<string, { count: number; resetAt: number }>();
 
 @Controller('v1/billing')
 export class BillingController {
@@ -42,8 +46,12 @@ export class BillingController {
 
   @Public()
   @Post('revenuecat/webhook')
-  async revenueCatWebhook(@Headers('authorization') authorization: string | undefined, @Body() body: RevenueCatWebhookBody) {
+  async revenueCatWebhook(@Req() request: Request, @Headers('authorization') authorization: string | undefined, @Body() body: RevenueCatWebhookBody) {
+    assertWithinRateLimit(`revenuecat:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS);
     const expectedSecret = this.config.get<string>('REVENUECAT_WEBHOOK_SECRET');
+    if (!expectedSecret && this.config.get<string>('NODE_ENV') === 'production') {
+      throw new UnauthorizedException('RevenueCat webhook secret is not configured');
+    }
     if (expectedSecret) {
       const token = authorization?.replace(/^Bearer\s+/i, '').trim();
       if (token !== expectedSecret) {
@@ -80,6 +88,7 @@ export class BillingController {
       cancelAtPeriodEnd: event.type === 'CANCELLATION' && expiresInFuture,
       eventId: event.id ?? `${event.type}:${venueId}:${event.event_timestamp_ms ?? Date.now()}`,
       eventType: event.type,
+      eventAt: new Date(event.event_timestamp_ms ?? event.purchased_at_ms ?? Date.now()),
       payload: body,
     });
 
@@ -97,25 +106,46 @@ export class BillingController {
     cancelAtPeriodEnd?: boolean;
     eventId?: string;
     eventType?: string;
+    eventAt?: Date;
     payload?: unknown;
   }) {
-    const venue = await this.prisma.venue.findUnique({ where: { id: input.venueId } });
-    if (!venue) {
-      return null;
-    }
-
     const now = new Date();
-    const existing = await this.prisma.subscription.findFirst({ where: { venueId: input.venueId } });
-    await this.prisma.$transaction([
-      this.prisma.venue.update({
-        where: { id: input.venueId },
-        data: {
-          subscriptionStatus: input.status,
-          subscriptionPlatform: 'apple',
-        },
-      }),
-      existing
-        ? this.prisma.subscription.update({
+    const eventAt = input.eventAt ?? now;
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const venue = await tx.venue.findUnique({ where: { id: input.venueId } });
+        if (!venue) {
+          return null;
+        }
+
+        const existing = await tx.subscription.findFirst({ where: { venueId: input.venueId } });
+        const isStale = Boolean(existing?.lastRevenueCatEventAt && existing.lastRevenueCatEventAt > eventAt);
+        if (isStale) {
+          if (input.eventId && input.eventType) {
+            await tx.subscriptionEvent.create({
+              data: {
+                venueId: input.venueId,
+                source: 'revenuecat',
+                externalEventId: input.eventId,
+                eventType: input.eventType,
+                payload: (input.payload ?? {}) as never,
+                processedAt: now,
+                status: 'ignored_stale',
+              },
+            });
+          }
+          return { status: existing!.status, ignored: true };
+        }
+
+        await tx.venue.update({
+          where: { id: input.venueId },
+          data: {
+            subscriptionStatus: input.status,
+            subscriptionPlatform: 'apple',
+          },
+        });
+        if (existing) {
+          await tx.subscription.update({
             where: { id: existing.id },
             data: {
               status: input.status,
@@ -127,10 +157,11 @@ export class BillingController {
               cancelledAt: input.status === 'cancelled' ? now : input.status === 'active' ? null : existing.cancelledAt,
               externalSubscriptionId: input.externalSubscriptionId ?? existing.externalSubscriptionId,
               externalCustomerId: input.externalCustomerId ?? existing.externalCustomerId,
-              lastRevenueCatEventAt: now,
+              lastRevenueCatEventAt: eventAt,
             },
-          })
-        : this.prisma.subscription.create({
+          });
+        } else {
+          await tx.subscription.create({
             data: {
               venueId: input.venueId,
               status: input.status,
@@ -146,26 +177,50 @@ export class BillingController {
               cancelledAt: input.status === 'cancelled' ? now : null,
               externalSubscriptionId: input.externalSubscriptionId ?? null,
               externalCustomerId: input.externalCustomerId ?? null,
-              lastRevenueCatEventAt: now,
+              lastRevenueCatEventAt: eventAt,
             },
-          }),
-      ...(input.eventId && input.eventType
-        ? [
-            this.prisma.subscriptionEvent.create({
-              data: {
-                venueId: input.venueId,
-                source: 'revenuecat',
-                externalEventId: input.eventId,
-                eventType: input.eventType,
-                payload: (input.payload ?? {}) as never,
-                processedAt: now,
-                status: 'processed',
-              },
-            }),
-          ]
-        : []),
-    ]);
+          });
+        }
+        if (input.eventId && input.eventType) {
+          await tx.subscriptionEvent.create({
+            data: {
+              venueId: input.venueId,
+              source: 'revenuecat',
+              externalEventId: input.eventId,
+              eventType: input.eventType,
+              payload: (input.payload ?? {}) as never,
+              processedAt: now,
+              status: 'processed',
+            },
+          });
+        }
 
-    return { status: input.status };
+        return { status: input.status };
+      });
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        return { ok: true, duplicate: true };
+      }
+      throw error;
+    }
   }
+}
+
+function getClientIp(request: Request) {
+  const forwarded = request.headers['x-forwarded-for'];
+  const firstForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
+  return firstForwarded?.trim() || request.ip || 'unknown';
+}
+
+function assertWithinRateLimit(key: string, max: number, windowMs: number) {
+  const now = Date.now();
+  const current = webhookAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    webhookAttempts.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+  if (current.count >= max) {
+    throw new HttpException('Too many webhook requests.', HttpStatus.TOO_MANY_REQUESTS);
+  }
+  current.count += 1;
 }

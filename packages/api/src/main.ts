@@ -1,12 +1,13 @@
 import 'reflect-metadata';
 import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   const config = app.get(ConfigService);
   const origins = config
     .get<string>('CORS_ORIGINS', '')
@@ -15,8 +16,10 @@ async function bootstrap() {
     .filter(Boolean);
 
   app.use(helmet());
+  app.use(json({ limit: config.get<string>('JSON_BODY_LIMIT', '8mb') }));
+  app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
   app.enableCors({
-    origin: origins.length > 0 ? origins : true,
+    origin: origins.length > 0 ? origins : config.get<string>('NODE_ENV') === 'production' ? false : true,
     credentials: true,
   });
   app.useGlobalPipes(

@@ -1,7 +1,8 @@
-import { BadRequestException, Body, Controller, Post, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, HttpException, HttpStatus, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import type { Request } from 'express';
 import { pbkdf2, randomBytes, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 
@@ -13,6 +14,10 @@ const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 210_000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
+const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_RATE_LIMIT_MAX = 12;
+
+const authAttempts = new Map<string, { count: number; resetAt: number }>();
 
 class PasswordAuthDto {
   @IsEmail()
@@ -43,9 +48,11 @@ export class AuthController {
 
   @Public()
   @Post('password')
-  async password(@Body() body: PasswordAuthDto) {
+  async password(@Req() request: Request, @Body() body: PasswordAuthDto) {
     const email = body.email.trim().toLowerCase();
     if (!email || !body.password) throw new BadRequestException('Enter your email and password.');
+    assertWithinRateLimit(`auth:ip:${getClientIp(request)}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+    assertWithinRateLimit(`auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
 
     const user = await this.prisma.user.findUnique({ where: { email }, include: { password: true } });
     if (body.flow === 'signIn') {
@@ -82,6 +89,9 @@ export class AuthController {
           where: { token: inviteToken, usedBy: null, expiresAt: { gt: new Date() } },
         })
       : null;
+    if (invite?.email && invite.email.toLowerCase() !== email) {
+      throw new UnauthorizedException('This invite was sent to a different email address.');
+    }
     const profile = await this.prisma.profile.upsert({
       where: { userId },
       update: {
@@ -126,6 +136,25 @@ export class AuthController {
       venue: profile.venue ? mapVenue(profile.venue) : null,
     };
   }
+}
+
+function getClientIp(request: Request) {
+  const forwarded = request.headers['x-forwarded-for'];
+  const firstForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
+  return firstForwarded?.trim() || request.ip || 'unknown';
+}
+
+function assertWithinRateLimit(key: string, max: number, windowMs: number) {
+  const now = Date.now();
+  const current = authAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    authAttempts.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+  if (current.count >= max) {
+    throw new HttpException('Too many attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
+  }
+  current.count += 1;
 }
 
 async function hashPassword(password: string) {

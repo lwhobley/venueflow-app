@@ -911,6 +911,7 @@ model SubscriptionEvent {
   status          String
   errorMessage    String?
 
+  @@unique([source, externalEventId])
   @@index([source, externalEventId])
   @@index([venueId, processedAt])
 }
@@ -1136,6 +1137,7 @@ model TableStateHistory {
 model Invite {
   id        String   @id @default(cuid())
   venueId   String
+  email     String?
   token     String
   role      Role
   jobTitle  String
@@ -1145,5 +1147,6 @@ model Invite {
   createdAt DateTime @default(now())
 
   @@index([token])
+  @@index([email])
   @@index([venueId])
 }

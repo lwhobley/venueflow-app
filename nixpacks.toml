@@ -11,4 +11,4 @@ cmds = [
 ]
 
 [start]
-cmd = "npm run start:prod -w @venue-wrangler/api"
+cmd = "npm run release -w @venue-wrangler/api && npm run start:prod -w @venue-wrangler/api"

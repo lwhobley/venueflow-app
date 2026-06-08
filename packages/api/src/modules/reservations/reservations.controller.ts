@@ -9,7 +9,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { IsArray, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -17,6 +17,8 @@ import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
+const RESERVATION_STATUSES = ['requested', 'confirmed', 'checked_in', 'seated', 'completed', 'no_show', 'cancelled'] as const;
+const RESERVATION_SOURCES = ['direct', 'opentable', 'resy', 'phone', 'walk_in', 'sevenrooms', 'tock', 'google', 'generic'] as const;
 
 class SaveReservationDto {
   @IsString()
@@ -27,12 +29,13 @@ class SaveReservationDto {
   guestName!: string;
 
   @IsInt()
+  @Min(1)
   partySize!: number;
 
   @IsString()
   reservationTime!: string;
 
-  @IsString()
+  @IsIn(RESERVATION_STATUSES)
   @IsOptional()
   status?: string;
 
@@ -40,7 +43,7 @@ class SaveReservationDto {
   @IsOptional()
   notes?: string;
 
-  @IsString()
+  @IsIn(RESERVATION_SOURCES)
   @IsOptional()
   source?: string;
 
@@ -90,18 +93,20 @@ export class ReservationsController {
     @Query('limit') limit?: string,
   ) {
     this.requireManager(scope);
-    const pageNum = parseInt(page ?? '0', 10) || 0;
-    const limitNum = Math.min(parseInt(limit ?? '50', 10) || 50, 200);
+    const pageNum = Math.max(0, parseInt(page ?? '0', 10) || 0);
+    const limitNum = Math.min(Math.max(1, parseInt(limit ?? '50', 10) || 50), 200);
     const where: Record<string, unknown> = {
       venueId: scope.venueId,
       deletedAt: null,
     };
     if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Invalid date');
       const start = new Date(`${date}T00:00:00.000Z`);
       const end = new Date(`${date}T23:59:59.999Z`);
       where['reservationTime'] = { gte: start, lte: end };
     }
     if (status) {
+      if (!RESERVATION_STATUSES.includes(status as any)) throw new BadRequestException('Invalid status');
       where['status'] = status;
     }
     const [reservations, totalCount] = await this.prisma.$transaction([
@@ -205,8 +210,14 @@ export class ReservationsController {
     };
     if (startDate || endDate) {
       const timeFilter: Record<string, Date> = {};
-      if (startDate) timeFilter['gte'] = new Date(`${startDate}T00:00:00.000Z`);
-      if (endDate) timeFilter['lte'] = new Date(`${endDate}T23:59:59.999Z`);
+      if (startDate) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new BadRequestException('Invalid start date');
+        timeFilter['gte'] = new Date(`${startDate}T00:00:00.000Z`);
+      }
+      if (endDate) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new BadRequestException('Invalid end date');
+        timeFilter['lte'] = new Date(`${endDate}T23:59:59.999Z`);
+      }
       where['reservationTime'] = timeFilter;
     }
     const reservations = await this.prisma.reservation.findMany({

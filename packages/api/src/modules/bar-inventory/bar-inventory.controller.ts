@@ -9,7 +9,8 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
@@ -123,6 +124,10 @@ class ParsedItemDto {
 }
 
 class ImportParsedBarItemsDto {
+  @IsArray()
+  @ArrayMaxSize(MAX_IMPORT_ITEMS)
+  @ValidateNested({ each: true })
+  @Type(() => ParsedItemDto)
   items!: ParsedItemDto[];
 }
 
@@ -143,6 +148,18 @@ class ParseBarInventoryInputDto {
 function cleanText(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function parseAiInventoryJson(rawText: string) {
+  try {
+    const parsed = JSON.parse(rawText);
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) {
+      throw new Error('Invalid inventory parse shape');
+    }
+    return parsed;
+  } catch {
+    throw new BadRequestException('AI inventory parser returned invalid JSON. Try again with a clearer image or text input.');
+  }
 }
 
 function toMs(date: Date | null | undefined): number | null {
@@ -258,34 +275,36 @@ export class BarInventoryController {
   ) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
-    const item = await this.prisma.barInventoryItem.findFirst({ where: { id: itemId, venueId } });
-    if (!item) throw new NotFoundException('Item not found');
-    const previousOnHand = item.onHand;
-    const nextOnHand =
-      body.movementType === 'count'
-        ? Math.max(0, body.quantity)
-        : Math.max(0, previousOnHand + body.quantity);
-    const now = new Date();
-    await this.prisma.barInventoryItem.update({
-      where: { id: item.id },
-      data: {
-        onHand: nextOnHand,
-        lastCountedAt: body.movementType === 'count' ? now : item.lastCountedAt,
-        updatedAt: now,
-      },
-    });
-    const movement = await this.prisma.barInventoryMovement.create({
-      data: {
-        venueId,
-        itemId: item.id,
-        movementType: body.movementType,
-        quantity: body.quantity,
-        previousOnHand,
-        nextOnHand,
-        notes: cleanText(body.notes) ?? null,
-        createdBy: profile.id,
-        createdAt: now,
-      },
+    const movement = await this.prisma.$transaction(async (tx) => {
+      const item = await tx.barInventoryItem.findFirst({ where: { id: itemId, venueId } });
+      if (!item) throw new NotFoundException('Item not found');
+      const previousOnHand = item.onHand;
+      const nextOnHand =
+        body.movementType === 'count'
+          ? Math.max(0, body.quantity)
+          : Math.max(0, previousOnHand + body.quantity);
+      const now = new Date();
+      await tx.barInventoryItem.update({
+        where: { id: item.id },
+        data: {
+          onHand: nextOnHand,
+          lastCountedAt: body.movementType === 'count' ? now : item.lastCountedAt,
+          updatedAt: now,
+        },
+      });
+      return tx.barInventoryMovement.create({
+        data: {
+          venueId,
+          itemId: item.id,
+          movementType: body.movementType,
+          quantity: body.quantity,
+          previousOnHand,
+          nextOnHand,
+          notes: cleanText(body.notes) ?? null,
+          createdBy: profile.id,
+          createdAt: now,
+        },
+      });
     });
     return { _id: movement.id };
   }
@@ -302,6 +321,7 @@ export class BarInventoryController {
     });
     const existingByName = new Map(existingRows.map((row) => [row.name.toLowerCase(), row]));
     const seenNames = new Set<string>();
+    const writes = [];
     let imported = 0;
     for (const item of items.slice(0, MAX_IMPORT_ITEMS)) {
       const name = item.name?.trim() ?? '';
@@ -327,11 +347,14 @@ export class BarInventoryController {
       };
       const existing = existingByName.get(nameKey);
       if (existing) {
-        await this.prisma.barInventoryItem.update({ where: { id: existing.id }, data: payload });
+        writes.push(this.prisma.barInventoryItem.update({ where: { id: existing.id }, data: payload }));
       } else {
-        await this.prisma.barInventoryItem.create({ data: { ...payload, createdAt: now } });
+        writes.push(this.prisma.barInventoryItem.create({ data: { ...payload, createdAt: now } }));
       }
       imported += 1;
+    }
+    if (writes.length) {
+      await this.prisma.$transaction(writes);
     }
     return { imported };
   }
@@ -401,7 +424,7 @@ export class BarInventoryController {
         throw new BadRequestException(json?.error?.message ?? 'OpenRouter inventory parse failed');
       }
       const rawText = json?.choices?.[0]?.message?.content ?? '{"notes":"","items":[]}';
-      parsed = JSON.parse(rawText);
+      parsed = parseAiInventoryJson(rawText);
     } else {
       const content: Array<Record<string, unknown>> = [
         {
@@ -476,13 +499,14 @@ export class BarInventoryController {
         json.output
           ?.flatMap((part: any) => part.content ?? [])
           .find((part: any) => part.type === 'output_text')?.text;
-      parsed = JSON.parse(outputText ?? '{"notes":"No output","items":[]}');
+      parsed = parseAiInventoryJson(outputText ?? '{"notes":"No output","items":[]}');
     }
+    const parsedItems = Array.isArray(parsed.items) ? parsed.items : [];
     return {
-      notes: parsed.notes ?? '',
-      items: (parsed.items ?? []).slice(0, 100).map((item: any) => ({
+      notes: typeof parsed.notes === 'string' ? parsed.notes : '',
+      items: parsedItems.slice(0, MAX_IMPORT_ITEMS).map((item: any) => ({
         name: String(item.name ?? ''),
-        category: item.category,
+        category: CATEGORIES.includes(item.category) ? item.category : 'other',
         area: cleanText(item.area),
         unit: String(item.unit || 'unit'),
         parLevel: Number(item.parLevel || 0),
