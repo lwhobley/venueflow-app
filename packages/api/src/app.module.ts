@@ -5,7 +5,6 @@ import { AuthGuard } from './auth/auth.guard';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
-import { BillingController } from './billing/billing.controller';
 import { HealthController } from './health.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -54,7 +53,6 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
   controllers: [
     HealthController,
     AuthController,
-    BillingController,
     AppController,
     SchedulingController,
     TimeClockController,
