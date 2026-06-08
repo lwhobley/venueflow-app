@@ -7,6 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Observable } from 'rxjs';
 import type { AuthenticatedRequest } from '../auth/auth.guard';
+import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -65,13 +66,19 @@ export class VenueScopeInterceptor implements NestInterceptor {
       return next.handle();
     }
 
+    const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
+      venueId: profile.venueId,
+      venueStatus: profile.venue.subscriptionStatus,
+      trialEndsAt: profile.trialEndsAt,
+    });
+
     request.venueScope = {
       profileId: profile.id,
       fullName: profile.fullName,
       venueId: profile.venueId,
       role: profile.role,
       allAccess: profile.allAccess,
-      subscriptionStatus: profile.venue.subscriptionStatus ?? null,
+      subscriptionStatus,
       trialEndsAt: profile.trialEndsAt ?? null,
     };
 

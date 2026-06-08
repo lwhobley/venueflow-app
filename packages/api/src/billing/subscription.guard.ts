@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
 import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveVenueSubscriptionStatus } from './subscription-status';
 
 /**
  * Guards routes behind active or paid subscription checks.
@@ -72,13 +73,19 @@ export class SubscriptionGuard implements CanActivate {
     });
     if (!profile?.venueId || !profile.venue) return null;
 
+    const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
+      venueId: profile.venueId,
+      venueStatus: profile.venue.subscriptionStatus,
+      trialEndsAt: profile.trialEndsAt,
+    });
+
     request.venueScope = {
       profileId: profile.id,
       fullName: profile.fullName,
       venueId: profile.venueId,
       role: profile.role,
       allAccess: profile.allAccess,
-      subscriptionStatus: profile.venue.subscriptionStatus ?? null,
+      subscriptionStatus,
       trialEndsAt: profile.trialEndsAt ?? null,
     };
     return request.venueScope;
