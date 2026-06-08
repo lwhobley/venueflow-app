@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useMutation as useReactMutation, useQuery as useReactQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from './api-client';
 import type { RailwayFunctionRef } from './railway-api';
@@ -295,7 +296,12 @@ export function useMutation(ref: RailwayFunctionRef): any {
       await Promise.all(invalidations.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
     },
   });
-  return (args: any) => mutation.mutateAsync(args);
+  // Return a STABLE callback. react-query's mutateAsync is referentially stable
+  // across renders, so this identity never changes — which makes it safe to use
+  // in useEffect dependency arrays. (A fresh function each render caused an
+  // infinite effect loop on the Chat tab's ensureChatSetup call.)
+  const mutateAsync = mutation.mutateAsync;
+  return useCallback((args: any) => mutateAsync(args), [mutateAsync]);
 }
 
 export function useAction(ref: RailwayFunctionRef): any {

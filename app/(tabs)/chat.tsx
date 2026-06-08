@@ -70,13 +70,16 @@ export default function ChatScreen() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Run chat setup once when the venue becomes ready. `ensureSetup` is
+  // intentionally excluded from deps — it must not re-trigger this effect.
   useEffect(() => {
     if (!isReady || !venue?.id) return;
     setError(null);
     void ensureSetup({ venueId: venue.id }).catch((e: unknown) => {
       setError(e instanceof Error ? e.message : 'Could not prepare chat.');
     });
-  }, [isReady, venue?.id, ensureSetup]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, venue?.id]);
 
   const groups = (conversations?.groups ?? []) as any[];
   const dms = (conversations?.dms ?? []) as any[];
