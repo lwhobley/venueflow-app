@@ -13,7 +13,7 @@
       "backgroundColor": "#F4FAFC"
     },
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
       "icon": "./assets/app-icon.png",
       "bundleIdentifier": "com.venuewrangler.app",
       "infoPlist": {
