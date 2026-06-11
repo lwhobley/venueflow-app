@@ -9,6 +9,7 @@ import { AllExceptionsFilter } from './common/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.enableShutdownHooks();
   const config = app.get(ConfigService);
   const origins = config
     .get<string>('CORS_ORIGINS', '')

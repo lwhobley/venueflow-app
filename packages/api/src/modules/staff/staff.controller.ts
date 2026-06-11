@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { IsEmail, IsIn, IsString } from 'class-validator';
 import { Role } from '@prisma/client';
-import { isAdminRole } from '../../auth/roles';
+import { canManageRole, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { mapProfile } from '../../common/mappers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -69,6 +69,7 @@ export class StaffController {
       existing.find((item) => item.email.toLowerCase() === body.email.toLowerCase()) ?? null;
 
     if (member) {
+      await this.assertCanManageTarget(scope, member);
       const updated = await this.prisma.profile.update({
         where: { id: member.id },
         data: {
@@ -106,11 +107,29 @@ export class StaffController {
     if (staff.venueId !== scope.venueId) {
       throw new ForbiddenException('Staff member does not belong to this venue');
     }
+    await this.assertCanManageTarget(scope, staff);
 
     const updated = await this.prisma.profile.update({
       where: { id: staff.id },
       data: { venueId: null },
     });
     return mapProfile(updated);
+  }
+
+  private async assertCanManageTarget(
+    scope: NonNullable<Scope>,
+    target: { id: string; role: Role; venueId: string | null },
+  ) {
+    if (!canManageRole(scope.role, target.role, scope.allAccess)) {
+      throw new ForbiddenException('You cannot modify this staff member');
+    }
+    if (isOwnerOrAdminRole(target.role)) {
+      const ownerAdminCount = await this.prisma.profile.count({
+        where: { venueId: scope.venueId, role: { in: ['owner', 'admin'] } },
+      });
+      if (ownerAdminCount <= 1) {
+        throw new ForbiddenException('You cannot remove the last owner or admin from the venue');
+      }
+    }
   }
 }
