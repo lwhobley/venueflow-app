@@ -11,15 +11,38 @@ export async function resolveVenueSubscriptionStatus(
     trialEndsAt?: Date | null;
   },
 ): Promise<SubscriptionStatus | null> {
+  const subscription = await prisma.subscription.findFirst({
+    where: { venueId: input.venueId },
+    orderBy: { updatedAt: 'desc' },
+    select: { id: true, status: true, trialEndsAt: true },
+  });
+
+  const trialEndsAt = subscription?.trialEndsAt ?? input.trialEndsAt ?? null;
+  const trialExpired = trialEndsAt ? trialEndsAt.getTime() <= Date.now() : true;
+
+  if (input.venueStatus === 'trialing') {
+    if (subscription?.status && subscription.status !== 'trialing') {
+      return subscription.status;
+    }
+    if (!trialExpired) {
+      return 'trialing';
+    }
+    await persistExpiredTrial(prisma, input.venueId, subscription?.id);
+    return 'expired';
+  }
+
   if (input.venueStatus && !TERMINAL_STATUSES.has(input.venueStatus)) {
     return input.venueStatus;
   }
 
-  const subscription = await prisma.subscription.findFirst({
-    where: { venueId: input.venueId },
-    orderBy: { updatedAt: 'desc' },
-    select: { status: true },
-  });
+  if (subscription?.status === 'trialing') {
+    if (!trialExpired) {
+      return 'trialing';
+    }
+    await persistExpiredTrial(prisma, input.venueId, subscription.id);
+    return 'expired';
+  }
+
   if (subscription?.status) {
     return subscription.status;
   }
@@ -28,9 +51,24 @@ export async function resolveVenueSubscriptionStatus(
     return input.venueStatus;
   }
 
-  if (input.trialEndsAt && input.trialEndsAt.getTime() > Date.now()) {
+  if (trialEndsAt && !trialExpired) {
     return 'trialing';
   }
 
-  return null;
+  return trialEndsAt ? 'expired' : null;
+}
+
+async function persistExpiredTrial(prisma: PrismaService, venueId: string, subscriptionId?: string) {
+  await Promise.all([
+    prisma.venue.updateMany({
+      where: { id: venueId, subscriptionStatus: 'trialing' },
+      data: { subscriptionStatus: 'expired' },
+    }),
+    subscriptionId
+      ? prisma.subscription.updateMany({
+          where: { id: subscriptionId, status: 'trialing' },
+          data: { status: 'expired' },
+        })
+      : Promise.resolve(),
+  ]);
 }

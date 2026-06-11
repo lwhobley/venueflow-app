@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { resolveVenueSubscriptionStatus } from './subscription-status';
 import type { PrismaService } from '../prisma/prisma.service';
 
-function fakePrisma(subscriptionStatus: string | null): PrismaService {
+function fakePrisma(subscriptionStatus: string | null, trialEndsAt?: Date | null): PrismaService {
   return {
     subscription: {
-      findFirst: async () => (subscriptionStatus ? { status: subscriptionStatus } : null),
+      findFirst: async () =>
+        subscriptionStatus ? { id: 'sub_1', status: subscriptionStatus, trialEndsAt: trialEndsAt ?? null } : null,
+      updateMany: async () => ({ count: 1 }),
+    },
+    venue: {
+      updateMany: async () => ({ count: 1 }),
     },
   } as unknown as PrismaService;
 }
@@ -36,12 +41,20 @@ describe('resolveVenueSubscriptionStatus', () => {
     expect(result).toBe('trialing');
   });
 
-  it('returns null when there is no status and the trial has expired', async () => {
+  it('expires a venue trial once the trial end has passed', async () => {
+    const result = await resolveVenueSubscriptionStatus(fakePrisma('trialing', new Date(Date.now() - 60_000)), {
+      venueId: 'v1',
+      venueStatus: 'trialing',
+    });
+    expect(result).toBe('expired');
+  });
+
+  it('returns expired when there is no status and the trial has expired', async () => {
     const result = await resolveVenueSubscriptionStatus(fakePrisma(null), {
       venueId: 'v1',
       venueStatus: null,
       trialEndsAt: new Date(Date.now() - 60_000),
     });
-    expect(result).toBeNull();
+    expect(result).toBe('expired');
   });
 });

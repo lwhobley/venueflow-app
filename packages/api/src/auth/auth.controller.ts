@@ -106,29 +106,69 @@ export class AuthController {
     if (invite?.email && invite.email.toLowerCase() !== email) {
       throw new UnauthorizedException('This invite was sent to a different email address.');
     }
-    const profile = await this.prisma.profile.upsert({
-      where: { userId },
-      update: {
-        email,
-        ...(fullName?.trim() ? { fullName: fullName.trim() } : {}),
-        ...(invite
-          ? {
-              venueId: invite.venueId,
-              role: invite.role,
-              jobTitle: invite.jobTitle,
-            }
-          : {}),
-      },
-      create: {
-        userId,
-        email,
-        fullName: fullName?.trim() || email.split('@')[0] || 'Team Member',
-        role: invite?.role ?? 'staff',
-        jobTitle: invite?.jobTitle ?? 'Staff',
-        venueId: invite?.venueId ?? undefined,
-        trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
-      },
-      include: { venue: true },
+    const trimmedFullName = fullName?.trim();
+    const profile = await this.prisma.$transaction(async (tx) => {
+      const existingByUser = await tx.profile.findUnique({
+        where: { userId },
+        include: { venue: true },
+      });
+      if (existingByUser) {
+        return tx.profile.update({
+          where: { id: existingByUser.id },
+          data: {
+            email,
+            ...(trimmedFullName ? { fullName: trimmedFullName } : {}),
+            ...(invite
+              ? {
+                  venueId: invite.venueId,
+                  role: invite.role,
+                  jobTitle: invite.jobTitle,
+                }
+              : {}),
+          },
+          include: { venue: true },
+        });
+      }
+
+      const claimedProfile = await tx.profile.findFirst({
+        where: {
+          userId: null,
+          email: { equals: email, mode: 'insensitive' },
+        },
+        orderBy: { createdAt: 'asc' },
+        include: { venue: true },
+      });
+      if (claimedProfile) {
+        return tx.profile.update({
+          where: { id: claimedProfile.id },
+          data: {
+            userId,
+            email,
+            fullName: trimmedFullName || claimedProfile.fullName,
+            ...(invite
+              ? {
+                  venueId: invite.venueId,
+                  role: invite.role,
+                  jobTitle: invite.jobTitle,
+                }
+              : {}),
+          },
+          include: { venue: true },
+        });
+      }
+
+      return tx.profile.create({
+        data: {
+          userId,
+          email,
+          fullName: trimmedFullName || email.split('@')[0] || 'Team Member',
+          role: invite?.role ?? 'staff',
+          jobTitle: invite?.jobTitle ?? 'Staff',
+          venueId: invite?.venueId ?? undefined,
+          trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
+        },
+        include: { venue: true },
+      });
     });
 
     if (invite && !invite.usedBy) {

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { Role, SubscriptionStatus } from '@prisma/client';
@@ -6,6 +6,8 @@ import { randomBytes } from 'crypto';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
+import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { assertWithinGeofence } from '../../common/geofence';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -152,20 +154,6 @@ function dayLabel(dayIndex: number) {
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayIndex] ?? 'Day';
 }
 
-function assertWithinGeofence(lat: number, lng: number, accuracy: number, mocked: boolean, venue: { latitude: number; longitude: number; geofenceRadiusM: number }) {
-  if (mocked) throw new Error('Mocked locations are not allowed.');
-  if (accuracy > 50) throw new Error('Location accuracy must be 50m or better.');
-  const earthRadius = 6371000;
-  const toRadians = (value: number) => (value * Math.PI) / 180;
-  const deltaLat = toRadians(lat - venue.latitude);
-  const deltaLng = toRadians(lng - venue.longitude);
-  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(toRadians(venue.latitude)) * Math.cos(toRadians(lat)) * Math.sin(deltaLng / 2) ** 2;
-  const distance = 2 * earthRadius * Math.asin(Math.min(1, Math.sqrt(a)));
-  if (distance > venue.geofenceRadiusM) {
-    throw new Error('You are outside the venue geofence.');
-  }
-}
-
 @Controller('v1/app')
 export class AppController {
   constructor(
@@ -213,9 +201,9 @@ export class AppController {
   async registerVenue(@CurrentUser() user: AuthUser, @Body() body: RegisterVenueDto) {
     await this.ensureUser(user);
     const businessName = body.businessName.trim();
-    if (!businessName) throw new Error('Enter your business name');
-    if (body.staffRange === '50+') throw new Error('For 50+ staff, please contact admin@venuewrangler.com to set up your account.');
-    if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new Error('Choose a staff size range');
+    if (!businessName) throw new BadRequestException('Enter your business name');
+    if (body.staffRange === '50+') throw new BadRequestException('For 50+ staff, please contact admin@venuewrangler.com to set up your account.');
+    if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new BadRequestException('Choose a staff size range');
 
     const existingProfile = await this.getProfile(user);
     if (existingProfile?.venue) {
@@ -500,11 +488,11 @@ export class AppController {
   @Post('notifications/:id/read')
   async markNotificationRead(@CurrentUser() user: AuthUser, @Param('id') notificationId: string) {
     const profile = await this.getProfile(user);
-    if (!profile?.venueId) throw new Error('Profile is not initialized');
+    if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
     const row = await this.prisma.notificationEvent.findFirst({ where: { id: notificationId, venueId: profile.venueId } });
     if (!row) throw new NotFoundException('Notification not found');
     const canRead = row.audience === 'staff' || (row.audience === 'managers' && isAdminRole(profile.role)) || (row.audience === 'profile' && row.profileId === profile.id);
-    if (!canRead) throw new Error('Not authorized');
+    if (!canRead) throw new ForbiddenException('Not authorized');
     await this.prisma.notificationRead.upsert({
       where: { notificationId_profileId: { notificationId, profileId: profile.id } },
       update: { readAt: new Date() },
@@ -566,10 +554,10 @@ export class AppController {
   async clockIn(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
     const profile = await this.requireVenueProfile(user);
     const venue = profile.venue;
-    if (!venue) throw new Error('Assigned venue not found');
+    if (!venue) throw new ForbiddenException('Assigned venue not found');
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
-    if (existing) throw new Error('Already clocked in');
+    if (existing) throw new BadRequestException('Already clocked in');
     const entry = await this.prisma.timeEntry.create({
       data: {
         profileId: profile.id,
@@ -591,10 +579,10 @@ export class AppController {
   async clockOut(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
     const profile = await this.requireVenueProfile(user);
     const venue = profile.venue;
-    if (!venue) throw new Error('Assigned venue not found');
+    if (!venue) throw new ForbiddenException('Assigned venue not found');
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
-    if (!existing) throw new Error('No active clock-in found');
+    if (!existing) throw new BadRequestException('No active clock-in found');
     const entry = await this.prisma.timeEntry.update({
       where: { id: existing.id },
       data: {
@@ -623,12 +611,15 @@ export class AppController {
   @Post('staff')
   async upsertVenueStaff(@CurrentUser() user: AuthUser, @Body() body: StaffDto) {
     const viewer = await this.requireManagerProfile(user);
-    if (viewer.venueId !== body.venueId) throw new Error('Not authorized');
+    if (viewer.venueId !== body.venueId) throw new ForbiddenException('Not authorized');
     const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess;
     if (!viewerIsOwnerOrAdmin && ['admin', 'owner', 'manager'].includes(body.role)) {
-      throw new Error('Managers cannot assign admin, owner, or manager roles');
+      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
     }
     const existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
+    if (existing) {
+      await this.assertCanManageLegacyStaffTarget(viewer, existing);
+    }
     const row = existing
       ? await this.prisma.profile.update({
           where: { id: existing.id },
@@ -646,6 +637,7 @@ export class AppController {
     const viewer = await this.requireManagerProfile(user);
     const staff = await this.prisma.profile.findFirst({ where: { id: staffId, venueId: viewer.venueId! } });
     if (!staff) throw new NotFoundException('Staff member not found');
+    await this.assertCanManageLegacyStaffTarget(viewer, staff);
     const updated = await this.prisma.profile.update({ where: { id: staff.id }, data: { venueId: null } });
     return this.mapProfile(updated);
   }
@@ -666,7 +658,7 @@ export class AppController {
   async addVenueRole(@CurrentUser() user: AuthUser, @Body() body: VenueRoleDto) {
     const profile = await this.requireManagerProfile(user);
     const name = body.name.trim();
-    if (!name) throw new Error('Enter a role name');
+    if (!name) throw new BadRequestException('Enter a role name');
     const existing = await this.prisma.venueRole.findFirst({
       where: { venueId: profile.venueId!, name: { equals: name, mode: 'insensitive' } },
     });
@@ -716,6 +708,14 @@ export class AppController {
   async deleteMyAccount(@CurrentUser() user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile) return { ok: true };
+    if (isOwnerOrAdminRole(profile.role)) {
+      const ownerAdminCount = await this.prisma.profile.count({
+        where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } },
+      });
+      if (ownerAdminCount <= 1) {
+        throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
+      }
+    }
     await this.prisma.$transaction([
       this.prisma.pushToken.deleteMany({ where: { profileId: profile.id } }),
       this.prisma.availability.deleteMany({ where: { profileId: profile.id } }),
@@ -748,22 +748,39 @@ export class AppController {
 
   private async requireVenueProfile(user: AuthUser) {
     const profile = await this.getProfile(user);
-    if (!profile?.venue) throw new Error('Profile is not initialized');
+    if (!profile?.venue) throw new ForbiddenException('Profile is not initialized');
     return profile;
   }
 
   private async requireManagerProfile(user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
-    if (!isAdminRole(profile.role)) throw new Error('Not authorized');
+    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
     return profile;
   }
 
   private async requireBillingProfile(user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
     if (!(profile.role === 'admin' || profile.role === 'owner' || profile.allAccess)) {
-      throw new Error('Not authorized');
+      throw new ForbiddenException('Not authorized');
     }
     return profile;
+  }
+
+  private async assertCanManageLegacyStaffTarget(
+    viewer: { role: Role; allAccess: boolean; venueId: string | null },
+    target: { id: string; role: Role; venueId: string | null },
+  ) {
+    if (!canManageRole(viewer.role, target.role, viewer.allAccess)) {
+      throw new ForbiddenException('You cannot modify this staff member');
+    }
+    if (isOwnerOrAdminRole(target.role)) {
+      const ownerAdminCount = await this.prisma.profile.count({
+        where: { venueId: viewer.venueId, role: { in: ['owner', 'admin'] } },
+      });
+      if (ownerAdminCount <= 1) {
+        throw new ForbiddenException('You cannot remove the last owner or admin from the venue');
+      }
+    }
   }
 
   private async verifyRevenueCatEntitlement(venueId: string, productId: string, entitlementId?: string) {

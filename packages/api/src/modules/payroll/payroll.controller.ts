@@ -61,9 +61,9 @@ async function buildPayrollRows(
       where: {
         venueId,
         clockInAt: { lte: periodEnd },
-        clockOutAt: { not: null },
+        clockOutAt: { not: null, gte: periodStart },
       },
-      take: 2000,
+      orderBy: { clockInAt: 'asc' },
     }),
   ]);
 

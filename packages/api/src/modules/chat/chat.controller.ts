@@ -64,7 +64,7 @@ export class ChatController {
     const nameById = new Map(staff.map((s) => [s.id, s.fullName]));
 
     const groups = all
-      .filter((c) => c.type === 'group')
+      .filter((c) => c.type === 'group' && canAccessConversation(c.memberIds, c.type, scope.profileId))
       .map((c) => ({
         _id: c.id,
         id: c.id,
@@ -211,8 +211,7 @@ export class ChatController {
     });
     if (!conv) throw new NotFoundException('Conversation not found');
 
-    // DM access check
-    if (conv.type === 'dm' && !conv.memberIds.includes(scope.profileId)) {
+    if (!canAccessConversation(conv.memberIds, conv.type, scope.profileId)) {
       throw new ForbiddenException('Not a participant');
     }
 
@@ -258,7 +257,7 @@ export class ChatController {
     });
     if (!conv) throw new NotFoundException('Conversation not found');
 
-    if (conv.type === 'dm' && !conv.memberIds.includes(scope.profileId)) {
+    if (!canAccessConversation(conv.memberIds, conv.type, scope.profileId)) {
       throw new ForbiddenException('Not a participant');
     }
 
@@ -286,4 +285,14 @@ export class ChatController {
 
     return { _id: msg.id, id: msg.id };
   }
+}
+
+function canAccessConversation(memberIds: string[], type: string, profileId: string) {
+  if (type === 'dm') {
+    return memberIds.includes(profileId);
+  }
+  if (type === 'group' && memberIds.length > 0) {
+    return memberIds.includes(profileId);
+  }
+  return true;
 }

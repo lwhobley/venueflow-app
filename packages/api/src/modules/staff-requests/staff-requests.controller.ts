@@ -179,6 +179,9 @@ export class StaffRequestsController {
     if (request.venueId !== scope.venueId) {
       throw new ForbiddenException('Request does not belong to this venue');
     }
+    if (request.status !== 'pending') {
+      throw new BadRequestException('Only pending requests can be reviewed');
+    }
 
     const reviewer = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
     const updated = await this.prisma.staffRequest.update({
