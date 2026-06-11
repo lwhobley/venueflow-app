@@ -9,6 +9,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling } from '../../lib/permissions';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
+const MONTHLY_PLAN_LABEL = '$29.99 / month';
 
 export default function BillingScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
@@ -44,12 +45,12 @@ export default function BillingScreen() {
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
           <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'Not configured'}</Text>
           {billing ? <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in trial</Text> : null}
-          <Text style={{ color: colors.muted }}>Subscriptions renew monthly and unlock the full app.</Text>
-          <Text style={{ color: colors.muted }}>Current plan: {billing?.planId ?? 'Not subscribed'}</Text>
+          <Text style={{ color: colors.muted }}>The paid plan renews monthly and unlocks the full app.</Text>
+          <Text style={{ color: colors.muted }}>Current plan: {billing ? MONTHLY_PLAN_LABEL : 'Not subscribed'}</Text>
           <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
 
           <Button mode="contained" buttonColor={colors.primary} onPress={() => router.push('/billing/paywall')}>
-            See plans
+            See pricing
           </Button>
           <Button mode="outlined" textColor={colors.primary} onPress={() => void Linking.openURL(APPLE_SUBSCRIPTIONS_URL)}>
             Manage subscription

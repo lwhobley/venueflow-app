@@ -13,6 +13,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
+const FLAT_PLAN_ID = 'venueflow_monthly';
+const FLAT_PLAN_PRICE_CENTS = 2999;
 
 class BootstrapProfileDto {
   @IsEmail()
@@ -138,9 +140,8 @@ function isAdminRole(role: Role) {
 }
 
 function planForStaffRange(range: string) {
-  if (range === '16-30') return { planId: 'venueflow_growth_30_monthly', priceCents: 14999 };
-  if (range === '31-50') return { planId: 'venueflow_pro_50_monthly', priceCents: 29999 };
-  return { planId: 'venueflow_starter_15_monthly', priceCents: 7999 };
+  void range;
+  return { planId: FLAT_PLAN_ID, priceCents: FLAT_PLAN_PRICE_CENTS };
 }
 
 function toMs(date: Date | null | undefined) {
@@ -207,7 +208,6 @@ export class AppController {
     await this.ensureUser(user);
     const businessName = body.businessName.trim();
     if (!businessName) throw new BadRequestException('Enter your business name');
-    if (body.staffRange === '50+') throw new BadRequestException('For 50+ staff, please contact admin@venuewrangler.com to set up your account.');
     if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new BadRequestException('Choose a staff size range');
 
     const existingProfile = await this.getProfile(user);

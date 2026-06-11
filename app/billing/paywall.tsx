@@ -16,13 +16,16 @@ const TERMS_URL = 'https://venuewrangler.com/terms';
 const PRIVACY_URL = 'https://venuewrangler.com/privacy';
 
 // Shown when RevenueCat returns no live offering yet — e.g. Expo Go / dev
-// (no native key), or before the App Store subscriptions are approved. Keeps
-// the three tiers visible so the screen is never blank. Real packages from
+// (no native key), or before the App Store subscription is approved. Keeps
+// the default plan visible so the screen is never blank. Real packages from
 // getOfferingPackages() override this whenever they're available.
 const FALLBACK_TIERS: PurchasePackage[] = [
-  { id: 'starter', title: 'Starter', priceString: '$79.99', productId: 'com.venuewrangler.starter.monthly' },
-  { id: 'pro', title: 'Pro', priceString: '$149.99', productId: 'com.venuewrangler.pro.monthly' },
-  { id: 'enterprise', title: 'Enterprise', priceString: '$299.99', productId: 'com.venuewrangler.enterprise.monthly' },
+  {
+    id: 'venueflow-monthly',
+    title: 'Venue Wrangler',
+    priceString: '$29.99',
+    productId: 'com.venuewrangler.monthly',
+  },
 ];
 
 export default function PaywallScreen() {
@@ -90,7 +93,7 @@ export default function PaywallScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
         <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Add your team</Text>
-        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Subscribe to invite staff and share scheduling, the live floor, time clock, and team chat across your whole team.</Text>
+        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Upgrade to one flat monthly plan to invite staff and share scheduling, the live floor, time clock, and team chat across your whole team.</Text>
       </View>
 
       {!PURCHASES_SUPPORTED ? (
@@ -100,7 +103,7 @@ export default function PaywallScreen() {
           </Card.Content>
         </Card>
       ) : loading ? (
-        <Text style={{ color: colors.muted }}>Loading plans…</Text>
+        <Text style={{ color: colors.muted }}>Loading pricing…</Text>
       ) : (
         (packages.length ? packages : FALLBACK_TIERS).map((pkg) => {
           const live = packages.length > 0;
@@ -110,7 +113,7 @@ export default function PaywallScreen() {
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
                 <Text style={{ color: colors.success, fontWeight: '600' }}>Includes 14-day free trial</Text>
-                <Text style={{ color: colors.muted }}>Solo use is free. Subscribe to add team members and unlock scheduling, reservations, and team chat.</Text>
+                <Text style={{ color: colors.muted }}>Solo use is free. Upgrade to unlock team scheduling, reservations, the live floor, and team chat.</Text>
                 <Button mode="contained" buttonColor={colors.primary} loading={busy === pkg.id} disabled={!!busy || !live} onPress={() => void buy(pkg.id)}>
                   Subscribe
                 </Button>
@@ -122,7 +125,7 @@ export default function PaywallScreen() {
 
       {!loading && PURCHASES_SUPPORTED && packages.length === 0 ? (
         <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-          Purchasing activates in the App Store build. These plans are shown for preview.
+          Purchasing activates in the App Store build. This pricing is shown for preview.
         </Text>
       ) : null}
 
