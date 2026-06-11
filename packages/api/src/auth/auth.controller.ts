@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import type { Request } from 'express';
-import { pbkdf2, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, pbkdf2, randomBytes, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 
 const pbkdf2Async = promisify(pbkdf2);
@@ -14,6 +14,8 @@ import { createRateLimiter } from '../common/rate-limit';
 import { PrismaService } from '../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+// Matches the JWT's 30-day expiry so a session and its token expire together.
+const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 210_000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
@@ -127,6 +129,28 @@ export class AuthController {
       update: { salt: next.salt, passwordHash: next.hash, iterations: PASSWORD_ITERATIONS },
       create: { userId: user.sub, salt: next.salt, passwordHash: next.hash, iterations: PASSWORD_ITERATIONS },
     });
+    // Revoke every other session so a leaked/old token can't survive a password
+    // change; the caller's current session (if any) stays valid.
+    await this.prisma.session.deleteMany({
+      where: { userId: user.sub, ...(user.sid ? { NOT: { id: user.sid } } : {}) },
+    });
+    return { ok: true };
+  }
+
+  // Revoke the current session (this device). The bearer token stops working
+  // immediately on the next request.
+  @Post('logout')
+  async logout(@CurrentUser() user: AuthUser) {
+    if (user.sid) {
+      await this.prisma.session.deleteMany({ where: { id: user.sid, userId: user.sub } });
+    }
+    return { ok: true };
+  }
+
+  // Revoke every session for the account (all devices).
+  @Post('logout-all')
+  async logoutAll(@CurrentUser() user: AuthUser) {
+    await this.prisma.session.deleteMany({ where: { userId: user.sub } });
     return { ok: true };
   }
 
@@ -213,10 +237,22 @@ export class AuthController {
       return result;
     });
 
+    // Create a revocable session and bind the JWT to it (sid). The session is
+    // deleted on logout / password change / account deletion, invalidating the
+    // token before its 30-day JWT expiry.
+    const session = await this.prisma.session.create({
+      data: { userId, expiresAt: new Date(Date.now() + SESSION_DURATION_MS) },
+      select: { id: true },
+    });
     const token = await this.jwt.signAsync({
       sub: userId,
       email,
       name: profile.fullName,
+      sid: session.id,
+    });
+    await this.prisma.session.update({
+      where: { id: session.id },
+      data: { tokenHash: createHash('sha256').update(token).digest('hex') },
     });
 
     return {

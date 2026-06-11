@@ -979,7 +979,8 @@ model PaymentMethod {
 model Invoice {
   id               String    @id @default(cuid())
   venueId          String
-  stripeInvoiceId  String
+  // Unique so retried Stripe invoice webhooks upsert one row per invoice.
+  stripeInvoiceId  String    @unique
   amountCents      Int
   currency         String
   status           String
@@ -992,7 +993,6 @@ model Invoice {
   venue            Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, createdAt])
-  @@index([stripeInvoiceId])
 }
 
 model CosmicInsight {

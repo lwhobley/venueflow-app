@@ -21,7 +21,18 @@ async function bootstrap() {
     .filter(Boolean);
 
   app.use(helmet());
-  app.use(json({ limit: config.get<string>('JSON_BODY_LIMIT', '8mb') }));
+  app.use(
+    json({
+      limit: config.get<string>('JSON_BODY_LIMIT', '8mb'),
+      // Stash the raw bytes only for the Stripe webhook, which needs them to
+      // verify the signature (the parsed JSON is not byte-identical).
+      verify: (req: any, _res, buf) => {
+        if (typeof req.url === 'string' && req.url.includes('/billing/stripe/webhook')) {
+          req.rawBody = buf;
+        }
+      },
+    }),
+  );
   app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
   // Fail closed: only origins explicitly listed in CORS_ORIGINS are allowed.
   // Native mobile clients don't send an Origin header, so this does not affect
