@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Venue Wrangler — Restaurant &amp; Venue Operations, All in One App</title>
+  <meta name="description" content="Scheduling, geofenced time clock, reservations, live floor plan, team chat, bar inventory, and POS sales reporting — built for restaurants, bars, and event venues." />
+  <meta property="og:title" content="Venue Wrangler — Run your venue from one app" />
+  <meta property="og:description" content="Scheduling, time clock, reservations, floor management, team chat, and sales reporting for venue teams." />
+  <meta property="og:image" content="https://venue-wrangler.pages.dev/assets/01-dashboard.png" />
+  <style>
+    :root {
+      --green: #2F7D46; --green-dark: #256137; --bg: #F4FAFC; --surface: #FFFFFF;
+      --text: #1F241E; --muted: #6F766B; --border: #E8E2D8; --cream: #FBF7EF;
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    a { color: var(--green); }
+
+    /* Nav */
+    nav { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; max-width: 1080px; margin: 0 auto; }
+    .nav-logo { height: 40px; }
+    .nav-links { display: flex; gap: 20px; align-items: center; }
+    .nav-links a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+    .nav-links a:hover { color: var(--green); }
+    @media (max-width: 720px) { .nav-links a:not(.btn) { display: none; } }
+
+    .btn { display: inline-block; background: var(--green); color: #fff !important; font-weight: 700; padding: 12px 22px; border-radius: 10px; text-decoration: none; }
+    .btn:hover { background: var(--green-dark); }
+    .btn.ghost { background: transparent; color: var(--green) !important; border: 2px solid var(--green); }
+
+    /* Hero */
+    header.hero { padding: 72px 0 48px; }
+    .hero-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 48px; align-items: center; }
+    @media (max-width: 860px) { .hero-grid { grid-template-columns: 1fr; } }
+    .hero h1 { font-size: clamp(2rem, 4.5vw, 3.1rem); line-height: 1.15; margin: 0 0 16px; color: var(--green); }
+    .hero p.lead { font-size: 1.15rem; color: var(--muted); margin: 0 0 28px; }
+    .hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+    .hero-shot { width: 100%; max-width: 340px; margin: 0 auto; display: block; border-radius: 28px; border: 1px solid var(--border); box-shadow: 0 24px 48px rgba(47,125,70,0.18); }
+
+    section { padding: 56px 0; }
+    section.alt { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    h2 { font-size: 1.8rem; color: var(--green); margin: 0 0 8px; }
+    .kicker { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.8rem; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
+    .sub { color: var(--muted); max-width: 640px; margin-bottom: 32px; }
+
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+    @media (max-width: 860px) { .grid3, .grid4 { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 540px) { .grid3, .grid4 { grid-template-columns: 1fr; } }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+    section.alt .card { background: var(--cream); }
+    .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+    .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    .emoji { font-size: 1.6rem; display: block; margin-bottom: 8px; }
+
+    /* ROI */
+    .roi .card { text-align: center; }
+    .roi .num { font-size: 2.2rem; font-weight: 800; color: var(--green); display: block; }
+
+    /* Screenshots */
+    .shots { display: flex; gap: 18px; overflow-x: auto; padding: 8px 4px 20px; scroll-snap-type: x mandatory; }
+    .shots img { height: 480px; border-radius: 22px; border: 1px solid var(--border); box-shadow: 0 12px 28px rgba(31,36,30,0.12); scroll-snap-align: center; }
+    @media (max-width: 540px) { .shots img { height: 380px; } }
+
+    /* Video */
+    .video-frame { position: relative; width: 100%; aspect-ratio: 16/9; background: #14241a; border-radius: 16px; overflow: hidden; display: flex; align-items: center; justify-content: center; color: #cfe5d6; text-align: center; padding: 24px; }
+    .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+    footer { background: var(--surface); border-top: 1px solid var(--border); padding: 40px 0; color: var(--muted); font-size: 0.9rem; }
+    .foot-grid { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; align-items: center; }
+    .foot-links { display: flex; gap: 18px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <img class="nav-logo" src="/assets/logo.jpg" alt="Venue Wrangler" />
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#who">Who it's for</a>
+      <a href="#roi">ROI</a>
+      <a href="#demo">Demo</a>
+      <a class="btn" href="https://apps.apple.com/app/id6772533789">Download on the App&nbsp;Store</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <h1>Run your whole venue from one app.</h1>
+      <p class="lead">Scheduling, geofenced time clock, reservations, a live floor plan, team chat, bar inventory, and POS sales reporting — built for the people running restaurants, bars, and event venues, not for spreadsheets.</p>
+      <div class="hero-ctas">
+        <a class="btn" href="https://apps.apple.com/app/id6772533789">Get Venue Wrangler for iOS</a>
+        <a class="btn ghost" href="#demo">Watch the demo</a>
+      </div>
+    </div>
+    <img class="hero-shot" src="/assets/01-dashboard.png" alt="Venue Wrangler manager dashboard showing live operations" />
+  </div>
+</header>
+
+<section class="alt" id="who">
+  <div class="wrap">
+    <div class="kicker">Who it serves</div>
+    <h2>Built for venue teams, front and back of house</h2>
+    <p class="sub">One app, every role. Managers get visibility; staff get clarity on when, where, and what.</p>
+    <div class="grid4">
+      <div class="card"><span class="emoji">🍽️</span><h3>Restaurants</h3><p>Full-service spots juggling covers, sections, and tight labor targets.</p></div>
+      <div class="card"><span class="emoji">🍸</span><h3>Bars &amp; lounges</h3><p>Bar stock counts, shift swaps, and late-night close-outs without group texts.</p></div>
+      <div class="card"><span class="emoji">🎉</span><h3>Event venues</h3><p>BEOs, leads, and contracts in the same place as the floor plan they affect.</p></div>
+      <div class="card"><span class="emoji">🏨</span><h3>Hospitality groups</h3><p>GMs and owners who want one operational picture per venue.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="kicker">Capabilities</div>
+    <h2>Everything the shift actually needs</h2>
+    <p class="sub">Stop stitching together five tools. Venue Wrangler covers the operational core in one place.</p>
+    <div class="grid3">
+      <div class="card"><span class="emoji">📅</span><h3>Smart scheduling</h3><p>Build weekly schedules in minutes, copy days, apply templates, manage swaps and open-shift claims, and publish to everyone at once.</p></div>
+      <div class="card"><span class="emoji">📍</span><h3>Geofenced time clock</h3><p>Clock-ins only count at the venue. Mocked locations are rejected, late clock-ins and missed clock-outs alert the manager.</p></div>
+      <div class="card"><span class="emoji">🪑</span><h3>Live floor plan</h3><p>Seat parties, track table states, merge tables, and bind reservations and waitlist to real tables in real time.</p></div>
+      <div class="card"><span class="emoji">📖</span><h3>Reservations &amp; waitlist</h3><p>A reservation book with statuses, CSV export, and integrations — synced to the floor.</p></div>
+      <div class="card"><span class="emoji">💬</span><h3>Team chat</h3><p>All-staff channel, groups, and DMs scoped to your venue. No more managing the group text.</p></div>
+      <div class="card"><span class="emoji">📊</span><h3>POS sales reporting</h3><p>Sales summary, by-server performance, top menu items, and labor versus sales — straight from your POS data.</p></div>
+      <div class="card"><span class="emoji">🍾</span><h3>Bar inventory</h3><p>Stock levels, movement logs, low-stock flags, and AI-assisted import from photos of your count sheets.</p></div>
+      <div class="card"><span class="emoji">🤝</span><h3>Events CRM</h3><p>Leads, notes, BEOs, and contracts for private events — convert a lead to a booked floor.</p></div>
+      <div class="card"><span class="emoji">🧾</span><h3>Payroll exports</h3><p>Hours roll up per employee from real punches. Export clean CSVs for your payroll provider.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt roi" id="roi">
+  <div class="wrap">
+    <div class="kicker">Return on investment</div>
+    <h2>Where the money comes back</h2>
+    <p class="sub">Venue margins live and die on labor and no-shows. Tightening both pays for the tool many times over.</p>
+    <div class="grid4">
+      <div class="card"><span class="num">Hours → minutes</span><p>Schedule building with templates and copy-day instead of spreadsheets.</p></div>
+      <div class="card"><span class="num">Stop buddy punches</span><p>Geofenced, anti-mock clock-ins mean you pay for hours actually worked on site.</p></div>
+      <div class="card"><span class="num">Catch overtime early</span><p>Live labor versus sales and missed clock-out alerts before payroll runs.</p></div>
+      <div class="card"><span class="num">Fill more seats</span><p>Reservations bound to a live floor cut no-show losses and dead tables.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <div class="kicker">See the app</div>
+    <h2>Designed for the pass, not the back office</h2>
+    <p class="sub">Fast, legible screens that work in a Friday-night rush.</p>
+  </div>
+  <div class="wrap">
+    <div class="shots">
+      <img src="/assets/01-dashboard.png" alt="Today dashboard with clocked-in staff, covers, open shifts, and labor target" />
+      <img src="/assets/02-schedule.png" alt="Weekly schedule builder" />
+      <img src="/assets/03-timeclock.png" alt="Geofenced time clock" />
+      <img src="/assets/04-floorplan.png" alt="Live floor plan with table states" />
+      <img src="/assets/05-chat.png" alt="Team chat" />
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="demo">
+  <div class="wrap">
+    <div class="kicker">Watch</div>
+    <h2>Two minutes, whole picture</h2>
+    <p class="sub">A quick walkthrough of a real shift in Venue Wrangler — from schedule to close-out.</p>
+    <!-- DEMO VIDEO: replace the placeholder div below with your embed, e.g.
+         <div class="video-frame"><iframe src="https://www.youtube.com/embed/VIDEO_ID" title="Venue Wrangler demo" allowfullscreen></iframe></div> -->
+    <div class="video-frame">
+      <p>🎬 Demo video coming soon.<br/>Meanwhile, <a href="https://apps.apple.com/app/id6772533789" style="color:#9fd4ae">download the app</a> and look around — solo use is free.</p>
+    </div>
+    <div style="height:20px"></div>
+    <!-- VIRAL / SOCIAL AD: replace with your short-form vertical embed (TikTok/Reels/Shorts), e.g.
+         <div class="video-frame"><iframe src="https://www.youtube.com/embed/SHORTS_ID" title="Venue Wrangler ad" allowfullscreen></iframe></div> -->
+  </div>
+</section>
+
+<section>
+  <div class="wrap" style="text-align:center">
+    <h2>Bring order to the chaos.</h2>
+    <p class="sub" style="margin-left:auto;margin-right:auto">Download Venue Wrangler, set up your venue, and invite your team.</p>
+    <a class="btn" href="https://apps.apple.com/app/id6772533789">Download on the App Store</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-grid">
+    <div>&copy; 2026 Loungeability LLC &middot; Venue Wrangler</div>
+    <div class="foot-links">
+      <a href="/support/">Support</a>
+      <a href="/privacy/">Privacy Policy</a>
+      <a href="/terms/">Terms (EULA)</a>
+      <a href="mailto:support@venuewrangler.com">Contact</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
