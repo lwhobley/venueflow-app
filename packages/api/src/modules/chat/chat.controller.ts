@@ -241,7 +241,7 @@ export class ChatController {
         _id: m.id,
         id: m.id,
         text: m.text,
-        senderName: nameById.get(m.senderId) ?? 'Someone',
+        senderName: (m.senderId && nameById.get(m.senderId)) || 'Former teammate',
         createdAt: m.createdAt.getTime(),
         mine: m.senderId === scope.profileId,
       })),

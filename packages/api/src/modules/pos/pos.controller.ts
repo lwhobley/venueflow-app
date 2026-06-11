@@ -3,24 +3,13 @@ import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { isAdminRole } from '../../auth/roles';
+import { zonedDayBounds, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
-
-function dayBounds(offsetDays: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  d.setHours(0, 0, 0, 0);
-  return { start: d.getTime(), end: d.getTime() + 86_400_000 };
-}
-
-function isoDate(ts: number) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 
@@ -70,12 +59,19 @@ export class PosController {
     if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
   }
 
+  // The venue's IANA timezone (null -> UTC). Daily buckets and "today" are
+  // computed in the venue's business day, not the server's.
+  private async venueTimezone(venueId: string): Promise<string | null> {
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } });
+    return venue?.timezone ?? null;
+  }
+
   // Resolve the [start, end) window for a sales query, defaulting to the last
-  // `windowDays` days (inclusive of today).
-  private resolveWindow(query: SalesWindowQueryDto) {
+  // `windowDays` venue-local days (inclusive of today).
+  private resolveWindow(query: SalesWindowQueryDto, tz: string | null) {
     const windowDays = Math.min(Math.max(1, Math.round(query.windowDays ?? 7)), 90);
-    const start = query.startTs ?? dayBounds(-windowDays + 1).start;
-    const end = query.endTs !== undefined ? query.endTs + 1 : dayBounds(1).start;
+    const start = query.startTs ?? zonedDayBounds(tz, -windowDays + 1).start;
+    const end = query.endTs !== undefined ? query.endTs + 1 : zonedDayBounds(tz, 0).end;
     return { start: new Date(start), end: new Date(end) };
   }
 
@@ -84,8 +80,8 @@ export class PosController {
   async getPosOverview(@VenueScope() scope: Scope) {
     this.requireManager(scope);
     const venueId = scope.venueId;
-    const { start: dayStart } = dayBounds(0);
-    const dayStartDate = new Date(dayStart);
+    const tz = await this.venueTimezone(venueId);
+    const dayStartDate = new Date(zonedDayBounds(tz, 0).start);
 
     const [connections, recentChecks, todayTotals, openChecks] = await Promise.all([
       this.prisma.posConnection.findMany({ where: { venueId }, take: 10 }),
@@ -118,7 +114,9 @@ export class PosController {
   async getSalesSummaryDashboard(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
     this.requireManager(scope);
     const venueId = scope.venueId;
-    const { start, end } = this.resolveWindow(query);
+    const tz = await this.venueTimezone(venueId);
+    const sqlTz = tz ?? 'UTC';
+    const { start, end } = this.resolveWindow(query, tz);
 
     // Aggregate in SQL so totals are correct regardless of volume (no row cap).
     const [totalsRows, byDayRows, byTender, byRevenueCenter] = await Promise.all([
@@ -148,7 +146,9 @@ export class PosController {
       this.prisma.$queryRaw<
         Array<{ date: string; salesCents: bigint; checkCount: number; coverCount: bigint }>
       >`
-        SELECT to_char("openedAt", 'YYYY-MM-DD') AS date,
+        -- Columns are timestamp-without-tz storing UTC; render in venue tz so
+        -- daily buckets follow the venue's business day.
+        SELECT to_char(("openedAt" AT TIME ZONE 'UTC') AT TIME ZONE ${sqlTz}, 'YYYY-MM-DD') AS date,
           COALESCE(SUM("totalCents"), 0)::bigint AS "salesCents",
           COUNT(*)::int AS "checkCount",
           COALESCE(SUM(COALESCE("guestCount", 1)), 0)::bigint AS "coverCount"
@@ -217,7 +217,7 @@ export class PosController {
   @Get('sales/by-server')
   async getSalesByServer(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
     this.requireManager(scope);
-    const { start, end } = this.resolveWindow(query);
+    const { start, end } = this.resolveWindow(query, await this.venueTimezone(scope.venueId));
 
     const rows = await this.prisma.posCheck.groupBy({
       by: ['serverName'],
@@ -248,7 +248,7 @@ export class PosController {
   @Get('sales/top-items')
   async getTopMenuItems(@VenueScope() scope: Scope, @Query() query: TopItemsQueryDto) {
     this.requireManager(scope);
-    const { start, end } = this.resolveWindow(query);
+    const { start, end } = this.resolveWindow(query, await this.venueTimezone(scope.venueId));
     const cap = Math.min(Math.max(1, Math.round(query.limit ?? 20)), 50);
 
     // Unnest the menuItems JSON array and aggregate in SQL (no row cap).
@@ -283,9 +283,10 @@ export class PosController {
   @Get('labor')
   async getLaborSummary(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
     this.requireManager(scope);
+    const tz = await this.venueTimezone(scope.venueId);
     const windowDays = Math.min(Math.max(1, Math.round(query.windowDays ?? 7)), 90);
-    const startDate = isoDate(query.startTs ?? dayBounds(-windowDays + 1).start);
-    const endDate = isoDate(query.endTs ?? dayBounds(0).start);
+    const startDate = zonedIsoDate(tz, query.startTs ?? zonedDayBounds(tz, -windowDays + 1).start);
+    const endDate = zonedIsoDate(tz, query.endTs ?? Date.now());
 
     const rows = await this.prisma.posLaborPunch.groupBy({
       by: ['externalEmployeeId', 'employeeName', 'jobTitle'],

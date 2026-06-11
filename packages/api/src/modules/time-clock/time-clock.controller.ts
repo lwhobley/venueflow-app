@@ -51,8 +51,7 @@ export class TimeClockController {
     });
 
     const openEntries = entries
-      .filter((entry) => entry.isOpen && entry.profile)
-      .map((entry) => mapClockEntry(entry, entry.profile, venue));
+      .flatMap((entry) => (entry.isOpen && entry.profile ? [mapClockEntry(entry, entry.profile, venue)] : []));
 
     const myOpenEntry = openEntries.find((item) => item.memberId === scope.profileId) ?? null;
 

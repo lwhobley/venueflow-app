@@ -67,28 +67,47 @@ async function buildPayrollRows(
     }),
   ]);
 
-  return staff.map((member) => {
-    const memberEntries = entries.filter((e) => {
-      if (e.profileId !== member.id || !e.clockOutAt) return false;
-      const end = e.clockOutAt.getTime();
-      return end >= periodStart.getTime() && e.clockInAt.getTime() <= periodEnd.getTime();
-    });
-
-    const totalHours = memberEntries.reduce((sum, e) => {
+  const inPeriod = (e: (typeof entries)[number]) => {
+    if (!e.clockOutAt) return false;
+    const end = e.clockOutAt.getTime();
+    return end >= periodStart.getTime() && e.clockInAt.getTime() <= periodEnd.getTime();
+  };
+  const hoursOf = (rows: typeof entries) =>
+    rows.reduce((sum, e) => {
       if (!e.clockOutAt) return sum;
       const start = Math.max(e.clockInAt.getTime(), periodStart.getTime());
       const end = Math.min(e.clockOutAt.getTime(), periodEnd.getTime());
       return sum + Math.max(0, end - start) / 3600000;
     }, 0);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
 
-    return {
-      profileId: member.id,
-      employeeName: member.fullName,
-      role: member.role,
-      jobTitle: member.jobTitle,
-      totalHours: Math.round(totalHours * 100) / 100,
-    };
-  });
+  const rows = staff.map((member) => ({
+    profileId: member.id as string | null,
+    employeeName: member.fullName,
+    role: member.role as string,
+    jobTitle: member.jobTitle,
+    totalHours: round2(hoursOf(entries.filter((e) => e.profileId === member.id && inPeriod(e)))),
+  }));
+
+  // Wage records retained after account deletion (profileId is null) still
+  // belong on payroll — group them by the snapshotted name.
+  const formerByName = new Map<string, typeof entries>();
+  for (const e of entries) {
+    if (e.profileId !== null || !inPeriod(e)) continue;
+    const name = e.profileFullName ?? 'Former staff';
+    formerByName.set(name, [...(formerByName.get(name) ?? []), e]);
+  }
+  for (const [name, rowsForName] of formerByName) {
+    rows.push({
+      profileId: null,
+      employeeName: name,
+      role: 'staff',
+      jobTitle: 'Former staff',
+      totalHours: round2(hoursOf(rowsForName)),
+    });
+  }
+
+  return rows;
 }
 
 @Controller('v1/payroll')

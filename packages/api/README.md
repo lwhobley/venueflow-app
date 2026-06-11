@@ -25,3 +25,11 @@ To apply migrations manually against the linked Railway environment:
 railway login
 railway run npm run prisma:migrate:deploy -w @venue-wrangler/api
 ```
+
+## Migration notes
+
+- `TimeEntry` has a **partial unique index** (`TimeEntry_profileId_open_key`,
+  one open entry per profile) that Prisma's schema language cannot express —
+  it lives only in migration `20260608130000_clock_in_open_unique`. If
+  `prisma migrate dev` ever generates a `DROP INDEX` for it, delete that
+  statement before applying the migration.

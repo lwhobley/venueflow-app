@@ -67,20 +67,34 @@ export class AuthController {
     }
 
     const result = await hashPassword(body.password);
-    const nextUser = await this.prisma.user.upsert({
-      where: { email },
-      update: {},
-      create: { email },
-    });
-    await this.prisma.passwordCredential.create({
-      data: {
-        userId: nextUser.id,
-        salt: result.salt,
-        passwordHash: result.hash,
-        iterations: PASSWORD_ITERATIONS,
-      },
-    });
-    return this.issueSession(nextUser.id, email, body.fullName, body.inviteToken);
+    let nextUserId: string;
+    try {
+      // One transaction so two concurrent signups for the same email can't
+      // interleave between the user upsert and the credential insert.
+      nextUserId = await this.prisma.$transaction(async (tx) => {
+        const nextUser = await tx.user.upsert({
+          where: { email },
+          update: {},
+          create: { email },
+        });
+        await tx.passwordCredential.create({
+          data: {
+            userId: nextUser.id,
+            salt: result.salt,
+            passwordHash: result.hash,
+            iterations: PASSWORD_ITERATIONS,
+          },
+        });
+        return nextUser.id;
+      });
+    } catch (error: any) {
+      // Unique violation on userId: the concurrent signup won the race.
+      if (error?.code === 'P2002') {
+        throw new BadRequestException('An account already exists for this email. Sign in instead.');
+      }
+      throw error;
+    }
+    return this.issueSession(nextUserId, email, body.fullName, body.inviteToken);
   }
 
   private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string) {

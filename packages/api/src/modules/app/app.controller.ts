@@ -454,8 +454,8 @@ export class AppController {
           : '';
         return [
           e.id,
-          e.profileId,
-          `"${e.profile.fullName.replace(/"/g, '""')}"`,
+          e.profileId ?? '',
+          `"${(e.profile?.fullName ?? e.profileFullName ?? 'Former staff').replace(/"/g, '""')}"`,
           e.clockInAt.toISOString(),
           e.clockOutAt?.toISOString() ?? '',
           hours,
@@ -719,7 +719,12 @@ export class AppController {
     await this.prisma.$transaction([
       this.prisma.pushToken.deleteMany({ where: { profileId: profile.id } }),
       this.prisma.availability.deleteMany({ where: { profileId: profile.id } }),
-      this.prisma.timeEntry.deleteMany({ where: { profileId: profile.id } }),
+      // Time entries are employer wage records (FLSA retention) — keep them.
+      // Snapshot the name; deleting the profile then SetNulls the linkage.
+      this.prisma.timeEntry.updateMany({
+        where: { profileId: profile.id },
+        data: { profileFullName: profile.fullName, isOpen: false },
+      }),
       this.prisma.scheduleShift.updateMany({ where: { profileId: profile.id }, data: { profileId: null, status: 'open' } }),
       this.prisma.session.deleteMany({ where: { userId: user.sub } }),
       this.prisma.authAccount.deleteMany({ where: { userId: user.sub } }),
@@ -851,7 +856,8 @@ export class AppController {
   private mapClockEntry(
     entry: {
       id: string;
-      profileId: string;
+      profileId: string | null;
+      profileFullName?: string | null;
       venueId: string;
       clockInAt: Date;
       clockOutAt: Date | null;
@@ -865,19 +871,24 @@ export class AppController {
       clockOutMocked: boolean | null;
       isOpen: boolean;
     },
-    profile: { fullName: string; role: Role; jobTitle: string },
+    // Null when the staff member deleted their account; wage records are
+    // retained with a snapshotted name (entry.profileFullName).
+    profile: { fullName: string; role: Role; jobTitle: string } | null,
     venue: { name: string },
   ) {
+    const memberName = profile?.fullName ?? entry.profileFullName ?? 'Former staff';
+    const role = profile?.role ?? 'staff';
+    const jobTitle = profile?.jobTitle ?? 'Former staff';
     return {
       _id: entry.id,
       id: entry.id,
       memberId: entry.profileId,
       member_id: entry.profileId,
-      memberName: profile.fullName,
-      member_name: profile.fullName,
-      role: profile.role,
-      jobTitle: profile.jobTitle,
-      job_title: profile.jobTitle,
+      memberName,
+      member_name: memberName,
+      role,
+      jobTitle,
+      job_title: jobTitle,
       venueId: entry.venueId,
       venue_id: entry.venueId,
       venueName: venue.name,
