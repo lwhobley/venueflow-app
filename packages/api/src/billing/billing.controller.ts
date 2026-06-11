@@ -1,8 +1,9 @@
-import { Body, Controller, Headers, HttpException, HttpStatus, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Headers, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
 import type { Request } from 'express';
 import { Public } from '../auth/public.decorator';
+import { createRateLimiter } from '../common/rate-limit';
 import { PrismaService } from '../prisma/prisma.service';
 
 type RevenueCatWebhookBody = {
@@ -35,7 +36,7 @@ const INACTIVE_REVENUECAT_EVENTS: Record<string, SubscriptionStatus> = {
 };
 const WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
 const WEBHOOK_RATE_LIMIT_MAX = 120;
-const webhookAttempts = new Map<string, { count: number; resetAt: number }>();
+const assertWithinRateLimit = createRateLimiter(WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS);
 
 @Controller('v1/billing')
 export class BillingController {
@@ -47,7 +48,7 @@ export class BillingController {
   @Public()
   @Post('revenuecat/webhook')
   async revenueCatWebhook(@Req() request: Request, @Headers('authorization') authorization: string | undefined, @Body() body: RevenueCatWebhookBody) {
-    assertWithinRateLimit(`revenuecat:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS);
+    assertWithinRateLimit(`revenuecat:${getClientIp(request)}`, 'Too many webhook requests.');
     // Fail closed: the webhook is @Public(), so without a configured secret
     // anyone could forge subscription state for any venue. Always require it.
     const expectedSecret = this.config.get<string>('REVENUECAT_WEBHOOK_SECRET');
@@ -212,15 +213,3 @@ function getClientIp(request: Request) {
   return firstForwarded?.trim() || request.ip || 'unknown';
 }
 
-function assertWithinRateLimit(key: string, max: number, windowMs: number) {
-  const now = Date.now();
-  const current = webhookAttempts.get(key);
-  if (!current || current.resetAt <= now) {
-    webhookAttempts.set(key, { count: 1, resetAt: now + windowMs });
-    return;
-  }
-  if (current.count >= max) {
-    throw new HttpException('Too many webhook requests.', HttpStatus.TOO_MANY_REQUESTS);
-  }
-  current.count += 1;
-}

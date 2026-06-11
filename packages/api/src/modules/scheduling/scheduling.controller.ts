@@ -483,7 +483,13 @@ export class SchedulingController {
     const shift = await this.getVenueShift(scope.venueId, id);
     if (shift.profileId || shift.status !== 'open') throw new BadRequestException('This shift is no longer open');
     await this.assertNoDoubleBook(scope.venueId, scope.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
-    await this.prisma.scheduleShift.update({ where: { id: shift.id }, data: { profileId: scope.profileId, status: 'covered' } });
+    // Claim atomically: only the request that still sees the shift open+unassigned
+    // wins, so two staff tapping "claim" simultaneously can't both take it.
+    const claimed = await this.prisma.scheduleShift.updateMany({
+      where: { id: shift.id, venueId: scope.venueId, status: 'open', profileId: null },
+      data: { profileId: scope.profileId, status: 'covered' },
+    });
+    if (claimed.count === 0) throw new BadRequestException('This shift is no longer open');
     await this.markScheduleEdited(scope.venueId);
     await this.notifications.notifyManagers({
       venueId: scope.venueId,
@@ -806,7 +812,12 @@ export class SchedulingController {
     const swap = await this.prisma.shiftSwap.findFirst({ where: { id, venueId: scope.venueId } });
     if (!swap || swap.targetProfileId !== scope.profileId) throw new ForbiddenException('Not authorized');
     if (swap.status !== 'proposed') throw new BadRequestException('This swap is no longer open');
-    await this.prisma.shiftSwap.update({ where: { id: swap.id }, data: { status: body.accept ? 'accepted' : 'declined' } });
+    // Atomic transition so a double-tap can't respond twice / re-fire notifications.
+    const responded = await this.prisma.shiftSwap.updateMany({
+      where: { id: swap.id, status: 'proposed' },
+      data: { status: body.accept ? 'accepted' : 'declined' },
+    });
+    if (responded.count === 0) throw new BadRequestException('This swap is no longer open');
     if (body.accept) {
       await this.notifications.notifyManagers({
         venueId: scope.venueId,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveVenueSubscriptionStatus } from './subscription-status';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -22,6 +22,14 @@ describe('resolveVenueSubscriptionStatus', () => {
       venueStatus: 'active',
     });
     expect(result).toBe('active');
+  });
+
+  it('takes the fast path for active venues without querying the subscription row', async () => {
+    const findFirst = vi.fn();
+    const prisma = { subscription: { findFirst } } as unknown as PrismaService;
+    const result = await resolveVenueSubscriptionStatus(prisma, { venueId: 'v1', venueStatus: 'active' });
+    expect(result).toBe('active');
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   it('falls back to the latest subscription record when the venue status is terminal', async () => {

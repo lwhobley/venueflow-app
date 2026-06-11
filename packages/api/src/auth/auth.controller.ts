@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, HttpException, HttpStatus, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
@@ -8,6 +8,9 @@ import { promisify } from 'util';
 
 const pbkdf2Async = promisify(pbkdf2);
 import { Public } from './public.decorator';
+import { CurrentUser } from './current-user.decorator';
+import type { AuthUser } from './auth.guard';
+import { createRateLimiter } from '../common/rate-limit';
 import { PrismaService } from '../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -17,7 +20,7 @@ const PASSWORD_DIGEST = 'sha256';
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 12;
 
-const authAttempts = new Map<string, { count: number; resetAt: number }>();
+const assertWithinRateLimit = createRateLimiter(AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
 
 class PasswordAuthDto {
   @IsEmail()
@@ -39,6 +42,16 @@ class PasswordAuthDto {
   inviteToken?: string;
 }
 
+class ChangePasswordDto {
+  @IsString()
+  @IsOptional()
+  currentPassword?: string;
+
+  @IsString()
+  @MinLength(6)
+  newPassword!: string;
+}
+
 @Controller('v1/auth')
 export class AuthController {
   constructor(
@@ -51,8 +64,8 @@ export class AuthController {
   async password(@Req() request: Request, @Body() body: PasswordAuthDto) {
     const email = body.email.trim().toLowerCase();
     if (!email || !body.password) throw new BadRequestException('Enter your email and password.');
-    assertWithinRateLimit(`auth:ip:${getClientIp(request)}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
-    assertWithinRateLimit(`auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+    assertWithinRateLimit(`auth:ip:${getClientIp(request)}`);
+    assertWithinRateLimit(`auth:email:${email}`);
 
     const user = await this.prisma.user.findUnique({ where: { email }, include: { password: true } });
     if (body.flow === 'signIn') {
@@ -97,6 +110,26 @@ export class AuthController {
     return this.issueSession(nextUserId, email, body.fullName, body.inviteToken);
   }
 
+  // Authenticated (not @Public): the global AuthGuard requires a valid bearer
+  // token. Lets a signed-in user rotate their password; also lets a user who
+  // signed up via OAuth set one for the first time.
+  @Post('change-password')
+  async changePassword(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: ChangePasswordDto) {
+    assertWithinRateLimit(`change-password:${user.sub}`);
+    const existing = await this.prisma.passwordCredential.findUnique({ where: { userId: user.sub } });
+    if (existing) {
+      const ok = await verifyPassword(body.currentPassword ?? '', existing.salt, existing.passwordHash, existing.iterations);
+      if (!ok) throw new UnauthorizedException('Current password is incorrect.');
+    }
+    const next = await hashPassword(body.newPassword);
+    await this.prisma.passwordCredential.upsert({
+      where: { userId: user.sub },
+      update: { salt: next.salt, passwordHash: next.hash, iterations: PASSWORD_ITERATIONS },
+      create: { userId: user.sub, salt: next.salt, passwordHash: next.hash, iterations: PASSWORD_ITERATIONS },
+    });
+    return { ok: true };
+  }
+
   private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string) {
     const invite = inviteToken
       ? await this.prisma.invite.findFirst({
@@ -108,75 +141,77 @@ export class AuthController {
     }
     const trimmedFullName = fullName?.trim();
     const profile = await this.prisma.$transaction(async (tx) => {
+      // Consume the invite atomically so it can only be redeemed once, even
+      // under concurrent signups. The guarded updateMany is the lock: the loser
+      // sees count 0 and proceeds as if no invite was supplied.
+      let activeInvite = invite;
+      if (invite) {
+        const claimed = await tx.invite.updateMany({
+          where: { id: invite.id, usedBy: null },
+          data: { usedBy: `pending:${userId}` },
+        });
+        if (claimed.count === 0) activeInvite = null;
+      }
+
+      const grant = activeInvite
+        ? { venueId: activeInvite.venueId, role: activeInvite.role, jobTitle: activeInvite.jobTitle }
+        : null;
+
       const existingByUser = await tx.profile.findUnique({
         where: { userId },
         include: { venue: true },
       });
+      let result;
       if (existingByUser) {
-        return tx.profile.update({
+        result = await tx.profile.update({
           where: { id: existingByUser.id },
           data: {
             email,
             ...(trimmedFullName ? { fullName: trimmedFullName } : {}),
-            ...(invite
-              ? {
-                  venueId: invite.venueId,
-                  role: invite.role,
-                  jobTitle: invite.jobTitle,
-                }
-              : {}),
+            ...(grant ?? {}),
           },
           include: { venue: true },
         });
+      } else {
+        // Only adopt a manager-precreated (unclaimed) profile when a valid
+        // invite authorizes access to that venue. Email match alone is NOT
+        // proof of ownership — signup does not verify email — so without an
+        // invite we never claim an existing profile; we create a fresh one.
+        const claimedProfile = grant
+          ? await tx.profile.findFirst({
+              where: { userId: null, venueId: grant.venueId, email: { equals: email, mode: 'insensitive' } },
+              orderBy: { createdAt: 'asc' },
+              include: { venue: true },
+            })
+          : null;
+        if (claimedProfile) {
+          result = await tx.profile.update({
+            where: { id: claimedProfile.id },
+            data: { userId, email, fullName: trimmedFullName || claimedProfile.fullName, ...grant! },
+            include: { venue: true },
+          });
+        } else {
+          result = await tx.profile.create({
+            data: {
+              userId,
+              email,
+              fullName: trimmedFullName || email.split('@')[0] || 'Team Member',
+              role: grant?.role ?? 'staff',
+              jobTitle: grant?.jobTitle ?? 'Staff',
+              venueId: grant?.venueId ?? undefined,
+              trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
+            },
+            include: { venue: true },
+          });
+        }
       }
 
-      const claimedProfile = await tx.profile.findFirst({
-        where: {
-          userId: null,
-          email: { equals: email, mode: 'insensitive' },
-        },
-        orderBy: { createdAt: 'asc' },
-        include: { venue: true },
-      });
-      if (claimedProfile) {
-        return tx.profile.update({
-          where: { id: claimedProfile.id },
-          data: {
-            userId,
-            email,
-            fullName: trimmedFullName || claimedProfile.fullName,
-            ...(invite
-              ? {
-                  venueId: invite.venueId,
-                  role: invite.role,
-                  jobTitle: invite.jobTitle,
-                }
-              : {}),
-          },
-          include: { venue: true },
-        });
+      // Re-point the consumed invite from the sentinel to the real profile.
+      if (activeInvite) {
+        await tx.invite.update({ where: { id: activeInvite.id }, data: { usedBy: result.id } });
       }
-
-      return tx.profile.create({
-        data: {
-          userId,
-          email,
-          fullName: trimmedFullName || email.split('@')[0] || 'Team Member',
-          role: invite?.role ?? 'staff',
-          jobTitle: invite?.jobTitle ?? 'Staff',
-          venueId: invite?.venueId ?? undefined,
-          trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
-        },
-        include: { venue: true },
-      });
+      return result;
     });
-
-    if (invite && !invite.usedBy) {
-      await this.prisma.invite.update({
-        where: { id: invite.id },
-        data: { usedBy: profile.id },
-      });
-    }
 
     const token = await this.jwt.signAsync({
       sub: userId,
@@ -196,19 +231,6 @@ function getClientIp(request: Request) {
   const forwarded = request.headers['x-forwarded-for'];
   const firstForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
   return firstForwarded?.trim() || request.ip || 'unknown';
-}
-
-function assertWithinRateLimit(key: string, max: number, windowMs: number) {
-  const now = Date.now();
-  const current = authAttempts.get(key);
-  if (!current || current.resetAt <= now) {
-    authAttempts.set(key, { count: 1, resetAt: now + windowMs });
-    return;
-  }
-  if (current.count >= max) {
-    throw new HttpException('Too many attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
-  }
-  current.count += 1;
 }
 
 async function hashPassword(password: string) {

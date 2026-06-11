@@ -1,9 +1,12 @@
-import { Body, Controller, ForbiddenException, Get, Post, Query } from '@nestjs/common';
-import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, UnauthorizedException } from '@nestjs/common';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
+import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
+import { Public } from '../../auth/public.decorator';
 import { zonedDayBounds, zonedIsoDate } from '../../common/venue-time';
+import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -12,6 +15,9 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 type Scope = VenueScopedRequest['venueScope'];
 
 const num = (v: unknown) => (v == null ? 0 : Number(v));
+const MAX_INGEST_ROWS = 1000;
+const POS_PROVIDERS = ['toast', 'square', 'clover', 'generic'] as const;
+const POS_CHECK_STATUSES = ['open', 'paid', 'void'] as const;
 
 class SalesWindowQueryDto {
   @IsOptional()
@@ -51,9 +57,180 @@ class UpsertPosConnectionDto {
   status!: string;
 }
 
+class IngestMenuItemDto {
+  @IsString()
+  name!: string;
+
+  @IsString()
+  @IsOptional()
+  category?: string;
+
+  @IsNumber()
+  quantity!: number;
+
+  @IsInt()
+  priceCents!: number;
+}
+
+class IngestCheckDto {
+  @IsString()
+  externalCheckId!: string;
+
+  @IsNumber()
+  openedAt!: number;
+
+  @IsNumber()
+  @IsOptional()
+  closedAt?: number;
+
+  @IsIn(POS_CHECK_STATUSES)
+  @IsOptional()
+  status?: string;
+
+  @IsInt() subtotalCents!: number;
+  @IsInt() totalCents!: number;
+  @IsInt() tipCents!: number;
+
+  @IsInt() @IsOptional() taxCents?: number;
+  @IsInt() @IsOptional() discountCents?: number;
+  @IsInt() @IsOptional() compCents?: number;
+  @IsInt() @IsOptional() promoCents?: number;
+  @IsInt() @IsOptional() guestCount?: number;
+
+  @IsString() @IsOptional() tableLabel?: string;
+  @IsString() @IsOptional() serverName?: string;
+  @IsString() @IsOptional() guestName?: string;
+  @IsString() @IsOptional() revenueCenter?: string;
+  @IsString() @IsOptional() tenderType?: string;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => IngestMenuItemDto)
+  menuItems?: IngestMenuItemDto[];
+}
+
+class IngestLaborPunchDto {
+  @IsString() externalEmployeeId!: string;
+  @IsString() employeeName!: string;
+  @IsString() @IsOptional() jobTitle?: string;
+
+  @IsNumber() clockInAt!: number;
+  @IsNumber() @IsOptional() clockOutAt?: number;
+
+  @IsInt() @IsOptional() regularMinutes?: number;
+  @IsInt() @IsOptional() overtimeMinutes?: number;
+  @IsInt() @IsOptional() declaredTipsCents?: number;
+  @IsInt() @IsOptional() tipsCents?: number;
+  @IsInt() @IsOptional() regularPayCents?: number;
+  @IsInt() @IsOptional() overtimePayCents?: number;
+  @IsInt() @IsOptional() totalPayCents?: number;
+
+  @IsString() businessDate!: string;
+}
+
+class PosIngestDto {
+  @IsIn(POS_PROVIDERS)
+  provider!: string;
+
+  @IsArray()
+  @IsOptional()
+  @ArrayMaxSize(MAX_INGEST_ROWS)
+  @ValidateNested({ each: true })
+  @Type(() => IngestCheckDto)
+  checks?: IngestCheckDto[];
+
+  @IsArray()
+  @IsOptional()
+  @ArrayMaxSize(MAX_INGEST_ROWS)
+  @ValidateNested({ each: true })
+  @Type(() => IngestLaborPunchDto)
+  laborPunches?: IngestLaborPunchDto[];
+}
+
 @Controller('v1/pos')
 export class PosController {
   constructor(private readonly prisma: PrismaService) {}
+
+  // External POS providers POST normalized sales/labor here. Authenticated by a
+  // per-connection webhook secret (issued by upsertPosConnection), not a user
+  // session. Idempotent: re-delivered rows upsert on their unique keys instead
+  // of double-counting.
+  @Public()
+  @Post('ingest/:venueId')
+  async ingest(
+    @Param('venueId') venueId: string,
+    @Headers('x-webhook-secret') secret: string | undefined,
+    @Body() body: PosIngestDto,
+  ) {
+    const provider = body.provider as PosProvider;
+    const connection = await this.prisma.posConnection.findFirst({ where: { venueId, provider } });
+    if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
+
+    let checksUpserted = 0;
+    for (const check of body.checks ?? []) {
+      const data = {
+        tableLabel: check.tableLabel ?? null,
+        serverName: check.serverName ?? null,
+        guestName: check.guestName ?? null,
+        openedAt: new Date(check.openedAt),
+        closedAt: check.closedAt ? new Date(check.closedAt) : null,
+        subtotalCents: check.subtotalCents,
+        taxCents: check.taxCents ?? null,
+        tipCents: check.tipCents,
+        totalCents: check.totalCents,
+        discountCents: check.discountCents ?? null,
+        compCents: check.compCents ?? null,
+        promoCents: check.promoCents ?? null,
+        guestCount: check.guestCount ?? null,
+        revenueCenter: check.revenueCenter ?? null,
+        tenderType: check.tenderType ?? null,
+        menuItems: check.menuItems ? (check.menuItems as unknown as Prisma.InputJsonValue) : undefined,
+        status: (check.status ?? 'open') as PosCheckStatus,
+      };
+      await this.prisma.posCheck.upsert({
+        where: { venueId_provider_externalCheckId: { venueId, provider, externalCheckId: check.externalCheckId } },
+        create: { venueId, provider, externalCheckId: check.externalCheckId, ...data },
+        update: data,
+      });
+      checksUpserted += 1;
+    }
+
+    let laborUpserted = 0;
+    for (const punch of body.laborPunches ?? []) {
+      const data = {
+        employeeName: punch.employeeName,
+        jobTitle: punch.jobTitle ?? null,
+        clockInAt: new Date(punch.clockInAt),
+        clockOutAt: punch.clockOutAt ? new Date(punch.clockOutAt) : null,
+        regularMinutes: punch.regularMinutes ?? null,
+        overtimeMinutes: punch.overtimeMinutes ?? null,
+        declaredTipsCents: punch.declaredTipsCents ?? null,
+        tipsCents: punch.tipsCents ?? null,
+        regularPayCents: punch.regularPayCents ?? null,
+        overtimePayCents: punch.overtimePayCents ?? null,
+        totalPayCents: punch.totalPayCents ?? null,
+      };
+      await this.prisma.posLaborPunch.upsert({
+        where: {
+          venueId_provider_externalEmployeeId_businessDate: {
+            venueId,
+            provider,
+            externalEmployeeId: punch.externalEmployeeId,
+            businessDate: punch.businessDate,
+          },
+        },
+        create: { venueId, provider, externalEmployeeId: punch.externalEmployeeId, businessDate: punch.businessDate, ...data },
+        update: data,
+      });
+      laborUpserted += 1;
+    }
+
+    await this.prisma.posConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });
+    return { ok: true, checksUpserted, laborUpserted };
+  }
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
     if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');

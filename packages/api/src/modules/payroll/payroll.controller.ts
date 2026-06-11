@@ -4,12 +4,14 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Header,
   Post,
   Query,
 } from '@nestjs/common';
 import { IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { csvCell } from '../../common/csv';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -33,11 +35,6 @@ class RecordPayrollExportDto {
   @IsNumber()
   @IsOptional()
   totalHours?: number;
-}
-
-function csvCell(value: string | number | null | undefined): string {
-  const text = value == null ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function parseDateParam(value: string | undefined, fallback: Date): Date {
@@ -147,6 +144,8 @@ export class PayrollController {
 
   @RequireSubscription('paid')
   @Get('export-csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="payroll.csv"')
   async exportPayrollCsv(
     @VenueScope() scope: Scope,
     @Query('startDate') startDate?: string,

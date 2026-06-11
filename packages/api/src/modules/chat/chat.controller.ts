@@ -137,6 +137,9 @@ export class ChatController {
   async openDm(@VenueScope() scope: Scope, @Body() body: OpenDmDto) {
     if (!scope) throw new ForbiddenException('No venue profile found');
 
+    if (body.targetProfileId === scope.profileId) {
+      throw new BadRequestException('You cannot start a direct message with yourself');
+    }
     const other = await this.prisma.profile.findFirst({
       where: { id: body.targetProfileId, venueId: scope.venueId },
     });
@@ -171,12 +174,14 @@ export class ChatController {
     if (!name) throw new BadRequestException('Enter a group name');
     if (name.length > 100) throw new BadRequestException('Group name must be 100 characters or fewer');
 
+    // Always include the creator so they retain access to the group they made.
+    const memberIds = Array.from(new Set([scope.profileId, ...body.memberIds]));
     const conv = await this.prisma.conversation.create({
       data: {
         venueId: scope.venueId,
         type: 'group',
         name,
-        memberIds: body.memberIds,
+        memberIds,
       },
     });
 

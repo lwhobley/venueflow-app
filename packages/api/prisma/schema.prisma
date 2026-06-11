@@ -229,7 +229,7 @@ model PasswordCredential {
 }
 
 model Venue {
-  id                            String                @id @default(cuid())
+  id                            String                  @id @default(cuid())
   name                          String
   latitude                      Float
   longitude                     Float
@@ -237,7 +237,7 @@ model Venue {
   // IANA timezone (e.g. "America/New_York"). Null falls back to UTC; used to
   // bucket daily reports in the venue's business day rather than server time.
   timezone                      String?
-  code                          String?               @unique
+  code                          String?                 @unique
   phone                         String?
   address                       String?
   venueType                     String?
@@ -249,8 +249,8 @@ model Venue {
   subscriptionStatus            SubscriptionStatus?
   subscriptionPlatform          SubscriptionPlatform?
   leadsWebhookSecret            String?
-  createdAt                     DateTime              @default(now())
-  updatedAt                     DateTime              @updatedAt
+  createdAt                     DateTime                @default(now())
+  updatedAt                     DateTime                @updatedAt
   profiles                      Profile[]
   shifts                        ScheduleShift[]
   shiftSwaps                    ShiftSwap[]
@@ -795,6 +795,9 @@ model PosLaborPunch {
   updatedAt          DateTime    @updatedAt
   venue              Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  // Unique so retried/at-least-once labor webhook deliveries upsert one row per
+  // employee per business day instead of double-counting hours and pay.
+  @@unique([venueId, provider, externalEmployeeId, businessDate])
   @@index([venueId, businessDate])
   @@index([venueId, externalEmployeeId])
 }
@@ -1080,8 +1083,10 @@ model ReservationSyncEvent {
   errorMessage    String?
   venue           Venue             @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  // Unique so an at-least-once reservation webhook can be deduped: re-deliveries
+  // of the same provider event are recognized and skipped.
+  @@unique([venueId, provider, externalEventId])
   @@index([provider, externalEventId])
-  @@index([venueId, provider, externalEventId])
   @@index([venueId, processedAt])
 }
 
@@ -1194,7 +1199,7 @@ model Invite {
   id        String   @id @default(cuid())
   venueId   String
   email     String?
-  token     String
+  token     String   @unique
   role      Role
   jobTitle  String
   createdBy String
@@ -1203,7 +1208,6 @@ model Invite {
   createdAt DateTime @default(now())
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
-  @@index([token])
   @@index([email])
   @@index([venueId])
 }

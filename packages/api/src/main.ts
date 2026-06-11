@@ -10,6 +10,9 @@ import { AllExceptionsFilter } from './common/all-exceptions.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.enableShutdownHooks();
+  // Behind Railway's proxy: trust the first hop so req.ip and X-Forwarded-For
+  // reflect the real client (used for rate-limit keys), not the proxy.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
   const config = app.get(ConfigService);
   const origins = config
     .get<string>('CORS_ORIGINS', '')

@@ -8,7 +8,9 @@ import { resolveVenueSubscriptionStatus } from './subscription-status';
 /**
  * Guards routes behind active or paid subscription checks.
  *
- * Requires VenueScopeInterceptor to have run first (reads request.venueScope).
+ * Guards run before interceptors in Nest, so request.venueScope is usually not
+ * yet populated when this runs; it resolves the scope itself (resolveVenueScope)
+ * and caches it on the request for the VenueScopeInterceptor/decorators to reuse.
  *
  * Activated with @RequireSubscription() (any active/trialing subscription) or
  * @RequireSubscription('paid') (paid-only, no trial). Routes without the

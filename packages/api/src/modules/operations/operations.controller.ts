@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -217,7 +218,7 @@ export class OperationsController {
     const venueId = profile.venueId!;
     const now = new Date();
     const title = body.title.trim();
-    if (!title) throw new Error('Goal title is required');
+    if (!title) throw new BadRequestException('Goal title is required');
     const payload = {
       venueId,
       title,

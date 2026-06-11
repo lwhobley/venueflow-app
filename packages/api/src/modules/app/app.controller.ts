@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Role, SubscriptionStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { AuthGuard } from '../../auth/auth.guard';
@@ -8,6 +8,7 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { assertWithinGeofence } from '../../common/geofence';
+import { csvCell } from '../../common/csv';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -57,10 +58,14 @@ class UpdateVenueDto {
   name?: string;
 
   @IsNumber()
+  @Min(-90)
+  @Max(90)
   @IsOptional()
   latitude?: number;
 
   @IsNumber()
+  @Min(-180)
+  @Max(180)
   @IsOptional()
   longitude?: number;
 
@@ -214,6 +219,12 @@ export class AppController {
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
     const result = await this.prisma.$transaction(async (tx) => {
+      // Re-check inside the transaction so a double-submit doesn't create a
+      // second venue + subscription for an owner who already has one.
+      const current = await tx.profile.findFirst({ where: { userId: user.sub }, include: { venue: true } });
+      if (current?.venue) {
+        return { profile: current, venue: current.venue };
+      }
       const venue = await tx.venue.create({
         data: {
           name: businessName,
@@ -367,16 +378,20 @@ export class AppController {
     const profile = await this.getProfile(user);
     if (!profile?.venue) return null;
     const canManage = isAdminRole(profile.role);
-    const shifts = await this.prisma.scheduleShift.findMany({
-      where: {
-        venueId: profile.venueId!,
-        ...(canManage ? {} : { OR: [{ profileId: profile.id }, { status: 'open' }] }),
-      },
-      include: { profile: true },
-      orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
-      take: 50,
-    });
-    const [teamCount, activeEntries] = await Promise.all([
+    const shiftWhere = {
+      venueId: profile.venueId!,
+      ...(canManage ? {} : { OR: [{ profileId: profile.id }, { status: 'open' as const }] }),
+    };
+    // Counts come from aggregates over all matching rows; the display list is
+    // capped separately so analytics stay correct past the display limit.
+    const [shifts, shiftCounts, teamCount, activeEntries, openClockCount] = await Promise.all([
+      this.prisma.scheduleShift.findMany({
+        where: shiftWhere,
+        include: { profile: true },
+        orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+        take: 14,
+      }),
+      this.prisma.scheduleShift.groupBy({ by: ['status'], where: shiftWhere, _count: { _all: true } }),
       canManage ? this.prisma.profile.count({ where: { venueId: profile.venueId! } }) : Promise.resolve(0),
       canManage
         ? this.prisma.timeEntry.findMany({
@@ -385,20 +400,22 @@ export class AppController {
             take: 50,
           })
         : Promise.resolve([]),
+      canManage ? this.prisma.timeEntry.count({ where: { venueId: profile.venueId!, isOpen: true } }) : Promise.resolve(0),
     ]);
+    const countByStatus = (status: string) => shiftCounts.find((c) => c.status === status)?._count._all ?? 0;
 
     return {
       profile: this.mapProfile(profile),
       venue: this.mapVenue(profile.venue),
       analytics: {
         teamCount,
-        scheduledCount: shifts.filter((shift) => shift.status === 'scheduled').length,
-        openShiftCount: shifts.filter((shift) => shift.status === 'open').length,
-        coveredShiftCount: shifts.filter((shift) => shift.status === 'covered').length,
-        openClockCount: activeEntries.length,
-        clockedInCount: activeEntries.length,
+        scheduledCount: countByStatus('scheduled'),
+        openShiftCount: countByStatus('open'),
+        coveredShiftCount: countByStatus('covered'),
+        openClockCount,
+        clockedInCount: openClockCount,
       },
-      schedule: shifts.slice(0, 14).map((shift) => this.mapShift(shift, canManage ? shift.profile?.fullName ?? null : shift.profileId === profile.id ? 'You' : null)),
+      schedule: shifts.map((shift) => this.mapShift(shift, canManage ? shift.profile?.fullName ?? null : shift.profileId === profile.id ? 'You' : null)),
       activeClockEntries: activeEntries.map((entry) => this.mapClockEntry(entry, entry.profile, entry.venue)),
     };
   }
@@ -425,6 +442,8 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @Get('time-entries/csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="time-entries.csv"')
   async exportTimeEntriesCsv(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
@@ -441,12 +460,12 @@ export class AppController {
           ? Math.round(((e.clockOutAt.getTime() - e.clockInAt.getTime()) / 3600000) * 100) / 100
           : '';
         return [
-          e.id,
-          e.profileId ?? '',
-          `"${(e.profile?.fullName ?? e.profileFullName ?? 'Former staff').replace(/"/g, '""')}"`,
-          e.clockInAt.toISOString(),
-          e.clockOutAt?.toISOString() ?? '',
-          hours,
+          csvCell(e.id),
+          csvCell(e.profileId ?? ''),
+          csvCell(e.profile?.fullName ?? e.profileFullName ?? 'Former staff'),
+          csvCell(e.clockInAt.toISOString()),
+          csvCell(e.clockOutAt?.toISOString() ?? ''),
+          csvCell(hours),
         ].join(',');
       })
       .join('\n');
@@ -558,20 +577,27 @@ export class AppController {
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
     if (existing) throw new BadRequestException('Already clocked in');
-    const entry = await this.prisma.timeEntry.create({
-      data: {
-        profileId: profile.id,
-        venueId: venue.id,
-        clockInAt: new Date(),
-        clockInLat: body.lat,
-        clockInLng: body.lng,
-        clockInAccuracyM: body.accuracy,
-        clockInMocked: body.mocked,
-        isOpen: true,
-      },
-      include: { profile: true, venue: true },
-    });
-    return this.mapClockEntry(entry, entry.profile, entry.venue);
+    try {
+      const entry = await this.prisma.timeEntry.create({
+        data: {
+          profileId: profile.id,
+          venueId: venue.id,
+          clockInAt: new Date(),
+          clockInLat: body.lat,
+          clockInLng: body.lng,
+          clockInAccuracyM: body.accuracy,
+          clockInMocked: body.mocked,
+          isOpen: true,
+        },
+        include: { profile: true, venue: true },
+      });
+      return this.mapClockEntry(entry, entry.profile, entry.venue);
+    } catch (error: any) {
+      // Partial unique index (one open entry per profile): a concurrent
+      // double-tap loses the race here instead of creating a second open entry.
+      if (error?.code === 'P2002') throw new BadRequestException('Already clocked in');
+      throw error;
+    }
   }
 
   @UseGuards(AuthGuard)
@@ -708,11 +734,15 @@ export class AppController {
   async deleteMyAccount(@CurrentUser() user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile) return { ok: true };
-    if (isOwnerOrAdminRole(profile.role)) {
-      const ownerAdminCount = await this.prisma.profile.count({
-        where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } },
-      });
-      if (ownerAdminCount <= 1) {
+    if (profile.venueId && isOwnerOrAdminRole(profile.role)) {
+      const [ownerAdminCount, memberCount] = await Promise.all([
+        this.prisma.profile.count({ where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } } }),
+        this.prisma.profile.count({ where: { venueId: profile.venueId } }),
+      ]);
+      // A sole remaining member may delete (orphaning an empty venue is fine,
+      // and App Store guideline 5.1.1(v) requires in-app account deletion).
+      // Block only when other staff remain but this is the last owner/admin.
+      if (ownerAdminCount <= 1 && memberCount > 1) {
         throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
       }
     }
@@ -735,11 +765,16 @@ export class AppController {
   }
 
   private async ensureUser(user: AuthUser) {
-    return this.prisma.user.upsert({
-      where: { id: user.sub },
-      update: { email: user.email ?? undefined },
-      create: { id: user.sub, email: user.email ?? null },
-    });
+    // Do NOT recreate the user from token claims: a deleted account's JWT stays
+    // valid until expiry, and recreating here would silently resurrect it.
+    const existing = await this.prisma.user.findUnique({ where: { id: user.sub } });
+    if (!existing) {
+      throw new UnauthorizedException('This account no longer exists. Please sign in again.');
+    }
+    if (user.email && user.email !== existing.email) {
+      return this.prisma.user.update({ where: { id: user.sub }, data: { email: user.email } });
+    }
+    return existing;
   }
 
   private getProfile(user: AuthUser) {
@@ -767,10 +802,12 @@ export class AppController {
   }
 
   private async assertCanManageLegacyStaffTarget(
-    viewer: { role: Role; allAccess: boolean; venueId: string | null },
+    viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null },
     target: { id: string; role: Role; venueId: string | null },
   ) {
-    if (!canManageRole(viewer.role, target.role, viewer.allAccess)) {
+    // Editing your own profile is always allowed; the last-owner guard below
+    // still prevents a sole owner from self-demoting out of access.
+    if (target.id !== viewer.id && !canManageRole(viewer.role, target.role, viewer.allAccess)) {
       throw new ForbiddenException('You cannot modify this staff member');
     }
     if (isOwnerOrAdminRole(target.role)) {

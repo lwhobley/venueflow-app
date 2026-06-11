@@ -11,6 +11,13 @@ export async function resolveVenueSubscriptionStatus(
     trialEndsAt?: Date | null;
   },
 ): Promise<SubscriptionStatus | null> {
+  // Fast path: a healthy, non-trial venue status (e.g. 'active') is
+  // authoritative and needs no extra query. Only trial/terminal/empty states
+  // require consulting the latest Subscription row.
+  if (input.venueStatus && input.venueStatus !== 'trialing' && !TERMINAL_STATUSES.has(input.venueStatus)) {
+    return input.venueStatus;
+  }
+
   const subscription = await prisma.subscription.findFirst({
     where: { venueId: input.venueId },
     orderBy: { updatedAt: 'desc' },
@@ -31,10 +38,7 @@ export async function resolveVenueSubscriptionStatus(
     return 'expired';
   }
 
-  if (input.venueStatus && !TERMINAL_STATUSES.has(input.venueStatus)) {
-    return input.venueStatus;
-  }
-
+  // Below here venueStatus is terminal or null; consult the subscription row.
   if (subscription?.status === 'trialing') {
     if (!trialExpired) {
       return 'trialing';

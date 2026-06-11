@@ -120,7 +120,9 @@ export class StaffController {
     scope: NonNullable<Scope>,
     target: { id: string; role: Role; venueId: string | null },
   ) {
-    if (!canManageRole(scope.role, target.role, scope.allAccess)) {
+    // Editing your own profile is always allowed; the last-owner guard below
+    // still prevents a sole owner from self-demoting out of access.
+    if (target.id !== scope.profileId && !canManageRole(scope.role, target.role, scope.allAccess)) {
       throw new ForbiddenException('You cannot modify this staff member');
     }
     if (isOwnerOrAdminRole(target.role)) {

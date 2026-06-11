@@ -5,13 +5,21 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Header,
+  Headers,
   Param,
   Post,
   Query,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { IsArray, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
+import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { csvCell } from '../../common/csv';
+import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -19,6 +27,8 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 type Scope = VenueScopedRequest['venueScope'];
 const RESERVATION_STATUSES = ['requested', 'confirmed', 'checked_in', 'seated', 'completed', 'no_show', 'cancelled'] as const;
 const RESERVATION_SOURCES = ['direct', 'opentable', 'resy', 'phone', 'walk_in', 'sevenrooms', 'tock', 'google', 'generic'] as const;
+const SYNC_SOURCES = ['opentable', 'resy', 'sevenrooms', 'tock', 'google', 'generic'] as const;
+const MAX_INGEST_EVENTS = 500;
 
 class SaveReservationDto {
   @IsString()
@@ -70,9 +80,48 @@ class SaveReservationDto {
   email?: string;
 }
 
-function csvCell(value: string | number | null | undefined): string {
-  const text = value == null ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
+class ReservationSyncEventDto {
+  @IsString()
+  externalEventId!: string;
+
+  @IsString()
+  eventType!: string;
+
+  @IsString()
+  externalId!: string;
+
+  @IsString()
+  guestName!: string;
+
+  @IsInt()
+  @Min(1)
+  partySize!: number;
+
+  @IsNumber()
+  reservationTime!: number;
+
+  @IsInt()
+  @IsOptional()
+  durationMinutes?: number;
+
+  @IsIn(RESERVATION_STATUSES)
+  @IsOptional()
+  status?: string;
+
+  @IsString() @IsOptional() phone?: string;
+  @IsString() @IsOptional() email?: string;
+  @IsString() @IsOptional() notes?: string;
+  @IsString() @IsOptional() specialRequests?: string;
+}
+
+class ReservationIngestDto {
+  @IsIn(SYNC_SOURCES)
+  provider!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ReservationSyncEventDto)
+  events!: ReservationSyncEventDto[];
 }
 
 @Controller('v1/reservations')
@@ -81,6 +130,75 @@ export class ReservationsController {
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
     if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+  }
+
+  // External reservation providers (OpenTable, Resy, ...) POST sync events here,
+  // authenticated by the connection's webhook secret. Each event is recorded
+  // once (unique on venue+provider+externalEventId); redeliveries are skipped.
+  @Public()
+  @Post('ingest/:venueId')
+  async ingest(
+    @Param('venueId') venueId: string,
+    @Headers('x-webhook-secret') secret: string | undefined,
+    @Body() body: ReservationIngestDto,
+  ) {
+    const provider = body.provider as ReservationSource;
+    const connection = await this.prisma.reservationConnection.findFirst({ where: { venueId, provider } });
+    if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
+
+    let processed = 0;
+    let duplicates = 0;
+    for (const event of body.events.slice(0, MAX_INGEST_EVENTS)) {
+      try {
+        // Claim the event id first; a duplicate delivery trips the unique
+        // constraint and is skipped before we touch the reservation.
+        await this.prisma.reservationSyncEvent.create({
+          data: {
+            venueId,
+            provider,
+            externalEventId: event.externalEventId,
+            eventType: event.eventType,
+            payload: event as unknown as Prisma.InputJsonValue,
+            processedAt: new Date(),
+            status: 'processed',
+          },
+        });
+      } catch (error: any) {
+        if (error?.code === 'P2002') { duplicates += 1; continue; }
+        throw error;
+      }
+
+      const fields = {
+        guestName: event.guestName,
+        partySize: event.partySize,
+        reservationTime: new Date(event.reservationTime),
+        durationMinutes: event.durationMinutes ?? 90,
+        status: (event.status ?? 'confirmed') as ReservationStatus,
+        guestPhone: event.phone?.trim() ?? null,
+        guestEmail: event.email?.trim() ?? null,
+        notes: event.notes?.trim() ?? null,
+        specialRequests: event.specialRequests?.trim() ?? null,
+      };
+      const existing = await this.prisma.reservation.findFirst({
+        where: { venueId, externalId: event.externalId },
+        select: { id: true },
+      });
+      const reservation = existing
+        ? await this.prisma.reservation.update({ where: { id: existing.id }, data: fields })
+        : await this.prisma.reservation.create({
+            data: { venueId, source: provider, externalId: event.externalId, ...fields },
+          });
+      await this.prisma.reservationSyncEvent.updateMany({
+        where: { venueId, provider, externalEventId: event.externalEventId },
+        data: { reservationId: reservation.id },
+      });
+      processed += 1;
+    }
+
+    await this.prisma.reservationConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });
+    return { ok: true, processed, duplicates };
   }
 
   @RequireSubscription('active')
@@ -198,6 +316,8 @@ export class ReservationsController {
 
   @RequireSubscription('active')
   @Get('export-csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="reservations.csv"')
   async exportReservationsCsv(
     @VenueScope() scope: Scope,
     @Query('startDate') startDate?: string,

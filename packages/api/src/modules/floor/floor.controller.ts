@@ -328,7 +328,10 @@ export class FloorController {
   @Get('unassigned-reservations')
   async getUnassignedReservations(@VenueScope() scope: Scope, @Query('withinMinutes') withinMinutes?: string) {
     if (!scope) return [];
-    const minutes = withinMinutes ? parseInt(withinMinutes, 10) : 120;
+    const parsed = parseInt(withinMinutes ?? '', 10);
+    // Clamp to a sane window; a bad/NaN value falls back to the 120-min default
+    // rather than producing an Invalid Date cutoff (which silently returns []).
+    const minutes = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 1440) : 120;
     const now = new Date();
     const cutoff = new Date(now.getTime() + minutes * 60 * 1000);
 
@@ -446,8 +449,25 @@ export class FloorController {
     });
     if (!reservation) throw new NotFoundException('Reservation not found');
 
-    await this.prisma.$transaction(
-      body.tableIds.map((tableId) =>
+    // Validate every table belongs to this venue's active floor plan so a
+    // caller can't attach a reservation to another venue's (or a stale) table.
+    const plan = await this.prisma.floorPlan.findFirst({
+      where: { venueId: scope.venueId, isActive: true },
+      include: { tables: { select: { id: true } } },
+    });
+    const validTableIds = new Set((plan?.tables ?? []).map((t) => t.id));
+    const unknown = body.tableIds.filter((id) => !validTableIds.has(id));
+    if (unknown.length) throw new BadRequestException('One or more tables are not on this venue\'s floor plan');
+
+    const endsAt = new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60 * 1000);
+    // Release any prior active assignments for this reservation first so repeat
+    // calls re-point the reservation instead of stacking duplicate holds.
+    await this.prisma.$transaction([
+      this.prisma.tableAssignment.updateMany({
+        where: { venueId: scope.venueId, reservationId: body.reservationId, releasedAt: null },
+        data: { releasedAt: new Date(), releasedReason: 'reassigned' },
+      }),
+      ...body.tableIds.map((tableId) =>
         this.prisma.tableAssignment.create({
           data: {
             venueId: scope.venueId,
@@ -455,11 +475,11 @@ export class FloorController {
             tableId,
             holdType: 'reserved',
             startsAt: reservation.reservationTime,
-            endsAt: new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60 * 1000),
+            endsAt,
           },
         }),
       ),
-    );
+    ]);
     return { ok: true };
   }
 

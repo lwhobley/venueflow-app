@@ -5,15 +5,19 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Headers,
   Param,
   Post,
   Query,
+  UnauthorizedException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { isAdminRole } from '../../auth/roles';
+import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -226,41 +230,82 @@ export class GuestsController {
   @Post('ingest-leads')
   async ingestLeads(@VenueScope() scope: Scope, @Body() body: IngestLeadsDto) {
     this.requireManager(scope);
-    const leads = body.leads.slice(0, 100);
+    return this.ingestLeadsForVenue(scope.venueId, body.leads);
+  }
+
+  // External lead sources (web forms, ad platforms) POST here, authenticated by
+  // the venue's rotatable leadsWebhookSecret rather than a user session.
+  @Public()
+  @Post('leads-webhook/:venueId')
+  async leadsWebhook(
+    @Param('venueId') venueId: string,
+    @Headers('x-webhook-secret') secret: string | undefined,
+    @Body() body: IngestLeadsDto,
+  ) {
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { leadsWebhookSecret: true } });
+    if (!venue?.leadsWebhookSecret || !secretsMatch(secret, venue.leadsWebhookSecret)) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
+    return this.ingestLeadsForVenue(venueId, body.leads);
+  }
+
+  private async ingestLeadsForVenue(venueId: string, rawLeads: LeadDto[]) {
+    const leads = rawLeads.slice(0, 100);
     let created = 0;
     let updated = 0;
     let skipped = 0;
     const guestIds: string[] = [];
     const seen = new Set<string>();
 
-    for (const lead of leads) {
-      const fullName = lead.fullName.trim();
-      if (!fullName) { skipped++; continue; }
-      const phone = cleanText(lead.phone);
-      const email = cleanText(lead.email)?.toLowerCase();
-      const key = email ?? phone ?? fullName.toLowerCase();
-      if (seen.has(key)) { skipped++; continue; }
-      seen.add(key);
+    // Normalize + dedupe first so we can batch the existence lookups instead of
+    // issuing up to three queries per lead (the original N+1).
+    const normalized = leads
+      .map((lead) => {
+        const fullName = lead.fullName.trim();
+        if (!fullName) return null;
+        const phone = cleanText(lead.phone) ?? null;
+        const email = cleanText(lead.email)?.toLowerCase() ?? null;
+        return {
+          fullName,
+          nameLower: fullName.toLowerCase(),
+          phone,
+          email,
+          tags: cleanTags([...(lead.tags ?? []), 'lead']),
+          source: cleanText(lead.source) ?? null,
+          key: email ?? phone ?? fullName.toLowerCase(),
+        };
+      })
+      .filter((l): l is NonNullable<typeof l> => l !== null);
+    skipped += leads.length - normalized.length;
 
-      const incomingTags = cleanTags([...(lead.tags ?? []), 'lead']);
-      const source = cleanText(lead.source) ?? null;
+    const emails = [...new Set(normalized.map((l) => l.email).filter((e): e is string => !!e))];
+    const phones = [...new Set(normalized.map((l) => l.phone).filter((p): p is string => !!p))];
+    const names = [...new Set(normalized.map((l) => l.nameLower))];
+    const existingGuests = await this.prisma.guest.findMany({
+      where: {
+        venueId,
+        deletedAt: null,
+        OR: [
+          ...(emails.length ? [{ email: { in: emails } }] : []),
+          ...(phones.length ? [{ phone: { in: phones } }] : []),
+          { nameLower: { in: names } },
+        ],
+      },
+    });
+    const byEmail = new Map(existingGuests.filter((g) => g.email).map((g) => [g.email!.toLowerCase(), g]));
+    const byPhone = new Map(existingGuests.filter((g) => g.phone).map((g) => [g.phone!, g]));
+    const byName = new Map(existingGuests.map((g) => [g.nameLower ?? g.fullName.toLowerCase(), g]));
 
-      let existing = null;
-      if (email) {
-        existing = await this.prisma.guest.findFirst({
-          where: { venueId: scope.venueId, email, deletedAt: null },
-        });
-      }
-      if (!existing && phone) {
-        existing = await this.prisma.guest.findFirst({
-          where: { venueId: scope.venueId, phone, deletedAt: null },
-        });
-      }
-      if (!existing) {
-        existing = await this.prisma.guest.findFirst({
-          where: { venueId: scope.venueId, nameLower: fullName.toLowerCase(), deletedAt: null },
-        });
-      }
+    for (const lead of normalized) {
+      const { fullName, phone, email, tags: incomingTags, source } = lead;
+      if (seen.has(lead.key)) { skipped++; continue; }
+      seen.add(lead.key);
+
+      const existing =
+        (email ? byEmail.get(email) : null) ??
+        (phone ? byPhone.get(phone) : null) ??
+        byName.get(lead.nameLower) ??
+        null;
 
       if (existing) {
         await this.prisma.guest.update({
@@ -280,7 +325,7 @@ export class GuestsController {
       } else {
         const newGuest = await this.prisma.guest.create({
           data: {
-            venueId: scope.venueId,
+            venueId,
             fullName,
             nameLower: fullName.toLowerCase(),
             phone: phone ?? null,
@@ -291,6 +336,11 @@ export class GuestsController {
             tags: incomingTags,
           },
         });
+        // Register the new guest so a later lead in the same batch matching a
+        // different identifier updates it instead of inserting a duplicate.
+        if (newGuest.email) byEmail.set(newGuest.email.toLowerCase(), newGuest);
+        if (newGuest.phone) byPhone.set(newGuest.phone, newGuest);
+        byName.set(newGuest.nameLower ?? newGuest.fullName.toLowerCase(), newGuest);
         guestIds.push(newGuest.id);
         created++;
       }
