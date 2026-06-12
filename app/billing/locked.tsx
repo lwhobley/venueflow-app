@@ -13,7 +13,7 @@ const headlineByReason: Record<string, string> = {
   trial_active: 'Upgrade to unlock this feature',
   payment_failed: "Your payment didn't go through",
   cancelled: 'Your subscription has been cancelled',
-  never_subscribed: 'Subscribe to access Venue Wrangler',
+  never_subscribed: 'Start your free trial',
 };
 
 export default function BillingLockedScreen() {
@@ -37,7 +37,7 @@ export default function BillingLockedScreen() {
 
             <Text variant="titleMedium">14-day free trial</Text>
             <Text style={{ color: colors.muted }}>
-              Subscribe to invite staff and unlock scheduling, the live floor, time clock, reservations, bar stock,
+              Start your 14-day free trial for teams of 1-50 people. After the trial, continue for $29.99/month to keep scheduling, the live floor, time clock, reservations, bar stock,
               reports, and integrations across your whole team.
             </Text>
 
@@ -53,7 +53,7 @@ export default function BillingLockedScreen() {
             ) : canPay ? (
               <>
                 <Button mode="contained" buttonColor={colors.primary} onPress={() => router.push('/billing/paywall')}>
-                  See plans
+                  Start free trial
                 </Button>
                 <Button mode="outlined" textColor={colors.primary} onPress={() => void Linking.openURL(APPLE_SUBSCRIPTIONS_URL)}>
                   Manage subscription

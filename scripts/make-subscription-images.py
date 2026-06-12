@@ -25,9 +25,7 @@ OUT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "screenshots
 os.makedirs(OUT, exist_ok=True)
 
 tiers = [
-    ("starter", "Starter", "$79.99/mo", "Up to 15 users", "For focused teams running one venue."),
-    ("pro", "Pro", "$149.99/mo", "Up to 30 users", "For growing teams with deeper ops."),
-    ("enterprise", "Enterprise", "$299.99/mo", "Up to 50 users", "For high-volume hospitality groups."),
+    ("team", "Team", "$29.99/mo", "1-50 people", "One flat plan for your whole venue team."),
 ]
 
 def center(draw, y, text, fnt, fill):

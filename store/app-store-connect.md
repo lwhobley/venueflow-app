@@ -7,7 +7,7 @@
 - SKU: venue-wrangler-ios
 - Privacy policy URL: https://venuewrangler.com/privacy
 - Support URL: https://venue-wrangler.pages.dev
-- Screenshot set: iPhone 6.5" portrait (1284x2778) and iPad portrait screenshots.
+- Screenshot set: iPhone portrait (1242x2688) and iPad portrait (2064x2752) screenshots.
 - Review notes: Venue Wrangler is a restaurant operations app for scheduling, reservations, floor management, team communication, bar stock, and manager reporting. Users can create an individual account without a venue, then join a venue later by invite from a venue owner or admin.
 - Review account: create a dedicated admin/manager account in production before submission and include the email/password in App Review notes. The account should belong to a seeded venue with staff, shifts, floor tables, reservations, chat messages, and an active/trialing subscription.
 

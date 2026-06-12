@@ -7,7 +7,7 @@ cards, controls, and realistic in-app data.
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-W, H = 1284, 2778
+W, H = 1242, 2688
 BG = (255, 255, 255)
 SURFACE = (255, 255, 255)
 SOFT = (247, 248, 245)

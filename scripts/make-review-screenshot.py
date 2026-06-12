@@ -1,14 +1,14 @@
 """Generate a paywall review screenshot for App Store Connect.
-Matches the app's clean white theme and uses an App-Store-accepted iPhone
-6.5" portrait resolution (1284x2778) so ASC accepts the upload.
+Matches the app's clean white theme and uses the requested App Store
+iPhone portrait resolution (1242x2688).
 
-Products: Starter $79.99 / Pro $149.99 / Enterprise $299.99 - one 'pro'
+Product: Venue Wrangler $29.99/month for teams of 1-50 people - one 'pro'
 entitlement unlocks the whole app.
 """
 from PIL import Image, ImageDraw, ImageFont
 import os
 
-W, H = 1284, 2778  # iPhone 6.5" accepted App Store screenshot size
+W, H = 1242, 2688
 
 BG = (255, 255, 255)
 SURFACE = (255, 255, 255)
@@ -57,11 +57,11 @@ def ctext(y, text, fnt, fill):
 # Header
 d.text((PAD, 96), "Choose your plan", font=f_head, fill=CHARCOAL)
 sy = 224
-for line in wrap("Start a 3-day free trial. Cancel anytime in your Apple account settings.", f_sub, W - 2*PAD):
+for line in wrap("Start a 14-day free trial. Cancel anytime in your Apple account settings.", f_sub, W - 2*PAD):
     d.text((PAD, sy), line, font=f_sub, fill=MUTED); sy += 50
 
-tiers = [("Starter", "$79.99"), ("Pro", "$149.99"), ("Enterprise", "$299.99")]
-DESC = "Full access: scheduling, time clock, floor plan, reservations, bar stock, reports, and team chat."
+tiers = [("Team plan", "$29.99")]
+DESC = "For teams of 1-50 people. Full access: scheduling, time clock, floor plan, reservations, bar stock, reports, and team chat."
 
 cx0, cx1 = PAD, W - PAD
 inner = cx1 - cx0 - 2*48

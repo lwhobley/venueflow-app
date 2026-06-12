@@ -148,7 +148,7 @@ export default function SignInScreen() {
           <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
           {!inviteToken ? (
             <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>
-              Time tracking, scheduling, reservations, and team chat. Create an individual account now, then join a venue when an owner invites you.
+              Time tracking, scheduling, reservations, and team chat. Start your 14-day free trial now, then join a venue when an owner invites you.
             </Text>
           ) : null}
         </View>
@@ -180,13 +180,13 @@ export default function SignInScreen() {
 
             <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
-                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Create free account')
+                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Start free trial')
                 : 'Sign in'}
             </Button>
 
             {!inviteToken ? (
               <Text style={{ color: authColors.muted, fontSize: 12, textAlign: 'center' }}>
-                You don't need a venue to sign up. A venue owner or admin can invite you to join their team later.
+                Your 14-day trial starts automatically when you sign up. You can join a venue later by owner or admin invite.
               </Text>
             ) : null}
           </Card.Content>

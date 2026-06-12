@@ -41,7 +41,7 @@ export default function PaywallScreen() {
         const pkgs = await getOfferingPackages();
         if (active) setPackages(pkgs);
       } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : 'Could not load plans.');
+        console.warn('[paywall] Could not load RevenueCat offerings', e);
       } finally {
         if (active) setLoading(false);
       }
@@ -93,7 +93,7 @@ export default function PaywallScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
         <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Add your team</Text>
-        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Upgrade to one flat monthly plan to invite staff and share scheduling, the live floor, time clock, and team chat across your whole team.</Text>
+        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Upgrade to one flat monthly plan for teams of 1-50 people to share scheduling, the live floor, time clock, and team chat.</Text>
       </View>
 
       {!PURCHASES_SUPPORTED ? (
@@ -112,10 +112,17 @@ export default function PaywallScreen() {
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
+                <Text style={{ color: colors.muted, fontWeight: '600' }}>For teams of 1-50 people</Text>
                 <Text style={{ color: colors.success, fontWeight: '600' }}>Includes 14-day free trial</Text>
                 <Text style={{ color: colors.muted }}>Solo use is free. Upgrade to unlock team scheduling, reservations, the live floor, and team chat.</Text>
-                <Button mode="contained" buttonColor={colors.primary} loading={busy === pkg.id} disabled={!!busy || !live} onPress={() => void buy(pkg.id)}>
-                  Subscribe
+                <Button
+                  mode="contained"
+                  buttonColor={colors.primary}
+                  loading={busy === pkg.id}
+                  disabled={!!busy}
+                  onPress={() => live ? void buy(pkg.id) : router.replace('/(tabs)/home')}
+                >
+                  Start free trial
                 </Button>
               </Card.Content>
             </Card>
@@ -125,7 +132,7 @@ export default function PaywallScreen() {
 
       {!loading && PURCHASES_SUPPORTED && packages.length === 0 ? (
         <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-          Purchasing activates in the App Store build. This pricing is shown for preview.
+          Your free trial starts automatically when you sign up. App Store purchasing appears here once the subscription is available.
         </Text>
       ) : null}
 

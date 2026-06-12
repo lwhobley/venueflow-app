@@ -155,6 +155,7 @@ export class AuthController {
   }
 
   private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string) {
+    const trialEndsAt = new Date(Date.now() + TRIAL_DURATION_MS);
     const invite = inviteToken
       ? await this.prisma.invite.findFirst({
           where: { token: inviteToken, usedBy: null, expiresAt: { gt: new Date() } },
@@ -193,6 +194,7 @@ export class AuthController {
             email,
             ...(trimmedFullName ? { fullName: trimmedFullName } : {}),
             ...(grant ?? {}),
+            ...(existingByUser.trialEndsAt ? {} : { trialEndsAt }),
           },
           include: { venue: true },
         });
@@ -211,7 +213,7 @@ export class AuthController {
         if (claimedProfile) {
           result = await tx.profile.update({
             where: { id: claimedProfile.id },
-            data: { userId, email, fullName: trimmedFullName || claimedProfile.fullName, ...grant! },
+            data: { userId, email, fullName: trimmedFullName || claimedProfile.fullName, ...grant!, trialEndsAt: claimedProfile.trialEndsAt ?? trialEndsAt },
             include: { venue: true },
           });
         } else {
@@ -223,7 +225,7 @@ export class AuthController {
               role: grant?.role ?? 'staff',
               jobTitle: grant?.jobTitle ?? 'Staff',
               venueId: grant?.venueId ?? undefined,
-              trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
+              trialEndsAt,
             },
             include: { venue: true },
           });

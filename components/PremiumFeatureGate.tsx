@@ -10,30 +10,28 @@ import { config } from '../lib/config';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { hasAllAccess } from '../lib/permissions';
 
-// Wraps premium-only features (Integrations, CRM). These are locked during the
-// free trial and after it expires — the user must upgrade to use them. When
-// billing is disabled (local/dev builds) the feature is always unlocked.
+// Wraps premium-only features (Integrations, CRM). The 14-day trial unlocks
+// these features automatically after signup; after it expires the user must
+// upgrade. When billing is disabled (local/dev builds) the feature is always
+// unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const { isPremium, isLoading } = useA0Purchases();
   const allAccess = hasAllAccess(me?.profile.allAccess ?? user?.all_access);
 
-  if (!config.billingEnabled || allAccess || isPremium) {
-    return <>{children}</>;
-  }
   // Avoid flashing the upsell while entitlement is still resolving.
   if (isLoading || me === undefined) {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   }
 
   const trial = getTrialState(me?.profile.trialEndsAt ?? null);
-  const headline = trial.active
-    ? `${feature} is a premium feature`
-    : 'Your free trial has ended';
-  const body = trial.active
-    ? `You have ${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial. Upgrade now to unlock ${feature}.`
-    : `Upgrade to a paid plan to unlock ${feature} and the rest of Venue Wrangler.`;
+  if (!config.billingEnabled || allAccess || isPremium || trial.active) {
+    return <>{children}</>;
+  }
+
+  const headline = 'Your free trial has ended';
+  const body = `Upgrade to a paid plan to unlock ${feature} and the rest of Venue Wrangler.`;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, flexGrow: 1, justifyContent: 'center' }}>
