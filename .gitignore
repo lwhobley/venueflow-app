@@ -45,3 +45,8 @@ yarn-error.*
 
 # Generated auth keys (contain a private key — never commit)
 scripts/.auth-keys.json
+
+# Local tooling artifacts (Claude Code, Codex, agent runners)
+.claude/
+.codex/
+.agents/
