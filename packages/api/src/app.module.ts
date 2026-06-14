@@ -26,6 +26,7 @@ import { FloorModule } from './modules/floor/floor.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { WorkforceModule } from './modules/workforce/workforce.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
     ChatModule,
     CrmModule,
     IntegrationsModule,
+    WorkforceModule,
   ],
   controllers: [
     HealthController,

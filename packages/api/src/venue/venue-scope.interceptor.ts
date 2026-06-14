@@ -66,6 +66,16 @@ export class VenueScopeInterceptor implements NestInterceptor {
       return next.handle();
     }
 
+    // A profile with an explicit pending/rejected/revoked status must not get
+    // venue scope even if venueId is set (e.g. revoked after being approved).
+    if (
+      profile.membershipStatus === 'pending' ||
+      profile.membershipStatus === 'rejected' ||
+      profile.membershipStatus === 'revoked'
+    ) {
+      return next.handle();
+    }
+
     const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
       venueId: profile.venueId,
       venueStatus: profile.venue.subscriptionStatus,
