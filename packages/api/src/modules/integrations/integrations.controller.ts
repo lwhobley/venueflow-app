@@ -36,7 +36,7 @@ export class IntegrationsController {
     if (!scope || !isAdminRole(scope.role)) {
       throw new ForbiddenException('Not authorized');
     }
-    const [connections, recentSyncEvents] = await Promise.all([
+    const [rawConnections, rawEvents] = await Promise.all([
       this.prisma.reservationConnection.findMany({ where: { venueId: scope.venueId } }),
       this.prisma.reservationSyncEvent.findMany({
         where: { venueId: scope.venueId },
@@ -44,7 +44,9 @@ export class IntegrationsController {
         take: 20,
       }),
     ]);
-    return { connections, recentSyncEvents };
+    const connections = rawConnections.map(({ id, webhookSecret: _, ...rest }) => ({ _id: id, ...rest }));
+    const recentEvents = rawEvents.map(({ id, ...rest }) => ({ _id: id, ...rest }));
+    return { connections, recentEvents };
   }
 
   @RequireSubscription('active')
@@ -57,13 +59,15 @@ export class IntegrationsController {
       where: { venueId: scope.venueId, provider: body.provider },
       select: { id: true },
     });
+    const mapConnection = ({ id, webhookSecret: _, ...rest }: any) => ({ _id: id, ...rest });
     if (existing) {
-      return this.prisma.reservationConnection.update({
+      const row = await this.prisma.reservationConnection.update({
         where: { id: existing.id },
         data: { externalVenueId: body.externalVenueId ?? null, status: body.status },
       });
+      return mapConnection(row);
     }
-    return this.prisma.reservationConnection.create({
+    const row = await this.prisma.reservationConnection.create({
       data: {
         venueId: scope.venueId,
         provider: body.provider,
@@ -71,5 +75,6 @@ export class IntegrationsController {
         status: body.status,
       },
     });
+    return mapConnection(row);
   }
 }

@@ -20,7 +20,7 @@ const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const EMAIL_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
-const PASSWORD_ITERATIONS = 210_000;
+const PASSWORD_ITERATIONS = 600_000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
@@ -125,6 +125,15 @@ export class AuthController {
           data: { failedSignInCount: 0, lockedUntil: null },
         } as any);
       }
+      // Transparently upgrade hash strength on login when the stored iteration
+      // count is below the current target.
+      if (user.password.iterations < PASSWORD_ITERATIONS) {
+        const upgraded = await hashPassword(body.password);
+        await this.prisma.passwordCredential.update({
+          where: { userId: user.id },
+          data: { salt: upgraded.salt, passwordHash: upgraded.hash, iterations: PASSWORD_ITERATIONS },
+        });
+      }
       return this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
     }
 
@@ -176,7 +185,14 @@ export class AuthController {
       throw error;
     }
     const session = await this.issueSession(nextUserId, email, resolvedFullName, body.inviteToken, body.phone);
-    await this.sendVerificationEmail(nextUserId, email, session.profile.fullName);
+    // Swallow delivery errors: the account is already created and the session
+    // token is ready to return. The user can request a new code from the
+    // verify-email screen if the email didn't arrive.
+    try {
+      await this.sendVerificationEmail(nextUserId, email, session.profile.fullName);
+    } catch {
+      // intentionally ignored
+    }
     void this.email.send({
       to: email,
       subject: 'Welcome to Venue Wrangler',

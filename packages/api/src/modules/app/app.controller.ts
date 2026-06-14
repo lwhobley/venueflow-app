@@ -1134,7 +1134,7 @@ export class AppController {
   }
 
   private mapProfile(
-    profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean },
+    profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; trialEndsAt?: Date | null },
     emailVerified = false,
   ) {
     return {
@@ -1152,6 +1152,7 @@ export class AppController {
       venue_id: profile.venueId,
       allAccess: profile.allAccess,
       all_access: profile.allAccess,
+      trialEndsAt: profile.trialEndsAt?.getTime() ?? null,
     };
   }
 

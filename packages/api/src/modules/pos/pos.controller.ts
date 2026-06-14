@@ -259,7 +259,7 @@ export class PosController {
     return { start: new Date(start), end: new Date(end) };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('overview')
   async getPosOverview(@VenueScope() scope: Scope) {
     this.requireManager(scope);
@@ -293,7 +293,7 @@ export class PosController {
     };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('sales/summary')
   async getSalesSummaryDashboard(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
     this.requireManager(scope);
@@ -397,7 +397,7 @@ export class PosController {
     };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('sales/by-server')
   async getSalesByServer(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
     this.requireManager(scope);
@@ -428,7 +428,7 @@ export class PosController {
       .sort((a, b) => b.salesCents - a.salesCents);
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('sales/top-items')
   async getTopMenuItems(@VenueScope() scope: Scope, @Query() query: TopItemsQueryDto) {
     this.requireManager(scope);
@@ -463,7 +463,7 @@ export class PosController {
     }));
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('labor')
   async getLaborSummary(@VenueScope() scope: Scope, @Query() query: SalesWindowQueryDto) {
     this.requireManager(scope);
@@ -502,7 +502,7 @@ export class PosController {
     return { totalRegularMins, totalOvertimeMins, totalPayCents, totalTipsCents, byEmployee };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Post('connections')
   async upsertPosConnection(@VenueScope() scope: Scope, @Body() body: UpsertPosConnectionDto) {
     this.requireManager(scope);

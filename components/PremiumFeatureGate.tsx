@@ -1,8 +1,6 @@
 import { Platform, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { useQuery } from '../lib/railway-hooks';
-import { api } from '../lib/railway-api';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
 import { getTrialState } from '../lib/trial';
 import { colors, spacing } from '../lib/theme';
@@ -15,13 +13,12 @@ import { hasAllAccess } from '../lib/permissions';
 // upgrade. When billing is disabled (local/dev builds) the feature is always
 // unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const { user, me, isAuthLoading } = useAuthenticatedSession();
   const { isPremium, isLoading } = useA0Purchases();
   const allAccess = hasAllAccess(me?.profile.allAccess ?? user?.all_access);
 
-  // Avoid flashing the upsell while entitlement is still resolving.
-  if (isLoading || me === undefined) {
+  // Avoid flashing the upsell while entitlement or profile is still resolving.
+  if (isLoading || isAuthLoading || me === undefined) {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   }
 

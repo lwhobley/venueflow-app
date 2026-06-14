@@ -58,6 +58,23 @@ const STRIPE_STATUS_MAP: Record<string, SubscriptionStatus> = {
   incomplete_expired: 'expired',
 };
 
+type SubscriptionInput = {
+  venueId: string;
+  status: SubscriptionStatus;
+  planId: string;
+  priceCents?: number | null;
+  currency?: string | null;
+  externalSubscriptionId?: string | null;
+  externalCustomerId?: string | null;
+  currentPeriodStart?: Date | null;
+  currentPeriodEnd?: Date | null;
+  cancelAtPeriodEnd?: boolean;
+  eventId?: string;
+  eventType?: string;
+  eventAt?: Date;
+  payload?: unknown;
+};
+
 function unixToDate(seconds: number | null | undefined): Date | null {
   return typeof seconds === 'number' && Number.isFinite(seconds) ? new Date(seconds * 1000) : null;
 }
@@ -178,6 +195,11 @@ export class BillingController {
       return { ok: true };
     }
 
+    if (event.type === 'charge.refunded') {
+      await this.recordStripeRefund(object, event, eventAt);
+      return { ok: true };
+    }
+
     return { ok: true, ignored: true };
   }
 
@@ -260,21 +282,54 @@ export class BillingController {
     });
   }
 
-  async applyStripeSubscription(input: {
-    venueId: string;
-    status: SubscriptionStatus;
-    planId: string;
-    priceCents?: number | null;
-    currency?: string | null;
-    externalSubscriptionId?: string | null;
-    externalCustomerId?: string | null;
-    currentPeriodStart?: Date | null;
-    currentPeriodEnd?: Date | null;
-    cancelAtPeriodEnd?: boolean;
-    eventId?: string;
-    eventType?: string;
-    eventAt?: Date;
-    payload?: unknown;
+  private async recordStripeRefund(charge: any, event: StripeEvent, eventAt: Date) {
+    const stripeInvoiceId = typeof charge?.invoice === 'string' ? charge.invoice : null;
+    if (!stripeInvoiceId) return;
+
+    try {
+      await this.prisma.subscriptionEvent.create({
+        data: {
+          venueId: '',
+          source: 'stripe',
+          externalEventId: event.id ?? `refund:${stripeInvoiceId}`,
+          eventType: event.type ?? 'charge.refunded',
+          payload: event as never,
+          processedAt: new Date(),
+          status: 'processed',
+        },
+      });
+    } catch (error: any) {
+      if (error?.code === 'P2002') return;
+      throw error;
+    }
+
+    const invoice = await this.prisma.invoice.findUnique({ where: { stripeInvoiceId } });
+    if (!invoice) return;
+
+    await this.prisma.invoice.update({
+      where: { stripeInvoiceId },
+      data: { status: charge.refunded ? 'refunded' : 'partially_refunded' },
+    });
+
+    // Record venue on the subscription event now that we know it.
+    await this.prisma.subscriptionEvent.updateMany({
+      where: { externalEventId: event.id ?? `refund:${stripeInvoiceId}`, venueId: '' },
+      data: { venueId: invoice.venueId },
+    });
+  }
+
+  async applyStripeSubscription(input: SubscriptionInput) {
+    return this.applySubscription({ ...input, platform: 'stripe', source: 'stripe', staleField: 'lastStripeEventAt' });
+  }
+
+  async applyAppleSubscription(input: SubscriptionInput) {
+    return this.applySubscription({ ...input, platform: 'apple', source: 'revenuecat', staleField: 'lastRevenueCatEventAt' });
+  }
+
+  private async applySubscription(input: SubscriptionInput & {
+    platform: 'stripe' | 'apple';
+    source: string;
+    staleField: 'lastStripeEventAt' | 'lastRevenueCatEventAt';
   }) {
     const now = new Date();
     const eventAt = input.eventAt ?? now;
@@ -284,13 +339,14 @@ export class BillingController {
         if (!venue) return null;
 
         const existing = await tx.subscription.findFirst({ where: { venueId: input.venueId } });
-        const isStale = Boolean(existing?.lastStripeEventAt && existing.lastStripeEventAt > eventAt);
+        const lastEventAt = existing?.[input.staleField];
+        const isStale = Boolean(lastEventAt && lastEventAt > eventAt);
         if (isStale) {
           if (input.eventId && input.eventType) {
             await tx.subscriptionEvent.create({
               data: {
                 venueId: input.venueId,
-                source: 'stripe',
+                source: input.source,
                 externalEventId: input.eventId,
                 eventType: input.eventType,
                 payload: (input.payload ?? {}) as never,
@@ -304,14 +360,15 @@ export class BillingController {
 
         await tx.venue.update({
           where: { id: input.venueId },
-          data: { subscriptionStatus: input.status, subscriptionPlatform: 'stripe' },
+          data: { subscriptionStatus: input.status, subscriptionPlatform: input.platform },
         });
+        const eventTimestamp = { [input.staleField]: eventAt };
         if (existing) {
           await tx.subscription.update({
             where: { id: existing.id },
             data: {
               status: input.status,
-              platform: 'stripe',
+              platform: input.platform,
               planId: input.planId,
               priceCents: input.priceCents ?? existing.priceCents,
               currency: input.currency ?? existing.currency,
@@ -321,7 +378,7 @@ export class BillingController {
               cancelledAt: input.status === 'cancelled' ? now : input.status === 'active' ? null : existing.cancelledAt,
               externalSubscriptionId: input.externalSubscriptionId ?? existing.externalSubscriptionId,
               externalCustomerId: input.externalCustomerId ?? existing.externalCustomerId,
-              lastStripeEventAt: eventAt,
+              ...eventTimestamp,
             },
           });
         } else {
@@ -329,7 +386,7 @@ export class BillingController {
             data: {
               venueId: input.venueId,
               status: input.status,
-              platform: 'stripe',
+              platform: input.platform,
               planId: input.planId,
               priceCents: input.priceCents ?? 0,
               currency: input.currency ?? 'USD',
@@ -341,7 +398,7 @@ export class BillingController {
               cancelledAt: input.status === 'cancelled' ? now : null,
               externalSubscriptionId: input.externalSubscriptionId ?? null,
               externalCustomerId: input.externalCustomerId ?? null,
-              lastStripeEventAt: eventAt,
+              ...eventTimestamp,
             },
           });
         }
@@ -349,7 +406,7 @@ export class BillingController {
           await tx.subscriptionEvent.create({
             data: {
               venueId: input.venueId,
-              source: 'stripe',
+              source: input.source,
               externalEventId: input.eventId,
               eventType: input.eventType,
               payload: (input.payload ?? {}) as never,
@@ -358,116 +415,6 @@ export class BillingController {
             },
           });
         }
-        return { status: input.status };
-      });
-    } catch (error: any) {
-      if (error?.code === 'P2002') {
-        return { ok: true, duplicate: true };
-      }
-      throw error;
-    }
-  }
-
-  async applyAppleSubscription(input: {
-    venueId: string;
-    status: SubscriptionStatus;
-    planId: string;
-    externalSubscriptionId?: string | null;
-    externalCustomerId?: string | null;
-    currentPeriodStart?: Date | null;
-    currentPeriodEnd?: Date | null;
-    cancelAtPeriodEnd?: boolean;
-    eventId?: string;
-    eventType?: string;
-    eventAt?: Date;
-    payload?: unknown;
-  }) {
-    const now = new Date();
-    const eventAt = input.eventAt ?? now;
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        const venue = await tx.venue.findUnique({ where: { id: input.venueId } });
-        if (!venue) {
-          return null;
-        }
-
-        const existing = await tx.subscription.findFirst({ where: { venueId: input.venueId } });
-        const isStale = Boolean(existing?.lastRevenueCatEventAt && existing.lastRevenueCatEventAt > eventAt);
-        if (isStale) {
-          if (input.eventId && input.eventType) {
-            await tx.subscriptionEvent.create({
-              data: {
-                venueId: input.venueId,
-                source: 'revenuecat',
-                externalEventId: input.eventId,
-                eventType: input.eventType,
-                payload: (input.payload ?? {}) as never,
-                processedAt: now,
-                status: 'ignored_stale',
-              },
-            });
-          }
-          return { status: existing!.status, ignored: true };
-        }
-
-        await tx.venue.update({
-          where: { id: input.venueId },
-          data: {
-            subscriptionStatus: input.status,
-            subscriptionPlatform: 'apple',
-          },
-        });
-        if (existing) {
-          await tx.subscription.update({
-            where: { id: existing.id },
-            data: {
-              status: input.status,
-              platform: 'apple',
-              planId: input.planId,
-              currentPeriodStart: input.currentPeriodStart ?? existing.currentPeriodStart,
-              currentPeriodEnd: input.currentPeriodEnd ?? existing.currentPeriodEnd,
-              cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
-              cancelledAt: input.status === 'cancelled' ? now : input.status === 'active' ? null : existing.cancelledAt,
-              externalSubscriptionId: input.externalSubscriptionId ?? existing.externalSubscriptionId,
-              externalCustomerId: input.externalCustomerId ?? existing.externalCustomerId,
-              lastRevenueCatEventAt: eventAt,
-            },
-          });
-        } else {
-          await tx.subscription.create({
-            data: {
-              venueId: input.venueId,
-              status: input.status,
-              platform: 'apple',
-              planId: input.planId,
-              priceCents: 0,
-              currency: 'USD',
-              trialStartedAt: now,
-              trialEndsAt: now,
-              currentPeriodStart: input.currentPeriodStart ?? now,
-              currentPeriodEnd: input.currentPeriodEnd,
-              cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
-              cancelledAt: input.status === 'cancelled' ? now : null,
-              externalSubscriptionId: input.externalSubscriptionId ?? null,
-              externalCustomerId: input.externalCustomerId ?? null,
-              lastRevenueCatEventAt: eventAt,
-            },
-          });
-        }
-        if (input.eventId && input.eventType) {
-          await tx.subscriptionEvent.create({
-            data: {
-              venueId: input.venueId,
-              source: 'revenuecat',
-              externalEventId: input.eventId,
-              eventType: input.eventType,
-              payload: (input.payload ?? {}) as never,
-              processedAt: now,
-              status: 'processed',
-            },
-          });
-        }
-
         return { status: input.status };
       });
     } catch (error: any) {

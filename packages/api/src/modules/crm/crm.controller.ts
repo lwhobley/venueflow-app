@@ -240,7 +240,7 @@ function makeContractNumber(): string {
 export class CrmController {
   constructor(private readonly prisma: PrismaService) {}
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('leads')
   async listLeads(@VenueScope() scope: Scope, @Query() query: CrmListQueryDto) {
     requireManager(scope);
@@ -304,7 +304,7 @@ export class CrmController {
     };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('leads/:id')
   async getLead(@VenueScope() scope: Scope, @Param('id') id: string) {
     requireManager(scope);
@@ -350,7 +350,7 @@ export class CrmController {
     };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Post('leads')
   async saveLead(@VenueScope() scope: Scope, @Body() body: SaveLeadDto) {
     requireManager(scope);
@@ -399,7 +399,7 @@ export class CrmController {
     return { leadId: lead.id };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Post('leads/:id/notes')
   async addNote(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: AddNoteDto) {
     requireManager(scope);
@@ -430,7 +430,7 @@ export class CrmController {
     return { noteId: note.id };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('beos')
   async listBeos(@VenueScope() scope: Scope, @Query() query: CrmListQueryDto) {
     requireManager(scope);
@@ -451,7 +451,7 @@ export class CrmController {
     }));
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Post('beos')
   async saveBeo(@VenueScope() scope: Scope, @Body() body: SaveBeoDto) {
     requireManager(scope);
@@ -516,7 +516,7 @@ export class CrmController {
     return { beoId: beo.id };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Post('beos/:id/convert')
   async convertBeoToContract(@VenueScope() scope: Scope, @Param('id') id: string) {
     requireManager(scope);
@@ -558,7 +558,7 @@ export class CrmController {
     return { contractId: contract.id };
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Get('contracts')
   async listContracts(@VenueScope() scope: Scope, @Query() query: CrmListQueryDto) {
     requireManager(scope);
@@ -579,7 +579,7 @@ export class CrmController {
     }));
   }
 
-  @RequireSubscription('paid')
+  @RequireSubscription('active')
   @Post('contracts')
   async saveContract(@VenueScope() scope: Scope, @Body() body: SaveContractDto) {
     requireManager(scope);

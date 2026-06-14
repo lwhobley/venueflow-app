@@ -174,7 +174,7 @@ function IntegrationsScreenInner() {
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
             <Button mode="contained" buttonColor={colors.primary} loading={pending === 'pos'} disabled={pending !== null} onPress={() => void saveConnection()}>Save connection</Button>
           </View>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: /pos/webhook with the x-venueflow-pos-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
+          <Text style={{ color: colors.muted }}>Webhook endpoint: POST /api/v1/pos/ingest/:venueId with the x-webhook-secret header (per-connection secret).</Text>
         </Card.Content>
       </Card>
 
@@ -190,7 +190,7 @@ function IntegrationsScreenInner() {
           <Button mode="contained" buttonColor={colors.primary} loading={pending === 'reservation'} disabled={pending !== null} onPress={() => void saveReservationConnection()}>
             Save reservation connection
           </Button>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: /reservations/webhook with the x-venueflow-reservation-secret (deployment) and x-venueflow-connection-secret (per-connection) headers.</Text>
+          <Text style={{ color: colors.muted }}>Webhook endpoint: POST /api/v1/reservations/ingest/:venueId with the x-webhook-secret header (per-connection secret).</Text>
         </Card.Content>
       </Card>
 
@@ -198,8 +198,7 @@ function IntegrationsScreenInner() {
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>CRM lead capture</Text>
           <Text style={{ color: colors.muted }}>
-            Pipe website forms, email, or CSV uploads into your guest CRM. Generate a per-venue secret, then POST to /crm/leads with the
-            x-venueflow-leads-secret (deployment) and x-venueflow-connection-secret (per-venue) headers.
+            Pipe website forms, email, or CSV uploads into your guest CRM. Generate a per-venue secret, then POST to /api/v1/guests/leads-webhook/:venueId with the x-webhook-secret header.
           </Text>
           <Button mode="contained" buttonColor={colors.primary} loading={pending === 'leads'} disabled={pending !== null} onPress={() => void generateLeadsSecret()}>
             Generate lead webhook secret

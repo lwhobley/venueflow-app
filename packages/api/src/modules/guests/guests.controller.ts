@@ -329,55 +329,55 @@ export class GuestsController {
     const byPhone = new Map(existingGuests.filter((g) => g.phone).map((g) => [g.phone!, g]));
     const byName = new Map(existingGuests.map((g) => [g.nameLower ?? g.fullName.toLowerCase(), g]));
 
-    for (const lead of normalized) {
-      const { fullName, phone, email, tags: incomingTags, source } = lead;
-      if (seen.has(lead.key)) { skipped++; continue; }
-      seen.add(lead.key);
+    await this.prisma.$transaction(async (tx) => {
+      for (const lead of normalized) {
+        const { fullName, phone, email, tags: incomingTags, source } = lead;
+        if (seen.has(lead.key)) { skipped++; continue; }
+        seen.add(lead.key);
 
-      const existing =
-        (email ? byEmail.get(email) : null) ??
-        (phone ? byPhone.get(phone) : null) ??
-        byName.get(lead.nameLower) ??
-        null;
+        const existing =
+          (email ? byEmail.get(email) : null) ??
+          (phone ? byPhone.get(phone) : null) ??
+          byName.get(lead.nameLower) ??
+          null;
 
-      if (existing) {
-        await this.prisma.guest.update({
-          where: { id: existing.id },
-          data: {
-            fullName,
-            nameLower: fullName.toLowerCase(),
-            phone: phone ?? existing.phone,
-            email: email ?? existing.email,
-            lifecycleStage: existing.lifecycleStage ?? 'lead',
-            source: source ?? existing.source,
-            tags: mergeTags(existing.tags, incomingTags),
-          },
-        });
-        guestIds.push(existing.id);
-        updated++;
-      } else {
-        const newGuest = await this.prisma.guest.create({
-          data: {
-            venueId,
-            fullName,
-            nameLower: fullName.toLowerCase(),
-            phone: phone ?? null,
-            email: email ?? null,
-            lifecycleStage: 'lead',
-            source,
-            marketingOptIn: false,
-            tags: incomingTags,
-          },
-        });
-        // Register the new guest so a later lead in the same batch matching a
-        // different identifier updates it instead of inserting a duplicate.
-        if (newGuest.email) byEmail.set(newGuest.email.toLowerCase(), newGuest);
-        if (newGuest.phone) byPhone.set(newGuest.phone, newGuest);
-        byName.set(newGuest.nameLower ?? newGuest.fullName.toLowerCase(), newGuest);
-        guestIds.push(newGuest.id);
-        created++;
+        if (existing) {
+          await tx.guest.update({
+            where: { id: existing.id },
+            data: {
+              fullName,
+              nameLower: fullName.toLowerCase(),
+              phone: phone ?? existing.phone,
+              email: email ?? existing.email,
+              lifecycleStage: existing.lifecycleStage ?? 'lead',
+              source: source ?? existing.source,
+              tags: mergeTags(existing.tags, incomingTags),
+            },
+          });
+          guestIds.push(existing.id);
+          updated++;
+        } else {
+          const newGuest = await tx.guest.create({
+            data: {
+              venueId,
+              fullName,
+              nameLower: fullName.toLowerCase(),
+              phone: phone ?? null,
+              email: email ?? null,
+              lifecycleStage: 'lead',
+              source,
+              marketingOptIn: false,
+              tags: incomingTags,
+            },
+          });
+          if (newGuest.email) byEmail.set(newGuest.email.toLowerCase(), newGuest);
+          if (newGuest.phone) byPhone.set(newGuest.phone, newGuest);
+          byName.set(newGuest.nameLower ?? newGuest.fullName.toLowerCase(), newGuest);
+          guestIds.push(newGuest.id);
+          created++;
+        }
       }
-    }
+    });
 
     return { created, updated, skipped, guestIds };
   }
@@ -391,6 +391,6 @@ export class GuestsController {
       where: { id: scope.venueId },
       data: { leadsWebhookSecret: secret },
     });
-    return { secret };
+    return { webhookSecret: secret };
   }
 }
