@@ -128,11 +128,13 @@ export class AuthController {
       // Transparently upgrade hash strength on login when the stored iteration
       // count is below the current target.
       if (user.password.iterations < PASSWORD_ITERATIONS) {
-        const upgraded = await hashPassword(body.password);
-        await this.prisma.passwordCredential.update({
-          where: { userId: user.id },
-          data: { salt: upgraded.salt, passwordHash: upgraded.hash, iterations: PASSWORD_ITERATIONS },
-        });
+        try {
+          const upgraded = await hashPassword(body.password);
+          await this.prisma.passwordCredential.update({
+            where: { userId: user.id },
+            data: { salt: upgraded.salt, passwordHash: upgraded.hash, iterations: PASSWORD_ITERATIONS },
+          });
+        } catch {}
       }
       return this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
     }

@@ -282,14 +282,17 @@ export class BillingController {
     });
   }
 
-  private async recordStripeRefund(charge: any, event: StripeEvent, eventAt: Date) {
+  private async recordStripeRefund(charge: any, event: StripeEvent, _eventAt: Date) {
     const stripeInvoiceId = typeof charge?.invoice === 'string' ? charge.invoice : null;
     if (!stripeInvoiceId) return;
+
+    const invoice = await this.prisma.invoice.findUnique({ where: { stripeInvoiceId } });
+    if (!invoice) return;
 
     try {
       await this.prisma.subscriptionEvent.create({
         data: {
-          venueId: '',
+          venueId: invoice.venueId,
           source: 'stripe',
           externalEventId: event.id ?? `refund:${stripeInvoiceId}`,
           eventType: event.type ?? 'charge.refunded',
@@ -303,18 +306,9 @@ export class BillingController {
       throw error;
     }
 
-    const invoice = await this.prisma.invoice.findUnique({ where: { stripeInvoiceId } });
-    if (!invoice) return;
-
     await this.prisma.invoice.update({
       where: { stripeInvoiceId },
       data: { status: charge.refunded ? 'refunded' : 'partially_refunded' },
-    });
-
-    // Record venue on the subscription event now that we know it.
-    await this.prisma.subscriptionEvent.updateMany({
-      where: { externalEventId: event.id ?? `refund:${stripeInvoiceId}`, venueId: '' },
-      data: { venueId: invoice.venueId },
     });
   }
 

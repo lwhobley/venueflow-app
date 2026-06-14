@@ -216,14 +216,14 @@ export default function RegisterScreen() {
                 I agree to the{' '}
                 <Text
                   style={{ color: colors.primary }}
-                  onPress={() => void Linking.openURL('https://venueflow.app/terms')}
+                  onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}
                 >
                   Terms of Service
                 </Text>{' '}
                 and{' '}
                 <Text
                   style={{ color: colors.primary }}
-                  onPress={() => void Linking.openURL('https://venueflow.app/privacy')}
+                  onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}
                 >
                   Privacy Policy
                 </Text>

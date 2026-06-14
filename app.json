@@ -19,6 +19,7 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Venue Wrangler uses your location to verify clock-ins and clock-outs at your venue.",
         "NSPhotoLibraryUsageDescription": "Venue Wrangler lets managers upload bar inventory photos from the photo library.",
+        "NSPhotoLibraryAddUsageDescription": "Venue Wrangler saves inventory photos to your library for backup and sharing.",
         "NSUserNotificationsUsageDescription": "Venue Wrangler sends schedule updates, shift changes, and important venue alerts.",
         "ITSAppUsesNonExemptEncryption": false
       }
