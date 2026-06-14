@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
-  FlatList,
   Platform,
   Pressable,
   StyleSheet,
@@ -97,7 +96,7 @@ function AnimatedSlide({ item, index, scrollX }: { item: Slide; index: number; s
 
 export default function WelcomeScreen() {
   const scrollX = useRef(new Animated.Value(0)).current;
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<Animated.FlatList>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const autoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -136,7 +135,7 @@ export default function WelcomeScreen() {
       </View>
 
       <View style={{ flex: 1 }}>
-        <FlatList
+        <Animated.FlatList
           ref={flatListRef}
           data={slides}
           horizontal
