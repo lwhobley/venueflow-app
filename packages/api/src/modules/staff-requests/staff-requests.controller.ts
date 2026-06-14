@@ -23,6 +23,7 @@ import { Prisma, RequestStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapStaffRequest } from '../../common/mappers';
+import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -96,6 +97,7 @@ export class StaffRequestsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly email: EmailService,
   ) {}
 
   @RequireSubscription()
@@ -159,6 +161,10 @@ export class StaffRequestsController {
       title: 'New staff request',
       body: `${profile.fullName} submitted ${body.kind.replace('_', ' ')}: ${body.title}`,
     });
+    void this.email.sendToVenueManagers(scope.venueId, {
+      subject: `New ${body.kind.replace('_', ' ')} request`,
+      text: `${profile.fullName} submitted a ${body.kind.replace('_', ' ')} request.\n\nTitle: ${body.title}\nDetails: ${body.details}`,
+    });
 
     return mapStaffRequest(request);
   }
@@ -200,6 +206,12 @@ export class StaffRequestsController {
       kind: 'request_reviewed',
       title: `Request ${body.status}`,
       body:
+        body.responseNotes?.trim() ||
+        `${reviewer.fullName} marked your ${request.kind.replace('_', ' ')} request ${body.status}.`,
+    });
+    void this.email.sendToProfile(request.profileId, {
+      subject: `Your request was ${body.status}`,
+      text:
         body.responseNotes?.trim() ||
         `${reviewer.fullName} marked your ${request.kind.replace('_', ' ')} request ${body.status}.`,
     });

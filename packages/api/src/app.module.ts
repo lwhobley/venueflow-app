@@ -5,6 +5,7 @@ import { AuthGuard } from './auth/auth.guard';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
+import { EmailModule } from './email/email.module';
 import { HealthController } from './health.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -38,6 +39,7 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
     AuthModule,
     VenueModule,
     BillingModule,
+    EmailModule,
     NotificationsModule,
     PosModule,
     BarInventoryModule,

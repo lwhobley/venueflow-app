@@ -25,6 +25,7 @@ import {
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { dayLabel, minutesToTime } from '../../common/mappers';
+import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -220,6 +221,7 @@ export class SchedulingController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly email: EmailService,
   ) {}
 
   @RequireSubscription()
@@ -383,6 +385,10 @@ export class SchedulingController {
         title: 'New shift assigned',
         body: `${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(body.endMinutes)} · ${body.jobTitle}`,
       });
+      void this.email.sendToProfile(body.profileId, {
+        subject: 'New shift assigned',
+        text: `You were assigned a new shift:\n\n${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(body.endMinutes)}\n${body.jobTitle} at ${body.station.trim() || 'Floor'}`,
+      });
     }
     return shift.id;
   }
@@ -406,6 +412,12 @@ export class SchedulingController {
       },
     });
     await this.markScheduleEdited(scope!.venueId);
+    if (shift.profileId) {
+      void this.email.sendToProfile(shift.profileId, {
+        subject: 'Your schedule changed',
+        text: `One of your shifts was updated:\n\n${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(body.endMinutes)}\n${body.jobTitle} at ${body.station.trim() || 'Floor'}`,
+      });
+    }
     return { ok: true };
   }
 
@@ -417,12 +429,28 @@ export class SchedulingController {
     if (!body.profileId) {
       await this.prisma.scheduleShift.update({ where: { id: shift.id }, data: { profileId: null, status: 'open' } });
       await this.markScheduleEdited(scope!.venueId);
+      if (shift.profileId) {
+        void this.email.sendToProfile(shift.profileId, {
+          subject: 'Your shift assignment changed',
+          text: `You were removed from this shift:\n\n${this.shiftLabel(shift)}\n${shift.jobTitle} at ${shift.station}`,
+        });
+      }
       return { ok: true };
     }
     await this.assertVenueMember(scope!.venueId, body.profileId);
     await this.assertNoDoubleBook(scope!.venueId, body.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
     await this.prisma.scheduleShift.update({ where: { id: shift.id }, data: { profileId: body.profileId, status: 'scheduled' } });
     await this.markScheduleEdited(scope!.venueId);
+    void this.email.sendToProfile(body.profileId, {
+      subject: 'Shift assigned',
+      text: `You were assigned this shift:\n\n${this.shiftLabel(shift)}\n${shift.jobTitle} at ${shift.station}`,
+    });
+    if (shift.profileId && shift.profileId !== body.profileId) {
+      void this.email.sendToProfile(shift.profileId, {
+        subject: 'Your shift assignment changed',
+        text: `You were removed from this shift:\n\n${this.shiftLabel(shift)}\n${shift.jobTitle} at ${shift.station}`,
+      });
+    }
     return { ok: true };
   }
 
@@ -433,6 +461,12 @@ export class SchedulingController {
     const shift = await this.getVenueShift(scope!.venueId, id);
     await this.prisma.scheduleShift.delete({ where: { id: shift.id } });
     await this.markScheduleEdited(scope!.venueId);
+    if (shift.profileId) {
+      void this.email.sendToProfile(shift.profileId, {
+        subject: 'A shift was removed from your schedule',
+        text: `This shift was removed from your schedule:\n\n${this.shiftLabel(shift)}\n${shift.jobTitle} at ${shift.station}`,
+      });
+    }
     return {
       dayIndex: shift.dayIndex,
       startMinutes: shift.startMinutes,
@@ -497,6 +531,10 @@ export class SchedulingController {
       title: 'Open shift covered',
       body: `${scope.fullName} picked up ${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)}.`,
     });
+    void this.email.sendToVenueManagers(scope.venueId, {
+      subject: 'Open shift covered',
+      text: `${scope.fullName} picked up ${this.shiftLabel(shift)}.\n\n${shift.jobTitle} at ${shift.station}`,
+    });
     return { ok: true };
   }
 
@@ -520,6 +558,10 @@ export class SchedulingController {
       kind: 'schedule_published',
       title: 'Schedule posted',
       body: `${assigned} shift${assigned === 1 ? '' : 's'} scheduled${open > 0 ? `, ${open} open to pick up` : ''}.`,
+    });
+    void this.email.sendToVenueStaff(scope!.venueId, {
+      subject: 'Schedule posted',
+      text: `The schedule has been posted.\n\n${assigned} shift${assigned === 1 ? '' : 's'} scheduled${open > 0 ? `, ${open} open to pick up` : ''}.`,
     });
     return { notified: assigned };
   }
@@ -749,6 +791,7 @@ export class SchedulingController {
     this.requireManager(scope);
     let assigned = 0;
     let skipped = 0;
+    const assignedShifts: Array<{ profileId: string; label: string; jobTitle: string; station: string }> = [];
     for (const assignment of body.assignments) {
       const shift = await this.getVenueShift(scope!.venueId, assignment.shiftId);
       if (shift.profileId || shift.status !== 'open') {
@@ -766,9 +809,21 @@ export class SchedulingController {
         where: { id: shift.id },
         data: { profileId: assignment.profileId, status: 'scheduled' },
       });
+      assignedShifts.push({
+        profileId: assignment.profileId,
+        label: this.shiftLabel(shift),
+        jobTitle: shift.jobTitle,
+        station: shift.station,
+      });
       assigned += 1;
     }
     if (assigned > 0) await this.markScheduleEdited(scope!.venueId);
+    for (const assignedShift of assignedShifts) {
+      void this.email.sendToProfile(assignedShift.profileId, {
+        subject: 'New shift assigned',
+        text: `You were assigned a new shift:\n\n${assignedShift.label}\n${assignedShift.jobTitle} at ${assignedShift.station}`,
+      });
+    }
     return { assigned, skipped };
   }
 
@@ -802,6 +857,10 @@ export class SchedulingController {
       title: 'Shift swap proposed',
       body: `${scope.fullName} wants to swap ${this.shiftLabel(myShift)}.`,
     });
+    void this.email.sendToProfile(target.id, {
+      subject: 'Shift swap proposed',
+      text: `${scope.fullName} wants to swap ${this.shiftLabel(myShift)}.${body.note?.trim() ? `\n\nNote: ${body.note.trim()}` : ''}`,
+    });
     return swap.id;
   }
 
@@ -824,6 +883,10 @@ export class SchedulingController {
         kind: 'swap_proposed',
         title: 'Swap needs approval',
         body: `${scope.fullName} accepted a shift swap. Approve it in the schedule.`,
+      });
+      void this.email.sendToVenueManagers(scope.venueId, {
+        subject: 'Shift swap needs approval',
+        text: `${scope.fullName} accepted a shift swap. Approve it in the schedule.`,
       });
     }
     return { ok: true };
@@ -877,12 +940,20 @@ export class SchedulingController {
       title: `Swap ${body.approve ? 'approved' : 'denied'}`,
       body: `Your shift swap was ${body.approve ? 'approved' : 'denied'}.`,
     });
+    void this.email.sendToProfile(swap.requesterProfileId, {
+      subject: `Shift swap ${body.approve ? 'approved' : 'denied'}`,
+      text: `Your shift swap was ${body.approve ? 'approved' : 'denied'}.`,
+    });
     await this.notifications.notifyProfile({
       venueId: scope!.venueId,
       profileId: swap.targetProfileId,
       kind: 'swap_reviewed',
       title: `Swap ${body.approve ? 'approved' : 'denied'}`,
       body: `A shift swap was ${body.approve ? 'approved' : 'denied'}.`,
+    });
+    void this.email.sendToProfile(swap.targetProfileId, {
+      subject: `Shift swap ${body.approve ? 'approved' : 'denied'}`,
+      text: `A shift swap was ${body.approve ? 'approved' : 'denied'}.`,
     });
     return { ok: true };
   }

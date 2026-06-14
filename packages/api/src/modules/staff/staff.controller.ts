@@ -12,6 +12,7 @@ import { IsEmail, IsIn, IsString } from 'class-validator';
 import { Role } from '@prisma/client';
 import { canManageRole, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { mapProfile } from '../../common/mappers';
+import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -38,7 +39,10 @@ class UpsertStaffDto {
 
 @Controller('v1/staff')
 export class StaffController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly email: EmailService,
+  ) {}
 
   @Get()
   async listVenueStaff(@VenueScope() scope: Scope) {
@@ -80,6 +84,11 @@ export class StaffController {
           venueId: scope.venueId,
         },
       });
+      void this.email.send({
+        to: updated.email,
+        subject: 'Your Venue Wrangler team profile was updated',
+        text: `Hi ${updated.fullName},\n\nYour team profile was updated.\n\nRole: ${updated.role}\nJob title: ${updated.jobTitle}`,
+      });
       return mapProfile(updated);
     }
 
@@ -92,6 +101,12 @@ export class StaffController {
         jobTitle: body.jobTitle,
         venueId: scope.venueId,
       },
+    });
+    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { name: true } });
+    void this.email.send({
+      to: created.email,
+      subject: `You were added to ${venue?.name ?? 'a Venue Wrangler team'}`,
+      text: `Hi ${created.fullName},\n\nYou were added to ${venue?.name ?? 'a Venue Wrangler team'} as ${created.jobTitle}.\n\nCreate an account or sign in with this email address to join the team.`,
     });
     return mapProfile(created);
   }
