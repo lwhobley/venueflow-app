@@ -32,38 +32,41 @@ export class EmailService {
   ) {}
 
   async send(args: EmailArgs) {
+    try {
+      await this.sendOrThrow(args);
+    } catch (error: any) {
+      this.logger.warn(`Email delivery failed for ${args.subject}: ${error?.message ?? String(error)}`);
+    }
+  }
+
+  async sendOrThrow(args: EmailArgs) {
     const to = this.normalizeRecipients(args.to);
     if (to.length === 0) return;
 
     const apiKey = this.config.get<string>('RESEND_API_KEY') ?? this.config.get<string>('EMAIL_API_KEY');
     if (!apiKey) {
-      this.logger.log(`Email skipped; RESEND_API_KEY is not configured. Subject: ${args.subject}`);
-      return;
+      throw new Error('RESEND_API_KEY is not configured');
     }
 
-    try {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>',
-          to,
-          subject: args.subject,
-          text: args.text,
-          html: args.html ?? this.textToHtml(args.text),
-          ...(args.replyTo ? { reply_to: args.replyTo } : {}),
-        }),
-      });
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>',
+        to,
+        subject: args.subject,
+        text: args.text,
+        html: args.html ?? this.textToHtml(args.text),
+        ...(args.replyTo ? { reply_to: args.replyTo } : {}),
+      }),
+    });
 
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '');
-        this.logger.warn(`Email delivery failed (${response.status}) for ${args.subject}: ${detail}`);
-      }
-    } catch (error: any) {
-      this.logger.warn(`Email delivery failed for ${args.subject}: ${error?.message ?? String(error)}`);
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Email delivery failed (${response.status}): ${detail || 'Unknown error'}`);
     }
   }
 

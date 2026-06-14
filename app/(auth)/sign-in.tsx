@@ -92,7 +92,14 @@ export default function SignInScreen() {
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.replace(profile.emailVerified === true ? '/(tabs)/home' : '/(auth)/verify-email');
+    if (profile.emailVerified === true) {
+      router.replace('/(tabs)/home');
+      return;
+    }
+    router.replace({
+      pathname: '/(auth)/verify-email',
+      params: options?.inviteToken ? { invite: options.inviteToken } : undefined,
+    });
   };
 
   const resetExistingSession = () => {

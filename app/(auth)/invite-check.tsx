@@ -53,13 +53,19 @@ export default function InviteCheckScreen() {
   };
 
   const continueWithInvite = (invite: Extract<InviteCheckResult, { status: 'found' }>) => {
+    if (!looksLikeEmail) {
+      Alert.alert(
+        'Use your email invite',
+        'For security, team invites now attach only after email verification. Ask your manager to send the invite to your email address.',
+      );
+      return;
+    }
     router.push({
-      pathname: '/(auth)/invite-accept',
+      pathname: '/(auth)/register',
       params: {
-        token: invite.token,
+        email: contact.trim(),
         venueName: invite.venueName,
-        jobTitle: invite.jobTitle,
-        phone: looksLikeEmail ? undefined : contact.trim(),
+        inviteFound: '1',
       },
     });
   };
@@ -133,6 +139,9 @@ export default function InviteCheckScreen() {
                 <Text variant="bodyMedium" style={{ color: colors.muted }}>
                   Role: {stage.invite.jobTitle}
                 </Text>
+                <Text variant="bodySmall" style={{ color: colors.muted }}>
+                  Sign up with this invited email address, then verify your email to join the team automatically.
+                </Text>
                 <Button
                   mode="contained"
                   buttonColor={colors.primary}
@@ -140,7 +149,7 @@ export default function InviteCheckScreen() {
                   onPress={() => continueWithInvite(stage.invite)}
                   style={{ marginTop: 4 }}
                 >
-                  Accept invite
+                  Create account
                 </Button>
                 <Button
                   mode="text"

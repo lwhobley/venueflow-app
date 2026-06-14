@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
 
 export default function VerifyEmailScreen() {
+  const { invite } = useLocalSearchParams<{ invite?: string }>();
   const user = useAuthStore((state: AuthState) => state.user);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
@@ -24,6 +25,35 @@ export default function VerifyEmailScreen() {
     setSubmitting(true);
     try {
       await appApi.verifyEmail({ code: code.trim() });
+      const redemption = typeof invite === 'string' && invite
+        ? await appApi.redeemInvite(invite)
+        : await appApi.redeemMyInvite();
+      if (redemption.redeemed && redemption.profile) {
+        setSession({
+          user: {
+            id: redemption.profile._id,
+            email: redemption.profile.email,
+            full_name: redemption.profile.fullName,
+            email_verified: true,
+            role: redemption.profile.role,
+            job_title: redemption.profile.jobTitle,
+            venue_id: redemption.profile.venueId ?? null,
+            all_access: redemption.profile.allAccess === true,
+          },
+          venue: redemption.venue
+            ? {
+                id: redemption.venue._id,
+                name: redemption.venue.name,
+                latitude: redemption.venue.latitude,
+                longitude: redemption.venue.longitude,
+                geofence_radius_m: redemption.venue.geofenceRadiusM,
+              }
+            : null,
+          token,
+        });
+        router.replace('/(tabs)/home');
+        return;
+      }
       if (user) {
         setSession({
           user: { ...user, email_verified: true },
@@ -31,7 +61,7 @@ export default function VerifyEmailScreen() {
           token,
         });
       }
-      router.replace(user?.venue_id ? '/(tabs)/home' : '/(auth)/workplace-search');
+      router.replace('/(auth)/workplace-search');
     } catch (error) {
       Alert.alert('Could not verify email', error instanceof Error ? error.message : 'Try again.');
     } finally {

@@ -106,7 +106,7 @@ export function useApiMutation<TArgs, TResult>(
 }
 
 export type InviteCheckResult =
-  | { status: 'found'; token: string; venueName: string; jobTitle: string; role: string; expiresAt: number }
+  | { status: 'found'; venueName: string; jobTitle: string; role: string; expiresAt: number }
   | { status: 'not_found' | 'expired' | 'used' };
 
 export type JoinRequestResult = { requestId: string; status: 'pending'; venueName: string };
@@ -140,6 +140,10 @@ export const appApi = {
   // Solo user joins an existing team later by code.
   joinByCode: (code: string) =>
     apiRequest<{ profile: ApiProfile; venue: ApiVenue | null }>('/v1/app/join', { method: 'POST', body: { code } }),
+  redeemInvite: (codeOrToken: string) =>
+    apiRequest<{ redeemed: boolean; profile?: ApiProfile; venue?: ApiVenue | null }>('/v1/app/redeem-invite', { method: 'POST', body: { codeOrToken } }),
+  redeemMyInvite: () =>
+    apiRequest<{ redeemed: boolean; profile?: ApiProfile; venue?: ApiVenue | null }>('/v1/app/redeem-my-invite', { method: 'POST' }),
   getMe: () => apiRequest<{ profile: ApiProfile; venue: ApiVenue | null } | null>('/v1/app/me'),
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
   syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>

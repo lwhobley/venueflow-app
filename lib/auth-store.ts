@@ -29,41 +29,12 @@ const secureStorage = {
 };
 
 const memoryStorage = new Map<string, string>();
-const browserWindow = globalThis as typeof globalThis & {
-  localStorage?: {
-    getItem: (key: string) => string | null;
-    setItem: (key: string, value: string) => void;
-    removeItem: (key: string) => void;
-  };
-};
 const webStorage = {
-  getItem: async (key: string) => {
-    try {
-      return browserWindow.localStorage?.getItem(key) ?? memoryStorage.get(key) ?? null;
-    } catch {
-      return memoryStorage.get(key) ?? null;
-    }
-  },
+  getItem: async (key: string) => memoryStorage.get(key) ?? null,
   setItem: async (key: string, value: string) => {
-    try {
-      browserWindow.localStorage?.setItem(key, value);
-      if (browserWindow.localStorage) {
-        return;
-      }
-    } catch {
-      // ignore and fall back to in-memory storage
-    }
     memoryStorage.set(key, value);
   },
   removeItem: async (key: string) => {
-    try {
-      browserWindow.localStorage?.removeItem(key);
-      if (browserWindow.localStorage) {
-        return;
-      }
-    } catch {
-      // ignore and fall back to in-memory storage
-    }
     memoryStorage.delete(key);
   },
 };

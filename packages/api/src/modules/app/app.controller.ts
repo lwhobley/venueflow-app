@@ -35,10 +35,6 @@ function makeInviteCode(): string {
 }
 
 class BootstrapProfileDto {
-  @IsEmail()
-  @IsOptional()
-  email?: string;
-
   @IsString()
   @IsOptional()
   fullName?: string;
@@ -158,6 +154,11 @@ class JoinByCodeDto {
   code!: string;
 }
 
+class RedeemInviteDto {
+  @IsString()
+  codeOrToken!: string;
+}
+
 function isAdminRole(role: Role) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
@@ -208,7 +209,11 @@ export class AppController {
   async bootstrapProfile(@CurrentUser() user: AuthUser, @Body() body: BootstrapProfileDto) {
     await this.ensureUser(user);
     const emailVerified = await this.isEmailVerified(user.sub);
-    const email = body.email ?? user.email ?? `${user.sub}@venuewrangler.local`;
+    const existingProfile = await this.prisma.profile.findUnique({
+      where: { userId: user.sub },
+      select: { email: true },
+    });
+    const email = user.email ?? existingProfile?.email ?? `${user.sub}@venuewrangler.local`;
     const fullName = body.fullName?.trim() || user.name || email.split('@')[0] || 'Team Member';
     const profile = await this.prisma.profile.upsert({
       where: { userId: user.sub },
@@ -827,11 +832,12 @@ export class AppController {
     const profile = await this.getProfile(user);
     if (!profile) throw new NotFoundException('Profile not found');
     if (profile.venueId) throw new BadRequestException('You are already part of a team.');
+    const verifiedEmail = await this.getVerifiedAccountEmail(user.sub);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const invite = await this.findRedeemableInvite(body.code, tx);
       if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
-      if (invite.email && invite.email.toLowerCase() !== profile.email.toLowerCase()) {
+      if (invite.email && invite.email.toLowerCase() !== verifiedEmail.toLowerCase()) {
         throw new ForbiddenException('This invite was sent to a different email address.');
       }
       // Atomic single-use claim — the loser of a race sees count 0.
@@ -852,6 +858,36 @@ export class AppController {
       profile: this.mapProfile(updated, emailVerified),
       venue: updated.venue ? this.mapVenue(updated.venue) : null,
     };
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('redeem-invite')
+  async redeemInvite(@CurrentUser() user: AuthUser, @Body() body: RedeemInviteDto) {
+    await this.requireVerifiedUser(user.sub);
+    return this.redeemInviteForUser(user.sub, body.codeOrToken);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('redeem-my-invite')
+  async redeemMyInvite(@CurrentUser() user: AuthUser) {
+    await this.requireVerifiedUser(user.sub);
+    const email = await this.getVerifiedAccountEmail(user.sub);
+    const matches = await this.prisma.invite.findMany({
+      where: {
+        email: { equals: email, mode: 'insensitive' },
+        usedBy: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 2,
+    });
+    if (matches.length === 0) {
+      return { redeemed: false };
+    }
+    if (matches.length > 1) {
+      throw new BadRequestException('Multiple pending invites were found for this email. Use the specific invite link from your manager.');
+    }
+    return this.redeemInviteForUser(user.sub, matches[0].token);
   }
 
   // Resolve a redeemable invite by either the short code or the long token.
@@ -965,12 +1001,71 @@ export class AppController {
     }
   }
 
+  private async getVerifiedAccountEmail(userId: string) {
+    const account = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, emailVerifiedAt: true },
+    });
+    if (!account?.email || !account.emailVerifiedAt) {
+      throw new ForbiddenException('Verify your email before using this feature.');
+    }
+    return account.email;
+  }
+
   private async isEmailVerified(userId: string) {
     const account: any = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { emailVerifiedAt: true },
     } as any);
     return Boolean(account?.emailVerifiedAt);
+  }
+
+  private async redeemInviteForUser(userId: string, codeOrToken: string) {
+    const email = await this.getVerifiedAccountEmail(userId);
+    const profile = await this.getProfile({ sub: userId });
+    if (!profile) throw new NotFoundException('Profile not found');
+    if (profile.venueId) {
+      const emailVerified = await this.isEmailVerified(userId);
+      return {
+        redeemed: false,
+        profile: this.mapProfile(profile, emailVerified),
+        venue: profile.venue ? this.mapVenue(profile.venue) : null,
+      };
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const invite = await this.findRedeemableInvite(codeOrToken, tx);
+      if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
+      if (!invite.email) {
+        throw new ForbiddenException('Ask your manager to resend this invite to your email address before joining.');
+      }
+      if (invite.email.toLowerCase() !== email.toLowerCase()) {
+        throw new ForbiddenException('This invite was sent to a different email address.');
+      }
+      const claimed = await tx.invite.updateMany({
+        where: { id: invite.id, usedBy: null },
+        data: { usedBy: profile.id },
+      });
+      if (claimed.count === 0) {
+        throw new BadRequestException('That invite has already been used.');
+      }
+      return tx.profile.update({
+        where: { id: profile.id },
+        data: {
+          email,
+          venueId: invite.venueId,
+          role: invite.role,
+          jobTitle: invite.jobTitle,
+        },
+        include: { venue: true },
+      });
+    });
+
+    return {
+      redeemed: true,
+      profile: this.mapProfile(updated, true),
+      venue: updated.venue ? this.mapVenue(updated.venue) : null,
+    };
   }
 
   private async assertCanManageLegacyStaffTarget(

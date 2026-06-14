@@ -53,18 +53,18 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Token is missing a subject claim');
     }
 
-    // Revocable sessions: a token carrying a sid is only valid while its Session
-    // row exists and hasn't expired. Logout, password change, and account
-    // deletion delete the row, invalidating the token before its JWT expiry.
-    // Legacy tokens without a sid remain stateless until they expire naturally.
-    if (payload.sid) {
-      const session = await this.prisma.session.findUnique({
-        where: { id: payload.sid },
-        select: { userId: true, expiresAt: true },
-      });
-      if (!session || session.userId !== payload.sub || session.expiresAt.getTime() <= Date.now()) {
-        throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
-      }
+    // Every accepted token must be backed by a revocable Session row. This lets
+    // logout, password reset, and account deletion invalidate access
+    // immediately instead of waiting for JWT expiry.
+    if (!payload.sid) {
+      throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
+    }
+    const session = await this.prisma.session.findUnique({
+      where: { id: payload.sid },
+      select: { userId: true, expiresAt: true },
+    });
+    if (!session || session.userId !== payload.sub || session.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 
     request.user = payload;

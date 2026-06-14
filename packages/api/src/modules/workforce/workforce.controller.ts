@@ -98,7 +98,6 @@ export class WorkforceController {
     }
     return {
       status: 'found',
-      token: invite.token,
       venueName: invite.venue.name,
       jobTitle: invite.jobTitle,
       role: invite.role,

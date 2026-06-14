@@ -76,7 +76,14 @@ export default function InviteAcceptScreen() {
         token: authToken,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace(profile.emailVerified === true ? '/(tabs)/home' : '/(auth)/verify-email');
+      if (profile.emailVerified === true) {
+        router.replace('/(tabs)/home');
+        return;
+      }
+      router.replace({
+        pathname: '/(auth)/verify-email',
+        params: { invite: token },
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
       setError(msg);

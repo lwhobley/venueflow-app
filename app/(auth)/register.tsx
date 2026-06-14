@@ -8,7 +8,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
@@ -18,11 +18,12 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 export default function RegisterScreen() {
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
+  const params = useLocalSearchParams<{ email?: string; venueName?: string; inviteFound?: string; mobile?: string }>();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [mobile, setMobile] = useState('');
+  const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
+  const [mobile, setMobile] = useState(typeof params.mobile === 'string' ? params.mobile : '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -111,7 +112,9 @@ export default function RegisterScreen() {
             Create your account
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
-            You'll search for your workplace after signing up.
+            {params.inviteFound === '1' && params.venueName
+              ? `Create your account with the invited email address, then verify it to join ${params.venueName} automatically.`
+              : "You'll search for your workplace after signing up."}
           </Text>
         </View>
 

@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import type { Request } from 'express';
-import { createHash, pbkdf2, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 
 const pbkdf2Async = promisify(pbkdf2);
@@ -26,6 +26,7 @@ const PASSWORD_DIGEST = 'sha256';
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 12;
 const MAX_FAILED_SIGN_INS = 8;
+const VERIFY_EMAIL_RATE_LIMIT_MAX = 10;
 
 class PasswordAuthDto {
   @IsEmail()
@@ -236,7 +237,9 @@ export class AuthController {
   }
 
   @Post('verify-email')
-  async verifyEmail(@CurrentUser() user: AuthUser, @Body() body: VerifyEmailDto) {
+  async verifyEmail(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: VerifyEmailDto) {
+    await assertWithinSharedRateLimit(this.prisma, `verify-email:ip:${getClientIp(request)}`, VERIFY_EMAIL_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `verify-email:user:${user.sub}`, VERIFY_EMAIL_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
     const account: any = await this.prisma.user.findUnique({
       where: { id: user.sub },
       select: { emailVerificationCodeHash: true, emailVerificationSentAt: true, emailVerifiedAt: true },
@@ -284,7 +287,7 @@ export class AuthController {
           passwordResetSentAt: new Date(),
         },
       } as any);
-      void this.email.send({
+      await this.email.sendOrThrow({
         to: account.email,
         subject: 'Reset your Venue Wrangler password',
         text:
@@ -369,9 +372,15 @@ export class AuthController {
 
   private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string, rawPhone?: string) {
     const trialEndsAt = new Date(Date.now() + TRIAL_DURATION_MS);
+    const account: any = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    } as any);
+    const emailVerified = Boolean(account?.emailVerifiedAt);
     // inviteToken may be the long deep-link token OR the short human code.
     const inviteValue = inviteToken?.trim();
     const invite = inviteValue
+      ? emailVerified
       ? await this.prisma.invite.findFirst({
           where: {
             OR: [{ token: inviteValue }, { code: { equals: inviteValue, mode: 'insensitive' } }],
@@ -379,6 +388,7 @@ export class AuthController {
             expiresAt: { gt: new Date() },
           },
         })
+      : null
       : null;
     if (invite?.email && invite.email.toLowerCase() !== email) {
       throw new UnauthorizedException('This invite was sent to a different email address.');
@@ -479,14 +489,9 @@ export class AuthController {
       where: { id: session.id },
       data: { tokenHash: createHash('sha256').update(token).digest('hex') },
     });
-    const account: any = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { emailVerifiedAt: true },
-    } as any);
-
     return {
       token,
-      profile: mapProfile(profile, Boolean(account?.emailVerifiedAt)),
+      profile: mapProfile(profile, emailVerified),
       venue: profile.venue ? mapVenue(profile.venue) : null,
     };
   }
@@ -513,7 +518,7 @@ export class AuthController {
         emailVerificationSentAt: new Date(),
       },
     } as any);
-    void this.email.send({
+    await this.email.sendOrThrow({
       to: email,
       subject: 'Verify your Venue Wrangler email',
       text:
@@ -578,7 +583,7 @@ function mapProfile(profile: {
 }
 
 function makeOneTimeCode() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
 }
 
 function hashOneTimeCode(code: string) {

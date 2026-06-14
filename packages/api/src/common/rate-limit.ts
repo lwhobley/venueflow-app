@@ -47,6 +47,7 @@ export async function assertWithinSharedRateLimit(
 ) {
   const now = new Date();
   const nextResetAt = new Date(now.getTime() + windowMs);
+  await maybeCleanupExpiredBuckets(prisma, now);
   const rows = await prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
     INSERT INTO "RateLimitBucket" ("key", "count", "resetAt")
     VALUES (${key}, 1, ${nextResetAt})
@@ -65,4 +66,18 @@ export async function assertWithinSharedRateLimit(
   if ((rows[0]?.count ?? 0) > max) {
     throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
   }
+}
+
+let lastCleanupAt = 0;
+
+async function maybeCleanupExpiredBuckets(prisma: PrismaService, now: Date) {
+  if (now.getTime() - lastCleanupAt < 5 * 60 * 1000) {
+    return;
+  }
+  lastCleanupAt = now.getTime();
+  await prisma.rateLimitBucket.deleteMany({
+    where: {
+      resetAt: { lte: now },
+    },
+  });
 }
