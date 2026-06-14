@@ -12,19 +12,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { ActivityIndicator, Button, Card, Divider, Text, TextInput } from 'react-native-paper';
 import { appApi, type VenueSearchResult } from '../../lib/api-client';
-import { spacing } from '../../lib/theme';
-
-const colors = {
-  background: '#FFFFFF',
-  surface: '#FFFFFF',
-  primary: '#2F7D46',
-  text: '#1F241E',
-  muted: '#6F766B',
-  border: '#E8E2D8',
-  danger: '#B85047',
-  buttonText: '#FFFFFF',
-  highlight: '#F0F7F2',
-};
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
 
 type SearchState =
   | { kind: 'idle' }
@@ -92,11 +80,8 @@ export default function WorkplaceSearchScreen() {
         {/* Search bar */}
         <View style={{ flexDirection: 'row', gap: spacing.sm }}>
           <TextInput
-            outlineColor={colors.border}
-            activeOutlineColor={colors.primary}
-            textColor={colors.text}
-            placeholderTextColor={colors.muted}
-            style={{ flex: 1, backgroundColor: colors.surface }}
+            {...inputProps}
+            style={[inputProps.style, { flex: 1 }]}
             label="Search"
             value={query}
             onChangeText={(v) => {
@@ -201,22 +186,19 @@ const styles = StyleSheet.create({
   stepActive: { backgroundColor: '#2F7D46' },
   stepDone: { backgroundColor: '#A8CBB0' },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E8E2D8',
+    ...authCardStyle,
   },
   resultsList: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E8E2D8',
+    borderColor: colors.border,
     flexGrow: 0,
   },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     gap: spacing.sm,
   },
 });

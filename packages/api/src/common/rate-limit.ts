@@ -1,4 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * Simple in-process fixed-window rate limiter.
@@ -30,4 +32,37 @@ export function createRateLimiter(max: number, windowMs: number) {
     }
     current.count += 1;
   };
+}
+
+/**
+ * Shared fixed-window limiter backed by Postgres so limits still hold when the
+ * API runs multiple replicas.
+ */
+export async function assertWithinSharedRateLimit(
+  prisma: PrismaService,
+  key: string,
+  max: number,
+  windowMs: number,
+  message = 'Too many attempts. Try again later.',
+) {
+  const now = new Date();
+  const nextResetAt = new Date(now.getTime() + windowMs);
+  const rows = await prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+    INSERT INTO "RateLimitBucket" ("key", "count", "resetAt")
+    VALUES (${key}, 1, ${nextResetAt})
+    ON CONFLICT ("key") DO UPDATE
+    SET
+      "count" = CASE
+        WHEN "RateLimitBucket"."resetAt" <= ${now} THEN 1
+        ELSE "RateLimitBucket"."count" + 1
+      END,
+      "resetAt" = CASE
+        WHEN "RateLimitBucket"."resetAt" <= ${now} THEN ${nextResetAt}
+        ELSE "RateLimitBucket"."resetAt"
+      END
+    RETURNING "count"
+  `);
+  if ((rows[0]?.count ?? 0) > max) {
+    throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
+  }
 }

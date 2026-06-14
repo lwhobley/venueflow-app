@@ -9,20 +9,26 @@ import {
   Param,
   Post,
   Query,
+  Req,
   UnauthorizedException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+import type { Request } from 'express';
 import { isAdminRole } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { getClientIp } from '../../common/http';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
+const LEADS_WEBHOOK_RATE_LIMIT_MAX = 120;
+const LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
 
 class UpsertGuestDto {
   @IsString()
@@ -111,6 +117,20 @@ class IngestLeadsDto {
   leads!: LeadDto[];
 }
 
+class GuestListQueryDto {
+  @IsString()
+  @IsOptional()
+  q?: string;
+
+  @Type(() => Number)
+  @IsOptional()
+  page?: number;
+
+  @Type(() => Number)
+  @IsOptional()
+  limit?: number;
+}
+
 function cleanText(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed || undefined;
@@ -134,44 +154,55 @@ export class GuestsController {
 
   @RequireSubscription('active')
   @Get()
-  async listGuests(@VenueScope() scope: Scope, @Query('q') q?: string) {
+  async listGuests(@VenueScope() scope: Scope, @Query() query: GuestListQueryDto) {
     this.requireManager(scope);
+    const page = Math.max(0, Math.floor(query.page ?? 0));
+    const limit = Math.min(Math.max(1, Math.floor(query.limit ?? 100)), 200);
     const where: Record<string, unknown> = {
       venueId: scope.venueId,
       deletedAt: null,
     };
-    if (q?.trim()) {
-      const term = q.trim().toLowerCase();
+    if (query.q?.trim()) {
+      const term = query.q.trim().toLowerCase();
       where['OR'] = [
         { nameLower: { contains: term } },
         { email: { contains: term, mode: 'insensitive' } },
         { phone: { contains: term } },
       ];
     }
-    const guests = await this.prisma.guest.findMany({
-      where: where as any,
-      orderBy: { updatedAt: 'desc' },
-      take: 500,
-    });
-    return guests.map((g) => ({
-      id: g.id,
-      venueId: g.venueId,
-      fullName: g.fullName,
-      phone: g.phone ?? null,
-      email: g.email ?? null,
-      lifecycleStage: g.lifecycleStage ?? 'lead',
-      source: g.source ?? null,
-      birthday: g.birthday ?? null,
-      company: g.company ?? null,
-      marketingOptIn: g.marketingOptIn ?? false,
-      favoriteTable: g.favoriteTable ?? null,
-      preferredServer: g.preferredServer ?? null,
-      dietaryNotes: g.dietaryNotes ?? null,
-      tags: g.tags,
-      notes: g.notes ?? null,
-      createdAt: g.createdAt.getTime(),
-      updatedAt: g.updatedAt.getTime(),
-    }));
+    const [guests, totalCount] = await this.prisma.$transaction([
+      this.prisma.guest.findMany({
+        where: where as any,
+        orderBy: { updatedAt: 'desc' },
+        skip: page * limit,
+        take: limit,
+      }),
+      this.prisma.guest.count({ where: where as any }),
+    ]);
+    return {
+      guests: guests.map((g) => ({
+        id: g.id,
+        venueId: g.venueId,
+        fullName: g.fullName,
+        phone: g.phone ?? null,
+        email: g.email ?? null,
+        lifecycleStage: g.lifecycleStage ?? 'lead',
+        source: g.source ?? null,
+        birthday: g.birthday ?? null,
+        company: g.company ?? null,
+        marketingOptIn: g.marketingOptIn ?? false,
+        favoriteTable: g.favoriteTable ?? null,
+        preferredServer: g.preferredServer ?? null,
+        dietaryNotes: g.dietaryNotes ?? null,
+        tags: g.tags,
+        notes: g.notes ?? null,
+        createdAt: g.createdAt.getTime(),
+        updatedAt: g.updatedAt.getTime(),
+      })),
+      totalCount,
+      page,
+      limit,
+    };
   }
 
   @RequireSubscription('active')
@@ -238,10 +269,12 @@ export class GuestsController {
   @Public()
   @Post('leads-webhook/:venueId')
   async leadsWebhook(
+    @Req() request: Request,
     @Param('venueId') venueId: string,
     @Headers('x-webhook-secret') secret: string | undefined,
     @Body() body: IngestLeadsDto,
   ) {
+    await assertWithinSharedRateLimit(this.prisma, `leads-webhook:${venueId}:${getClientIp(request)}`, LEADS_WEBHOOK_RATE_LIMIT_MAX, LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { leadsWebhookSecret: true } });
     if (!venue?.leadsWebhookSecret || !secretsMatch(secret, venue.leadsWebhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');

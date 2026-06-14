@@ -10,20 +10,22 @@ const pbkdf2Async = promisify(pbkdf2);
 import { Public } from './public.decorator';
 import { CurrentUser } from './current-user.decorator';
 import type { AuthUser } from './auth.guard';
-import { createRateLimiter } from '../common/rate-limit';
+import { getClientIp } from '../common/http';
+import { assertWithinSharedRateLimit } from '../common/rate-limit';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 // Matches the JWT's 30-day expiry so a session and its token expire together.
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+const EMAIL_CODE_TTL_MS = 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 210_000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 12;
-
-const assertWithinRateLimit = createRateLimiter(AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+const MAX_FAILED_SIGN_INS = 8;
 
 class PasswordAuthDto {
   @IsEmail()
@@ -46,6 +48,10 @@ class PasswordAuthDto {
 
   @IsString()
   @IsOptional()
+  firstName?: string;
+
+  @IsString()
+  @IsOptional()
   lastName?: string;
 
   @IsString()
@@ -57,6 +63,28 @@ class ChangePasswordDto {
   @IsString()
   @IsOptional()
   currentPassword?: string;
+
+  @IsString()
+  @MinLength(6)
+  newPassword!: string;
+}
+
+class VerifyEmailDto {
+  @IsString()
+  code!: string;
+}
+
+class ForgotPasswordDto {
+  @IsEmail()
+  email!: string;
+}
+
+class ResetPasswordDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  code!: string;
 
   @IsString()
   @MinLength(6)
@@ -76,24 +104,36 @@ export class AuthController {
   async password(@Req() request: Request, @Body() body: PasswordAuthDto) {
     const email = body.email.trim().toLowerCase();
     if (!email || !body.password) throw new BadRequestException('Enter your email and password.');
-    assertWithinRateLimit(`auth:ip:${getClientIp(request)}`);
-    assertWithinRateLimit(`auth:email:${email}`);
+    await assertWithinSharedRateLimit(this.prisma, `auth:ip:${getClientIp(request)}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
 
-    const user = await this.prisma.user.findUnique({ where: { email }, include: { password: true } });
+    const user: any = await this.prisma.user.findUnique({ where: { email }, include: { password: true } } as any);
     if (body.flow === 'signIn') {
+      if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+        throw new UnauthorizedException('Too many failed sign-in attempts. Try again later.');
+      }
       if (!user?.password || !(await verifyPassword(body.password, user.password.salt, user.password.passwordHash, user.password.iterations))) {
+        if (user) {
+          await this.recordFailedSignIn(user.id, user.failedSignInCount, user.lockedUntil);
+        }
         throw new UnauthorizedException('Invalid email or password.');
       }
-      return this.issueSession(user.id, email, body.fullName, body.inviteToken);
+      if (user.failedSignInCount > 0 || user.lockedUntil) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { failedSignInCount: 0, lockedUntil: null },
+        } as any);
+      }
+      return this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
     }
 
-    if (user?.password) {
+    if (user?.password && user.emailVerifiedAt) {
       throw new BadRequestException('An account already exists for this email. Sign in instead.');
     }
 
     // Build the display name from fullName (legacy) or firstName + lastName.
     const resolvedFullName = body.fullName?.trim()
-      || [body.fullName, body.lastName].filter(Boolean).join(' ').trim()
+      || [body.firstName, body.lastName].filter(Boolean).join(' ').trim()
       || undefined;
 
     const phone = body.phone?.trim().replace(/[\s\-().+]/g, '') || undefined;
@@ -101,16 +141,24 @@ export class AuthController {
     const result = await hashPassword(body.password);
     let nextUserId: string;
     try {
-      // One transaction so two concurrent signups for the same email can't
-      // interleave between the user upsert and the credential insert.
       nextUserId = await this.prisma.$transaction(async (tx) => {
         const nextUser = await tx.user.upsert({
           where: { email },
-          update: phone ? { phone } : {},
+          update: {
+            ...(phone ? { phone } : {}),
+            failedSignInCount: 0,
+            lockedUntil: null,
+          },
           create: { email, phone },
-        });
-        await tx.passwordCredential.create({
-          data: {
+        } as any);
+        await tx.passwordCredential.upsert({
+          where: { userId: nextUser.id },
+          update: {
+            salt: result.salt,
+            passwordHash: result.hash,
+            iterations: PASSWORD_ITERATIONS,
+          },
+          create: {
             userId: nextUser.id,
             salt: result.salt,
             passwordHash: result.hash,
@@ -126,11 +174,14 @@ export class AuthController {
       }
       throw error;
     }
-    const session = await this.issueSession(nextUserId, email, resolvedFullName, body.inviteToken);
+    const session = await this.issueSession(nextUserId, email, resolvedFullName, body.inviteToken, body.phone);
+    await this.sendVerificationEmail(nextUserId, email, session.profile.fullName);
     void this.email.send({
       to: email,
       subject: 'Welcome to Venue Wrangler',
-      text: `Hi ${session.profile.fullName},\n\nYour Venue Wrangler account has been created and your 14-day free trial has started.\n\nYou can now build your team, publish schedules, and use the live floor tools.`,
+      text:
+        `Hi ${session.profile.fullName},\n\nYour Venue Wrangler account has been created and your 14-day free trial has started.\n\n` +
+        'Check your email for the verification code before creating or joining a team.',
     });
     return session;
   }
@@ -140,7 +191,7 @@ export class AuthController {
   // signed up via OAuth set one for the first time.
   @Post('change-password')
   async changePassword(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: ChangePasswordDto) {
-    assertWithinRateLimit(`change-password:${user.sub}`);
+    await assertWithinSharedRateLimit(this.prisma, `change-password:${user.sub}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
     const existing = await this.prisma.passwordCredential.findUnique({ where: { userId: user.sub } });
     if (existing) {
       const ok = await verifyPassword(body.currentPassword ?? '', existing.salt, existing.passwordHash, existing.iterations);
@@ -157,7 +208,7 @@ export class AuthController {
     await this.prisma.session.deleteMany({
       where: { userId: user.sub, ...(user.sid ? { NOT: { id: user.sid } } : {}) },
     });
-    const account = await this.prisma.user.findUnique({
+    const account: any = await this.prisma.user.findUnique({
       where: { id: user.sub },
       select: { email: true },
     });
@@ -168,6 +219,134 @@ export class AuthController {
         text: 'Your Venue Wrangler password was changed. If you did not make this change, reset your password immediately and contact support.',
       });
     }
+    return { ok: true };
+  }
+
+  @Post('verify-email/send')
+  async resendVerification(@CurrentUser() user: AuthUser) {
+    const account: any = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { email: true, emailVerifiedAt: true },
+    } as any);
+    if (!account?.email) throw new BadRequestException('No email address is available for this account.');
+    if (account.emailVerifiedAt) return { ok: true, alreadyVerified: true };
+    await assertWithinSharedRateLimit(this.prisma, `verify-email:${user.sub}`, 5, AUTH_RATE_LIMIT_WINDOW_MS);
+    await this.sendVerificationEmail(user.sub, account.email, user.name);
+    return { ok: true };
+  }
+
+  @Post('verify-email')
+  async verifyEmail(@CurrentUser() user: AuthUser, @Body() body: VerifyEmailDto) {
+    const account: any = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { emailVerificationCodeHash: true, emailVerificationSentAt: true, emailVerifiedAt: true },
+    } as any);
+    if (!account) throw new UnauthorizedException('Account not found.');
+    if (account.emailVerifiedAt) return { ok: true, alreadyVerified: true };
+    if (!account.emailVerificationCodeHash || !account.emailVerificationSentAt) {
+      throw new BadRequestException('Request a new verification code and try again.');
+    }
+    if (account.emailVerificationSentAt.getTime() + EMAIL_CODE_TTL_MS < Date.now()) {
+      throw new BadRequestException('That verification code has expired. Request a new code.');
+    }
+    if (account.emailVerificationCodeHash !== hashOneTimeCode(body.code)) {
+      throw new BadRequestException('That verification code is not valid.');
+    }
+    await this.prisma.user.update({
+      where: { id: user.sub },
+      data: {
+        emailVerifiedAt: new Date(),
+        emailVerificationCodeHash: null,
+        emailVerificationSentAt: null,
+      },
+    } as any);
+    return { ok: true };
+  }
+
+  @Public()
+  @Post('forgot-password')
+  async forgotPassword(@Req() request: Request, @Body() body: ForgotPasswordDto) {
+    const email = body.email.trim().toLowerCase();
+    await assertWithinSharedRateLimit(this.prisma, `forgot-password:ip:${getClientIp(request)}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `forgot-password:email:${email}`, 5, AUTH_RATE_LIMIT_WINDOW_MS);
+
+    const account: any = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, profile: { select: { fullName: true } } },
+    });
+    if (account?.email) {
+      const code = makeOneTimeCode();
+      await this.prisma.user.update({
+        where: { id: account.id },
+        data: {
+          passwordResetCodeHash: hashOneTimeCode(code),
+          passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+          passwordResetSentAt: new Date(),
+        },
+      } as any);
+      void this.email.send({
+        to: account.email,
+        subject: 'Reset your Venue Wrangler password',
+        text:
+          `Hi ${account.profile?.fullName ?? 'there'},\n\n` +
+          `Use this code to reset your Venue Wrangler password: ${code}\n\n` +
+          'The code expires in 60 minutes. If you did not request a reset, you can ignore this email.',
+      });
+    }
+    return { ok: true };
+  }
+
+  @Public()
+  @Post('reset-password')
+  async resetPassword(@Req() request: Request, @Body() body: ResetPasswordDto) {
+    const email = body.email.trim().toLowerCase();
+    await assertWithinSharedRateLimit(this.prisma, `reset-password:ip:${getClientIp(request)}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `reset-password:email:${email}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
+
+    const account: any = await this.prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        passwordResetCodeHash: true,
+        passwordResetExpiresAt: true,
+      },
+    } as any);
+    if (
+      !account?.passwordResetCodeHash ||
+      !account.passwordResetExpiresAt ||
+      account.passwordResetExpiresAt.getTime() < Date.now() ||
+      account.passwordResetCodeHash !== hashOneTimeCode(body.code)
+    ) {
+      throw new BadRequestException('That password reset code is invalid or expired.');
+    }
+    const next = await hashPassword(body.newPassword);
+    await this.prisma.$transaction([
+      this.prisma.passwordCredential.upsert({
+        where: { userId: account.id },
+        update: {
+          salt: next.salt,
+          passwordHash: next.hash,
+          iterations: PASSWORD_ITERATIONS,
+        },
+        create: {
+          userId: account.id,
+          salt: next.salt,
+          passwordHash: next.hash,
+          iterations: PASSWORD_ITERATIONS,
+        },
+      }),
+      this.prisma.user.update({
+        where: { id: account.id },
+        data: {
+          passwordResetCodeHash: null,
+          passwordResetExpiresAt: null,
+          passwordResetSentAt: null,
+          failedSignInCount: 0,
+          lockedUntil: null,
+        },
+      } as any),
+      this.prisma.session.deleteMany({ where: { userId: account.id } }),
+    ]);
     return { ok: true };
   }
 
@@ -188,7 +367,7 @@ export class AuthController {
     return { ok: true };
   }
 
-  private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string) {
+  private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string, rawPhone?: string) {
     const trialEndsAt = new Date(Date.now() + TRIAL_DURATION_MS);
     // inviteToken may be the long deep-link token OR the short human code.
     const inviteValue = inviteToken?.trim();
@@ -203,6 +382,10 @@ export class AuthController {
       : null;
     if (invite?.email && invite.email.toLowerCase() !== email) {
       throw new UnauthorizedException('This invite was sent to a different email address.');
+    }
+    const phone = rawPhone?.trim().replace(/[\s\-().+]/g, '') || undefined;
+    if (!invite?.email && invite?.phone && invite.phone !== phone) {
+      throw new UnauthorizedException('This invite was sent to a different mobile number.');
     }
     const trimmedFullName = fullName?.trim();
     const profile = await this.prisma.$transaction(async (tx) => {
@@ -296,19 +479,49 @@ export class AuthController {
       where: { id: session.id },
       data: { tokenHash: createHash('sha256').update(token).digest('hex') },
     });
+    const account: any = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    } as any);
 
     return {
       token,
-      profile: mapProfile(profile),
+      profile: mapProfile(profile, Boolean(account?.emailVerifiedAt)),
       venue: profile.venue ? mapVenue(profile.venue) : null,
     };
   }
-}
 
-function getClientIp(request: Request) {
-  const forwarded = request.headers['x-forwarded-for'];
-  const firstForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
-  return firstForwarded?.trim() || request.ip || 'unknown';
+  private async recordFailedSignIn(userId: string, failedSignInCount: number, lockedUntil: Date | null) {
+    const isLocked = lockedUntil && lockedUntil.getTime() > Date.now();
+    if (isLocked) return;
+    const nextCount = (lockedUntil && lockedUntil.getTime() <= Date.now() ? 0 : failedSignInCount) + 1;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        failedSignInCount: nextCount >= MAX_FAILED_SIGN_INS ? 0 : nextCount,
+        lockedUntil: nextCount >= MAX_FAILED_SIGN_INS ? new Date(Date.now() + AUTH_RATE_LIMIT_WINDOW_MS) : null,
+      },
+    } as any);
+  }
+
+  private async sendVerificationEmail(userId: string, email: string, fullName?: string) {
+    const code = makeOneTimeCode();
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        emailVerificationCodeHash: hashOneTimeCode(code),
+        emailVerificationSentAt: new Date(),
+      },
+    } as any);
+    void this.email.send({
+      to: email,
+      subject: 'Verify your Venue Wrangler email',
+      text:
+        `Hi ${fullName?.trim() || 'there'},\n\n` +
+        `Use this code to verify your email address in Venue Wrangler: ${code}\n\n` +
+        'This code expires in 24 hours.',
+    });
+  }
 }
 
 async function hashPassword(password: string) {
@@ -344,7 +557,7 @@ function mapProfile(profile: {
   venueId: string | null;
   allAccess: boolean;
   trialEndsAt?: Date | null;
-}) {
+}, emailVerified: boolean) {
   return {
     _id: profile.id,
     id: profile.id,
@@ -358,6 +571,16 @@ function mapProfile(profile: {
     venue_id: profile.venueId,
     allAccess: profile.allAccess,
     all_access: profile.allAccess,
+    emailVerified,
+    email_verified: emailVerified,
     trialEndsAt: profile.trialEndsAt?.getTime() ?? null,
   };
+}
+
+function makeOneTimeCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function hashOneTimeCode(code: string) {
+  return createHash('sha256').update(code.trim()).digest('hex');
 }

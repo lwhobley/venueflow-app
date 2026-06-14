@@ -10,15 +10,19 @@ import {
   Param,
   Post,
   Query,
+  Req,
   UnauthorizedException,
 } from '@nestjs/common';
 import { IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
+import type { Request } from 'express';
 import { isAdminRole } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell } from '../../common/csv';
+import { getClientIp } from '../../common/http';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -29,6 +33,8 @@ const RESERVATION_STATUSES = ['requested', 'confirmed', 'checked_in', 'seated', 
 const RESERVATION_SOURCES = ['direct', 'opentable', 'resy', 'phone', 'walk_in', 'sevenrooms', 'tock', 'google', 'generic'] as const;
 const SYNC_SOURCES = ['opentable', 'resy', 'sevenrooms', 'tock', 'google', 'generic'] as const;
 const MAX_INGEST_EVENTS = 500;
+const INGEST_RATE_LIMIT_MAX = 120;
+const INGEST_RATE_LIMIT_WINDOW_MS = 60_000;
 
 class SaveReservationDto {
   @IsString()
@@ -138,10 +144,12 @@ export class ReservationsController {
   @Public()
   @Post('ingest/:venueId')
   async ingest(
+    @Req() request: Request,
     @Param('venueId') venueId: string,
     @Headers('x-webhook-secret') secret: string | undefined,
     @Body() body: ReservationIngestDto,
   ) {
+    await assertWithinSharedRateLimit(this.prisma, `reservation-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     const provider = body.provider as ReservationSource;
     const connection = await this.prisma.reservationConnection.findFirst({ where: { venueId, provider } });
     if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {

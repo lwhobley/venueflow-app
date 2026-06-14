@@ -12,27 +12,8 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-
-const colors = {
-  background: '#FFFFFF',
-  surface: '#FFFFFF',
-  primary: '#2F7D46',
-  text: '#1F241E',
-  muted: '#6F766B',
-  border: '#E8E2D8',
-  danger: '#B85047',
-  buttonText: '#FFFFFF',
-};
-
-const inputProps = {
-  outlineColor: colors.border,
-  activeOutlineColor: colors.primary,
-  textColor: colors.text,
-  placeholderTextColor: colors.muted,
-  style: { backgroundColor: colors.surface },
-};
 
 export default function RegisterScreen() {
   const setSession = useAuthStore((s: AuthState) => s.setSession);
@@ -78,6 +59,7 @@ export default function RegisterScreen() {
           id: profile._id,
           email: profile.email,
           full_name: profile.fullName,
+          email_verified: profile.emailVerified === true,
           role: profile.role,
           job_title: profile.jobTitle,
           venue_id: profile.venueId ?? null,
@@ -96,7 +78,7 @@ export default function RegisterScreen() {
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Go straight to workplace search — employee has no venue yet.
-      router.replace('/(auth)/workplace-search');
+      router.replace(profile.emailVerified === true ? '/(auth)/workplace-search' : '/(auth)/verify-email');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
       Alert.alert('Could not create account', msg);
@@ -273,15 +255,8 @@ const styles = StyleSheet.create({
   stepRow: { flexDirection: 'row', gap: 6, marginBottom: 4 },
   step: { flex: 1, height: 4, borderRadius: 2, backgroundColor: '#E8E2D8' },
   stepActive: { backgroundColor: '#2F7D46' },
-  fieldError: { color: '#B85047', fontSize: 12, marginTop: 2, marginLeft: 4 },
+  fieldError: { color: colors.danger, fontSize: 12, marginTop: 2, marginLeft: 4 },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E8E2D8',
-    shadowColor: '#817B6B',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    ...authCardStyle,
   },
 });

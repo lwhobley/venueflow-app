@@ -200,6 +200,14 @@ model User {
   id           String                @id @default(cuid())
   email        String?               @unique
   phone        String?               @unique
+  emailVerifiedAt         DateTime?
+  emailVerificationCodeHash String?
+  emailVerificationSentAt DateTime?
+  passwordResetCodeHash   String?
+  passwordResetExpiresAt  DateTime?
+  passwordResetSentAt     DateTime?
+  failedSignInCount       Int       @default(0)
+  lockedUntil             DateTime?
   createdAt    DateTime              @default(now())
   // userId is unique on Profile, so this is effectively one-to-one.
   profile      Profile?
@@ -1264,4 +1272,12 @@ model WorkplaceJoinRequestEvent {
   request   WorkplaceJoinRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@index([requestId, createdAt])
+}
+
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
 }

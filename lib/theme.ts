@@ -71,6 +71,27 @@ export const useDesignTheme = () => {
 
 export const colors = designPalettes.light;
 
+export const authColors = {
+  background: colors.background,
+  surface: colors.surface,
+  primary: colors.primary,
+  text: '#1F241E',
+  muted: '#6F766B',
+  border: '#E8E2D8',
+  danger: colors.danger,
+  success: colors.success,
+  buttonText: '#FFFFFF',
+  highlight: '#F0F7F2',
+};
+
+export const authInputProps = {
+  outlineColor: authColors.border,
+  activeOutlineColor: authColors.primary,
+  textColor: authColors.text,
+  placeholderTextColor: authColors.muted,
+  style: { backgroundColor: authColors.surface },
+};
+
 export const accents = [
   { bg: 'rgba(123, 199, 126, 0.14)', fg: '#7BC77E', icon: '#7BC77E' },
   { bg: 'rgba(224, 168, 79, 0.16)', fg: '#E0A84F', icon: '#E0A84F' },
@@ -103,6 +124,17 @@ export const shadow = {
   shadowRadius: 16,
   shadowOffset: { width: 0, height: 8 },
   elevation: 2,
+} as const;
+
+export const authCardStyle = {
+  backgroundColor: authColors.surface,
+  borderRadius: 14,
+  borderWidth: 1,
+  borderColor: authColors.border,
+  shadowColor: designPalettes.light.shadow,
+  shadowOpacity: 0.08,
+  shadowRadius: 16,
+  shadowOffset: { width: 0, height: 8 },
 } as const;
 
 export const glass = {

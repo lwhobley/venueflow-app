@@ -20,6 +20,7 @@ type ProfileEmailTarget = {
 };
 
 const MANAGER_ROLES: Role[] = ['admin', 'owner', 'manager'];
+const ACTIVE_MEMBERSHIP = [{ membershipStatus: null }, { membershipStatus: 'active' as const }];
 
 @Injectable()
 export class EmailService {
@@ -82,7 +83,7 @@ export class EmailService {
   async sendToVenueManagers(venueId: string, message: EmailMessage) {
     try {
       const managers = await this.prisma.profile.findMany({
-        where: { venueId, role: { in: MANAGER_ROLES } },
+        where: { venueId, role: { in: MANAGER_ROLES }, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, email: true, fullName: true },
       });
       return this.sendToProfiles(managers, message);
@@ -94,7 +95,7 @@ export class EmailService {
   async sendToVenueStaff(venueId: string, message: EmailMessage) {
     try {
       const staff = await this.prisma.profile.findMany({
-        where: { venueId },
+        where: { venueId, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, email: true, fullName: true },
       });
       return this.sendToProfiles(staff, message);

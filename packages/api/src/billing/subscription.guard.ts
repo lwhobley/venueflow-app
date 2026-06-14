@@ -71,7 +71,7 @@ export class SubscriptionGuard implements CanActivate {
 
     const profile = await this.prisma.profile.findFirst({
       where: { userId: user.sub },
-      include: { venue: { select: { id: true, subscriptionStatus: true } } },
+      include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
     });
     if (!profile?.venueId || !profile.venue) return null;
 
@@ -85,6 +85,7 @@ export class SubscriptionGuard implements CanActivate {
       profileId: profile.id,
       fullName: profile.fullName,
       venueId: profile.venueId,
+      venueName: profile.venue.name,
       role: profile.role,
       allAccess: profile.allAccess,
       subscriptionStatus,

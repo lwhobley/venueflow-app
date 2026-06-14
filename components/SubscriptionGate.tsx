@@ -59,12 +59,22 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
     const same =
       user.role === p.role &&
       user.full_name === p.fullName &&
+      user.email_verified === (p.emailVerified === true) &&
       user.job_title === p.jobTitle &&
       user.all_access === (p.allAccess === true) &&
       user.venue_id === (p.venueId ?? null);
     if (same) return;
     setSession({
-      user: { id: p._id, email: p.email, full_name: p.fullName, role: p.role, job_title: p.jobTitle, venue_id: p.venueId ?? null, all_access: p.allAccess === true },
+      user: {
+        id: p._id,
+        email: p.email,
+        full_name: p.fullName,
+        email_verified: p.emailVerified === true,
+        role: p.role,
+        job_title: p.jobTitle,
+        venue_id: p.venueId ?? null,
+        all_access: p.allAccess === true,
+      },
       venue: me.venue
         ? { id: me.venue._id, name: me.venue.name, latitude: me.venue.latitude, longitude: me.venue.longitude, geofence_radius_m: me.venue.geofenceRadiusM }
         : null,
@@ -80,12 +90,19 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const trialBlocked = config.billingEnabled && !allAccess && trialExpired && !venueActive && !isPremiumLoading && !isPremium;
   const blocked = venueBlocked || trialBlocked;
   const reason = trialBlocked ? 'trial_expired' : reasonFromStatus(billing?.status ?? null);
+  const emailVerified = (me?.profile?.emailVerified ?? user?.email_verified) !== false;
 
   useEffect(() => {
     if (!hydrated || !user || !blocked) return;
     if (isAllowedRoute(route)) return;
     router.replace(`/billing/locked?reason=${reason}`);
   }, [blocked, hydrated, reason, route, user]);
+
+  useEffect(() => {
+    if (!hydrated || !user || !token || emailVerified) return;
+    if (route.startsWith('/(auth)/verify-email') || route.startsWith('/(auth)/reset-password')) return;
+    router.replace('/(auth)/verify-email');
+  }, [emailVerified, hydrated, route, token, user]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;

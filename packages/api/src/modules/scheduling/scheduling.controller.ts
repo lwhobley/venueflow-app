@@ -818,10 +818,26 @@ export class SchedulingController {
       assigned += 1;
     }
     if (assigned > 0) await this.markScheduleEdited(scope!.venueId);
+    const assignedByProfile = new Map<string, typeof assignedShifts>();
     for (const assignedShift of assignedShifts) {
-      void this.email.sendToProfile(assignedShift.profileId, {
-        subject: 'New shift assigned',
-        text: `You were assigned a new shift:\n\n${assignedShift.label}\n${assignedShift.jobTitle} at ${assignedShift.station}`,
+      const profileAssignments = assignedByProfile.get(assignedShift.profileId) ?? [];
+      profileAssignments.push(assignedShift);
+      assignedByProfile.set(assignedShift.profileId, profileAssignments);
+    }
+    const assignedProfiles = assignedByProfile.size
+      ? await this.prisma.profile.findMany({
+          where: { id: { in: Array.from(assignedByProfile.keys()) } },
+          select: { id: true, email: true },
+        })
+      : [];
+    for (const profile of assignedProfiles) {
+      const profileAssignments = assignedByProfile.get(profile.id) ?? [];
+      void this.email.send({
+        to: profile.email,
+        subject: profileAssignments.length === 1 ? 'New shift assigned' : 'New shifts assigned',
+        text: `You were assigned ${profileAssignments.length === 1 ? 'a new shift' : 'new shifts'}:\n\n${profileAssignments
+          .map((shift) => `${shift.label}\n${shift.jobTitle} at ${shift.station}`)
+          .join('\n\n')}`,
       });
     }
     return { assigned, skipped };

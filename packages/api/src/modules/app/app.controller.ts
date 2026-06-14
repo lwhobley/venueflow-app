@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role, SubscriptionStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import type { Request } from 'express';
 import { AuthGuard } from '../../auth/auth.guard';
 import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -10,6 +11,8 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { assertWithinGeofence } from '../../common/geofence';
 import { csvCell } from '../../common/csv';
+import { getClientIp } from '../../common/http';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -17,6 +20,8 @@ const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
 const FLAT_PLAN_ID = 'venueflow_monthly';
 const FLAT_PLAN_PRICE_CENTS = 2999;
+const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
+const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 // Human-typeable invite codes. Excludes look-alike characters (0/O, 1/I/L) so
 // codes read aloud or written down don't get mistyped. Format: VW-XXXXXX.
@@ -191,13 +196,18 @@ export class AppController {
   async getMe(@CurrentUser() user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile) return null;
-    return { profile: this.mapProfile(profile), venue: profile.venue ? this.mapVenue(profile.venue) : null };
+    const emailVerified = await this.isEmailVerified(user.sub);
+    return {
+      profile: this.mapProfile(profile, emailVerified),
+      venue: profile.venue ? this.mapVenue(profile.venue) : null,
+    };
   }
 
   @UseGuards(AuthGuard)
   @Post('bootstrap-profile')
   async bootstrapProfile(@CurrentUser() user: AuthUser, @Body() body: BootstrapProfileDto) {
     await this.ensureUser(user);
+    const emailVerified = await this.isEmailVerified(user.sub);
     const email = body.email ?? user.email ?? `${user.sub}@venuewrangler.local`;
     const fullName = body.fullName?.trim() || user.name || email.split('@')[0] || 'Team Member';
     const profile = await this.prisma.profile.upsert({
@@ -224,20 +234,28 @@ export class AppController {
       text: `Hi ${profile.fullName},\n\nYour Venue Wrangler account profile was updated.`,
     });
 
-    return { profile: this.mapProfile(profile), venue: profile.venue ? this.mapVenue(profile.venue) : null };
+    return {
+      profile: this.mapProfile(profile, emailVerified),
+      venue: profile.venue ? this.mapVenue(profile.venue) : null,
+    };
   }
 
   @UseGuards(AuthGuard)
   @Post('register-venue')
   async registerVenue(@CurrentUser() user: AuthUser, @Body() body: RegisterVenueDto) {
     await this.ensureUser(user);
+    await this.requireVerifiedUser(user.sub);
     const businessName = body.businessName.trim();
     if (!businessName) throw new BadRequestException('Enter your business name');
     if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new BadRequestException('Choose a staff size range');
 
     const existingProfile = await this.getProfile(user);
     if (existingProfile?.venue) {
-      return { profile: this.mapProfile(existingProfile), venue: this.mapVenue(existingProfile.venue) };
+      const emailVerified = await this.isEmailVerified(user.sub);
+      return {
+        profile: this.mapProfile(existingProfile, emailVerified),
+        venue: this.mapVenue(existingProfile.venue),
+      };
     }
 
     const plan = planForStaffRange(body.staffRange);
@@ -741,6 +759,7 @@ export class AppController {
   @Post('invites')
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
+    await this.requireVerifiedUser(user.sub);
     const email = body.email?.trim().toLowerCase() || null;
     const token = randomBytes(18).toString('base64url');
     const code = await this.uniqueInviteCode();
@@ -781,7 +800,13 @@ export class AppController {
   // name and the role they'd get.
   @Public()
   @Get('invite/:code')
-  async previewInvite(@Param('code') rawCode: string) {
+  async previewInvite(@Req() request: Request, @Param('code') rawCode: string) {
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `public-invite:${getClientIp(request)}`,
+      PUBLIC_INVITE_RATE_LIMIT_MAX,
+      PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS,
+    );
     const invite = await this.findRedeemableInvite(rawCode);
     if (!invite) throw new NotFoundException('That invite code is invalid, used, or expired.');
     const venue = await this.prisma.venue.findUnique({ where: { id: invite.venueId }, select: { name: true } });
@@ -798,6 +823,7 @@ export class AppController {
   @UseGuards(AuthGuard)
   @Post('join')
   async joinByCode(@CurrentUser() user: AuthUser, @Body() body: JoinByCodeDto) {
+    await this.requireVerifiedUser(user.sub);
     const profile = await this.getProfile(user);
     if (!profile) throw new NotFoundException('Profile not found');
     if (profile.venueId) throw new BadRequestException('You are already part of a team.');
@@ -821,7 +847,11 @@ export class AppController {
       });
     });
 
-    return { profile: this.mapProfile(updated), venue: updated.venue ? this.mapVenue(updated.venue) : null };
+    const emailVerified = await this.isEmailVerified(user.sub);
+    return {
+      profile: this.mapProfile(updated, emailVerified),
+      venue: updated.venue ? this.mapVenue(updated.venue) : null,
+    };
   }
 
   // Resolve a redeemable invite by either the short code or the long token.
@@ -903,7 +933,10 @@ export class AppController {
   }
 
   private getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({ where: { userId: user.sub }, include: { venue: true } });
+    return this.prisma.profile.findFirst({
+      where: { userId: user.sub },
+      include: { venue: true },
+    });
   }
 
   private async requireVenueProfile(user: AuthUser) {
@@ -924,6 +957,20 @@ export class AppController {
       throw new ForbiddenException('Not authorized');
     }
     return profile;
+  }
+
+  private async requireVerifiedUser(userId: string) {
+    if (!(await this.isEmailVerified(userId))) {
+      throw new ForbiddenException('Verify your email before using this feature.');
+    }
+  }
+
+  private async isEmailVerified(userId: string) {
+    const account: any = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    } as any);
+    return Boolean(account?.emailVerifiedAt);
   }
 
   private async assertCanManageLegacyStaffTarget(
@@ -991,13 +1038,18 @@ export class AppController {
     };
   }
 
-  private mapProfile(profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean }) {
+  private mapProfile(
+    profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean },
+    emailVerified = false,
+  ) {
     return {
       _id: profile.id,
       id: profile.id,
       email: profile.email,
       fullName: profile.fullName,
       full_name: profile.fullName,
+      emailVerified,
+      email_verified: emailVerified,
       role: profile.role,
       jobTitle: profile.jobTitle,
       job_title: profile.jobTitle,

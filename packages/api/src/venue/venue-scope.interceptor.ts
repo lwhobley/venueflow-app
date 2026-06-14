@@ -16,6 +16,7 @@ export type VenueScopedRequest = AuthenticatedRequest & {
     profileId: string;
     fullName: string;
     venueId: string;
+    venueName: string;
     role: string;
     allAccess: boolean;
     subscriptionStatus: string | null;
@@ -59,7 +60,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
     const profile = await this.prisma.profile.findFirst({
       where: { userId: user.sub },
-      include: { venue: { select: { id: true, subscriptionStatus: true } } },
+      include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
     });
 
     if (!profile?.venueId || !profile.venue) {
@@ -86,6 +87,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
       profileId: profile.id,
       fullName: profile.fullName,
       venueId: profile.venueId,
+      venueName: profile.venue.name,
       role: profile.role,
       allAccess: profile.allAccess,
       subscriptionStatus,

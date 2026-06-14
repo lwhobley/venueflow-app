@@ -1,10 +1,13 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import * as crypto from 'crypto';
 import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
+import type { Request } from 'express';
 import { isAdminRole } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
+import { getClientIp } from '../../common/http';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { zonedDayBounds, zonedIsoDate } from '../../common/venue-time';
 import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -16,6 +19,8 @@ type Scope = VenueScopedRequest['venueScope'];
 
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 const MAX_INGEST_ROWS = 1000;
+const INGEST_RATE_LIMIT_MAX = 120;
+const INGEST_RATE_LIMIT_WINDOW_MS = 60_000;
 const POS_PROVIDERS = ['toast', 'square', 'clover', 'generic'] as const;
 const POS_CHECK_STATUSES = ['open', 'paid', 'void'] as const;
 
@@ -159,10 +164,12 @@ export class PosController {
   @Public()
   @Post('ingest/:venueId')
   async ingest(
+    @Req() request: Request,
     @Param('venueId') venueId: string,
     @Headers('x-webhook-secret') secret: string | undefined,
     @Body() body: PosIngestDto,
   ) {
+    await assertWithinSharedRateLimit(this.prisma, `pos-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     const provider = body.provider as PosProvider;
     const connection = await this.prisma.posConnection.findFirst({ where: { venueId, provider } });
     if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {

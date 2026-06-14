@@ -62,6 +62,7 @@ type LeadDetail = {
   contracts: ContractRow[];
   activityLog: Array<{ _id: Id<'crmActivityLog'>; kind: string; detail?: string; createdAt: number }>;
 };
+type LeadListResponse = { leads: LeadRow[]; totalCount: number; page: number; limit: number };
 
 const statusColumns: Array<{ status: LeadStatus; label: string; accent: (typeof accents)[number] }> = [
   { status: 'new', label: 'New', accent: accents[2] },
@@ -124,7 +125,8 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
   const [noteText, setNoteText] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
-  const leads = useQuery(api.crm.listLeads, enabled && venueId ? { venueId, search: leadSearch || undefined } : 'skip') as LeadRow[] | undefined;
+  const leadList = useQuery(api.crm.listLeads, enabled && venueId ? { venueId, search: leadSearch || undefined } : 'skip') as LeadListResponse | undefined;
+  const leads = leadList?.leads;
   const beos = useQuery(api.crm.listBeos, enabled && venueId ? { venueId } : 'skip') as BeoRow[] | undefined;
   const contracts = useQuery(api.crm.listContracts, enabled && venueId ? { venueId } : 'skip') as ContractRow[] | undefined;
   const detail = useQuery(api.crm.getLead, enabled && venueId && selectedLeadId ? { venueId, leadId: selectedLeadId } : 'skip') as LeadDetail | null | undefined;

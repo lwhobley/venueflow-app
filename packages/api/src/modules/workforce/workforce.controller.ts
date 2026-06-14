@@ -16,7 +16,9 @@ import type { Request } from 'express';
 import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
-import { createRateLimiter } from '../../common/rate-limit';
+import { getClientIp } from '../../common/http';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 
@@ -26,16 +28,6 @@ const JOIN_REQUEST_LIMIT_MAX = 5;
 const JOIN_REQUEST_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const APPROVE_LIMIT_MAX = 60;
 const APPROVE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
-
-const assertInviteCheckRateLimit = createRateLimiter(INVITE_CHECK_LIMIT_MAX, INVITE_CHECK_LIMIT_WINDOW_MS);
-const assertJoinRequestRateLimit = createRateLimiter(JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
-const assertApproveRateLimit = createRateLimiter(APPROVE_LIMIT_MAX, APPROVE_LIMIT_WINDOW_MS);
-
-function getClientIp(request: Request): string {
-  const forwarded = request.headers['x-forwarded-for'];
-  const first = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0];
-  return first?.trim() || request.ip || 'unknown';
-}
 
 function normalisedPhone(raw: string): string {
   return raw.replace(/[\s\-().+]/g, '');
@@ -66,14 +58,17 @@ class ReviewDecisionDto {
 @SkipVenueScope()
 @Controller('v1/workforce')
 export class WorkforceController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly email: EmailService,
+  ) {}
 
   // ─── Public: invite check ──────────────────────────────────────────────────
 
   @Public()
   @Post('invite-check')
   async inviteCheck(@Req() req: Request, @Body() body: InviteCheckDto) {
-    assertInviteCheckRateLimit(`invite-check:ip:${getClientIp(req)}`);
+    await assertWithinSharedRateLimit(this.prisma, `invite-check:ip:${getClientIp(req)}`, INVITE_CHECK_LIMIT_MAX, INVITE_CHECK_LIMIT_WINDOW_MS);
 
     const email = body.email?.trim().toLowerCase();
     const phone = body.phone ? normalisedPhone(body.phone) : undefined;
@@ -116,7 +111,7 @@ export class WorkforceController {
   @Public()
   @Get('venues/search')
   async searchVenues(@Req() req: Request, @Query('q') q: string) {
-    assertInviteCheckRateLimit(`venue-search:ip:${getClientIp(req)}`);
+    await assertWithinSharedRateLimit(this.prisma, `venue-search:ip:${getClientIp(req)}`, INVITE_CHECK_LIMIT_MAX, INVITE_CHECK_LIMIT_WINDOW_MS);
 
     const term = (q ?? '').trim();
     if (!term) {
@@ -177,8 +172,9 @@ export class WorkforceController {
 
   @Post('join-request')
   async submitJoinRequest(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: JoinRequestDto) {
-    assertJoinRequestRateLimit(`join-request:user:${user.sub}`);
-    assertJoinRequestRateLimit(`join-request:ip:${getClientIp(req)}`);
+    await this.requireVerifiedUser(user.sub);
+    await assertWithinSharedRateLimit(this.prisma, `join-request:user:${user.sub}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `join-request:ip:${getClientIp(req)}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
 
     const venue = await this.prisma.venue.findUnique({
       where: { id: body.venueId },
@@ -188,10 +184,11 @@ export class WorkforceController {
 
     let requestId: string;
     try {
-      const rows = await this.prisma.$queryRaw<[{ request_join_workplace: string }]>`
-        SELECT request_join_workplace(${user.sub}, ${body.venueId})
+      const rows = await this.prisma.$queryRaw<[{ requestId: string }]>`
+        SELECT request_join_workplace(${user.sub}, ${body.venueId}) AS "requestId"
       `;
-      requestId = rows[0].request_join_workplace;
+      requestId = rows[0]?.requestId;
+      if (!requestId) throw new Error('join_request_id_missing');
     } catch (err: any) {
       const msg: string = err?.message ?? '';
       if (msg.includes('already_member')) {
@@ -276,8 +273,8 @@ export class WorkforceController {
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
   ) {
-    assertApproveRateLimit(`approve:user:${user.sub}`);
-    assertApproveRateLimit(`approve:ip:${getClientIp(req)}`);
+    await assertWithinSharedRateLimit(this.prisma, `approve:user:${user.sub}`, APPROVE_LIMIT_MAX, APPROVE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `approve:ip:${getClientIp(req)}`, APPROVE_LIMIT_MAX, APPROVE_LIMIT_WINDOW_MS);
 
     try {
       await this.prisma.$queryRaw`SELECT approve_join_request(${id}, ${user.sub})`;
@@ -288,6 +285,7 @@ export class WorkforceController {
       if (msg.includes('not_authorized')) throw new ForbiddenException('You are not authorized to approve requests for this workplace.');
       throw err;
     }
+    void this.emailJoinRequestDecision(id, 'approved');
     return { ok: true };
   }
 
@@ -298,8 +296,8 @@ export class WorkforceController {
     @Param('id') id: string,
     @Body() body: ReviewDecisionDto,
   ) {
-    assertApproveRateLimit(`approve:user:${user.sub}`);
-    assertApproveRateLimit(`approve:ip:${getClientIp(req)}`);
+    await assertWithinSharedRateLimit(this.prisma, `approve:user:${user.sub}`, APPROVE_LIMIT_MAX, APPROVE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `approve:ip:${getClientIp(req)}`, APPROVE_LIMIT_MAX, APPROVE_LIMIT_WINDOW_MS);
 
     const note = body.note?.trim() ?? null;
     try {
@@ -311,6 +309,7 @@ export class WorkforceController {
       if (msg.includes('not_authorized')) throw new ForbiddenException('You are not authorized to reject requests for this workplace.');
       throw err;
     }
+    void this.emailJoinRequestDecision(id, 'rejected', note);
     return { ok: true };
   }
 
@@ -364,5 +363,42 @@ export class WorkforceController {
         createdAt: e.createdAt.getTime(),
       })),
     };
+  }
+
+  private async emailJoinRequestDecision(id: string, decision: 'approved' | 'rejected', note?: string | null) {
+    const request = await this.prisma.workplaceJoinRequest.findUnique({
+      where: { id },
+      include: {
+        venue: { select: { name: true } },
+        user: {
+          select: {
+            email: true,
+            profile: { select: { email: true, fullName: true } },
+          },
+        },
+      },
+    });
+    if (!request) return;
+    const to = request.user.profile?.email ?? request.user.email;
+    if (!to) return;
+    const name = request.user.profile?.fullName ?? 'there';
+    void this.email.send({
+      to,
+      subject: `Your request to join ${request.venue.name} was ${decision}`,
+      text:
+        decision === 'approved'
+          ? `Hi ${name},\n\nYour request to join ${request.venue.name} was approved. You can now open Venue Wrangler and access the team.`
+          : `Hi ${name},\n\nYour request to join ${request.venue.name} was rejected.${note ? `\n\nNote: ${note}` : ''}`,
+    });
+  }
+
+  private async requireVerifiedUser(userId: string) {
+    const account: any = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    } as any);
+    if (!account?.emailVerifiedAt) {
+      throw new ForbiddenException('Verify your email before joining a workplace.');
+    }
   }
 }

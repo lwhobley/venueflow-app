@@ -3,18 +3,8 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-
-const colors = {
-  background: '#FFFFFF',
-  primary: '#2F7D46',
-  text: '#1F241E',
-  muted: '#6F766B',
-  border: '#E8E2D8',
-  danger: '#B85047',
-  buttonText: '#FFFFFF',
-};
 
 type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'unknown';
 
@@ -195,14 +185,11 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#F0F7F2',
+    backgroundColor: colors.highlight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E8E2D8',
+    ...authCardStyle,
   },
 });

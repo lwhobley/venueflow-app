@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import Constants from 'expo-constants';
 import { useAuthStore } from './auth-store';
+import type { Role } from './types';
 
-const apiBaseUrl =
+const configuredApiBaseUrl =
   process.env.EXPO_PUBLIC_API_URL ??
   (Constants.expoConfig?.extra?.EXPO_PUBLIC_API_URL as string | undefined) ??
-  'https://venue-wranglerapi-production.up.railway.app/api';
+  null;
 
 export class ApiError extends Error {
   constructor(
@@ -17,6 +18,39 @@ export class ApiError extends Error {
   }
 }
 
+type ApiProfile = {
+  _id: string;
+  email: string;
+  fullName: string;
+  emailVerified: boolean;
+  role: Role;
+  jobTitle: string;
+  venueId: string | null;
+  allAccess: boolean;
+  trialEndsAt?: number | null;
+};
+
+type ApiVenue = {
+  _id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusM: number;
+};
+
+export type AuthSessionResponse = {
+  token: string;
+  profile: ApiProfile;
+  venue: ApiVenue | null;
+};
+
+function getApiBaseUrl() {
+  if (!configuredApiBaseUrl) {
+    throw new ApiError('The app is missing EXPO_PUBLIC_API_URL. Set it before signing in.', 500);
+  }
+  return configuredApiBaseUrl;
+}
+
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
@@ -24,7 +58,7 @@ type RequestOptions = {
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = useAuthStore.getState().token;
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: options.method ?? 'GET',
     headers: {
       Accept: 'application/json',
@@ -84,11 +118,17 @@ export const appApi = {
     phone?: string;
     password: string;
     flow: 'signIn' | 'signUp';
+    firstName?: string;
     fullName?: string;
     lastName?: string;
     inviteToken?: string;
   }) =>
-    apiRequest<{ token: string; profile: any; venue: any | null }>('/v1/auth/password', { method: 'POST', body }),
+    apiRequest<AuthSessionResponse>('/v1/auth/password', { method: 'POST', body }),
+  resendVerification: () => apiRequest<{ ok: true; alreadyVerified?: boolean }>('/v1/auth/verify-email/send', { method: 'POST' }),
+  verifyEmail: (body: { code: string }) => apiRequest<{ ok: true; alreadyVerified?: boolean }>('/v1/auth/verify-email', { method: 'POST', body }),
+  forgotPassword: (body: { email: string }) => apiRequest<{ ok: true }>('/v1/auth/forgot-password', { method: 'POST', body }),
+  resetPassword: (body: { email: string; code: string; newPassword: string }) =>
+    apiRequest<{ ok: true }>('/v1/auth/reset-password', { method: 'POST', body }),
   // Public: preview which team an invite code belongs to before signing up.
   previewInvite: (code: string) =>
     apiRequest<{ valid: boolean; venueName: string; role: string; jobTitle: string; expiresAt: number }>(
@@ -96,11 +136,11 @@ export const appApi = {
     ),
   // Owner setup: create the venue/master account (caller becomes admin/owner).
   registerVenue: (body: { businessName: string; staffRange: string; ownerName?: string; phone?: string; address?: string; venueType?: string }) =>
-    apiRequest<{ profile: any; venue: any | null }>('/v1/app/register-venue', { method: 'POST', body }),
+    apiRequest<{ profile: ApiProfile; venue: ApiVenue | null }>('/v1/app/register-venue', { method: 'POST', body }),
   // Solo user joins an existing team later by code.
   joinByCode: (code: string) =>
-    apiRequest<{ profile: any; venue: any | null }>('/v1/app/join', { method: 'POST', body: { code } }),
-  getMe: () => apiRequest<{ profile: any; venue: any | null } | null>('/v1/app/me'),
+    apiRequest<{ profile: ApiProfile; venue: ApiVenue | null }>('/v1/app/join', { method: 'POST', body: { code } }),
+  getMe: () => apiRequest<{ profile: ApiProfile; venue: ApiVenue | null } | null>('/v1/app/me'),
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
   syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
     apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),

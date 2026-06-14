@@ -53,11 +53,17 @@ const queryRoutes: Record<string, Route> = {
   'chat.listConversations': { path: '/v1/chat/conversations' },
   'chat.listDirectory': { path: '/v1/chat/directory' },
   'chat.getMessages': { path: (args) => `/v1/chat/conversations/${args.conversationId}/messages` },
-  'guests.listGuests': { path: (args) => `/v1/guests${args.search ? `?q=${encodeURIComponent(args.search)}` : ''}` },
+  'guests.listGuests': {
+    path: (args) =>
+      `/v1/guests?page=${args.page ?? 0}&limit=${args.limit ?? 100}${args.search ? `&q=${encodeURIComponent(args.search)}` : ''}`,
+  },
   'guests.getGuestProfile': { path: (args) => `/v1/guests/${args.guestId}` },
-  'crm.listLeads': { path: (args) => `/v1/crm/leads${args.search ? `?search=${encodeURIComponent(args.search)}` : ''}` },
-  'crm.listBeos': { path: '/v1/crm/beos' },
-  'crm.listContracts': { path: '/v1/crm/contracts' },
+  'crm.listLeads': {
+    path: (args) =>
+      `/v1/crm/leads?page=${args.page ?? 0}&limit=${args.limit ?? 100}${args.search ? `&search=${encodeURIComponent(args.search)}` : ''}`,
+  },
+  'crm.listBeos': { path: (args) => `/v1/crm/beos?page=${args.page ?? 0}&limit=${args.limit ?? 100}` },
+  'crm.listContracts': { path: (args) => `/v1/crm/contracts?page=${args.page ?? 0}&limit=${args.limit ?? 100}` },
   'crm.getLead': { path: (args) => `/v1/crm/leads/${args.leadId}` },
   'reservationIntegrations.getReservationIntegrationOverview': { path: '/v1/integrations/reservations' },
 };

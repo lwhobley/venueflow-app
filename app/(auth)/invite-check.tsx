@@ -11,27 +11,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi, type InviteCheckResult } from '../../lib/api-client';
-import { spacing } from '../../lib/theme';
-
-const colors = {
-  background: '#FFFFFF',
-  surface: '#FFFFFF',
-  primary: '#2F7D46',
-  text: '#1F241E',
-  muted: '#6F766B',
-  border: '#E8E2D8',
-  danger: '#B85047',
-  success: '#2F7D46',
-  buttonText: '#FFFFFF',
-};
-
-const inputProps = {
-  outlineColor: colors.border,
-  activeOutlineColor: colors.primary,
-  textColor: colors.text,
-  placeholderTextColor: colors.muted,
-  style: { backgroundColor: colors.surface },
-};
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
 
 type Stage =
   | { kind: 'entry' }
@@ -79,6 +59,7 @@ export default function InviteCheckScreen() {
         token: invite.token,
         venueName: invite.venueName,
         jobTitle: invite.jobTitle,
+        phone: looksLikeEmail ? undefined : contact.trim(),
       },
     });
   };
@@ -281,13 +262,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: '#817B6B',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    ...authCardStyle,
   },
 });

@@ -4,23 +4,13 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { spacing } from '../../lib/theme';
+import { authCardStyle, authColors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
 
 type InvitePreview = { expired?: boolean; venueName?: string; jobTitle?: string };
 
 const logoSource = require('../../assets/venue-wrangler-logo.jpg');
-const authColors = {
-  background: '#FFFFFF',
-  surface: '#FFFFFF',
-  primary: '#2F7D46',
-  text: '#1F241E',
-  muted: '#6F766B',
-  border: '#E8E2D8',
-  danger: '#B85047',
-  buttonText: '#FFFFFF',
-};
 
 export default function SignInScreen() {
   const setSession = useAuthStore((state: AuthState) => state.setSession);
@@ -44,8 +34,9 @@ export default function SignInScreen() {
     },
   };
 
-  const { invite: inviteParam } = useLocalSearchParams<{ invite?: string }>();
+  const { invite: inviteParam, phone: phoneParam } = useLocalSearchParams<{ invite?: string; phone?: string }>();
   const inviteToken = typeof inviteParam === 'string' ? inviteParam : undefined;
+  const invitePhone = typeof phoneParam === 'string' ? phoneParam : undefined;
   const [invitePreview] = useState<InvitePreview | null>(null);
 
   const [flow, setFlow] = useState<'signIn' | 'signUp'>('signUp');
@@ -63,6 +54,7 @@ export default function SignInScreen() {
   const finishSession = async (options?: { inviteToken?: string }) => {
     const last = await appApi.passwordAuth({
       email: email.trim(),
+      phone: invitePhone,
       password,
       flow,
       fullName: fullName.trim() || undefined,
@@ -82,6 +74,7 @@ export default function SignInScreen() {
         id: profile._id,
         email: profile.email,
         full_name: profile.fullName,
+        email_verified: profile.emailVerified === true,
         role: profile.role,
         job_title: profile.jobTitle,
         venue_id: profile.venueId ?? null,
@@ -99,7 +92,7 @@ export default function SignInScreen() {
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.replace('/(tabs)/home');
+    router.replace(profile.emailVerified === true ? '/(tabs)/home' : '/(auth)/verify-email');
   };
 
   const resetExistingSession = () => {
@@ -177,6 +170,11 @@ export default function SignInScreen() {
             ) : null}
             <TextInput {...authInputProps} label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
             <TextInput {...authInputProps} label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
+            {flow === 'signIn' ? (
+              <Button mode="text" compact textColor={authColors.primary} onPress={() => router.push('/(auth)/reset-password')}>
+                Forgot password?
+              </Button>
+            ) : null}
 
             <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
@@ -234,13 +232,6 @@ const styles = StyleSheet.create({
     resizeMode: 'contain',
   },
   authCard: {
-    backgroundColor: authColors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: authColors.border,
-    shadowColor: '#817B6B',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    ...authCardStyle,
   },
 });

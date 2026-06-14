@@ -83,6 +83,7 @@ type CheckEvent = {
 };
 
 type GuestProfile = { guest: GuestRow; reservations: ReservationEvent[]; checks: CheckEvent[] };
+type GuestListResponse = { guests: GuestRow[]; totalCount: number; page: number; limit: number };
 
 const segmentOptions: Array<{ value: Segment; label: string }> = [
   { value: 'all', label: 'All' },
@@ -242,7 +243,8 @@ function GuestsScreenInner() {
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
-  const guests = useQuery(api.guests.listGuests, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as GuestRow[] | undefined;
+  const guestList = useQuery(api.guests.listGuests, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as GuestListResponse | undefined;
+  const guests = guestList?.guests;
   const upsertGuest = useMutation(api.guests.upsertGuest);
   const ingestLeads = useMutation(api.guests.ingestLeads);
   const removeGuest = useMutation(api.guests.removeGuest);
@@ -540,7 +542,9 @@ function GuestsScreenInner() {
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'flex-start' }}>
         <View style={{ flexGrow: 1, flexBasis: 320, gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>Guests ({filtered.length})</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>
+            Guests ({guestList?.totalCount ?? filtered.length})
+          </Text>
           {guests === undefined ? (
             <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>Loading guests…</Text></Card.Content></Card>
           ) : filtered.length === 0 ? (

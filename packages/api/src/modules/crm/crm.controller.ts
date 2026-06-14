@@ -17,6 +17,7 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { CrmLeadStatus, BeoStatus, ContractStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
@@ -208,6 +209,20 @@ class SaveContractDto {
   status?: string;
 }
 
+class CrmListQueryDto {
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @Type(() => Number)
+  @IsOptional()
+  page?: number;
+
+  @Type(() => Number)
+  @IsOptional()
+  limit?: number;
+}
+
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
   if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
 }
@@ -227,25 +242,36 @@ export class CrmController {
 
   @RequireSubscription('paid')
   @Get('leads')
-  async listLeads(@VenueScope() scope: Scope, @Query('search') search?: string) {
+  async listLeads(@VenueScope() scope: Scope, @Query() query: CrmListQueryDto) {
     requireManager(scope);
+    const page = Math.max(0, Math.floor(query.page ?? 0));
+    const limit = Math.min(Math.max(1, Math.floor(query.limit ?? 100)), 200);
+    const search = query.search?.trim();
+    const where = {
+      venueId: scope.venueId,
+      deletedAt: null,
+      ...(search
+        ? {
+            OR: [
+              { fullName: { contains: search, mode: 'insensitive' as const } },
+              { company: { contains: search, mode: 'insensitive' as const } },
+              { email: { contains: search, mode: 'insensitive' as const } },
+              { phone: { contains: search } },
+              { tags: { hasSome: [search] } },
+            ],
+          }
+        : {}),
+    };
 
-    let leads = await this.prisma.crmLead.findMany({
-      where: { venueId: scope.venueId, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-      take: 500,
-    });
-
-    if (search) {
-      const q = search.toLowerCase();
-      leads = leads.filter(
-        (l) =>
-          l.fullName.toLowerCase().includes(q) ||
-          (l.company ?? '').toLowerCase().includes(q) ||
-          (l.email ?? '').toLowerCase().includes(q) ||
-          l.tags.some((t) => t.toLowerCase().includes(q)),
-      );
-    }
+    const [leads, totalCount] = await this.prisma.$transaction([
+      this.prisma.crmLead.findMany({
+        where,
+        orderBy: [{ lastActivityAt: 'desc' }, { createdAt: 'desc' }],
+        skip: page * limit,
+        take: limit,
+      }),
+      this.prisma.crmLead.count({ where }),
+    ]);
 
     const assigneeIds = [...new Set(leads.map((l) => l.assignedToId).filter((id): id is string => Boolean(id)))];
     const assignees = assigneeIds.length
@@ -253,24 +279,29 @@ export class CrmController {
       : [];
     const assigneeMap = new Map(assignees.map((a) => [a.id, a.fullName]));
 
-    return leads.map((l) => ({
-      _id: l.id,
-      id: l.id,
-      venueId: l.venueId,
-      fullName: l.fullName,
-      email: l.email ?? null,
-      phone: l.phone ?? null,
-      company: l.company ?? null,
-      source: l.source ?? null,
-      status: l.status,
-      tags: l.tags,
-      assignedToId: l.assignedToId ?? null,
-      assignedToName: l.assignedToId ? (assigneeMap.get(l.assignedToId) ?? null) : null,
-      estimatedValueCents: l.estimatedValueCents ?? null,
-      lastActivityAt: toMs(l.lastActivityAt),
-      createdAt: l.createdAt.getTime(),
-      updatedAt: l.updatedAt.getTime(),
-    }));
+    return {
+      leads: leads.map((l) => ({
+        _id: l.id,
+        id: l.id,
+        venueId: l.venueId,
+        fullName: l.fullName,
+        email: l.email ?? null,
+        phone: l.phone ?? null,
+        company: l.company ?? null,
+        source: l.source ?? null,
+        status: l.status,
+        tags: l.tags,
+        assignedToId: l.assignedToId ?? null,
+        assignedToName: l.assignedToId ? (assigneeMap.get(l.assignedToId) ?? null) : null,
+        estimatedValueCents: l.estimatedValueCents ?? null,
+        lastActivityAt: toMs(l.lastActivityAt),
+        createdAt: l.createdAt.getTime(),
+        updatedAt: l.updatedAt.getTime(),
+      })),
+      totalCount,
+      page,
+      limit,
+    };
   }
 
   @RequireSubscription('paid')
@@ -401,13 +432,16 @@ export class CrmController {
 
   @RequireSubscription('paid')
   @Get('beos')
-  async listBeos(@VenueScope() scope: Scope) {
+  async listBeos(@VenueScope() scope: Scope, @Query() query: CrmListQueryDto) {
     requireManager(scope);
+    const page = Math.max(0, Math.floor(query.page ?? 0));
+    const limit = Math.min(Math.max(1, Math.floor(query.limit ?? 100)), 200);
 
     const beos = await this.prisma.crmBeo.findMany({
       where: { venueId: scope.venueId },
       orderBy: { createdAt: 'desc' },
-      take: 500,
+      skip: page * limit,
+      take: limit,
       include: { lead: { select: { fullName: true } } },
     });
 
@@ -526,13 +560,16 @@ export class CrmController {
 
   @RequireSubscription('paid')
   @Get('contracts')
-  async listContracts(@VenueScope() scope: Scope) {
+  async listContracts(@VenueScope() scope: Scope, @Query() query: CrmListQueryDto) {
     requireManager(scope);
+    const page = Math.max(0, Math.floor(query.page ?? 0));
+    const limit = Math.min(Math.max(1, Math.floor(query.limit ?? 100)), 200);
 
     const contracts = await this.prisma.crmContract.findMany({
       where: { venueId: scope.venueId },
       orderBy: { createdAt: 'desc' },
-      take: 500,
+      skip: page * limit,
+      take: limit,
       include: { lead: { select: { fullName: true } } },
     });
 

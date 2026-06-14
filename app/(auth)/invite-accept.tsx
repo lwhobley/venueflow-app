@@ -11,36 +11,18 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-
-const colors = {
-  background: '#FFFFFF',
-  surface: '#FFFFFF',
-  primary: '#2F7D46',
-  text: '#1F241E',
-  muted: '#6F766B',
-  border: '#E8E2D8',
-  danger: '#B85047',
-  buttonText: '#FFFFFF',
-};
-
-const inputProps = {
-  outlineColor: colors.border,
-  activeOutlineColor: colors.primary,
-  textColor: colors.text,
-  placeholderTextColor: colors.muted,
-  style: { backgroundColor: colors.surface },
-};
 
 export default function InviteAcceptScreen() {
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
 
-  const { token, venueName, jobTitle } = useLocalSearchParams<{
+  const { token, venueName, jobTitle, phone } = useLocalSearchParams<{
     token: string;
     venueName: string;
     jobTitle: string;
+    phone?: string;
   }>();
 
   const [email, setEmail] = useState('');
@@ -65,6 +47,7 @@ export default function InviteAcceptScreen() {
       clearSession();
       const resp = await appApi.passwordAuth({
         email: email.trim(),
+        phone,
         password,
         flow: 'signUp',
         inviteToken: token,
@@ -75,6 +58,7 @@ export default function InviteAcceptScreen() {
           id: profile._id,
           email: profile.email,
           full_name: profile.fullName,
+          email_verified: profile.emailVerified === true,
           role: profile.role,
           job_title: profile.jobTitle,
           venue_id: profile.venueId ?? null,
@@ -92,7 +76,7 @@ export default function InviteAcceptScreen() {
         token: authToken,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(tabs)/home');
+      router.replace(profile.emailVerified === true ? '/(tabs)/home' : '/(auth)/verify-email');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
       setError(msg);
@@ -184,7 +168,7 @@ export default function InviteAcceptScreen() {
                 onPress={() =>
                   router.replace({
                     pathname: '/(auth)/sign-in',
-                    params: { invite: token },
+                    params: { invite: token, phone },
                   })
                 }
               >
@@ -208,13 +192,6 @@ const styles = StyleSheet.create({
   stepActive: { backgroundColor: '#2F7D46' },
   stepDone: { backgroundColor: '#A8CBB0' },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E8E2D8',
-    shadowColor: '#817B6B',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    ...authCardStyle,
   },
 });

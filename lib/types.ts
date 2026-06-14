@@ -14,6 +14,7 @@ export type UserSummary = {
   id: string;
   email: string;
   full_name: string;
+  email_verified: boolean;
   role: Role;
   job_title: string;
   venue_id: Id<'venues'> | null;

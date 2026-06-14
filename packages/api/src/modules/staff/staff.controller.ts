@@ -102,11 +102,10 @@ export class StaffController {
         venueId: scope.venueId,
       },
     });
-    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { name: true } });
     void this.email.send({
       to: created.email,
-      subject: `You were added to ${venue?.name ?? 'a Venue Wrangler team'}`,
-      text: `Hi ${created.fullName},\n\nYou were added to ${venue?.name ?? 'a Venue Wrangler team'} as ${created.jobTitle}.\n\nCreate an account or sign in with this email address to join the team.`,
+      subject: `You were added to ${scope.venueName}`,
+      text: `Hi ${created.fullName},\n\nYou were added to ${scope.venueName} as ${created.jobTitle}.\n\nCreate an account or sign in with this email address to join the team.`,
     });
     return mapProfile(created);
   }

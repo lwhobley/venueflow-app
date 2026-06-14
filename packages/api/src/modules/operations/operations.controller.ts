@@ -191,16 +191,28 @@ export class OperationsController {
       .slice(0, 8)
       .map(mapGoal);
 
-    const eventRows: ReturnType<typeof mapEvent>[] = [];
-    for (const event of venueEvents.slice(0, 8)) {
-      let reservation = null;
-      if (event.reservationId) {
-        reservation = await this.prisma.reservation.findFirst({
-          where: { id: event.reservationId },
-        });
-      }
-      eventRows.push(mapEvent(event, reservation));
-    }
+    const visibleEvents = venueEvents.slice(0, 8);
+    const reservationIds = visibleEvents
+      .map((event) => event.reservationId)
+      .filter((id): id is string => Boolean(id));
+    const reservationsById = reservationIds.length
+      ? new Map(
+          (
+            await this.prisma.reservation.findMany({
+              where: { id: { in: reservationIds } },
+              select: {
+                id: true,
+                notes: true,
+                specialRequests: true,
+                guestName: true,
+                partySize: true,
+              },
+            })
+          ).map((reservation) => [reservation.id, reservation]),
+        )
+      : new Map<string, { id: string; notes: string | null; specialRequests: string | null; guestName: string; partySize: number }>();
+
+    const eventRows = visibleEvents.map((event) => mapEvent(event, event.reservationId ? reservationsById.get(event.reservationId) ?? null : null));
 
     return {
       totalReservations: reservations.length,

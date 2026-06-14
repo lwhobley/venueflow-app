@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const ADMIN_ROLES: Role[] = [Role.admin, Role.owner, Role.manager];
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const EXPO_CHUNK_SIZE = 100;
+const ACTIVE_MEMBERSHIP = [{ membershipStatus: null }, { membershipStatus: 'active' as const }];
 
 /**
  * Writes NotificationEvent rows and delivers them to registered devices via the
@@ -22,7 +23,7 @@ export class NotificationsService {
       data: { venueId: args.venueId, audience: 'managers', kind: args.kind, title: args.title, body: args.body },
     });
     const managers = await this.prisma.profile.findMany({
-      where: { venueId: args.venueId, role: { in: ADMIN_ROLES } },
+      where: { venueId: args.venueId, role: { in: ADMIN_ROLES }, OR: ACTIVE_MEMBERSHIP },
       select: { id: true },
     });
     // Fire-and-forget: push delivery must not add latency to the triggering request.
@@ -63,6 +64,7 @@ export class NotificationsService {
         where: {
           venueId: args.venueId,
           enabled: true,
+          profile: { OR: ACTIVE_MEMBERSHIP },
           ...(args.profileIds ? { profileId: { in: args.profileIds } } : {}),
         },
         select: { token: true },
