@@ -3,6 +3,7 @@ import { Linking, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { colors, spacing, radius, shadow } from '../../lib/theme';
 import {
   PURCHASES_SUPPORTED,
@@ -29,10 +30,18 @@ const FALLBACK_TIERS: PurchasePackage[] = [
 ];
 
 export default function PaywallScreen() {
+  const { me } = useAuthenticatedSession();
   const [packages, setPackages] = useState<PurchasePackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The free trial begins at signup, so anyone here is either already trialing
+  // (action = upgrade to paid) or past it (action = subscribe). "Start free
+  // trial" would be misleading once the trial is already running.
+  const trialEndsAt: number | null = me?.profile?.trialEndsAt ?? null;
+  const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
+  const ctaLabel = inTrial ? 'Upgrade' : 'Subscribe';
 
   useEffect(() => {
     let active = true;
@@ -113,7 +122,9 @@ export default function PaywallScreen() {
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
                 <Text style={{ color: colors.muted, fontWeight: '600' }}>For teams of 1-50 people</Text>
-                <Text style={{ color: colors.success, fontWeight: '600' }}>Includes 14-day free trial</Text>
+                <Text style={{ color: colors.success, fontWeight: '600' }}>
+                  {inTrial ? 'Your free trial is active' : 'Includes 14-day free trial'}
+                </Text>
                 <Text style={{ color: colors.muted }}>Solo use is free. Upgrade to unlock team scheduling, reservations, the live floor, and team chat.</Text>
                 <Button
                   mode="contained"
@@ -122,7 +133,7 @@ export default function PaywallScreen() {
                   disabled={!!busy}
                   onPress={() => live ? void buy(pkg.id) : router.replace('/(tabs)/home')}
                 >
-                  Start free trial
+                  {ctaLabel}
                 </Button>
               </Card.Content>
             </Card>
