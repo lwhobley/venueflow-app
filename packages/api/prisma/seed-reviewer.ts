@@ -73,6 +73,20 @@ async function main() {
         },
       });
 
+      await tx.subscription.create({
+        data: {
+          venueId: venue.id,
+          status: 'trialing',
+          platform: null,
+          planId: 'venueflow_monthly',
+          priceCents: 2999,
+          currency: 'USD',
+          trialStartedAt: new Date(),
+          trialEndsAt,
+          cancelAtPeriodEnd: false,
+        },
+      });
+
       console.log('Reviewer account created successfully.');
       console.log(`  Email:    ${DEMO_EMAIL}`);
       console.log(`  Password: ${DEMO_PASSWORD}`);

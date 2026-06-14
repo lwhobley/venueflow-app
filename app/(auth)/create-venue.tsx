@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -28,8 +28,18 @@ const venueTypeLabels: Record<string, string> = {
 };
 
 export default function CreateVenueScreen() {
+  const user = useAuthStore((s: AuthState) => s.user);
+  const venue = useAuthStore((s: AuthState) => s.venue);
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const token = useAuthStore((s: AuthState) => s.token);
+
+  useEffect(() => {
+    if (venue) {
+      router.replace('/(tabs)/home');
+    } else if (user && !user.email_verified) {
+      router.replace('/(auth)/verify-email');
+    }
+  }, [user, venue]);
 
   const [businessName, setBusinessName] = useState('');
   const [address, setAddress] = useState('');
@@ -37,6 +47,8 @@ export default function CreateVenueScreen() {
   const [venueType, setVenueType] = useState<string>('restaurant');
   const [staffRange, setStaffRange] = useState<string>('1-15');
   const [submitting, setSubmitting] = useState(false);
+
+  if (venue || (user && !user.email_verified)) return null;
 
   const submit = async () => {
     if (!businessName.trim()) {

@@ -1,9 +1,24 @@
+import { useEffect } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { authCardStyle, authColors as colors, spacing } from '../../lib/theme';
+import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 export default function TeamChoiceScreen() {
+  const user = useAuthStore((s: AuthState) => s.user);
+  const venue = useAuthStore((s: AuthState) => s.venue);
+
+  useEffect(() => {
+    if (venue) {
+      router.replace('/(tabs)/home');
+    } else if (user && !user.email_verified) {
+      router.replace('/(auth)/verify-email');
+    }
+  }, [user, venue]);
+
+  if (venue || (user && !user.email_verified)) return null;
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colors.background }}
