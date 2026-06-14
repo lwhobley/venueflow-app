@@ -30,6 +30,10 @@ class PasswordAuthDto {
   email!: string;
 
   @IsString()
+  @IsOptional()
+  phone?: string;
+
+  @IsString()
   @MinLength(6)
   password!: string;
 
@@ -39,6 +43,10 @@ class PasswordAuthDto {
   @IsString()
   @IsOptional()
   fullName?: string;
+
+  @IsString()
+  @IsOptional()
+  lastName?: string;
 
   @IsString()
   @IsOptional()
@@ -83,6 +91,13 @@ export class AuthController {
       throw new BadRequestException('An account already exists for this email. Sign in instead.');
     }
 
+    // Build the display name from fullName (legacy) or firstName + lastName.
+    const resolvedFullName = body.fullName?.trim()
+      || [body.fullName, body.lastName].filter(Boolean).join(' ').trim()
+      || undefined;
+
+    const phone = body.phone?.trim().replace(/[\s\-().+]/g, '') || undefined;
+
     const result = await hashPassword(body.password);
     let nextUserId: string;
     try {
@@ -91,8 +106,8 @@ export class AuthController {
       nextUserId = await this.prisma.$transaction(async (tx) => {
         const nextUser = await tx.user.upsert({
           where: { email },
-          update: {},
-          create: { email },
+          update: phone ? { phone } : {},
+          create: { email, phone },
         });
         await tx.passwordCredential.create({
           data: {
@@ -111,7 +126,7 @@ export class AuthController {
       }
       throw error;
     }
-    const session = await this.issueSession(nextUserId, email, body.fullName, body.inviteToken);
+    const session = await this.issueSession(nextUserId, email, resolvedFullName, body.inviteToken);
     void this.email.send({
       to: email,
       subject: 'Welcome to Venue Wrangler',

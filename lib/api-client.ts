@@ -71,8 +71,23 @@ export function useApiMutation<TArgs, TResult>(
   });
 }
 
+export type InviteCheckResult =
+  | { status: 'found'; token: string; venueName: string; jobTitle: string; role: string; expiresAt: number }
+  | { status: 'not_found' | 'expired' | 'used' };
+
+export type JoinRequestResult = { requestId: string; status: 'pending'; venueName: string };
+export type VenueSearchResult = { id: string; name: string; address: string | null; code: string | null };
+
 export const appApi = {
-  passwordAuth: (body: { email: string; password: string; flow: 'signIn' | 'signUp'; fullName?: string; inviteToken?: string }) =>
+  passwordAuth: (body: {
+    email: string;
+    phone?: string;
+    password: string;
+    flow: 'signIn' | 'signUp';
+    fullName?: string;
+    lastName?: string;
+    inviteToken?: string;
+  }) =>
     apiRequest<{ token: string; profile: any; venue: any | null }>('/v1/auth/password', { method: 'POST', body }),
   // Public: preview which team an invite code belongs to before signing up.
   previewInvite: (code: string) =>
@@ -103,4 +118,22 @@ export const appApi = {
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
     apiRequest<any>('/v1/app/venue', { method: 'PATCH', body }),
   deleteMyAccount: () => apiRequest('/v1/app/me', { method: 'DELETE' }),
+
+  // ─── Workforce ───────────────────────────────────────────────────────────────
+  inviteCheck: (body: { email?: string; phone?: string }) =>
+    apiRequest<InviteCheckResult>('/v1/workforce/invite-check', { method: 'POST', body }),
+  searchVenues: (q: string) =>
+    apiRequest<{ venues: VenueSearchResult[] }>(`/v1/workforce/venues/search?q=${encodeURIComponent(q)}`),
+  submitJoinRequest: (body: { venueId: string }) =>
+    apiRequest<JoinRequestResult>('/v1/workforce/join-request', { method: 'POST', body }),
+  listMyJoinRequests: () =>
+    apiRequest<{ requests: any[] }>('/v1/workforce/join-requests'),
+  cancelJoinRequest: (id: string) =>
+    apiRequest('/v1/workforce/join-request/' + id, { method: 'DELETE' }),
+  listManagerJoinRequests: () =>
+    apiRequest<{ requests: any[] }>('/v1/workforce/manager/join-requests'),
+  approveJoinRequest: (id: string) =>
+    apiRequest('/v1/workforce/manager/join-request/' + id + '/approve', { method: 'POST', body: {} }),
+  rejectJoinRequest: (id: string, note?: string) =>
+    apiRequest('/v1/workforce/manager/join-request/' + id + '/reject', { method: 'POST', body: { note } }),
 };

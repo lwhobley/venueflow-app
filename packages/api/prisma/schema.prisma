@@ -182,16 +182,31 @@ enum ManagerGoalStatus {
   cancelled
 }
 
+enum MembershipStatus {
+  pending
+  active
+  rejected
+  revoked
+}
+
+enum WorkplaceJoinRequestStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
 model User {
-  id        String              @id @default(cuid())
-  email     String?             @unique
-  phone     String?             @unique
-  createdAt DateTime            @default(now())
+  id           String                @id @default(cuid())
+  email        String?               @unique
+  phone        String?               @unique
+  createdAt    DateTime              @default(now())
   // userId is unique on Profile, so this is effectively one-to-one.
-  profile   Profile?
-  sessions  Session[]
-  accounts  AuthAccount[]
-  password  PasswordCredential?
+  profile      Profile?
+  sessions     Session[]
+  accounts     AuthAccount[]
+  password     PasswordCredential?
+  joinRequests WorkplaceJoinRequest[]
 }
 
 model Session {
@@ -290,23 +305,25 @@ model Venue {
   reservationSettings           ReservationSetting[]
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
+  joinRequests                  WorkplaceJoinRequest[]
 }
 
 model Profile {
-  id              String          @id @default(cuid())
-  userId          String?         @unique
-  tokenIdentifier String?
-  email           String
-  fullName        String
-  role            Role
-  jobTitle        String
-  venueId         String?
-  allAccess       Boolean         @default(false)
-  trialEndsAt     DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  user            User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
-  venue           Venue?          @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  id               String           @id @default(cuid())
+  userId           String?          @unique
+  tokenIdentifier  String?
+  email            String
+  fullName         String
+  role             Role
+  jobTitle         String
+  venueId          String?
+  membershipStatus MembershipStatus?
+  allAccess        Boolean          @default(false)
+  trialEndsAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  user             User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  venue            Venue?           @relation(fields: [venueId], references: [id], onDelete: SetNull)
   shifts          ScheduleShift[]
   availability    Availability[]
   pushTokens      PushToken[]
@@ -1199,6 +1216,7 @@ model Invite {
   id        String   @id @default(cuid())
   venueId   String
   email     String?
+  phone     String?
   token     String   @unique
   // Short, human-typeable join code (e.g. "VW-7K2Q9"); employees enter this to
   // join a team. The long `token` backs the venuewrangler://join deep link.
@@ -1212,5 +1230,38 @@ model Invite {
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([email])
+  @@index([phone])
   @@index([venueId])
+}
+
+model WorkplaceJoinRequest {
+  id           String                     @id @default(cuid())
+  venueId      String
+  userId       String
+  status       WorkplaceJoinRequestStatus @default(pending)
+  decidedAt    DateTime?
+  decidedById  String?
+  decisionNote String?
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  venue        Venue                      @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  user         User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events       WorkplaceJoinRequestEvent[]
+
+  @@index([venueId])
+  @@index([userId])
+  @@index([status])
+  @@index([venueId, status])
+}
+
+model WorkplaceJoinRequestEvent {
+  id        String               @id @default(cuid())
+  requestId String
+  actorId   String?
+  eventType String
+  payload   Json?
+  createdAt DateTime             @default(now())
+  request   WorkplaceJoinRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
 }
