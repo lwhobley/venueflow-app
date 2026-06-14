@@ -1,20 +1,33 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
-import { Role, SubscriptionStatus } from '@prisma/client';
+import { Prisma, Role, SubscriptionStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { AuthGuard } from '../../auth/auth.guard';
+import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { assertWithinGeofence } from '../../common/geofence';
 import { csvCell } from '../../common/csv';
+import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
 const FLAT_PLAN_ID = 'venueflow_monthly';
 const FLAT_PLAN_PRICE_CENTS = 2999;
+
+// Human-typeable invite codes. Excludes look-alike characters (0/O, 1/I/L) so
+// codes read aloud or written down don't get mistyped. Format: VW-XXXXXX.
+const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function makeInviteCode(): string {
+  let body = '';
+  for (let i = 0; i < 6; i += 1) {
+    body += INVITE_CODE_ALPHABET[randomBytes(1)[0] % INVITE_CODE_ALPHABET.length];
+  }
+  return `VW-${body}`;
+}
 
 class BootstrapProfileDto {
   @IsEmail()
@@ -135,6 +148,11 @@ class CreateInviteDto {
   jobTitle?: string;
 }
 
+class JoinByCodeDto {
+  @IsString()
+  code!: string;
+}
+
 function isAdminRole(role: Role) {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
@@ -165,6 +183,7 @@ export class AppController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly email: EmailService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -197,6 +216,12 @@ export class AppController {
         trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
       },
       include: { venue: true },
+    });
+
+    void this.email.send({
+      to: profile.email,
+      subject: 'Your Venue Wrangler account was updated',
+      text: `Hi ${profile.fullName},\n\nYour Venue Wrangler account profile was updated.`,
     });
 
     return { profile: this.mapProfile(profile), venue: profile.venue ? this.mapVenue(profile.venue) : null };
@@ -654,6 +679,13 @@ export class AppController {
       : await this.prisma.profile.create({
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId },
         });
+    void this.email.send({
+      to: row.email,
+      subject: existing ? 'Your Venue Wrangler team profile was updated' : `You were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'}`,
+      text: existing
+        ? `Hi ${row.fullName},\n\nYour team profile for ${viewer.venue?.name ?? 'your venue'} was updated.\n\nRole: ${row.role}\nJob title: ${row.jobTitle}`
+        : `Hi ${row.fullName},\n\nYou were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'} as ${row.jobTitle}.\n\nCreate an account or sign in with this email address to join the team.`,
+    });
     return this.mapProfile(row);
   }
 
@@ -711,22 +743,108 @@ export class AppController {
     const profile = await this.requireManagerProfile(user);
     const email = body.email?.trim().toLowerCase() || null;
     const token = randomBytes(18).toString('base64url');
+    const code = await this.uniqueInviteCode();
     const invite = await this.prisma.invite.create({
       data: {
         venueId: profile.venueId!,
         email,
         token,
+        code,
         role: body.role === 'manager' ? 'manager' : 'staff',
         jobTitle: body.jobTitle?.trim() || 'Team Member',
         createdBy: profile.id,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
+    const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(invite.token)}`;
+    const venueName = profile.venue?.name ?? 'your Venue Wrangler team';
+    if (email) {
+      void this.email.send({
+        to: email,
+        subject: `Join ${venueName}`,
+        text:
+          `${profile.fullName} invited you to join ${venueName}.\n\n` +
+          `Open the Venue Wrangler app, choose "Join a team", and enter this code:\n\n  ${code}\n\n` +
+          `Or open this link on your phone:\n${inviteUrl}\n\nThis invite expires in 7 days.`,
+      });
+    }
     return {
       token: invite.token,
-      inviteUrl: `venuewrangler://join?invite=${encodeURIComponent(invite.token)}`,
+      code: invite.code,
+      inviteUrl,
       expiresAt: invite.expiresAt.getTime(),
     };
+  }
+
+  // Public: lets the join screen show which team a code belongs to before the
+  // employee creates an account. Returns nothing identifying beyond the team
+  // name and the role they'd get.
+  @Public()
+  @Get('invite/:code')
+  async previewInvite(@Param('code') rawCode: string) {
+    const invite = await this.findRedeemableInvite(rawCode);
+    if (!invite) throw new NotFoundException('That invite code is invalid, used, or expired.');
+    const venue = await this.prisma.venue.findUnique({ where: { id: invite.venueId }, select: { name: true } });
+    return {
+      valid: true,
+      venueName: venue?.name ?? 'a Venue Wrangler team',
+      role: invite.role,
+      jobTitle: invite.jobTitle,
+      expiresAt: invite.expiresAt.getTime(),
+    };
+  }
+
+  // Authenticated: lets a solo user (no venue yet) join a team later by code.
+  @UseGuards(AuthGuard)
+  @Post('join')
+  async joinByCode(@CurrentUser() user: AuthUser, @Body() body: JoinByCodeDto) {
+    const profile = await this.getProfile(user);
+    if (!profile) throw new NotFoundException('Profile not found');
+    if (profile.venueId) throw new BadRequestException('You are already part of a team.');
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const invite = await this.findRedeemableInvite(body.code, tx);
+      if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
+      if (invite.email && invite.email.toLowerCase() !== profile.email.toLowerCase()) {
+        throw new ForbiddenException('This invite was sent to a different email address.');
+      }
+      // Atomic single-use claim — the loser of a race sees count 0.
+      const claimed = await tx.invite.updateMany({
+        where: { id: invite.id, usedBy: null },
+        data: { usedBy: profile.id },
+      });
+      if (claimed.count === 0) throw new BadRequestException('That invite has already been used.');
+      return tx.profile.update({
+        where: { id: profile.id },
+        data: { venueId: invite.venueId, role: invite.role, jobTitle: invite.jobTitle },
+        include: { venue: true },
+      });
+    });
+
+    return { profile: this.mapProfile(updated), venue: updated.venue ? this.mapVenue(updated.venue) : null };
+  }
+
+  // Resolve a redeemable invite by either the short code or the long token.
+  private findRedeemableInvite(codeOrToken: string, tx: Prisma.TransactionClient = this.prisma) {
+    const value = codeOrToken?.trim();
+    if (!value) return Promise.resolve(null);
+    return tx.invite.findFirst({
+      where: {
+        OR: [{ code: { equals: value, mode: 'insensitive' } }, { token: value }],
+        usedBy: null,
+        expiresAt: { gt: new Date() },
+      },
+    });
+  }
+
+  private async uniqueInviteCode(): Promise<string> {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const code = makeInviteCode();
+      const clash = await this.prisma.invite.findUnique({ where: { code } });
+      if (!clash) return code;
+    }
+    // Astronomically unlikely; widen with a longer suffix as a last resort.
+    return `${makeInviteCode()}${randomBytes(2).toString('hex').toUpperCase()}`;
   }
 
   @UseGuards(AuthGuard)
@@ -734,6 +852,8 @@ export class AppController {
   async deleteMyAccount(@CurrentUser() user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile) return { ok: true };
+    const deletedAccountEmail = profile.email;
+    const deletedAccountName = profile.fullName;
     if (profile.venueId && isOwnerOrAdminRole(profile.role)) {
       const [ownerAdminCount, memberCount] = await Promise.all([
         this.prisma.profile.count({ where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } } }),
@@ -761,6 +881,11 @@ export class AppController {
       this.prisma.profile.delete({ where: { id: profile.id } }),
       this.prisma.user.deleteMany({ where: { id: user.sub } }),
     ]);
+    void this.email.send({
+      to: deletedAccountEmail,
+      subject: 'Your Venue Wrangler account was deleted',
+      text: `Hi ${deletedAccountName},\n\nYour Venue Wrangler account has been deleted. Any retained time records remain available to the venue for wage and compliance records.`,
+    });
     return { ok: true };
   }
 

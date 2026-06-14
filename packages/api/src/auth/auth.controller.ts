@@ -11,6 +11,7 @@ import { Public } from './public.decorator';
 import { CurrentUser } from './current-user.decorator';
 import type { AuthUser } from './auth.guard';
 import { createRateLimiter } from '../common/rate-limit';
+import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -59,6 +60,7 @@ export class AuthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly email: EmailService,
   ) {}
 
   @Public()
@@ -109,7 +111,13 @@ export class AuthController {
       }
       throw error;
     }
-    return this.issueSession(nextUserId, email, body.fullName, body.inviteToken);
+    const session = await this.issueSession(nextUserId, email, body.fullName, body.inviteToken);
+    void this.email.send({
+      to: email,
+      subject: 'Welcome to Venue Wrangler',
+      text: `Hi ${session.profile.fullName},\n\nYour Venue Wrangler account has been created and your 14-day free trial has started.\n\nYou can now build your team, publish schedules, and use the live floor tools.`,
+    });
+    return session;
   }
 
   // Authenticated (not @Public): the global AuthGuard requires a valid bearer
@@ -134,6 +142,17 @@ export class AuthController {
     await this.prisma.session.deleteMany({
       where: { userId: user.sub, ...(user.sid ? { NOT: { id: user.sid } } : {}) },
     });
+    const account = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { email: true },
+    });
+    if (account?.email) {
+      void this.email.send({
+        to: account.email,
+        subject: 'Your Venue Wrangler password was changed',
+        text: 'Your Venue Wrangler password was changed. If you did not make this change, reset your password immediately and contact support.',
+      });
+    }
     return { ok: true };
   }
 
@@ -156,9 +175,15 @@ export class AuthController {
 
   private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string) {
     const trialEndsAt = new Date(Date.now() + TRIAL_DURATION_MS);
-    const invite = inviteToken
+    // inviteToken may be the long deep-link token OR the short human code.
+    const inviteValue = inviteToken?.trim();
+    const invite = inviteValue
       ? await this.prisma.invite.findFirst({
-          where: { token: inviteToken, usedBy: null, expiresAt: { gt: new Date() } },
+          where: {
+            OR: [{ token: inviteValue }, { code: { equals: inviteValue, mode: 'insensitive' } }],
+            usedBy: null,
+            expiresAt: { gt: new Date() },
+          },
         })
       : null;
     if (invite?.email && invite.email.toLowerCase() !== email) {

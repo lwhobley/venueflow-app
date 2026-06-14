@@ -1200,6 +1200,9 @@ model Invite {
   venueId   String
   email     String?
   token     String   @unique
+  // Short, human-typeable join code (e.g. "VW-7K2Q9"); employees enter this to
+  // join a team. The long `token` backs the venuewrangler://join deep link.
+  code      String?  @unique
   role      Role
   jobTitle  String
   createdBy String
