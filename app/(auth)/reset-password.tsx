@@ -41,7 +41,7 @@ export default function ResetPasswordScreen() {
         newPassword,
       });
       Alert.alert('Password updated', 'Your password has been reset. Sign in with the new password.');
-      router.replace('/(auth)/sign-in');
+      router.replace('/(auth)/welcome');
     } catch (error) {
       Alert.alert('Could not reset password', error instanceof Error ? error.message : 'Try again.');
     } finally {

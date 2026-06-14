@@ -44,13 +44,13 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
 
   useEffect(() => {
     if (!navigationReady || !signedOutProtectedRoute) return;
-    router.replace('/sign-in');
+    router.replace('/(auth)/welcome');
   }, [navigationReady, signedOutProtectedRoute]);
 
   useEffect(() => {
     if (!profileMissing) return;
     clearSession();
-    if (navigationReady && !authRoute) router.replace('/sign-in');
+    if (navigationReady && !authRoute) router.replace('/(auth)/welcome');
   }, [authRoute, clearSession, navigationReady, profileMissing]);
 
   useEffect(() => {

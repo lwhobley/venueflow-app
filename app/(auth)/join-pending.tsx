@@ -170,7 +170,7 @@ export default function JoinPendingScreen() {
         textColor={colors.muted}
         onPress={() => {
           clearSession();
-          router.replace('/(auth)/sign-in');
+          router.replace('/(auth)/welcome');
         }}
       >
         Sign out

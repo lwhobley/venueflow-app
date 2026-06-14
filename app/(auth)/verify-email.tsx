@@ -122,7 +122,7 @@ export default function VerifyEmailScreen() {
           textColor={colors.muted}
           onPress={() => {
             clearSession();
-            router.replace('/(auth)/sign-in');
+            router.replace('/(auth)/welcome');
           }}
         >
           Sign out

@@ -27,7 +27,7 @@ export default function ProfileScreen() {
 
   const onLogout = async () => {
     clearSession();
-    router.replace('/sign-in');
+    router.replace('/(auth)/welcome');
   };
 
   const onOpenStaff = () => {
@@ -44,7 +44,7 @@ export default function ProfileScreen() {
       await deleteAccount({});
       clearSession();
       try { await signOut(); } catch { /* already signed out */ }
-      router.replace('/sign-in');
+      router.replace('/(auth)/welcome');
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not delete account. Try again.');
     } finally {

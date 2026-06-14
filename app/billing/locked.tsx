@@ -65,7 +65,7 @@ export default function BillingLockedScreen() {
               </Text>
             )}
 
-            <Button mode="text" textColor={colors.primary} onPress={() => router.replace('/sign-in')}>
+            <Button mode="text" textColor={colors.primary} onPress={() => router.replace('/(auth)/welcome')}>
               Sign out
             </Button>
             <Button mode="text" textColor={colors.primary} onPress={() => Linking.openURL('mailto:support@venuewrangler.com')}>

@@ -34,12 +34,12 @@ export default function SignInScreen() {
     },
   };
 
-  const { invite: inviteParam, phone: phoneParam } = useLocalSearchParams<{ invite?: string; phone?: string }>();
+  const { invite: inviteParam, phone: phoneParam, tab } = useLocalSearchParams<{ invite?: string; phone?: string; tab?: string }>();
   const inviteToken = typeof inviteParam === 'string' ? inviteParam : undefined;
   const invitePhone = typeof phoneParam === 'string' ? phoneParam : undefined;
   const [invitePreview] = useState<InvitePreview | null>(null);
 
-  const [flow, setFlow] = useState<'signIn' | 'signUp'>('signUp');
+  const [flow, setFlow] = useState<'signIn' | 'signUp'>(tab === 'signIn' ? 'signIn' : 'signUp');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -196,8 +196,7 @@ export default function SignInScreen() {
           </Card.Content>
         </Card>
 
-        {/* Sign-in users who already have an account but need to join */}
-        {!inviteToken && flow === 'signIn' ? (
+        {!inviteToken ? (
           <Button
             mode="outlined"
             textColor={authColors.primary}
