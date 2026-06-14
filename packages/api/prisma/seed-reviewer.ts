@@ -1,0 +1,89 @@
+/**
+ * Creates a demo account for Apple App Store reviewers.
+ *
+ * Usage:
+ *   npx tsx prisma/seed-reviewer.ts
+ *
+ * Credentials (enter these in App Store Connect → App Review Information):
+ *   Email:    reviewer@venuewrangler.com
+ *   Password: VenueReview2026!
+ *
+ * The account is pre-verified, attached to a demo venue with an active
+ * trial, and has the "owner" role so every feature is accessible.
+ */
+import { PrismaClient } from '@prisma/client';
+import { pbkdf2, randomBytes } from 'crypto';
+import { promisify } from 'util';
+
+const pbkdf2Async = promisify(pbkdf2);
+
+const DEMO_EMAIL = 'reviewer@venuewrangler.com';
+const DEMO_PASSWORD = 'VenueReview2026!';
+const ITERATIONS = 600_000;
+const KEY_LENGTH = 32;
+const DIGEST = 'sha256';
+
+async function main() {
+  const prisma = new PrismaClient();
+
+  try {
+    const existing = await prisma.user.findUnique({ where: { email: DEMO_EMAIL } });
+    if (existing) {
+      console.log('Reviewer account already exists — skipping.');
+      return;
+    }
+
+    const salt = randomBytes(16).toString('hex');
+    const hash = (await pbkdf2Async(DEMO_PASSWORD, salt, ITERATIONS, KEY_LENGTH, DIGEST)).toString('hex');
+    const trialEndsAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+
+    await prisma.$transaction(async (tx) => {
+      const venue = await tx.venue.create({
+        data: {
+          name: 'Demo Venue',
+          latitude: 40.7128,
+          longitude: -74.006,
+          geofenceRadiusM: 200,
+          timezone: 'America/New_York',
+          address: '123 Demo Street, New York, NY 10001',
+          venueType: 'restaurant',
+          staffRange: '1-15',
+          subscriptionStatus: 'trialing',
+        },
+      });
+
+      const user = await tx.user.create({
+        data: {
+          email: DEMO_EMAIL,
+          emailVerifiedAt: new Date(),
+          password: { create: { salt, passwordHash: hash, iterations: ITERATIONS } },
+        },
+      });
+
+      await tx.profile.create({
+        data: {
+          userId: user.id,
+          email: DEMO_EMAIL,
+          fullName: 'App Reviewer',
+          role: 'owner',
+          jobTitle: 'Owner',
+          venueId: venue.id,
+          allAccess: false,
+          trialEndsAt,
+        },
+      });
+
+      console.log('Reviewer account created successfully.');
+      console.log(`  Email:    ${DEMO_EMAIL}`);
+      console.log(`  Password: ${DEMO_PASSWORD}`);
+      console.log(`  Venue:    ${venue.name} (${venue.id})`);
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

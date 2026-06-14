@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
@@ -92,14 +92,14 @@ export default function SignInScreen() {
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (profile.emailVerified === true) {
-      router.replace('/(tabs)/home');
+    if (profile.emailVerified !== true) {
+      router.replace({
+        pathname: '/(auth)/verify-email',
+        params: options?.inviteToken ? { invite: options.inviteToken } : undefined,
+      });
       return;
     }
-    router.replace({
-      pathname: '/(auth)/verify-email',
-      params: options?.inviteToken ? { invite: options.inviteToken } : undefined,
-    });
+    router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
   };
 
   const resetExistingSession = () => {
@@ -189,37 +189,29 @@ export default function SignInScreen() {
                 : 'Sign in'}
             </Button>
 
-            {!inviteToken ? (
+            {!inviteToken && flow === 'signUp' ? (
               <Text style={{ color: authColors.muted, fontSize: 12, textAlign: 'center' }}>
-                Your 14-day trial starts automatically when you sign up. You can join a venue later by owner or admin invite.
+                By creating an account, you agree to our{' '}
+                <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
+                  Terms of Service
+                </Text>{' '}and{' '}
+                <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
+                  Privacy Policy
+                </Text>. Your 14-day trial starts automatically.
               </Text>
             ) : null}
           </Card.Content>
         </Card>
 
-        {/* Employee paths: shown when not in invite mode */}
-        {!inviteToken ? (
-          <View style={{ gap: spacing.sm }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ flex: 1, height: 1, backgroundColor: authColors.border }} />
-              <Text style={{ color: authColors.muted, fontSize: 12 }}>or join as an employee</Text>
-              <View style={{ flex: 1, height: 1, backgroundColor: authColors.border }} />
-            </View>
-            <Button
-              mode="outlined"
-              textColor={authColors.primary}
-              onPress={() => router.push('/(auth)/invite-check')}
-            >
-              I have an invite from my manager
-            </Button>
-            <Button
-              mode="text"
-              textColor={authColors.muted}
-              onPress={() => router.push('/(auth)/register')}
-            >
-              Join a workplace without an invite
-            </Button>
-          </View>
+        {/* Sign-in users who already have an account but need to join */}
+        {!inviteToken && flow === 'signIn' ? (
+          <Button
+            mode="outlined"
+            textColor={authColors.primary}
+            onPress={() => router.push('/(auth)/invite-check')}
+          >
+            I have an invite from my manager
+          </Button>
         ) : null}
 
         <View style={{ alignItems: 'center', marginTop: spacing.sm }}>

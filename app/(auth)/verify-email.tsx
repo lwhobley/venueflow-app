@@ -61,7 +61,7 @@ export default function VerifyEmailScreen() {
           token,
         });
       }
-      router.replace('/(auth)/workplace-search');
+      router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
     } catch (error) {
       Alert.alert('Could not verify email', error instanceof Error ? error.message : 'Try again.');
     } finally {

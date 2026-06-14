@@ -78,8 +78,7 @@ export default function RegisterScreen() {
         token,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      // Go straight to workplace search — employee has no venue yet.
-      router.replace(profile.emailVerified === true ? '/(auth)/workplace-search' : '/(auth)/verify-email');
+      router.replace(profile.emailVerified === true ? '/(auth)/team-choice' : '/(auth)/verify-email');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
       Alert.alert('Could not create account', msg);
