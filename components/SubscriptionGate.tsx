@@ -90,7 +90,6 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const trialBlocked = config.billingEnabled && !allAccess && trialExpired && !venueActive && !isPremiumLoading && !isPremium;
   const blocked = venueBlocked || trialBlocked;
   const reason = trialBlocked ? 'trial_expired' : reasonFromStatus(billing?.status ?? null);
-  const emailVerified = (me?.profile?.emailVerified ?? user?.email_verified) !== false;
 
   useEffect(() => {
     if (!hydrated || !user || !blocked) return;
@@ -98,11 +97,6 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
     router.replace(`/billing/locked?reason=${reason}`);
   }, [blocked, hydrated, reason, route, user]);
 
-  useEffect(() => {
-    if (!hydrated || !user || !token || emailVerified) return;
-    if (route.startsWith('/(auth)/verify-email') || route.startsWith('/(auth)/reset-password')) return;
-    router.replace('/(auth)/verify-email');
-  }, [emailVerified, hydrated, route, token, user]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;
