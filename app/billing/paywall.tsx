@@ -12,8 +12,8 @@ import {
   type PurchasePackage,
 } from '../../lib/purchases';
 
-const TERMS_URL = 'https://venuewrangler.com/terms/';
-const PRIVACY_URL = 'https://venuewrangler.com/privacy/';
+const TERMS_URL = 'https://venue-wrangler.pages.dev/terms/';
+const PRIVACY_URL = 'https://venue-wrangler.pages.dev/privacy/';
 
 // Shown when RevenueCat returns no live offering yet — e.g. Expo Go / dev
 // (no native key), or before the App Store subscription is approved. Keeps
