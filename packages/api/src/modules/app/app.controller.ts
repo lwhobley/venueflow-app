@@ -249,7 +249,6 @@ export class AppController {
   @Post('register-venue')
   async registerVenue(@CurrentUser() user: AuthUser, @Body() body: RegisterVenueDto) {
     await this.ensureUser(user);
-    await this.requireVerifiedUser(user.sub);
     const businessName = body.businessName.trim();
     if (!businessName) throw new BadRequestException('Enter your business name');
     if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new BadRequestException('Choose a staff size range');
@@ -764,7 +763,6 @@ export class AppController {
   @Post('invites')
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
-    await this.requireVerifiedUser(user.sub);
     const email = body.email?.trim().toLowerCase() || null;
     const token = randomBytes(18).toString('base64url');
     const code = await this.uniqueInviteCode();
@@ -828,7 +826,6 @@ export class AppController {
   @UseGuards(AuthGuard)
   @Post('join')
   async joinByCode(@CurrentUser() user: AuthUser, @Body() body: JoinByCodeDto) {
-    await this.requireVerifiedUser(user.sub);
     const profile = await this.getProfile(user);
     if (!profile) throw new NotFoundException('Profile not found');
     if (profile.venueId) throw new BadRequestException('You are already part of a team.');
@@ -863,14 +860,12 @@ export class AppController {
   @UseGuards(AuthGuard)
   @Post('redeem-invite')
   async redeemInvite(@CurrentUser() user: AuthUser, @Body() body: RedeemInviteDto) {
-    await this.requireVerifiedUser(user.sub);
     return this.redeemInviteForUser(user.sub, body.codeOrToken);
   }
 
   @UseGuards(AuthGuard)
   @Post('redeem-my-invite')
   async redeemMyInvite(@CurrentUser() user: AuthUser) {
-    await this.requireVerifiedUser(user.sub);
     const email = await this.getVerifiedAccountEmail(user.sub);
     const matches = await this.prisma.invite.findMany({
       where: {
@@ -995,11 +990,7 @@ export class AppController {
     return profile;
   }
 
-  private async requireVerifiedUser(userId: string) {
-    if (!(await this.isEmailVerified(userId))) {
-      throw new ForbiddenException('Verify your email before using this feature.');
-    }
-  }
+
 
   private async getVerifiedAccountEmail(userId: string) {
     const account = await this.prisma.user.findUnique({

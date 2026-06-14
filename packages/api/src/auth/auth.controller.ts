@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Logger, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
@@ -94,6 +94,8 @@ class ResetPasswordDto {
 
 @Controller('v1/auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -192,8 +194,8 @@ export class AuthController {
     // verify-email screen if the email didn't arrive.
     try {
       await this.sendVerificationEmail(nextUserId, email, session.profile.fullName);
-    } catch {
-      // intentionally ignored
+    } catch (err: any) {
+      this.logger.error(`Verification email failed for ${email}: ${err?.message ?? String(err)}`);
     }
     void this.email.send({
       to: email,

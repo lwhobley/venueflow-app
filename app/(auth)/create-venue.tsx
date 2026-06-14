@@ -28,7 +28,6 @@ const venueTypeLabels: Record<string, string> = {
 };
 
 export default function CreateVenueScreen() {
-  const user = useAuthStore((s: AuthState) => s.user);
   const venue = useAuthStore((s: AuthState) => s.venue);
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const token = useAuthStore((s: AuthState) => s.token);
@@ -36,10 +35,8 @@ export default function CreateVenueScreen() {
   useEffect(() => {
     if (venue) {
       router.replace('/(tabs)/home');
-    } else if (user && !user.email_verified) {
-      router.replace('/(auth)/verify-email');
     }
-  }, [user, venue]);
+  }, [venue]);
 
   const [businessName, setBusinessName] = useState('');
   const [address, setAddress] = useState('');
@@ -48,7 +45,7 @@ export default function CreateVenueScreen() {
   const [staffRange, setStaffRange] = useState<string>('1-15');
   const [submitting, setSubmitting] = useState(false);
 
-  if (venue || (user && !user.email_verified)) return null;
+  if (venue) return null;
 
   const submit = async () => {
     if (!businessName.trim()) {

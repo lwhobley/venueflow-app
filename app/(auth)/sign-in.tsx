@@ -92,13 +92,6 @@ export default function SignInScreen() {
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (profile.emailVerified !== true) {
-      router.replace({
-        pathname: '/(auth)/verify-email',
-        params: options?.inviteToken ? { invite: options.inviteToken } : undefined,
-      });
-      return;
-    }
     router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
   };
 

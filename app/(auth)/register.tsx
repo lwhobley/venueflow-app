@@ -78,7 +78,7 @@ export default function RegisterScreen() {
         token,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace(profile.emailVerified === true ? '/(auth)/team-choice' : '/(auth)/verify-email');
+      router.replace('/(auth)/team-choice');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
       Alert.alert('Could not create account', msg);

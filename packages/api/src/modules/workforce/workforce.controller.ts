@@ -171,7 +171,6 @@ export class WorkforceController {
 
   @Post('join-request')
   async submitJoinRequest(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: JoinRequestDto) {
-    await this.requireVerifiedUser(user.sub);
     await assertWithinSharedRateLimit(this.prisma, `join-request:user:${user.sub}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `join-request:ip:${getClientIp(req)}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
 
@@ -391,13 +390,4 @@ export class WorkforceController {
     });
   }
 
-  private async requireVerifiedUser(userId: string) {
-    const account: any = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { emailVerifiedAt: true },
-    } as any);
-    if (!account?.emailVerifiedAt) {
-      throw new ForbiddenException('Verify your email before joining a workplace.');
-    }
-  }
 }
