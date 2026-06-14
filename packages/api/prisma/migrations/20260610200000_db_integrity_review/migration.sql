@@ -1,4 +1,4 @@
-﻿-- DB integrity review fixes.
+-- DB integrity review fixes.
 --
 -- 1) Dedupe PosCheck rows before enforcing webhook idempotency (keep newest).
 DELETE FROM "PosCheck" a
