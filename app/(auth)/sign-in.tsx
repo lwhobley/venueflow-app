@@ -192,6 +192,31 @@ export default function SignInScreen() {
           </Card.Content>
         </Card>
 
+        {/* Employee paths: shown when not in invite mode */}
+        {!inviteToken ? (
+          <View style={{ gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ flex: 1, height: 1, backgroundColor: authColors.border }} />
+              <Text style={{ color: authColors.muted, fontSize: 12 }}>or join as an employee</Text>
+              <View style={{ flex: 1, height: 1, backgroundColor: authColors.border }} />
+            </View>
+            <Button
+              mode="outlined"
+              textColor={authColors.primary}
+              onPress={() => router.push('/(auth)/invite-check')}
+            >
+              I have an invite from my manager
+            </Button>
+            <Button
+              mode="text"
+              textColor={authColors.muted}
+              onPress={() => router.push('/(auth)/register')}
+            >
+              Join a workplace without an invite
+            </Button>
+          </View>
+        ) : null}
+
         <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
           <Text style={{ color: authColors.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
           <Text style={{ color: authColors.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>

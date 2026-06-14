@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, Share, View } from 'react-native';
+import { router } from 'expo-router';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
@@ -228,6 +229,15 @@ export default function StaffScreen() {
         <Text style={{ color: colors.muted }}>
           Staff are scoped to this venue and can be promoted or updated without leaving the workspace.
         </Text>
+        <Button
+          mode="outlined"
+          icon="account-check"
+          textColor={colors.primary}
+          onPress={() => router.push('/join-requests')}
+          style={{ alignSelf: 'flex-start', marginTop: 4 }}
+        >
+          Review join requests
+        </Button>
       </View>
 
       {/* Roles / positions */}
