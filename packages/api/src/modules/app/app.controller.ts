@@ -1,20 +1,21 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
-import { Prisma, Role, SubscriptionStatus } from '@prisma/client';
+import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Prisma, Role } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';
 import { AuthGuard } from '../../auth/auth.guard';
 import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
-import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { assertWithinGeofence } from '../../common/geofence';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappers';
+import { ProfileService } from './profile.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
@@ -105,56 +106,9 @@ class ClockDto {
   mocked!: boolean;
 }
 
-class StaffDto {
-  @IsString()
-  venueId!: string;
-
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  fullName!: string;
-
-  @IsIn(['admin', 'owner', 'manager', 'server', 'staff'])
-  role!: Role;
-
-  @IsString()
-  jobTitle!: string;
-
-  @IsString()
-  @IsOptional()
-  phone?: string;
-
-  @IsString()
-  @IsOptional()
-  altPhone?: string;
-
-  @IsString()
-  @IsOptional()
-  address?: string;
-
-  @IsDateString()
-  @IsOptional()
-  dateOfBirth?: string;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  certifications?: string[];
-}
-
 class VenueRoleDto {
   @IsString()
   name!: string;
-}
-
-class AppleSubscriptionSyncDto {
-  @IsString()
-  productId!: string;
-
-  @IsString()
-  @IsOptional()
-  entitlementId?: string;
 }
 
 class CreateInviteDto {
@@ -180,37 +134,17 @@ class RedeemInviteDto {
   codeOrToken!: string;
 }
 
-function isAdminRole(role: Role) {
-  return role === 'admin' || role === 'owner' || role === 'manager';
-}
-
 function planForStaffRange(range: string) {
   void range;
   return { planId: FLAT_PLAN_ID, priceCents: FLAT_PLAN_PRICE_CENTS };
-}
-
-function toMs(date: Date | null | undefined) {
-  return date ? date.getTime() : null;
-}
-
-function minutesToTime(total: number) {
-  const hours = Math.floor(total / 60);
-  const minutes = total % 60;
-  const suffix = hours >= 12 ? 'PM' : 'AM';
-  const displayHour = hours % 12 || 12;
-  return `${displayHour}:${String(minutes).padStart(2, '0')} ${suffix}`;
-}
-
-function dayLabel(dayIndex: number) {
-  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayIndex] ?? 'Day';
 }
 
 @Controller('v1/app')
 export class AppController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
     private readonly email: EmailService,
+    private readonly profiles: ProfileService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -220,8 +154,8 @@ export class AppController {
     if (!profile) return null;
     const emailVerified = await this.isEmailVerified(user.sub);
     return {
-      profile: this.mapProfile(profile, emailVerified),
-      venue: profile.venue ? this.mapVenue(profile.venue) : null,
+      profile: mapProfile(profile, emailVerified),
+      venue: profile.venue ? mapVenue(profile.venue) : null,
     };
   }
 
@@ -261,8 +195,8 @@ export class AppController {
     });
 
     return {
-      profile: this.mapProfile(profile, emailVerified),
-      venue: profile.venue ? this.mapVenue(profile.venue) : null,
+      profile: mapProfile(profile, emailVerified),
+      venue: profile.venue ? mapVenue(profile.venue) : null,
     };
   }
 
@@ -278,8 +212,8 @@ export class AppController {
     if (existingProfile?.venue) {
       const emailVerified = await this.isEmailVerified(user.sub);
       return {
-        profile: this.mapProfile(existingProfile, emailVerified),
-        venue: this.mapVenue(existingProfile.venue),
+        profile: mapProfile(existingProfile, emailVerified),
+        venue: mapVenue(existingProfile.venue),
       };
     }
 
@@ -341,7 +275,7 @@ export class AppController {
       return { profile, venue };
     });
 
-    return { profile: this.mapProfile(result.profile), venue: this.mapVenue(result.venue) };
+    return { profile: mapProfile(result.profile), venue: mapVenue(result.venue) };
   }
 
   @UseGuards(AuthGuard)
@@ -358,86 +292,7 @@ export class AppController {
         ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(20, Math.min(2000, body.geofenceRadiusM)) } : {}),
       },
     });
-    return this.mapVenue(venue);
-  }
-
-  @UseGuards(AuthGuard)
-  @Get('billing')
-  async getMyVenueBilling(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venueId) return null;
-    const subscription = await this.prisma.subscription.findFirst({ where: { venueId: profile.venueId } });
-    if (!subscription) return null;
-    return {
-      venueId: subscription.venueId,
-      status: subscription.status,
-      platform: subscription.platform,
-      trialStartedAt: subscription.trialStartedAt.getTime(),
-      trialEndsAt: subscription.trialEndsAt.getTime(),
-      currentPeriodStart: toMs(subscription.currentPeriodStart),
-      currentPeriodEnd: toMs(subscription.currentPeriodEnd),
-      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
-      cancelledAt: toMs(subscription.cancelledAt),
-      planId: subscription.planId,
-      priceCents: subscription.priceCents,
-      currency: subscription.currency,
-    };
-  }
-
-  @UseGuards(AuthGuard)
-  @Post('billing/apple/sync')
-  async syncAppleSubscription(@CurrentUser() user: AuthUser, @Body() body: AppleSubscriptionSyncDto) {
-    const profile = await this.requireBillingProfile(user);
-    const verified = await this.verifyRevenueCatEntitlement(profile.venueId!, body.productId, body.entitlementId);
-    if (!verified) {
-      return this.getMyVenueBilling(user);
-    }
-    const status: SubscriptionStatus = 'active';
-    const now = new Date();
-    const existing = await this.prisma.subscription.findFirst({ where: { venueId: profile.venueId! } });
-    await this.prisma.$transaction([
-      this.prisma.venue.update({
-        where: { id: profile.venueId! },
-        data: {
-          subscriptionStatus: status,
-          subscriptionPlatform: 'apple',
-        },
-      }),
-      existing
-        ? this.prisma.subscription.update({
-            where: { id: existing.id },
-            data: {
-              status,
-              platform: 'apple',
-              planId: body.productId,
-              currentPeriodStart: verified.currentPeriodStart ?? existing.currentPeriodStart ?? now,
-              currentPeriodEnd: verified.currentPeriodEnd ?? existing.currentPeriodEnd,
-              cancelAtPeriodEnd: false,
-              cancelledAt: null,
-              externalCustomerId: profile.venueId!,
-              lastRevenueCatEventAt: now,
-            },
-          })
-        : this.prisma.subscription.create({
-            data: {
-              venueId: profile.venueId!,
-              status,
-              platform: 'apple',
-              planId: body.productId,
-              priceCents: 0,
-              currency: 'USD',
-              trialStartedAt: now,
-              trialEndsAt: now,
-              currentPeriodStart: verified.currentPeriodStart ?? now,
-              currentPeriodEnd: verified.currentPeriodEnd,
-              cancelAtPeriodEnd: false,
-              externalCustomerId: profile.venueId!,
-              lastRevenueCatEventAt: now,
-            },
-          }),
-    ]);
-
-    return this.getMyVenueBilling(user);
+    return mapVenue(venue);
   }
 
   @UseGuards(AuthGuard)
@@ -473,8 +328,8 @@ export class AppController {
     const countByStatus = (status: string) => shiftCounts.find((c) => c.status === status)?._count._all ?? 0;
 
     return {
-      profile: this.mapProfile(profile),
-      venue: this.mapVenue(profile.venue),
+      profile: mapProfile(profile),
+      venue: mapVenue(profile.venue),
       analytics: {
         teamCount,
         scheduledCount: countByStatus('scheduled'),
@@ -483,8 +338,8 @@ export class AppController {
         openClockCount,
         clockedInCount: openClockCount,
       },
-      schedule: shifts.map((shift) => this.mapShift(shift, canManage ? shift.profile?.fullName ?? null : shift.profileId === profile.id ? 'You' : null)),
-      activeClockEntries: activeEntries.map((entry) => this.mapClockEntry(entry, entry.profile, entry.venue)),
+      schedule: shifts.map((shift) => mapShift(shift, canManage ? shift.profile?.fullName ?? null : shift.profileId === profile.id ? 'You' : null)),
+      activeClockEntries: activeEntries.map((entry) => mapClockEntry(entry, entry.profile, entry.venue)),
     };
   }
 
@@ -599,9 +454,9 @@ export class AppController {
       orderBy: { clockInAt: 'desc' },
       take: 100,
     });
-    const openEntries = entries.map((entry) => this.mapClockEntry(entry, entry.profile, entry.venue));
+    const openEntries = entries.map((entry) => mapClockEntry(entry, entry.profile, entry.venue));
     return {
-      venue: this.mapVenue(profile.venue),
+      venue: mapVenue(profile.venue),
       activeClockEntries: isAdminRole(profile.role) ? openEntries : [],
       employeeEntry: openEntries.find((entry) => entry.memberId === profile.id) ?? null,
       managerAlerts: [],
@@ -659,7 +514,7 @@ export class AppController {
         },
         include: { profile: true, venue: true },
       });
-      return this.mapClockEntry(entry, entry.profile, entry.venue);
+      return mapClockEntry(entry, entry.profile, entry.venue);
     } catch (error: any) {
       // Partial unique index (one open entry per profile): a concurrent
       // double-tap loses the race here instead of creating a second open entry.
@@ -689,65 +544,7 @@ export class AppController {
       },
       include: { profile: true, venue: true },
     });
-    return this.mapClockEntry(entry, entry.profile, entry.venue);
-  }
-
-  @UseGuards(AuthGuard)
-  @Get('staff')
-  async listVenueStaff(@CurrentUser() user: AuthUser) {
-    const profile = await this.requireManagerProfile(user);
-    return this.prisma.profile
-      .findMany({ where: { venueId: profile.venueId! }, orderBy: { fullName: 'asc' } })
-      .then((rows) => rows.map((row) => this.mapProfile(row)));
-  }
-
-  @UseGuards(AuthGuard)
-  @Post('staff')
-  async upsertVenueStaff(@CurrentUser() user: AuthUser, @Body() body: StaffDto) {
-    const viewer = await this.requireManagerProfile(user);
-    if (viewer.venueId !== body.venueId) throw new ForbiddenException('Not authorized');
-    const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess;
-    if (!viewerIsOwnerOrAdmin && ['admin', 'owner', 'manager'].includes(body.role)) {
-      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
-    }
-    const existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
-    if (existing) {
-      await this.assertCanManageLegacyStaffTarget(viewer, existing);
-    }
-    const employeeFields = {
-      phone: body.phone?.trim() || null,
-      altPhone: body.altPhone?.trim() || null,
-      address: body.address?.trim() || null,
-      dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
-      certifications: body.certifications ?? [],
-    };
-    const row = existing
-      ? await this.prisma.profile.update({
-          where: { id: existing.id },
-          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
-        })
-      : await this.prisma.profile.create({
-          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
-        });
-    void this.email.send({
-      to: row.email,
-      subject: existing ? 'Your Venue Wrangler team profile was updated' : `You were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'}`,
-      text: existing
-        ? `Hi ${row.fullName},\n\nYour team profile for ${viewer.venue?.name ?? 'your venue'} was updated.\n\nRole: ${row.role}\nJob title: ${row.jobTitle}`
-        : `Hi ${row.fullName},\n\nYou were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'} as ${row.jobTitle}.\n\nCreate an account or sign in with this email address to join the team.`,
-    });
-    return this.mapProfile(row);
-  }
-
-  @UseGuards(AuthGuard)
-  @Delete('staff/:id')
-  async deactivateVenueStaff(@CurrentUser() user: AuthUser, @Param('id') staffId: string) {
-    const viewer = await this.requireManagerProfile(user);
-    const staff = await this.prisma.profile.findFirst({ where: { id: staffId, venueId: viewer.venueId! } });
-    if (!staff) throw new NotFoundException('Staff member not found');
-    await this.assertCanManageLegacyStaffTarget(viewer, staff);
-    const updated = await this.prisma.profile.update({ where: { id: staff.id }, data: { venueId: null } });
-    return this.mapProfile(updated);
+    return mapClockEntry(entry, entry.profile, entry.venue);
   }
 
   @UseGuards(AuthGuard)
@@ -880,8 +677,8 @@ export class AppController {
 
     const emailVerified = await this.isEmailVerified(user.sub);
     return {
-      profile: this.mapProfile(updated, emailVerified),
-      venue: updated.venue ? this.mapVenue(updated.venue) : null,
+      profile: mapProfile(updated, emailVerified),
+      venue: updated.venue ? mapVenue(updated.venue) : null,
     };
   }
 
@@ -978,65 +775,34 @@ export class AppController {
     return { ok: true };
   }
 
-  private async ensureUser(user: AuthUser) {
-    // Do NOT recreate the user from token claims: a deleted account's JWT stays
-    // valid until expiry, and recreating here would silently resurrect it.
-    const existing = await this.prisma.user.findUnique({ where: { id: user.sub } });
-    if (!existing) {
-      throw new UnauthorizedException('This account no longer exists. Please sign in again.');
-    }
-    if (user.email && user.email !== existing.email) {
-      return this.prisma.user.update({ where: { id: user.sub }, data: { email: user.email } });
-    }
-    return existing;
+  private ensureUser(user: AuthUser) {
+    return this.profiles.ensureUser(user);
   }
 
   private getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({
-      where: { userId: user.sub },
-      include: { venue: true },
-    });
+    return this.profiles.getProfile(user);
   }
 
-  private async requireVenueProfile(user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venue) throw new ForbiddenException('Profile is not initialized');
-    return profile;
+  private requireVenueProfile(user: AuthUser) {
+    return this.profiles.requireVenueProfile(user);
   }
 
-  private async requireManagerProfile(user: AuthUser) {
-    const profile = await this.requireVenueProfile(user);
-    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
-    return profile;
+  private requireManagerProfile(user: AuthUser) {
+    return this.profiles.requireManagerProfile(user);
   }
 
-  private async requireBillingProfile(user: AuthUser) {
-    const profile = await this.requireVenueProfile(user);
-    if (!(profile.role === 'admin' || profile.role === 'owner' || profile.allAccess)) {
-      throw new ForbiddenException('Not authorized');
-    }
-    return profile;
+  private requireBillingProfile(user: AuthUser) {
+    return this.profiles.requireBillingProfile(user);
   }
 
 
 
-  private async getVerifiedAccountEmail(userId: string) {
-    const account = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { email: true, emailVerifiedAt: true },
-    });
-    if (!account?.email || !account.emailVerifiedAt) {
-      throw new ForbiddenException('Verify your email before using this feature.');
-    }
-    return account.email;
+  private getVerifiedAccountEmail(userId: string) {
+    return this.profiles.getVerifiedAccountEmail(userId);
   }
 
-  private async isEmailVerified(userId: string) {
-    const account: any = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { emailVerifiedAt: true },
-    } as any);
-    return Boolean(account?.emailVerifiedAt);
+  private isEmailVerified(userId: string) {
+    return this.profiles.isEmailVerified(userId);
   }
 
   private async redeemInviteForUser(userId: string, codeOrToken: string) {
@@ -1047,8 +813,8 @@ export class AppController {
       const emailVerified = await this.isEmailVerified(userId);
       return {
         redeemed: false,
-        profile: this.mapProfile(profile, emailVerified),
-        venue: profile.venue ? this.mapVenue(profile.venue) : null,
+        profile: mapProfile(profile, emailVerified),
+        venue: profile.venue ? mapVenue(profile.venue) : null,
       };
     }
 
@@ -1082,196 +848,9 @@ export class AppController {
 
     return {
       redeemed: true,
-      profile: this.mapProfile(updated, true),
-      venue: updated.venue ? this.mapVenue(updated.venue) : null,
+      profile: mapProfile(updated, true),
+      venue: updated.venue ? mapVenue(updated.venue) : null,
     };
   }
 
-  private async assertCanManageLegacyStaffTarget(
-    viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null },
-    target: { id: string; role: Role; venueId: string | null },
-  ) {
-    // Editing your own profile is always allowed; the last-owner guard below
-    // still prevents a sole owner from self-demoting out of access.
-    if (target.id !== viewer.id && !canManageRole(viewer.role, target.role, viewer.allAccess)) {
-      throw new ForbiddenException('You cannot modify this staff member');
-    }
-    if (isOwnerOrAdminRole(target.role)) {
-      const ownerAdminCount = await this.prisma.profile.count({
-        where: { venueId: viewer.venueId, role: { in: ['owner', 'admin'] } },
-      });
-      if (ownerAdminCount <= 1) {
-        throw new ForbiddenException('You cannot remove the last owner or admin from the venue');
-      }
-    }
-  }
-
-  private async verifyRevenueCatEntitlement(venueId: string, productId: string, entitlementId?: string) {
-    const apiKey = this.config.get<string>('REVENUECAT_API_KEY') ?? this.config.get<string>('REVENUECAT_SECRET_API_KEY');
-    if (!apiKey) {
-      return null;
-    }
-
-    const response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(venueId)}`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/json',
-      },
-    });
-    const json: any = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new BadRequestException(json?.message ?? 'Could not verify RevenueCat subscription.');
-    }
-
-    const subscriber = json?.subscriber ?? {};
-    const entitlements = subscriber.entitlements ?? {};
-    const subscriptions = subscriber.subscriptions ?? {};
-    const matchingEntitlement = entitlementId
-      ? entitlements[entitlementId]
-      : Object.values(entitlements).find((entitlement: any) => entitlement?.product_identifier === productId);
-    const matchingSubscription = subscriptions[productId];
-    const expiresAt = parseRevenueCatDate(matchingEntitlement?.expires_date ?? matchingSubscription?.expires_date);
-    const purchasedAt = parseRevenueCatDate(matchingEntitlement?.purchase_date ?? matchingSubscription?.purchase_date);
-    const isActive = Boolean(matchingEntitlement || matchingSubscription) && (!expiresAt || expiresAt.getTime() > Date.now());
-    if (!isActive) {
-      throw new BadRequestException('No active RevenueCat entitlement found for this Apple subscription.');
-    }
-
-    return { currentPeriodStart: purchasedAt, currentPeriodEnd: expiresAt };
-  }
-
-  private mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number }) {
-    return {
-      _id: venue.id,
-      id: venue.id,
-      name: venue.name,
-      latitude: venue.latitude,
-      longitude: venue.longitude,
-      geofenceRadiusM: venue.geofenceRadiusM,
-      geofence_radius_m: venue.geofenceRadiusM,
-    };
-  }
-
-  private mapProfile(
-    profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; trialEndsAt?: Date | null; phone?: string | null; altPhone?: string | null; address?: string | null; dateOfBirth?: Date | null; certifications?: string[] },
-    emailVerified = false,
-  ) {
-    return {
-      _id: profile.id,
-      id: profile.id,
-      email: profile.email,
-      fullName: profile.fullName,
-      full_name: profile.fullName,
-      emailVerified,
-      email_verified: emailVerified,
-      role: profile.role,
-      jobTitle: profile.jobTitle,
-      job_title: profile.jobTitle,
-      venueId: profile.venueId,
-      venue_id: profile.venueId,
-      allAccess: profile.allAccess,
-      all_access: profile.allAccess,
-      trialEndsAt: profile.trialEndsAt?.getTime() ?? null,
-      phone: profile.phone ?? null,
-      altPhone: profile.altPhone ?? null,
-      address: profile.address ?? null,
-      dateOfBirth: profile.dateOfBirth?.toISOString() ?? null,
-      certifications: profile.certifications ?? [],
-    };
-  }
-
-  private mapShift(shift: { id: string; dayIndex: number; startMinutes: number; endMinutes: number; profileId: string | null; jobTitle: string; station: string; status: string; notes: string | null }, memberName: string | null) {
-    return {
-      _id: shift.id,
-      id: shift.id,
-      dayIndex: shift.dayIndex,
-      day_index: shift.dayIndex,
-      dayLabel: dayLabel(shift.dayIndex),
-      day_label: dayLabel(shift.dayIndex),
-      startMinutes: shift.startMinutes,
-      start_time: minutesToTime(shift.startMinutes),
-      endMinutes: shift.endMinutes,
-      end_time: minutesToTime(shift.endMinutes),
-      memberId: shift.profileId,
-      member_id: shift.profileId,
-      memberName,
-      member_name: memberName,
-      jobTitle: shift.jobTitle,
-      job_title: shift.jobTitle,
-      station: shift.station,
-      status: shift.status,
-      notes: shift.notes ?? undefined,
-    };
-  }
-
-  private mapClockEntry(
-    entry: {
-      id: string;
-      profileId: string | null;
-      profileFullName?: string | null;
-      venueId: string;
-      clockInAt: Date;
-      clockOutAt: Date | null;
-      clockInLat: number;
-      clockInLng: number;
-      clockInAccuracyM: number;
-      clockInMocked: boolean;
-      clockOutLat: number | null;
-      clockOutLng: number | null;
-      clockOutAccuracyM: number | null;
-      clockOutMocked: boolean | null;
-      isOpen: boolean;
-    },
-    // Null when the staff member deleted their account; wage records are
-    // retained with a snapshotted name (entry.profileFullName).
-    profile: { fullName: string; role: Role; jobTitle: string } | null,
-    venue: { name: string },
-  ) {
-    const memberName = profile?.fullName ?? entry.profileFullName ?? 'Former staff';
-    const role = profile?.role ?? 'staff';
-    const jobTitle = profile?.jobTitle ?? 'Former staff';
-    return {
-      _id: entry.id,
-      id: entry.id,
-      memberId: entry.profileId,
-      member_id: entry.profileId,
-      memberName,
-      member_name: memberName,
-      role,
-      jobTitle,
-      job_title: jobTitle,
-      venueId: entry.venueId,
-      venue_id: entry.venueId,
-      venueName: venue.name,
-      venue_name: venue.name,
-      clockInAt: entry.clockInAt.getTime(),
-      clock_in_at: entry.clockInAt.getTime(),
-      clockOutAt: toMs(entry.clockOutAt),
-      clock_out_at: toMs(entry.clockOutAt),
-      clockInLat: entry.clockInLat,
-      clock_in_lat: entry.clockInLat,
-      clockInLng: entry.clockInLng,
-      clock_in_lng: entry.clockInLng,
-      clockInAccuracyM: entry.clockInAccuracyM,
-      clock_in_accuracy_m: entry.clockInAccuracyM,
-      clockInMocked: entry.clockInMocked,
-      clock_in_mocked: entry.clockInMocked,
-      clockOutLat: entry.clockOutLat,
-      clock_out_lat: entry.clockOutLat,
-      clockOutLng: entry.clockOutLng,
-      clock_out_lng: entry.clockOutLng,
-      clockOutAccuracyM: entry.clockOutAccuracyM,
-      clock_out_accuracy_m: entry.clockOutAccuracyM,
-      clockOutMocked: entry.clockOutMocked,
-      clock_out_mocked: entry.clockOutMocked,
-      isOpen: entry.isOpen,
-      is_open: entry.isOpen,
-    };
-  }
-}
-
-function parseRevenueCatDate(value: unknown) {
-  if (typeof value !== 'string' || !value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
 }

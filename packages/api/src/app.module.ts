@@ -12,6 +12,9 @@ import { PrismaModule } from './prisma/prisma.module';
 import { VenueModule } from './venue/venue.module';
 import { VenueScopeInterceptor } from './venue/venue-scope.interceptor';
 import { AppController } from './modules/app/app.controller';
+import { AppBillingController } from './modules/app/app-billing.controller';
+import { AppStaffController } from './modules/app/app-staff.controller';
+import { ProfileService } from './modules/app/profile.service';
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
@@ -58,6 +61,8 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
     HealthController,
     AuthController,
     AppController,
+    AppBillingController,
+    AppStaffController,
     SchedulingController,
     TimeClockController,
     StaffRequestsController,
@@ -70,6 +75,9 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
     { provide: APP_INTERCEPTOR, useClass: VenueScopeInterceptor },
     // Reflector must be provided at the module level for the interceptor DI.
     Reflector,
+    // Shared /v1/app profile + venue resolution (AppController, AppBilling,
+    // AppStaff controllers all depend on it).
+    ProfileService,
   ],
 })
 export class AppModule {}
