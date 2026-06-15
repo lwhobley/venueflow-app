@@ -37,7 +37,7 @@ export default function BillingLockedScreen() {
 
             <Text variant="titleMedium">Subscribe to continue</Text>
             <Text style={{ color: colors.muted }}>
-              $29.99/month for teams of 1-50 people keeps scheduling, the live floor, time clock, reservations, bar stock,
+              $99/month for teams of 1-50 people keeps scheduling, the live floor, time clock, reservations, bar stock,
               reports, and integrations running across your whole team.
             </Text>
 

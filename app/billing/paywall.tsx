@@ -24,7 +24,7 @@ const FALLBACK_TIERS: PurchasePackage[] = [
   {
     id: 'venueflow-monthly',
     title: 'Venue Wrangler',
-    priceString: '$29.99',
+    priceString: '$99',
     productId: 'com.venuewrangler.monthly',
   },
 ];

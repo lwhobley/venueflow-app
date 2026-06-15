@@ -92,10 +92,10 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const reason = trialBlocked ? 'trial_expired' : reasonFromStatus(billing?.status ?? null);
 
   useEffect(() => {
-    if (!hydrated || !user || !blocked) return;
+    if (!navigationReady || !hydrated || !user || !blocked) return;
     if (isAllowedRoute(route)) return;
     router.replace(`/billing/locked?reason=${reason}`);
-  }, [blocked, hydrated, reason, route, user]);
+  }, [blocked, hydrated, navigationReady, reason, route, user]);
 
 
   useEffect(() => {

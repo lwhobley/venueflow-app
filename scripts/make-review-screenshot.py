@@ -2,7 +2,7 @@
 Matches the app's clean white theme and uses the requested App Store
 iPhone portrait resolution (1242x2688).
 
-Product: Venue Wrangler $29.99/month for teams of 1-50 people - one 'pro'
+Product: Venue Wrangler $99/month for teams of 1-50 people - one 'pro'
 entitlement unlocks the whole app.
 """
 from PIL import Image, ImageDraw, ImageFont
@@ -60,7 +60,7 @@ sy = 224
 for line in wrap("Start a 14-day free trial. Cancel anytime in your Apple account settings.", f_sub, W - 2*PAD):
     d.text((PAD, sy), line, font=f_sub, fill=MUTED); sy += 50
 
-tiers = [("Team plan", "$29.99")]
+tiers = [("Team plan", "$99")]
 DESC = "For teams of 1-50 people. Full access: scheduling, time clock, floor plan, reservations, bar stock, reports, and team chat."
 
 cx0, cx1 = PAD, W - PAD
