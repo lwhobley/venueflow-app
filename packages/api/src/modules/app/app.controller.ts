@@ -19,7 +19,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
 const FLAT_PLAN_ID = 'venueflow_monthly';
-const FLAT_PLAN_PRICE_CENTS = 2999;
+const FLAT_PLAN_PRICE_CENTS = 9999;
 const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -120,6 +120,25 @@ class StaffDto {
 
   @IsString()
   jobTitle!: string;
+
+  @IsString()
+  @IsOptional()
+  phone?: string;
+
+  @IsString()
+  @IsOptional()
+  altPhone?: string;
+
+  @IsString()
+  @IsOptional()
+  address?: string;
+
+  @IsString()
+  @IsOptional()
+  dateOfBirth?: string;
+
+  @IsOptional()
+  certifications?: string[];
 }
 
 class VenueRoleDto {
@@ -693,13 +712,20 @@ export class AppController {
     if (existing) {
       await this.assertCanManageLegacyStaffTarget(viewer, existing);
     }
+    const employeeFields = {
+      phone: body.phone?.trim() || null,
+      altPhone: body.altPhone?.trim() || null,
+      address: body.address?.trim() || null,
+      dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+      certifications: body.certifications ?? [],
+    };
     const row = existing
       ? await this.prisma.profile.update({
           where: { id: existing.id },
-          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId },
+          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         })
       : await this.prisma.profile.create({
-          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId },
+          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         });
     void this.email.send({
       to: row.email,
@@ -1125,7 +1151,7 @@ export class AppController {
   }
 
   private mapProfile(
-    profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; trialEndsAt?: Date | null },
+    profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; trialEndsAt?: Date | null; phone?: string | null; altPhone?: string | null; address?: string | null; dateOfBirth?: Date | null; certifications?: string[] },
     emailVerified = false,
   ) {
     return {
@@ -1144,6 +1170,11 @@ export class AppController {
       allAccess: profile.allAccess,
       all_access: profile.allAccess,
       trialEndsAt: profile.trialEndsAt?.getTime() ?? null,
+      phone: profile.phone ?? null,
+      altPhone: profile.altPhone ?? null,
+      address: profile.address ?? null,
+      dateOfBirth: profile.dateOfBirth?.toISOString() ?? null,
+      certifications: profile.certifications ?? [],
     };
   }
 

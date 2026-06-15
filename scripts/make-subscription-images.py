@@ -11,7 +11,14 @@ SECOND = (189, 126, 43)
 CHAR = (31, 36, 30)
 MUTED = (107, 115, 104)
 
-FONTS = "C:/Windows/Fonts/"
+import sys
+if sys.platform == "win32":
+    FONTS = "C:/Windows/Fonts"
+elif sys.platform == "darwin":
+    FONTS = "/System/Library/Fonts/Supplemental"
+else:
+    FONTS = "/usr/share/fonts/truetype"
+
 def font(name, size):
     return ImageFont.truetype(os.path.join(FONTS, name), size)
 
@@ -25,7 +32,7 @@ OUT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "screenshots
 os.makedirs(OUT, exist_ok=True)
 
 tiers = [
-    ("team", "Team", "$29.99/mo", "1-50 people", "One flat plan for your whole venue team."),
+    ("team", "Team", "$99", "1-50 people", "One flat plan for your whole venue team."),
 ]
 
 def center(draw, y, text, fnt, fill):

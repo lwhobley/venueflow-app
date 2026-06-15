@@ -24,7 +24,7 @@ const FALLBACK_TIERS: PurchasePackage[] = [
   {
     id: 'venueflow-monthly',
     title: 'Venue Wrangler',
-    priceString: '$99',
+    priceString: '$99.99',
     productId: 'com.venuewrangler.monthly',
   },
 ];
@@ -87,7 +87,7 @@ export default function PaywallScreen() {
     try {
       const active = await restorePurchases();
       if (active) {
-        await appApi.syncAppleSubscription({ productId: 'restored_apple_subscription' });
+        await appApi.syncAppleSubscription({ productId: 'com.venuewrangler.monthly', entitlementId: 'pro' });
         router.replace('/(tabs)/home');
       }
       else setError('No active subscription found to restore.');

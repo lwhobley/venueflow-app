@@ -156,7 +156,7 @@ export const appApi = {
   clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-in', { method: 'POST', body }),
   clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-out', { method: 'POST', body }),
   listVenueStaff: () => apiRequest<any[]>('/v1/app/staff'),
-  upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string }) =>
+  upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string; phone?: string; altPhone?: string; address?: string; dateOfBirth?: string; certifications?: string[] }) =>
     apiRequest('/v1/app/staff', { method: 'POST', body }),
   deactivateVenueStaff: (staffId: string) => apiRequest('/v1/app/staff/' + staffId, { method: 'DELETE' }),
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>

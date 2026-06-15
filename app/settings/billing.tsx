@@ -9,7 +9,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling } from '../../lib/permissions';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
-const MONTHLY_PLAN_LABEL = '$99 / month';
+const MONTHLY_PLAN_LABEL = '$99.99 / month';
 
 export default function BillingScreen() {
   const user = useAuthStore((state: AuthState) => state.user);

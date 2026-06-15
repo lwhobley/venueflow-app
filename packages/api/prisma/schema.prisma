@@ -328,7 +328,7 @@ model Profile {
   altPhone         String?
   address          String?
   dateOfBirth      DateTime?
-  certifications   String[]
+  certifications   String[]         @default([])
   venueId          String?
   membershipStatus MembershipStatus?
   allAccess        Boolean          @default(false)

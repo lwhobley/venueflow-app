@@ -17,7 +17,13 @@ CHARCOAL = (35, 36, 31)
 MUTED = (111, 106, 95)
 INFO = (73, 122, 120)
 
-FONTS = "C:/Windows/Fonts"
+import sys
+if sys.platform == "win32":
+    FONTS = "C:/Windows/Fonts"
+elif sys.platform == "darwin":
+    FONTS = "/System/Library/Fonts/Supplemental"
+else:
+    FONTS = "/usr/share/fonts/truetype"
 
 
 def font(name, size):
@@ -41,7 +47,7 @@ def scaled_fonts(scale):
 
 TARGETS = [
     ("screenshots/appstore", 1242, 2688, 1.0),
-    ("screenshots/appstore-ipad", 2064, 2752, 1.28),
+    ("screenshots/appstore-ipad", 2048, 2732, 1.27),
     ("screenshots/appstore-ipad-13", 2064, 2752, 1.28),
 ]
 

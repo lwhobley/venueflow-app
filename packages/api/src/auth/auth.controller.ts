@@ -582,6 +582,11 @@ function mapProfile(profile: {
   venueId: string | null;
   allAccess: boolean;
   trialEndsAt?: Date | null;
+  phone?: string | null;
+  altPhone?: string | null;
+  address?: string | null;
+  dateOfBirth?: Date | null;
+  certifications?: string[];
 }, emailVerified: boolean) {
   return {
     _id: profile.id,
@@ -599,6 +604,11 @@ function mapProfile(profile: {
     emailVerified,
     email_verified: emailVerified,
     trialEndsAt: profile.trialEndsAt?.getTime() ?? null,
+    phone: profile.phone ?? null,
+    altPhone: profile.altPhone ?? null,
+    address: profile.address ?? null,
+    dateOfBirth: profile.dateOfBirth?.toISOString() ?? null,
+    certifications: profile.certifications ?? [],
   };
 }
 
