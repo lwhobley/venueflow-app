@@ -8,7 +8,7 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
-import { IsEmail, IsIn, IsString } from 'class-validator';
+import { IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
 import { Role } from '@prisma/client';
 import { canManageRole, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { mapProfile } from '../../common/mappers';
@@ -35,6 +35,27 @@ class UpsertStaffDto {
 
   @IsString()
   jobTitle!: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  altPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateOfBirth?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  certifications?: string[];
 }
 
 @Controller('v1/staff')
@@ -82,6 +103,11 @@ export class StaffController {
           role: body.role as Role,
           jobTitle: body.jobTitle,
           venueId: scope.venueId,
+          phone: body.phone ?? member.phone,
+          altPhone: body.altPhone ?? member.altPhone,
+          address: body.address ?? member.address,
+          dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : member.dateOfBirth,
+          certifications: body.certifications ?? member.certifications,
         },
       });
       void this.email.send({
@@ -100,6 +126,11 @@ export class StaffController {
         role: body.role as Role,
         jobTitle: body.jobTitle,
         venueId: scope.venueId,
+        phone: body.phone?.trim() || null,
+        altPhone: body.altPhone?.trim() || null,
+        address: body.address?.trim() || null,
+        dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+        certifications: body.certifications ?? [],
       },
     });
     void this.email.send({

@@ -59,6 +59,11 @@ type ProfileRow = {
   fullName: string;
   role: string;
   jobTitle: string;
+  phone: string | null;
+  altPhone: string | null;
+  address: string | null;
+  dateOfBirth: Date | null;
+  certifications: string[];
   venueId: string | null;
   allAccess: boolean;
 };
@@ -70,6 +75,11 @@ export function mapProfile(profile: ProfileRow) {
     fullName: profile.fullName,
     role: profile.role,
     jobTitle: profile.jobTitle,
+    phone: profile.phone ?? null,
+    altPhone: profile.altPhone ?? null,
+    address: profile.address ?? null,
+    dateOfBirth: profile.dateOfBirth?.toISOString().slice(0, 10) ?? null,
+    certifications: profile.certifications ?? [],
     venueId: profile.venueId,
     allAccess: profile.allAccess,
   };

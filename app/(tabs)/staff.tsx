@@ -32,6 +32,10 @@ const JOB_ROLES = [
   'Chef', 'Cook', 'Dishwasher', 'Cleaner', 'Busser', 'Barback', 'Temp', 'Contractor',
 ];
 
+const CERTIFICATIONS = [
+  'TIPS', 'ServSafe', 'Food Handler', 'Alcohol Server', 'CPR/First Aid', 'OSHA',
+];
+
 function Dropdown({
   label,
   value,
@@ -92,6 +96,11 @@ type StaffMember = {
   email: string;
   role: Exclude<Role, 'host'>;
   jobTitle: string;
+  phone: string | null;
+  altPhone: string | null;
+  address: string | null;
+  dateOfBirth: string | null;
+  certifications: string[];
   venueId: string | null;
 };
 
@@ -105,6 +114,11 @@ export default function StaffScreen() {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('staff');
   const [jobTitle, setJobTitle] = useState('Team Member');
+  const [phone, setPhone] = useState('');
+  const [altPhone, setAltPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [certifications, setCertifications] = useState<string[]>([]);
 
   const staffQuery = useQuery(api.app.listVenueStaff, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
   const staff = useMemo(() => (staffQuery ?? []) as StaffMember[], [staffQuery]);
@@ -176,6 +190,11 @@ export default function StaffScreen() {
     setEmail(member.email);
     setRole(member.role);
     setJobTitle(member.jobTitle);
+    setPhone(member.phone ?? '');
+    setAltPhone(member.altPhone ?? '');
+    setAddress(member.address ?? '');
+    setDateOfBirth(member.dateOfBirth ?? '');
+    setCertifications(member.certifications ?? []);
   };
 
   const clearForm = () => {
@@ -184,6 +203,11 @@ export default function StaffScreen() {
     setEmail('');
     setRole('staff');
     setJobTitle('Team Member');
+    setPhone('');
+    setAltPhone('');
+    setAddress('');
+    setDateOfBirth('');
+    setCertifications([]);
   };
 
   const onSubmit = async () => {
@@ -194,6 +218,11 @@ export default function StaffScreen() {
       email,
       role,
       jobTitle,
+      phone: phone.trim() || undefined,
+      altPhone: altPhone.trim() || undefined,
+      address: address.trim() || undefined,
+      dateOfBirth: dateOfBirth.trim() || undefined,
+      certifications: certifications.length > 0 ? certifications : undefined,
     });
     clearForm();
   };
@@ -310,6 +339,28 @@ export default function StaffScreen() {
             options={jobRoleOptions}
             onSelect={setJobTitle}
           />
+          <PaperTextInput placeholder="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder="Alt phone" value={altPhone} onChangeText={setAltPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder="Address" value={address} onChangeText={setAddress} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder="Date of birth (YYYY-MM-DD)" value={dateOfBirth} onChangeText={setDateOfBirth} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <View style={{ gap: 4 }}>
+            <Text style={{ color: colors.muted }}>Certifications</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {CERTIFICATIONS.map((cert) => (
+                <Chip
+                  key={cert}
+                  selected={certifications.includes(cert)}
+                  onPress={() =>
+                    setCertifications((prev) =>
+                      prev.includes(cert) ? prev.filter((c) => c !== cert) : [...prev, cert],
+                    )
+                  }
+                >
+                  {cert}
+                </Chip>
+              ))}
+            </View>
+          </View>
           <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()}>
             {selectedStaff ? 'Update staff member' : 'Add staff member'}
           </Button>
@@ -356,6 +407,13 @@ export default function StaffScreen() {
                     <Chip compact>{member.role}</Chip>
                   </View>
                   <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
+                  {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>Phone: {member.phone}</Text> : null}
+                  {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>DOB: {member.dateOfBirth}</Text> : null}
+                  {member.certifications?.length > 0 ? (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                      {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
+                    </View>
+                  ) : null}
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     <Button mode="outlined" onPress={() => fillFromStaff(member)}>
                       Edit

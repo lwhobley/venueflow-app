@@ -324,6 +324,11 @@ model Profile {
   fullName         String
   role             Role
   jobTitle         String
+  phone            String?
+  altPhone         String?
+  address          String?
+  dateOfBirth      DateTime?
+  certifications   String[]
   venueId          String?
   membershipStatus MembershipStatus?
   allAccess        Boolean          @default(false)
