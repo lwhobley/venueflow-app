@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, SegmentedButtons, Switch, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
@@ -330,7 +330,7 @@ function GuestsScreenInner() {
     setError(null);
   };
 
-  const startEdit = (guest: GuestRow) => {
+  const startEdit = useCallback((guest: GuestRow) => {
     setEditingGuestId(guest._id);
     setFullName(guest.fullName);
     setPhone(guest.phone ?? '');
@@ -346,7 +346,7 @@ function GuestsScreenInner() {
     setTags(guest.tags.join(', '));
     setNotes(guest.notes ?? '');
     setShowForm(true);
-  };
+  }, []);
 
   const saveGuest = async () => {
     if (!venue?.id || !fullName.trim()) {
@@ -413,6 +413,15 @@ function GuestsScreenInner() {
     }
   };
 
+  const onOpenGuest = useCallback((id: Id<'guests'>) => setSelectedGuestId(id), []);
+  const keyExtractor = useCallback((item: GuestRow) => String(item._id), []);
+  const renderGuest = useCallback(
+    ({ item }: { item: GuestRow }) => (
+      <GuestListItem guest={item} isSelected={selectedGuest?._id === item._id} onOpen={onOpenGuest} onEdit={startEdit} />
+    ),
+    [selectedGuest?._id, onOpenGuest, startEdit],
+  );
+
   if (!canManage) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
@@ -422,167 +431,144 @@ function GuestsScreenInner() {
   }
 
   return (
-    <ScrollView
+    <FlatList
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+      contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
-    >
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>CRM</Text>
-        <Text style={{ color: colors.muted }}>Sales pipeline, event docs, guest intelligence, and follow-up cues for {venue?.name ?? 'your venue'}.</Text>
-      </View>
+      data={filtered}
+      keyExtractor={keyExtractor}
+      renderItem={renderGuest}
+      ItemSeparatorComponent={GuestListSeparator}
+      removeClippedSubviews
+      ListHeaderComponent={
+        <View style={{ gap: spacing.md, marginBottom: spacing.sm }}>
+          <View style={{ gap: 4 }}>
+            <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>CRM</Text>
+            <Text style={{ color: colors.muted }}>Sales pipeline, event docs, guest intelligence, and follow-up cues for {venue?.name ?? 'your venue'}.</Text>
+          </View>
 
-      <CrmSalesWorkspace venueId={venue?.id} enabled={isReady && canManage} />
+          <CrmSalesWorkspace venueId={venue?.id} enabled={isReady && canManage} />
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        {[
-          { label: 'Guests', value: String(crmStats.totalGuests), accent: accents[0] },
-          { label: 'Leads', value: String(crmStats.leads), accent: accents[5] },
-          { label: 'VIPs', value: String(crmStats.vipGuests), accent: accents[1] },
-          { label: 'Upcoming', value: String(crmStats.upcomingGuests), accent: accents[2] },
-          { label: 'Revenue', value: money(crmStats.totalSpend), accent: accents[3] },
-          { label: 'Opted in', value: String(crmStats.optedIn), accent: accents[4] },
-          { label: 'Follow-up', value: String(crmStats.needsFollowUp), accent: accents[5] },
-        ].map((metric) => (
-          <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, width: '31%', minWidth: 105, flexGrow: 1, borderRadius: 16 }}>
-            <Card.Content>
-              <Text style={{ color: metric.accent.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
-              <Text style={{ color: colors.muted }}>{metric.label}</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            {[
+              { label: 'Guests', value: String(crmStats.totalGuests), accent: accents[0] },
+              { label: 'Leads', value: String(crmStats.leads), accent: accents[5] },
+              { label: 'VIPs', value: String(crmStats.vipGuests), accent: accents[1] },
+              { label: 'Upcoming', value: String(crmStats.upcomingGuests), accent: accents[2] },
+              { label: 'Revenue', value: money(crmStats.totalSpend), accent: accents[3] },
+              { label: 'Opted in', value: String(crmStats.optedIn), accent: accents[4] },
+              { label: 'Follow-up', value: String(crmStats.needsFollowUp), accent: accents[5] },
+            ].map((metric) => (
+              <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, width: '31%', minWidth: 105, flexGrow: 1, borderRadius: 16 }}>
+                <Card.Content>
+                  <Text style={{ color: metric.accent.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
+                  <Text style={{ color: colors.muted }}>{metric.label}</Text>
+                </Card.Content>
+              </Card>
+            ))}
+          </View>
+
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest directory</Text>
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowLeadImport((value) => !value)}>
+                    {showLeadImport ? 'Close leads' : 'Import leads'}
+                  </Button>
+                  <Button compact mode={showForm ? 'text' : 'contained'} buttonColor={showForm ? undefined : colors.primary} onPress={() => {
+                    if (showForm) resetForm();
+                    setShowForm((value) => !value);
+                  }}>
+                    {showForm ? 'Close' : 'Add guest'}
+                  </Button>
+                </View>
+              </View>
+              <TextInput label="Search name, company, phone, email, or tags" value={query} onChangeText={setQuery} mode="outlined" style={{ backgroundColor: colors.surface }} />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <SegmentedButtons
+                  value={segment}
+                  onValueChange={(value) => setSegment(value as Segment)}
+                  buttons={segmentOptions.map((option) => ({ value: option.value, label: option.label }))}
+                  style={{ minWidth: 560 }}
+                />
+              </ScrollView>
+              {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
+              {showLeadImport ? (
+                <Card style={{ backgroundColor: accents[5].bg, borderRadius: 14 }}>
+                  <Card.Content style={{ gap: spacing.sm }}>
+                    <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>Lead intake</Text>
+                    <Text style={{ color: colors.muted }}>
+                      Manual entry and CSV paste use name,email,phone,source,company,tags,notes. API/webhooks, web forms, Zapier/Make, and email parsers can POST to /crm/leads.
+                    </Text>
+                    <TextInput label="Default source" value={leadSource} onChangeText={setLeadSource} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                    <TextInput
+                      label="Leads"
+                      value={leadText}
+                      onChangeText={setLeadText}
+                      mode="outlined"
+                      multiline
+                      numberOfLines={6}
+                      placeholder={'name,email,phone,source,company,tags,notes\nJane Doe,jane@example.com,555-0101,Web form,Private Events,VIP|birthday,Asked about April party\nMarco Lee,,555-0102,Instagram,Catering,lead,Needs follow-up'}
+                      style={{ backgroundColor: colors.surface, minHeight: 130 }}
+                    />
+                    {leadMessage ? <Text style={{ color: leadMessage.startsWith('Could') || leadMessage.startsWith('Paste') ? colors.danger : colors.charcoal }}>{leadMessage}</Text> : null}
+                    <Button mode="contained" buttonColor={colors.primary} loading={leadBusy} disabled={leadBusy} onPress={() => void importLeads()}>
+                      Ingest leads
+                    </Button>
+                  </Card.Content>
+                </Card>
+              ) : null}
+              {showForm ? (
+                <View style={{ gap: spacing.sm }}>
+                  <Text variant="titleSmall" style={{ fontWeight: '700' }}>{editingGuestId ? 'Edit guest profile' : 'Add guest profile'}</Text>
+                  <TextInput label="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                  <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                    <TextInput label="Phone" value={phone} onChangeText={setPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
+                    <TextInput label="Email" value={email} onChangeText={setEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
+                  </View>
+                  <SegmentedButtons
+                    value={lifecycleStage}
+                    onValueChange={(value) => setLifecycleStage(value as LifecycleStage)}
+                    buttons={lifecycleOptions}
+                  />
+                  <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                    <TextInput label="Source" value={source} onChangeText={setSource} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label="Company / group" value={company} onChangeText={setCompany} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label="Birthday (MM-DD)" value={birthday} onChangeText={setBirthday} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+                    <TextInput label="Favorite table" value={favoriteTable} onChangeText={setFavoriteTable} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label="Preferred server" value={preferredServer} onChangeText={setPreferredServer} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                  </View>
+                  <TextInput label="Dietary notes / allergies" value={dietaryNotes} onChangeText={setDietaryNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                  <TextInput label="Tags (comma-separated)" value={tags} onChangeText={setTags} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                  <TextInput label="Internal notes" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+                    <Text style={{ color: colors.charcoal, flex: 1 }}>Marketing opt-in</Text>
+                    <Switch value={marketingOptIn} onValueChange={setMarketingOptIn} color={colors.primary} />
+                  </View>
+                  {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
+                  <Button mode="contained" buttonColor={colors.primary} onPress={() => void saveGuest()}>{editingGuestId ? 'Update guest' : 'Save guest'}</Button>
+                </View>
+              ) : null}
             </Card.Content>
           </Card>
-        ))}
-      </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest directory</Text>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowLeadImport((value) => !value)}>
-                {showLeadImport ? 'Close leads' : 'Import leads'}
-              </Button>
-              <Button compact mode={showForm ? 'text' : 'contained'} buttonColor={showForm ? undefined : colors.primary} onPress={() => {
-                if (showForm) resetForm();
-                setShowForm((value) => !value);
-              }}>
-                {showForm ? 'Close' : 'Add guest'}
-              </Button>
-            </View>
-          </View>
-          <TextInput label="Search name, company, phone, email, or tags" value={query} onChangeText={setQuery} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <SegmentedButtons
-              value={segment}
-              onValueChange={(value) => setSegment(value as Segment)}
-              buttons={segmentOptions.map((option) => ({ value: option.value, label: option.label }))}
-              style={{ minWidth: 560 }}
-            />
-          </ScrollView>
-          {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
-          {showLeadImport ? (
-            <Card style={{ backgroundColor: accents[5].bg, borderRadius: 14 }}>
-              <Card.Content style={{ gap: spacing.sm }}>
-                <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>Lead intake</Text>
-                <Text style={{ color: colors.muted }}>
-                  Manual entry and CSV paste use name,email,phone,source,company,tags,notes. API/webhooks, web forms, Zapier/Make, and email parsers can POST to /crm/leads.
-                </Text>
-                <TextInput label="Default source" value={leadSource} onChangeText={setLeadSource} mode="outlined" style={{ backgroundColor: colors.surface }} />
-                <TextInput
-                  label="Leads"
-                  value={leadText}
-                  onChangeText={setLeadText}
-                  mode="outlined"
-                  multiline
-                  numberOfLines={6}
-                  placeholder={'name,email,phone,source,company,tags,notes\nJane Doe,jane@example.com,555-0101,Web form,Private Events,VIP|birthday,Asked about April party\nMarco Lee,,555-0102,Instagram,Catering,lead,Needs follow-up'}
-                  style={{ backgroundColor: colors.surface, minHeight: 130 }}
-                />
-                {leadMessage ? <Text style={{ color: leadMessage.startsWith('Could') || leadMessage.startsWith('Paste') ? colors.danger : colors.charcoal }}>{leadMessage}</Text> : null}
-                <Button mode="contained" buttonColor={colors.primary} loading={leadBusy} disabled={leadBusy} onPress={() => void importLeads()}>
-                  Ingest leads
-                </Button>
-              </Card.Content>
-            </Card>
-          ) : null}
-          {showForm ? (
-            <View style={{ gap: spacing.sm }}>
-              <Text variant="titleSmall" style={{ fontWeight: '700' }}>{editingGuestId ? 'Edit guest profile' : 'Add guest profile'}</Text>
-              <TextInput label="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-              <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                <TextInput label="Phone" value={phone} onChangeText={setPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
-                <TextInput label="Email" value={email} onChangeText={setEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
-              </View>
-              <SegmentedButtons
-                value={lifecycleStage}
-                onValueChange={(value) => setLifecycleStage(value as LifecycleStage)}
-                buttons={lifecycleOptions}
-              />
-              <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                <TextInput label="Source" value={source} onChangeText={setSource} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-                <TextInput label="Company / group" value={company} onChangeText={setCompany} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-                <TextInput label="Birthday (MM-DD)" value={birthday} onChangeText={setBirthday} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-              </View>
-              <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                <TextInput label="Favorite table" value={favoriteTable} onChangeText={setFavoriteTable} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-                <TextInput label="Preferred server" value={preferredServer} onChangeText={setPreferredServer} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-              </View>
-              <TextInput label="Dietary notes / allergies" value={dietaryNotes} onChangeText={setDietaryNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
-              <TextInput label="Tags (comma-separated)" value={tags} onChangeText={setTags} mode="outlined" style={{ backgroundColor: colors.surface }} />
-              <TextInput label="Internal notes" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
-                <Text style={{ color: colors.charcoal, flex: 1 }}>Marketing opt-in</Text>
-                <Switch value={marketingOptIn} onValueChange={setMarketingOptIn} color={colors.primary} />
-              </View>
-              {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-              <Button mode="contained" buttonColor={colors.primary} onPress={() => void saveGuest()}>{editingGuestId ? 'Update guest' : 'Save guest'}</Button>
-            </View>
-          ) : null}
-        </Card.Content>
-      </Card>
-
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'flex-start' }}>
-        <View style={{ flexGrow: 1, flexBasis: 320, gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>
             Guests ({guestList?.totalCount ?? filtered.length})
           </Text>
-          {guests === undefined ? (
-            <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>Loading guests…</Text></Card.Content></Card>
-          ) : filtered.length === 0 ? (
-            <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>No guests match this segment yet.</Text></Card.Content></Card>
-          ) : filtered.map((guest) => (
-            <Card key={guest._id} style={{ backgroundColor: selectedGuest?._id === guest._id ? accents[2].bg : colors.surface, borderRadius: 16 }}>
-              <Card.Content style={{ gap: spacing.sm }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-                  <View style={{ flex: 1 }}>
-                    <Text variant="titleMedium" style={{ fontWeight: '700' }}>{guest.fullName}</Text>
-                    <Text style={{ color: colors.muted }}>{guest.company ? `${guest.company} · ` : ''}{guest.phone || guest.email || 'No contact on file'}</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ fontWeight: '800', color: colors.primary }}>{scoreGuest(guest)}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>score</Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  <Chip compact>{guest.lifecycleStage.toUpperCase()}</Chip>
-                  {guest.marketingOptIn ? <Chip compact>Opted in</Chip> : null}
-                  {guest.tags.slice(0, 4).map((tag) => <Chip compact key={tag}>{tag}</Chip>)}
-                </View>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-                  <Text style={{ color: colors.muted }}>{guest.visitCount} visits</Text>
-                  <Text style={{ color: colors.muted }}>{money(guest.totalSpendCents)}</Text>
-                  <Text style={{ color: colors.muted }}>Last {dateText(guest.lastVisitAt)}</Text>
-                  <Text style={{ color: colors.muted }}>Next {dateText(guest.upcomingReservationAt)}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => setSelectedGuestId(guest._id)}>Open profile</Button>
-                  <Button compact mode="text" textColor={colors.primary} onPress={() => startEdit(guest)}>Edit</Button>
-                </View>
-              </Card.Content>
-            </Card>
-          ))}
         </View>
-
-        <View style={{ flexGrow: 1, flexBasis: 360, gap: spacing.sm }}>
+      }
+      ListEmptyComponent={
+        guests === undefined ? (
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>Loading guests…</Text></Card.Content></Card>
+        ) : (
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>No guests match this segment yet.</Text></Card.Content></Card>
+        )
+      }
+      ListFooterComponent={
+        <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>CRM profile</Text>
           {!selectedGuest ? (
             <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>Select a guest to view their relationship profile.</Text></Card.Content></Card>
@@ -595,10 +581,53 @@ function GuestsScreenInner() {
             />
           )}
         </View>
-      </View>
-    </ScrollView>
+      }
+    />
   );
 }
+
+const GuestListSeparator = () => <View style={{ height: spacing.sm }} />;
+
+type GuestListItemProps = {
+  guest: GuestRow;
+  isSelected: boolean;
+  onOpen: (id: Id<'guests'>) => void;
+  onEdit: (guest: GuestRow) => void;
+};
+
+const GuestListItem = memo(function GuestListItem({ guest, isSelected, onOpen, onEdit }: GuestListItemProps) {
+  return (
+    <Card style={{ backgroundColor: isSelected ? accents[2].bg : colors.surface, borderRadius: 16 }}>
+      <Card.Content style={{ gap: spacing.sm }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+          <View style={{ flex: 1 }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>{guest.fullName}</Text>
+            <Text style={{ color: colors.muted }}>{guest.company ? `${guest.company} · ` : ''}{guest.phone || guest.email || 'No contact on file'}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={{ fontWeight: '800', color: colors.primary }}>{scoreGuest(guest)}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>score</Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          <Chip compact>{guest.lifecycleStage.toUpperCase()}</Chip>
+          {guest.marketingOptIn ? <Chip compact>Opted in</Chip> : null}
+          {guest.tags.slice(0, 4).map((tag) => <Chip compact key={tag}>{tag}</Chip>)}
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+          <Text style={{ color: colors.muted }}>{guest.visitCount} visits</Text>
+          <Text style={{ color: colors.muted }}>{money(guest.totalSpendCents)}</Text>
+          <Text style={{ color: colors.muted }}>Last {dateText(guest.lastVisitAt)}</Text>
+          <Text style={{ color: colors.muted }}>Next {dateText(guest.upcomingReservationAt)}</Text>
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+          <Button compact mode="outlined" textColor={colors.primary} onPress={() => onOpen(guest._id)}>Open profile</Button>
+          <Button compact mode="text" textColor={colors.primary} onPress={() => onEdit(guest)}>Edit</Button>
+        </View>
+      </Card.Content>
+    </Card>
+  );
+});
 
 function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestRow; profile: GuestProfile | null | undefined; onEdit: () => void; onDelete: () => void }) {
   const [generatedDocument, setGeneratedDocument] = useState('');
