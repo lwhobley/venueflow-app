@@ -110,7 +110,7 @@ export class AuthController {
     await assertWithinSharedRateLimit(this.prisma, `auth:ip:${getClientIp(request)}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
 
-    const user: any = await this.prisma.user.findUnique({ where: { email }, include: { password: true } } as any);
+    const user = await this.prisma.user.findUnique({ where: { email }, include: { password: true } });
     if (body.flow === 'signIn') {
       if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
         throw new UnauthorizedException('Too many failed sign-in attempts. Try again later.');
@@ -125,7 +125,7 @@ export class AuthController {
         await this.prisma.user.update({
           where: { id: user.id },
           data: { failedSignInCount: 0, lockedUntil: null },
-        } as any);
+        });
       }
       // Transparently upgrade hash strength on login when the stored iteration
       // count is below the current target.
@@ -164,7 +164,7 @@ export class AuthController {
             lockedUntil: null,
           },
           create: { email, phone },
-        } as any);
+        });
         await tx.passwordCredential.upsert({
           where: { userId: nextUser.id },
           update: {
@@ -229,7 +229,7 @@ export class AuthController {
     await this.prisma.session.deleteMany({
       where: { userId: user.sub, ...(user.sid ? { NOT: { id: user.sid } } : {}) },
     });
-    const account: any = await this.prisma.user.findUnique({
+    const account = await this.prisma.user.findUnique({
       where: { id: user.sub },
       select: { email: true },
     });
@@ -245,10 +245,10 @@ export class AuthController {
 
   @Post('verify-email/send')
   async resendVerification(@CurrentUser() user: AuthUser) {
-    const account: any = await this.prisma.user.findUnique({
+    const account = await this.prisma.user.findUnique({
       where: { id: user.sub },
       select: { email: true, emailVerifiedAt: true },
-    } as any);
+    });
     if (!account?.email) throw new BadRequestException('No email address is available for this account.');
     if (account.emailVerifiedAt) return { ok: true, alreadyVerified: true };
     await assertWithinSharedRateLimit(this.prisma, `verify-email:${user.sub}`, 5, AUTH_RATE_LIMIT_WINDOW_MS);
@@ -260,10 +260,10 @@ export class AuthController {
   async verifyEmail(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: VerifyEmailDto) {
     await assertWithinSharedRateLimit(this.prisma, `verify-email:ip:${getClientIp(request)}`, VERIFY_EMAIL_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `verify-email:user:${user.sub}`, VERIFY_EMAIL_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
-    const account: any = await this.prisma.user.findUnique({
+    const account = await this.prisma.user.findUnique({
       where: { id: user.sub },
       select: { emailVerificationCodeHash: true, emailVerificationSentAt: true, emailVerifiedAt: true },
-    } as any);
+    });
     if (!account) throw new UnauthorizedException('Account not found.');
     if (account.emailVerifiedAt) return { ok: true, alreadyVerified: true };
     if (!account.emailVerificationCodeHash || !account.emailVerificationSentAt) {
@@ -282,7 +282,7 @@ export class AuthController {
         emailVerificationCodeHash: null,
         emailVerificationSentAt: null,
       },
-    } as any);
+    });
     return { ok: true };
   }
 
@@ -293,7 +293,7 @@ export class AuthController {
     await assertWithinSharedRateLimit(this.prisma, `forgot-password:ip:${getClientIp(request)}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `forgot-password:email:${email}`, 5, AUTH_RATE_LIMIT_WINDOW_MS);
 
-    const account: any = await this.prisma.user.findUnique({
+    const account = await this.prisma.user.findUnique({
       where: { email },
       select: { id: true, email: true, profile: { select: { fullName: true } } },
     });
@@ -306,7 +306,7 @@ export class AuthController {
           passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
           passwordResetSentAt: new Date(),
         },
-      } as any);
+      });
       await this.email.sendOrThrow({
         to: account.email,
         subject: 'Reset your Venue Wrangler password',
@@ -326,14 +326,14 @@ export class AuthController {
     await assertWithinSharedRateLimit(this.prisma, `reset-password:ip:${getClientIp(request)}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `reset-password:email:${email}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
 
-    const account: any = await this.prisma.user.findUnique({
+    const account = await this.prisma.user.findUnique({
       where: { email },
       select: {
         id: true,
         passwordResetCodeHash: true,
         passwordResetExpiresAt: true,
       },
-    } as any);
+    });
     if (
       !account?.passwordResetCodeHash ||
       !account.passwordResetExpiresAt ||
@@ -367,7 +367,7 @@ export class AuthController {
           failedSignInCount: 0,
           lockedUntil: null,
         },
-      } as any),
+      }),
       this.prisma.session.deleteMany({ where: { userId: account.id } }),
     ]);
     return { ok: true };
@@ -392,10 +392,10 @@ export class AuthController {
 
   private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string, rawPhone?: string) {
     const trialEndsAt = new Date(Date.now() + TRIAL_DURATION_MS);
-    const account: any = await this.prisma.user.findUnique({
+    const account = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { emailVerifiedAt: true },
-    } as any);
+    });
     const emailVerified = Boolean(account?.emailVerifiedAt);
     // inviteToken may be the long deep-link token OR the short human code.
     const inviteValue = inviteToken?.trim();
@@ -526,7 +526,7 @@ export class AuthController {
         failedSignInCount: nextCount >= MAX_FAILED_SIGN_INS ? 0 : nextCount,
         lockedUntil: nextCount >= MAX_FAILED_SIGN_INS ? new Date(Date.now() + AUTH_RATE_LIMIT_WINDOW_MS) : null,
       },
-    } as any);
+    });
   }
 
   private async sendVerificationEmail(userId: string, email: string, fullName?: string) {
@@ -537,7 +537,7 @@ export class AuthController {
         emailVerificationCodeHash: hashOneTimeCode(code),
         emailVerificationSentAt: new Date(),
       },
-    } as any);
+    });
     await this.email.sendOrThrow({
       to: email,
       subject: 'Verify your Venue Wrangler email',

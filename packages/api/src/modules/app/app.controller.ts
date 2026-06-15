@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role, SubscriptionStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';
@@ -133,11 +133,13 @@ class StaffDto {
   @IsOptional()
   address?: string;
 
-  @IsString()
+  @IsDateString()
   @IsOptional()
   dateOfBirth?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   certifications?: string[];
 }
 
