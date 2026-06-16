@@ -974,6 +974,7 @@ model Subscription {
   @@index([venueId])
   @@index([status])
   @@index([externalSubscriptionId])
+  @@index([externalCustomerId])
 }
 
 model SubscriptionEvent {

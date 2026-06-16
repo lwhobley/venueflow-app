@@ -5,7 +5,7 @@ import type { Request } from 'express';
 import { Public } from '../auth/public.decorator';
 import { getClientIp } from '../common/http';
 import { assertWithinSharedRateLimit } from '../common/rate-limit';
-import { verifyStripeSignature } from '../common/webhook-auth';
+import { secretsMatch, verifyStripeSignature } from '../common/webhook-auth';
 import { PrismaService } from '../prisma/prisma.service';
 
 type RevenueCatWebhookBody = {
@@ -97,7 +97,7 @@ export class BillingController {
       throw new UnauthorizedException('RevenueCat webhook secret is not configured');
     }
     const token = authorization?.replace(/^Bearer\s+/i, '').trim();
-    if (token !== expectedSecret) {
+    if (!secretsMatch(token, expectedSecret)) {
       throw new UnauthorizedException('Invalid RevenueCat webhook secret');
     }
 

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Logger, Post, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
 import { IsOptional, IsString } from 'class-validator';
@@ -23,6 +23,8 @@ class AppleSubscriptionSyncDto {
 // Split out of AppController; routes and response shapes are unchanged.
 @Controller('v1/app')
 export class AppBillingController {
+  private readonly logger = new Logger(AppBillingController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -124,7 +126,8 @@ export class AppBillingController {
     });
     const json: any = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new BadRequestException(json?.message ?? 'Could not verify RevenueCat subscription.');
+      this.logger.warn(`RevenueCat verification failed for venue ${venueId}: ${json?.message ?? response.statusText}`);
+      throw new BadRequestException('Could not verify RevenueCat subscription.');
     }
 
     const subscriber = json?.subscriber ?? {};
