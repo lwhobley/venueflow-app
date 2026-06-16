@@ -6,6 +6,15 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 export default function TeamChoiceScreen() {
   const venue = useAuthStore((s: AuthState) => s.venue);
+  const clearSession = useAuthStore((s: AuthState) => s.clearSession);
+
+  // An already-registered person who landed here (e.g. a leftover/expired
+  // session) needs a way back to sign in. Clearing the session returns them to
+  // the welcome screen, which has Log In / Sign Up.
+  const useDifferentAccount = () => {
+    clearSession();
+    router.replace('/(auth)/welcome');
+  };
 
   // Once a venue exists (created or joined), leave onboarding. <Redirect> is
   // render-safe, so it never throws "navigate before mounting the Root Layout"
@@ -76,6 +85,15 @@ export default function TeamChoiceScreen() {
             </Button>
           </Card.Content>
         </Card>
+
+        <View style={{ alignItems: 'center', gap: 2, marginTop: spacing.sm }}>
+          <Text style={{ color: colors.muted, textAlign: 'center' }}>
+            Already have an account on a different login?
+          </Text>
+          <Button mode="text" textColor={colors.primary} onPress={useDifferentAccount}>
+            Sign in to a different account
+          </Button>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
