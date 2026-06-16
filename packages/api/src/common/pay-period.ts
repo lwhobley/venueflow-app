@@ -11,8 +11,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // A Sunday, so default Sunday-aligned weeks line up with 14-day periods.
 export const DEFAULT_PAY_PERIOD_ANCHOR = '2024-01-07';
 export const DEFAULT_PAY_PERIOD_LENGTH_DAYS = 14;
+// Pay periods are whole weeks (1–4) so period boundaries align to Sunday week
+// boundaries — staff availability is edited and locked a week at a time.
 export const MIN_PAY_PERIOD_LENGTH_DAYS = 7;
-export const MAX_PAY_PERIOD_LENGTH_DAYS = 31;
+export const MAX_PAY_PERIOD_LENGTH_DAYS = 28;
+
+export function isValidPeriodLength(lengthDays: number): boolean {
+  return (
+    Number.isInteger(lengthDays) &&
+    lengthDays % 7 === 0 &&
+    lengthDays >= MIN_PAY_PERIOD_LENGTH_DAYS &&
+    lengthDays <= MAX_PAY_PERIOD_LENGTH_DAYS
+  );
+}
 
 export function toUtcMs(dateStr: string): number {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -75,4 +86,13 @@ export function isWeekLocked(args: {
 export function upcomingWeeks(today: string, count: number): string[] {
   const start = weekStartFor(today);
   return Array.from({ length: count }, (_, i) => addDays(start, i * 7));
+}
+
+/**
+ * Weeks of availability to surface: enough to cover the current (locked) period
+ * plus the next (editable) period, so there is always an editable week
+ * regardless of period length.
+ */
+export function weeksToCover(lengthDays: number): number {
+  return Math.ceil(Math.max(7, lengthDays) / 7) * 2;
 }

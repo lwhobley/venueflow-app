@@ -28,12 +28,12 @@ import { dayLabel, minutesToTime } from '../../common/mappers';
 import {
   DEFAULT_PAY_PERIOD_ANCHOR,
   DEFAULT_PAY_PERIOD_LENGTH_DAYS,
-  MAX_PAY_PERIOD_LENGTH_DAYS,
-  MIN_PAY_PERIOD_LENGTH_DAYS,
   isIsoDate,
+  isValidPeriodLength,
   isWeekLocked,
   todayIso,
   upcomingWeeks,
+  weeksToCover,
   weekStartFor,
 } from '../../common/pay-period';
 import { EmailService } from '../../email/email.service';
@@ -258,7 +258,7 @@ export class SchedulingController {
     if (!scope) return { payPeriod: { anchor: DEFAULT_PAY_PERIOD_ANCHOR, lengthDays: DEFAULT_PAY_PERIOD_LENGTH_DAYS, unlocked: false }, weeks: [] };
     const config = await this.payPeriodConfig(scope.venueId);
     const today = todayIso();
-    const weekStarts = upcomingWeeks(today, 4);
+    const weekStarts = upcomingWeeks(today, weeksToCover(config.lengthDays));
     const rows = await this.prisma.availability.findMany({
       where: { profileId: scope.profileId, weekStart: { in: weekStarts } },
       orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
@@ -332,8 +332,8 @@ export class SchedulingController {
       data.payPeriodAnchor = weekStartFor(body.anchor);
     }
     if (body.lengthDays !== undefined) {
-      if (body.lengthDays < MIN_PAY_PERIOD_LENGTH_DAYS || body.lengthDays > MAX_PAY_PERIOD_LENGTH_DAYS) {
-        throw new BadRequestException(`Pay period must be ${MIN_PAY_PERIOD_LENGTH_DAYS}-${MAX_PAY_PERIOD_LENGTH_DAYS} days`);
+      if (!isValidPeriodLength(body.lengthDays)) {
+        throw new BadRequestException('Pay period must be a whole number of weeks (7, 14, 21, or 28 days).');
       }
       data.payPeriodLengthDays = body.lengthDays;
     }

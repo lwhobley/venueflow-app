@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   addDays,
   isIsoDate,
+  isValidPeriodLength,
   isWeekLocked,
   payPeriodStartFor,
   upcomingWeeks,
+  weeksToCover,
   weekStartFor,
 } from './pay-period';
 
@@ -57,5 +59,25 @@ describe('pay-period math', () => {
   it('adds days across month boundaries', () => {
     expect(addDays('2024-01-31', 1)).toBe('2024-02-01');
     expect(addDays('2024-02-28', 1)).toBe('2024-02-29'); // leap year
+  });
+
+  it('accepts only whole-week pay periods (7..28)', () => {
+    expect(isValidPeriodLength(7)).toBe(true);
+    expect(isValidPeriodLength(14)).toBe(true);
+    expect(isValidPeriodLength(28)).toBe(true);
+    expect(isValidPeriodLength(10)).toBe(false); // not a multiple of 7
+    expect(isValidPeriodLength(35)).toBe(false); // too long
+    expect(isValidPeriodLength(0)).toBe(false);
+  });
+
+  it('covers two periods of weeks so an editable week always exists', () => {
+    expect(weeksToCover(14)).toBe(4);
+    expect(weeksToCover(7)).toBe(2);
+    expect(weeksToCover(28)).toBe(8);
+    // The last-covered week sits in the next (editable) period, not the current one.
+    const today = '2024-01-07';
+    const weeks = upcomingWeeks(today, weeksToCover(28));
+    const lastWeek = weeks[weeks.length - 1];
+    expect(isWeekLocked({ weekStart: lastWeek, today, anchor: ANCHOR, lengthDays: 28, unlocked: false })).toBe(false);
   });
 });

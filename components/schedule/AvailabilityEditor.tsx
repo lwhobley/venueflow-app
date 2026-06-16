@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Switch, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Chip, SegmentedButtons, Switch, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { accents, colors, spacing } from '../../lib/theme';
@@ -188,7 +188,7 @@ function AvailabilityManagerSettings() {
   const settings = useQuery(api.scheduling.getAvailabilitySettings, isReady ? {} : 'skip') as SettingsResponse | undefined;
   const updateSettings = useMutation(api.scheduling.updateAvailabilitySettings);
 
-  const [length, setLength] = useState('14');
+  const [weeks, setWeeks] = useState('2');
   const [anchor, setAnchor] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -196,7 +196,7 @@ function AvailabilityManagerSettings() {
 
   useEffect(() => {
     if (!settings) return;
-    setLength(String(settings.lengthDays));
+    setWeeks(String(Math.min(4, Math.max(1, Math.round(settings.lengthDays / 7)))));
     setAnchor(settings.anchor);
   }, [settings]);
 
@@ -206,19 +206,13 @@ function AvailabilityManagerSettings() {
     setBusy(true);
     setError(null);
     setNote(null);
-    const lengthDays = Number(length);
-    if (!Number.isInteger(lengthDays) || lengthDays < 7 || lengthDays > 31) {
-      setError('Pay period must be a whole number of 7–31 days.');
-      setBusy(false);
-      return;
-    }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor.trim())) {
       setError('Start date must be YYYY-MM-DD.');
       setBusy(false);
       return;
     }
     try {
-      await updateSettings({ lengthDays, anchor: anchor.trim() });
+      await updateSettings({ lengthDays: Number(weeks) * 7, anchor: anchor.trim() });
       setNote('Pay period saved ✓');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save settings.');
@@ -245,10 +239,18 @@ function AvailabilityManagerSettings() {
         <Text style={{ color: colors.charcoal }}>
           Set your pay period. Staff availability locks once a period starts. Unlock to let everyone edit locked weeks.
         </Text>
-        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-          <TextInput label="Pay period (days)" value={length} onChangeText={setLength} keyboardType="number-pad" mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-          <TextInput label="Start date (YYYY-MM-DD)" value={anchor} onChangeText={setAnchor} autoCapitalize="none" mode="outlined" style={{ flex: 1.4, backgroundColor: colors.surface }} />
-        </View>
+        <Text style={{ color: colors.charcoal, fontWeight: '600' }}>Pay period length</Text>
+        <SegmentedButtons
+          value={weeks}
+          onValueChange={setWeeks}
+          buttons={[
+            { value: '1', label: '1 wk' },
+            { value: '2', label: '2 wks' },
+            { value: '3', label: '3 wks' },
+            { value: '4', label: '4 wks' },
+          ]}
+        />
+        <TextInput label="Start date (YYYY-MM-DD)" value={anchor} onChangeText={setAnchor} autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
         <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void savePeriod()}>
           Save pay period
         </Button>
