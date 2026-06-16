@@ -7,7 +7,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useRootNavigationState } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
@@ -31,12 +31,15 @@ export default function CreateVenueScreen() {
   const venue = useAuthStore((s: AuthState) => s.venue);
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const token = useAuthStore((s: AuthState) => s.token);
+  // Wait until the root navigator is mounted before redirecting; navigating
+  // during the first render (e.g. this screen as the initial/restored route)
+  // throws "navigate before mounting the Root Layout".
+  const navigationReady = Boolean(useRootNavigationState()?.key);
 
   useEffect(() => {
-    if (venue) {
-      router.replace('/(tabs)/home');
-    }
-  }, [venue]);
+    if (!navigationReady || !venue) return;
+    router.replace('/(tabs)/home');
+  }, [navigationReady, venue]);
 
   const [businessName, setBusinessName] = useState('');
   const [address, setAddress] = useState('');
