@@ -11,7 +11,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Prisma, ShiftStatus } from '@prisma/client';
+import { Availability, Prisma, ShiftStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -174,6 +174,10 @@ class AutoScheduleAssignmentDto {
 }
 
 class ApplyAutoScheduleDto {
+  @IsString()
+  @IsOptional()
+  weekStartDate?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AutoScheduleAssignmentDto)
@@ -244,6 +248,20 @@ type ShiftWithProfile = {
   profile?: { fullName: string } | null;
 };
 
+type AvailabilityWindow = Pick<Availability, 'dayIndex' | 'startMinutes' | 'endMinutes' | 'available'>;
+
+function availabilityCovers(rows: AvailabilityWindow[] | undefined, shift: { dayIndex: number; startMinutes: number; endMinutes: number }) {
+  const dayRows = (rows ?? []).filter((row) => row.dayIndex === shift.dayIndex);
+  if (dayRows.length === 0) return false;
+  const blocked = dayRows.some((row) =>
+    !row.available &&
+    row.startMinutes < shift.endMinutes &&
+    row.endMinutes > shift.startMinutes,
+  );
+  if (blocked) return false;
+  return dayRows.some((row) => row.available && row.startMinutes <= shift.startMinutes && row.endMinutes >= shift.endMinutes);
+}
+
 @Controller('v1/scheduling')
 export class SchedulingController {
   constructor(
@@ -294,6 +312,9 @@ export class SchedulingController {
     const today = todayInZone(config.timezone);
     if (isWeekLocked({ weekStart, today, anchor: config.anchor, lengthDays: config.lengthDays, unlocked: config.unlocked })) {
       throw new ForbiddenException('Availability for this week is locked. Ask a manager to unlock availability.');
+    }
+    for (const row of body.rows) {
+      ensureValidShiftWindow(row.dayIndex, row.startMinutes, row.endMinutes);
     }
     await this.prisma.$transaction([
       this.prisma.availability.deleteMany({ where: { profileId: scope.profileId, weekStart } }),
@@ -436,7 +457,10 @@ export class SchedulingController {
     }
     const totalScheduledMinutes = shifts.reduce((sum, shift) => sum + Math.max(0, shift.endMinutes - shift.startMinutes), 0);
     return {
-      shifts: shifts.map((shift) => this.mapManagerShift(shift)),
+      shifts: shifts.map((shift) => {
+        const rows = shift.profileId ? availabilityByProfile.get(shift.profileId) : undefined;
+        return this.mapManagerShift(shift, rows && rows.length > 0 ? !availabilityCovers(rows, shift) : false);
+      }),
       staff: staff.map((member) => {
         const mins = weeklyMinutes.get(member.id) ?? 0;
         return {
@@ -842,19 +866,28 @@ export class SchedulingController {
 
   @RequireSubscription()
   @Get('auto-schedule/preview')
-  async previewAutoSchedule(@VenueScope() scope: Scope, @Query('weekStartDate') _weekStartDate?: string) {
+  async previewAutoSchedule(@VenueScope() scope: Scope, @Query('weekStartDate') weekStartDate?: string) {
     this.requireManager(scope);
-    const [shifts, staff] = await Promise.all([
+    const availabilityWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, weekStartDate);
+    const [shifts, staff, availability] = await Promise.all([
       this.prisma.scheduleShift.findMany({
         where: { venueId: scope!.venueId },
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
       this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.availability.findMany({
+        where: { venueId: scope!.venueId, weekStart: availabilityWeekStart },
+        orderBy: [{ profileId: 'asc' }, { dayIndex: 'asc' }, { startMinutes: 'asc' }],
+      }),
     ]);
+    const availabilityByProfile = this.groupAvailabilityByProfile(availability);
     const openShifts = shifts.filter((shift) => shift.status === 'open' && !shift.profileId);
     const assignments = new Map<string, number>();
     const proposals = openShifts.map((shift) => {
+      let sawRoleMatch = false;
+      let sawAvailable = false;
+      let sawFree = false;
       const candidate = staff.find((member) => {
         const assignedMinutes = assignments.get(member.id) ?? 0;
         const roleMatch =
@@ -862,13 +895,20 @@ export class SchedulingController {
           shift.jobTitle.toLowerCase().includes(member.jobTitle.toLowerCase()) ||
           member.role === 'staff' ||
           member.role === 'server';
+        if (!roleMatch) return false;
+        sawRoleMatch = true;
+        const hasAvailability = availabilityCovers(availabilityByProfile.get(member.id), shift);
+        if (!hasAvailability) return false;
+        sawAvailable = true;
         const overlaps = shifts.some((other) =>
           other.profileId === member.id &&
           other.dayIndex === shift.dayIndex &&
           other.startMinutes < shift.endMinutes &&
           other.endMinutes > shift.startMinutes,
         );
-        return roleMatch && !overlaps && assignedMinutes < 40 * 60;
+        if (overlaps) return false;
+        sawFree = true;
+        return assignedMinutes < 40 * 60;
       });
       if (candidate) assignments.set(candidate.id, (assignments.get(candidate.id) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes));
       return {
@@ -878,7 +918,7 @@ export class SchedulingController {
         endTime: minutesToTime(shift.endMinutes),
         jobTitle: shift.jobTitle,
         profileId: candidate?.id ?? null,
-        reason: candidate ? 'assigned' : 'no_role_match',
+        reason: candidate ? 'assigned' : !sawRoleMatch ? 'no_role_match' : !sawAvailable ? 'no_availability' : !sawFree ? 'all_double_booked' : 'labor_cap',
       };
     });
     const filled = proposals.filter((proposal) => proposal.profileId).length;
@@ -886,6 +926,7 @@ export class SchedulingController {
       openCount: openShifts.length,
       filled,
       unfilled: openShifts.length - filled,
+      weekStart: availabilityWeekStart,
       proposals,
     };
   }
@@ -894,6 +935,12 @@ export class SchedulingController {
   @Post('auto-schedule/apply')
   async applyAutoSchedule(@VenueScope() scope: Scope, @Body() body: ApplyAutoScheduleDto) {
     this.requireManager(scope);
+    const availabilityWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStartDate);
+    const availability = await this.prisma.availability.findMany({
+      where: { venueId: scope!.venueId, weekStart: availabilityWeekStart },
+      orderBy: [{ profileId: 'asc' }, { dayIndex: 'asc' }, { startMinutes: 'asc' }],
+    });
+    const availabilityByProfile = this.groupAvailabilityByProfile(availability);
     let assigned = 0;
     let skipped = 0;
     const assignedShifts: Array<{ profileId: string; label: string; jobTitle: string; station: string }> = [];
@@ -904,6 +951,10 @@ export class SchedulingController {
         continue;
       }
       await this.assertVenueMember(scope!.venueId, assignment.profileId);
+      if (!availabilityCovers(availabilityByProfile.get(assignment.profileId), shift)) {
+        skipped += 1;
+        continue;
+      }
       try {
         await this.assertNoDoubleBook(scope!.venueId, assignment.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
       } catch {
@@ -1144,7 +1195,25 @@ export class SchedulingController {
     });
   }
 
-  private mapManagerShift(shift: ShiftWithProfile) {
+  private resolveAvailabilityWeekStart(venueId: string, weekStartDate?: string) {
+    if (weekStartDate) {
+      if (!isIsoDate(weekStartDate)) throw new BadRequestException('weekStartDate must be a YYYY-MM-DD date');
+      return Promise.resolve(weekStartFor(weekStartDate));
+    }
+    return this.payPeriodConfig(venueId).then((config) => weekStartFor(todayInZone(config.timezone)));
+  }
+
+  private groupAvailabilityByProfile(rows: Availability[]) {
+    const byProfile = new Map<string, Availability[]>();
+    for (const row of rows) {
+      const profileRows = byProfile.get(row.profileId) ?? [];
+      profileRows.push(row);
+      byProfile.set(row.profileId, profileRows);
+    }
+    return byProfile;
+  }
+
+  private mapManagerShift(shift: ShiftWithProfile, conflict = false) {
     return {
       _id: shift.id,
       dayIndex: shift.dayIndex,
@@ -1159,7 +1228,7 @@ export class SchedulingController {
       status: shift.status,
       profileId: shift.profileId,
       memberName: shift.profileId ? shift.profile?.fullName ?? null : null,
-      conflict: false,
+      conflict,
     };
   }
 

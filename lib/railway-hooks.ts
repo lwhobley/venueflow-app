@@ -205,7 +205,7 @@ const mutationRoutes: Record<string, Route> = {
   'scheduling.applyAutoSchedule': {
     path: '/v1/scheduling/auto-schedule/apply',
     method: 'POST',
-    body: ({ assignments }) => ({ assignments }),
+    body: ({ assignments, weekStartDate }) => ({ assignments, weekStartDate }),
     invalidate: scheduleInvalidations(),
   },
   'scheduling.claimOpenShift': {

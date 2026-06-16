@@ -1,10 +1,13 @@
--- Availability becomes dated per calendar week (weekStart). Existing rows are
--- the old recurring-weekly shape with no week, so they're incompatible — clear
--- them before adding the NOT NULL column. (Pre-launch: no production roster data
--- to preserve.)
-DELETE FROM "Availability";
+-- Availability becomes dated per calendar week (weekStart). Existing recurring
+-- rows are backfilled to the current Sunday so the NOT NULL column can be added
+-- without discarding staff-entered availability.
+ALTER TABLE "Availability" ADD COLUMN "weekStart" TEXT;
 
-ALTER TABLE "Availability" ADD COLUMN "weekStart" TEXT NOT NULL;
+UPDATE "Availability"
+SET "weekStart" = to_char((CURRENT_DATE - EXTRACT(DOW FROM CURRENT_DATE)::int)::date, 'YYYY-MM-DD')
+WHERE "weekStart" IS NULL;
+
+ALTER TABLE "Availability" ALTER COLUMN "weekStart" SET NOT NULL;
 
 -- Week-scoped lookups supersede the old (profileId, dayIndex) composite.
 DROP INDEX IF EXISTS "Availability_profileId_dayIndex_idx";
