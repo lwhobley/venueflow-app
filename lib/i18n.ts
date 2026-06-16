@@ -201,14 +201,35 @@ export function useI18n() {
     );
   };
 
-  const formatDate = (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
-    new Intl.DateTimeFormat(locale === 'pseudo' ? 'en' : locale, options).format(value);
+  const intlLocale = locale === 'pseudo' ? 'en' : locale;
 
-  const formatNumber = (value: number, options?: Intl.NumberFormatOptions) =>
-    new Intl.NumberFormat(locale === 'pseudo' ? 'en' : locale, options).format(value);
+  // Hermes (iOS/Android release) ships a reduced Intl. Currency/date formatting
+  // with options can throw in production where it works in Expo Go. These
+  // formatters run during render on the dashboard, so a throw here would crash
+  // the whole app at startup — fall back to a plain string instead.
+  const formatDate = (value: number | Date, options?: Intl.DateTimeFormatOptions) => {
+    try {
+      return new Intl.DateTimeFormat(intlLocale, options).format(value);
+    } catch {
+      return (value instanceof Date ? value : new Date(value)).toDateString();
+    }
+  };
 
-  const formatCurrency = (value: number, currency = 'USD') =>
-    formatNumber(value, { style: 'currency', currency, maximumFractionDigits: 0 });
+  const formatNumber = (value: number, options?: Intl.NumberFormatOptions) => {
+    try {
+      return new Intl.NumberFormat(intlLocale, options).format(value);
+    } catch {
+      return String(value);
+    }
+  };
+
+  const formatCurrency = (value: number, currency = 'USD') => {
+    try {
+      return new Intl.NumberFormat(intlLocale, { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
+    } catch {
+      return `$${Math.round(value)}`;
+    }
+  };
 
   return {
     locale,
