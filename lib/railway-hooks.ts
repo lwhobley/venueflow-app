@@ -3,13 +3,16 @@ import { useMutation as useReactMutation, useQuery as useReactQuery, useQueryCli
 import { apiRequest } from './api-client';
 import type { RailwayFunctionRef } from './railway-api';
 
-type QueryArgs = Record<string, any> | 'skip' | undefined;
+type QueryArgs = Record<string, unknown> | 'skip' | undefined;
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Route args are dynamic by design; the outer hooks are generic.
+type RouteArgs = Record<string, any>;
+
 type Route = {
-  path: string | ((args: any) => string);
+  path: string | ((args: RouteArgs) => string);
   method?: Method;
-  body?: (args: any) => any;
+  body?: (args: RouteArgs) => unknown;
   invalidate?: unknown[][];
 };
 
@@ -274,28 +277,29 @@ const mutationRoutes: Record<string, Route> = {
   },
 };
 
-export function useQuery(ref: RailwayFunctionRef, args?: QueryArgs): any {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- default keeps backward compat; callers can opt in with useQuery<MyType>(...)
+export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T | undefined {
   const key = getKey(ref);
   const route = queryRoutes[key];
   const enabled = args !== 'skip';
-  const query = useReactQuery({
+  const query = useReactQuery<T>({
     queryKey: [key, args],
     enabled,
-    queryFn: () => (route ? requestRoute(route, args) : Promise.resolve(defaultQueryResult(key))),
+    queryFn: () => (route ? requestRoute<T>(route, args) : Promise.resolve(defaultQueryResult(key) as T)),
   });
   return query.data;
 }
 
-export function useMutation(ref: RailwayFunctionRef): any {
+export function useMutation<TArgs = RouteArgs, TResult = any>(ref: RailwayFunctionRef): (args: TArgs) => Promise<TResult> {
   const key = getKey(ref);
   const route = mutationRoutes[key];
   const queryClient = useQueryClient();
-  const mutation = useReactMutation({
-    mutationFn: async (args: any) => {
+  const mutation = useReactMutation<TResult, Error, TArgs>({
+    mutationFn: async (args: TArgs) => {
       if (!route) {
         throw new Error('This feature is still being moved to the Railway API.');
       }
-      return requestRoute(route, args);
+      return requestRoute<TResult>(route, args as RouteArgs);
     },
     onSuccess: async () => {
       const invalidations = route?.invalidate ?? [[key]];
@@ -307,11 +311,11 @@ export function useMutation(ref: RailwayFunctionRef): any {
   // in useEffect dependency arrays. (A fresh function each render caused an
   // infinite effect loop on the Chat tab's ensureChatSetup call.)
   const mutateAsync = mutation.mutateAsync;
-  return useCallback((args: any) => mutateAsync(args), [mutateAsync]);
+  return useCallback((args: TArgs) => mutateAsync(args), [mutateAsync]);
 }
 
-export function useAction(ref: RailwayFunctionRef): any {
-  return useMutation(ref);
+export function useAction<TArgs = RouteArgs, TResult = any>(ref: RailwayFunctionRef): (args: TArgs) => Promise<TResult> {
+  return useMutation<TArgs, TResult>(ref);
 }
 
 export function useAuthActions() {
@@ -327,25 +331,26 @@ function getKey(ref: RailwayFunctionRef) {
   return ref.__railwayKey;
 }
 
-function requestRoute<T>(route: Route, args: any): Promise<T> {
-  const path = typeof route.path === 'function' ? route.path(args ?? {}) : route.path;
+function requestRoute<T>(route: Route, args: RouteArgs | QueryArgs): Promise<T> {
+  const resolved = (args && args !== 'skip' ? args : {}) as RouteArgs;
+  const path = typeof route.path === 'function' ? route.path(resolved) : route.path;
   return apiRequest<T>(path, {
     method: route.method ?? 'GET',
-    body: route.method && route.method !== 'GET' && route.method !== 'DELETE' ? route.body?.(args ?? {}) ?? args ?? {} : undefined,
+    body: route.method && route.method !== 'GET' && route.method !== 'DELETE' ? route.body?.(resolved) ?? resolved : undefined,
   });
 }
 
-function stripVenue(args: any) {
+function stripVenue(args: RouteArgs) {
   const { venueId, ...rest } = args ?? {};
   return rest;
 }
 
-function stripVenueAndIds(args: any) {
+function stripVenueAndIds(args: RouteArgs) {
   const { venueId, shiftId, id, ...rest } = args ?? {};
   return rest;
 }
 
-function locationBody(args: any) {
+function locationBody(args: RouteArgs) {
   return {
     lat: args.lat,
     lng: args.lng,

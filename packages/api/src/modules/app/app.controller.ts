@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role } from '@prisma/client';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import type { Request } from 'express';
 import { AuthGuard } from '../../auth/auth.guard';
 import { Public } from '../../auth/public.decorator';
@@ -30,7 +30,7 @@ const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function makeInviteCode(): string {
   let body = '';
   for (let i = 0; i < 6; i += 1) {
-    body += INVITE_CODE_ALPHABET[randomBytes(1)[0] % INVITE_CODE_ALPHABET.length];
+    body += INVITE_CODE_ALPHABET[randomInt(INVITE_CODE_ALPHABET.length)];
   }
   return `VW-${body}`;
 }
