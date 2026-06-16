@@ -46,6 +46,9 @@ class InviteCheckDto {
 class JoinRequestDto {
   @IsString()
   venueId!: string;
+
+  @IsString()
+  code!: string;
 }
 
 class ReviewDecisionDto {
@@ -121,7 +124,7 @@ export class WorkforceController {
     const [byCode, byText] = await Promise.all([
       this.prisma.venue.findMany({
         where: { code: { equals: term, mode: 'insensitive' } },
-        select: { id: true, name: true, address: true, code: true },
+        select: { id: true, name: true },
         take: 3,
       }),
       this.prisma.venue.findMany({
@@ -131,7 +134,7 @@ export class WorkforceController {
             { address: { contains: term, mode: 'insensitive' } },
           ],
         },
-        select: { id: true, name: true, address: true, code: true },
+        select: { id: true, name: true },
         take: 10,
       }),
     ]);
@@ -176,9 +179,14 @@ export class WorkforceController {
 
     const venue = await this.prisma.venue.findUnique({
       where: { id: body.venueId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, code: true },
     });
     if (!venue) throw new NotFoundException('Workplace not found.');
+
+    // Require the correct venue code to prevent enumeration-based join spam.
+    if (!venue.code || venue.code.toLowerCase() !== body.code.trim().toLowerCase()) {
+      throw new BadRequestException('Incorrect venue code.');
+    }
 
     let requestId: string;
     try {

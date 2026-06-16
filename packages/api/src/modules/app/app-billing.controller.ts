@@ -5,6 +5,7 @@ import { IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { toMs } from './app-mappers';
 import { ProfileService } from './profile.service';
@@ -54,6 +55,8 @@ export class AppBillingController {
   @UseGuards(AuthGuard)
   @Post('billing/apple/sync')
   async syncAppleSubscription(@CurrentUser() user: AuthUser, @Body() body: AppleSubscriptionSyncDto) {
+    await assertWithinSharedRateLimit(this.prisma, `apple-sync:${user.sub}`, 10, 60_000);
+
     const profile = await this.profiles.requireBillingProfile(user);
     const verified = await this.verifyRevenueCatEntitlement(profile.venueId!, body.productId, body.entitlementId);
     if (!verified) {

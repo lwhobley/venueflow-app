@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
 import { Role } from '@prisma/client';
 import { AuthGuard } from '../../auth/auth.guard';
@@ -84,7 +84,7 @@ export class AppStaffController {
       phone: body.phone?.trim() || null,
       altPhone: body.altPhone?.trim() || null,
       address: body.address?.trim() || null,
-      dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+      dateOfBirth: body.dateOfBirth ? parseDateOfBirth(body.dateOfBirth) : null,
       certifications: body.certifications ?? [],
     };
     const row = existing
@@ -134,4 +134,16 @@ export class AppStaffController {
       }
     }
   }
+}
+
+/** Accept only YYYY-MM-DD and store as noon UTC to avoid timezone day-shift. */
+function parseDateOfBirth(value: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new BadRequestException('dateOfBirth must be in YYYY-MM-DD format.');
+  }
+  const date = new Date(`${value}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException('dateOfBirth is not a valid date.');
+  }
+  return date;
 }

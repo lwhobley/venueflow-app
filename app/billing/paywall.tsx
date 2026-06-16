@@ -50,7 +50,7 @@ export default function PaywallScreen() {
         const pkgs = await getOfferingPackages();
         if (active) setPackages(pkgs);
       } catch (e) {
-        console.warn('[paywall] Could not load RevenueCat offerings', e);
+        if (__DEV__) console.warn('[paywall] Could not load RevenueCat offerings', e);
       } finally {
         if (active) setLoading(false);
       }

@@ -1,7 +1,7 @@
 // iOS in-app purchases via RevenueCat. A single "pro" entitlement unlocks the
 // app; all tiers grant it (they differ only by the staff-count limit shown at
-// signup). Configure values via app.json -> extra or EXPO_PUBLIC_* env so no
-// real keys live in source. Android is not a purchase platform — on Android the
+// signup). The public SDK key may be set in eas.json or EXPO_PUBLIC_* env
+// vars. Android is not a purchase platform — on Android the
 // key is empty and purchases are disabled.
 import Purchases from 'react-native-purchases';
 import Constants from 'expo-constants';
@@ -37,9 +37,9 @@ let configured = false;
 export async function configurePurchases(appUserId?: string): Promise<void> {
   if (!EFFECTIVE_KEY) {
     if (isTestKey) {
-      console.warn('[purchases] Test Store key ignored in release build — purchases disabled. Use a production key for TestFlight/production.');
+      if (isDev) console.warn('[purchases] Test Store key ignored in release build — purchases disabled. Use a production key for TestFlight/production.');
     } else {
-      console.warn(`[purchases] EXPO_PUBLIC_REVENUECAT_${Platform.OS.toUpperCase()}_KEY not set — purchases disabled.`);
+      if (isDev) console.warn(`[purchases] EXPO_PUBLIC_REVENUECAT_${Platform.OS.toUpperCase()}_KEY not set — purchases disabled.`);
     }
     return;
   }
@@ -51,7 +51,7 @@ export async function configurePurchases(appUserId?: string): Promise<void> {
       await Purchases.logIn(appUserId);
     }
   } catch (e) {
-    console.error('[purchases] configure failed:', e);
+    if (isDev) console.error('[purchases] configure failed:', e);
   }
 }
 

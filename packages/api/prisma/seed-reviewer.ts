@@ -2,11 +2,10 @@
  * Creates a demo account for Apple App Store reviewers.
  *
  * Usage:
- *   npx tsx prisma/seed-reviewer.ts
+ *   REVIEWER_EMAIL="..." REVIEWER_PASSWORD="..." npx tsx prisma/seed-reviewer.ts
  *
- * Credentials (enter these in App Store Connect → App Review Information):
- *   Email:    reviewer@venuewrangler.com
- *   Password: VenueReview2026!
+ * Set the credentials in App Store Connect → App Review Information.
+ * NEVER commit real credentials to source.
  *
  * The account is pre-verified, attached to a demo venue with an active
  * trial, and has the "owner" role so every feature is accessible.
@@ -17,8 +16,15 @@ import { promisify } from 'util';
 
 const pbkdf2Async = promisify(pbkdf2);
 
-const DEMO_EMAIL = 'reviewer@venuewrangler.com';
-const DEMO_PASSWORD = 'VenueReview2026!';
+const DEMO_EMAIL = process.env.REVIEWER_EMAIL?.trim();
+const DEMO_PASSWORD = process.env.REVIEWER_PASSWORD?.trim();
+
+if (!DEMO_EMAIL || !DEMO_PASSWORD) {
+  console.error('ERROR: REVIEWER_EMAIL and REVIEWER_PASSWORD env vars are required.');
+  console.error('Usage: REVIEWER_EMAIL="..." REVIEWER_PASSWORD="..." npx tsx prisma/seed-reviewer.ts');
+  process.exit(1);
+}
+
 const ITERATIONS = 600_000;
 const KEY_LENGTH = 32;
 const DIGEST = 'sha256';
@@ -34,7 +40,7 @@ async function main() {
     }
 
     const salt = randomBytes(16).toString('hex');
-    const hash = (await pbkdf2Async(DEMO_PASSWORD, salt, ITERATIONS, KEY_LENGTH, DIGEST)).toString('hex');
+    const hash = (await pbkdf2Async(DEMO_PASSWORD!, salt, ITERATIONS, KEY_LENGTH, DIGEST)).toString('hex');
     const trialEndsAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
 
     await prisma.$transaction(async (tx) => {
@@ -54,7 +60,7 @@ async function main() {
 
       const user = await tx.user.create({
         data: {
-          email: DEMO_EMAIL,
+          email: DEMO_EMAIL!,
           emailVerifiedAt: new Date(),
           password: { create: { salt, passwordHash: hash, iterations: ITERATIONS } },
         },
@@ -63,7 +69,7 @@ async function main() {
       await tx.profile.create({
         data: {
           userId: user.id,
-          email: DEMO_EMAIL,
+          email: DEMO_EMAIL!,
           fullName: 'App Reviewer',
           role: 'owner',
           jobTitle: 'Owner',
@@ -89,7 +95,6 @@ async function main() {
 
       console.log('Reviewer account created successfully.');
       console.log(`  Email:    ${DEMO_EMAIL}`);
-      console.log(`  Password: ${DEMO_PASSWORD}`);
       console.log(`  Venue:    ${venue.name} (${venue.id})`);
     });
   } finally {

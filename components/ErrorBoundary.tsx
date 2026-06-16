@@ -19,7 +19,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error) {
-    console.error('[ErrorBoundary] caught:', error);
+    if (__DEV__) console.error('[ErrorBoundary] caught:', error);
   }
 
   private reset = (goHome: boolean) => {
@@ -48,9 +48,11 @@ export class ErrorBoundary extends Component<Props, State> {
           <Text style={{ color: colors.muted }}>
             This screen hit an error and couldn’t load. Your data is safe — try again or head back home.
           </Text>
-          <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={3}>
-            {error.message}
-          </Text>
+          {__DEV__ ? (
+            <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={3}>
+              {error.message}
+            </Text>
+          ) : null}
           <Button mode="contained" buttonColor={colors.primary} onPress={() => this.reset(true)}>
             Back to Home
           </Button>
