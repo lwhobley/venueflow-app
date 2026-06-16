@@ -31,7 +31,7 @@ import {
   isIsoDate,
   isValidPeriodLength,
   isWeekLocked,
-  todayIso,
+  todayInZone,
   upcomingWeeks,
   weeksToCover,
   weekStartFor,
@@ -257,7 +257,7 @@ export class SchedulingController {
   async getMyAvailability(@VenueScope() scope: Scope) {
     if (!scope) return { payPeriod: { anchor: DEFAULT_PAY_PERIOD_ANCHOR, lengthDays: DEFAULT_PAY_PERIOD_LENGTH_DAYS, unlocked: false }, weeks: [] };
     const config = await this.payPeriodConfig(scope.venueId);
-    const today = todayIso();
+    const today = todayInZone(config.timezone);
     const weekStarts = upcomingWeeks(today, weeksToCover(config.lengthDays));
     const rows = await this.prisma.availability.findMany({
       where: { profileId: scope.profileId, weekStart: { in: weekStarts } },
@@ -291,7 +291,8 @@ export class SchedulingController {
     if (!isIsoDate(body.weekStart)) throw new BadRequestException('weekStart must be a YYYY-MM-DD date');
     const weekStart = weekStartFor(body.weekStart);
     const config = await this.payPeriodConfig(scope.venueId);
-    if (isWeekLocked({ weekStart, today: todayIso(), anchor: config.anchor, lengthDays: config.lengthDays, unlocked: config.unlocked })) {
+    const today = todayInZone(config.timezone);
+    if (isWeekLocked({ weekStart, today, anchor: config.anchor, lengthDays: config.lengthDays, unlocked: config.unlocked })) {
       throw new ForbiddenException('Availability for this week is locked. Ask a manager to unlock availability.');
     }
     await this.prisma.$transaction([
@@ -345,12 +346,13 @@ export class SchedulingController {
   private async payPeriodConfig(venueId: string) {
     const venue = await this.prisma.venue.findUnique({
       where: { id: venueId },
-      select: { payPeriodAnchor: true, payPeriodLengthDays: true, availabilityUnlocked: true },
+      select: { payPeriodAnchor: true, payPeriodLengthDays: true, availabilityUnlocked: true, timezone: true },
     });
     return {
       anchor: venue?.payPeriodAnchor ?? DEFAULT_PAY_PERIOD_ANCHOR,
       lengthDays: venue?.payPeriodLengthDays ?? DEFAULT_PAY_PERIOD_LENGTH_DAYS,
       unlocked: venue?.availabilityUnlocked ?? false,
+      timezone: venue?.timezone ?? null,
     };
   }
 
@@ -401,7 +403,7 @@ export class SchedulingController {
   @Get('manager')
   async getManagerSchedule(@VenueScope() scope: Scope) {
     this.requireManager(scope);
-    const [venue, shifts, staff, availability] = await Promise.all([
+    const [venue, shifts, staff, config] = await Promise.all([
       this.prisma.venue.findUniqueOrThrow({ where: { id: scope!.venueId } }),
       this.prisma.scheduleShift.findMany({
         where: { venueId: scope!.venueId },
@@ -409,12 +411,20 @@ export class SchedulingController {
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
       this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
-      // The weekly schedule grid is day-of-week based; show the current week's
-      // dated availability for conflict highlighting.
-      this.prisma.availability.findMany({ where: { venueId: scope!.venueId, weekStart: weekStartFor(todayIso()) } }),
+      this.payPeriodConfig(scope!.venueId),
     ]);
+    const today = todayInZone(config.timezone);
+    const weekStarts = upcomingWeeks(today, weeksToCover(config.lengthDays));
+    const availability = await this.prisma.availability.findMany({
+      where: { venueId: scope!.venueId, weekStart: { in: weekStarts } },
+      orderBy: [{ weekStart: 'asc' }, { dayIndex: 'asc' }, { startMinutes: 'asc' }],
+    });
     const availabilityByProfile = new Map<string, typeof availability>();
+    const selectedAvailabilityWeekByProfile = new Map<string, string>();
     for (const row of availability) {
+      const selectedWeek = selectedAvailabilityWeekByProfile.get(row.profileId);
+      if (selectedWeek && selectedWeek !== row.weekStart) continue;
+      if (!selectedWeek) selectedAvailabilityWeekByProfile.set(row.profileId, row.weekStart);
       const rows = availabilityByProfile.get(row.profileId) ?? [];
       rows.push(row);
       availabilityByProfile.set(row.profileId, rows);
@@ -436,6 +446,7 @@ export class SchedulingController {
           jobTitle: member.jobTitle,
           weeklyHours: Math.round((mins / 60) * 10) / 10,
           overtime: mins > 40 * 60,
+          availabilityWeekStart: selectedAvailabilityWeekByProfile.get(member.id) ?? null,
           availability: (availabilityByProfile.get(member.id) ?? []).map((row) => ({
             dayIndex: row.dayIndex,
             startMinutes: row.startMinutes,

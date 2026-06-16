@@ -5,6 +5,7 @@ import {
   isValidPeriodLength,
   isWeekLocked,
   payPeriodStartFor,
+  todayInZone,
   upcomingWeeks,
   weeksToCover,
   weekStartFor,
@@ -54,6 +55,18 @@ describe('pay-period math', () => {
 
   it('lists upcoming week-starts beginning with the current week', () => {
     expect(upcomingWeeks('2024-01-10', 4)).toEqual(['2024-01-07', '2024-01-14', '2024-01-21', '2024-01-28']);
+  });
+
+  it('computes today in the venue timezone instead of UTC', () => {
+    const now = new Date('2026-06-16T03:00:00.000Z');
+    expect(todayInZone('UTC', now)).toBe('2026-06-16');
+    expect(todayInZone('America/Los_Angeles', now)).toBe('2026-06-15');
+  });
+
+  it('falls back to UTC when the timezone is missing or invalid', () => {
+    const now = new Date('2026-06-16T03:00:00.000Z');
+    expect(todayInZone(null, now)).toBe('2026-06-16');
+    expect(todayInZone('Not/AZone', now)).toBe('2026-06-16');
   });
 
   it('adds days across month boundaries', () => {

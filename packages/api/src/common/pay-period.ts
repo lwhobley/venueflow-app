@@ -58,6 +58,28 @@ export function todayIso(now: Date = new Date()): string {
   return fromUtcMs(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+/**
+ * Today's calendar date in the venue's IANA timezone, so the lock flips at the
+ * venue's local midnight rather than UTC midnight. Falls back to UTC when no
+ * timezone is set or the zone is invalid.
+ */
+export function todayInZone(timezone: string | null | undefined, now: Date = new Date()): string {
+  if (!timezone) return todayIso(now);
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(now).map((part) => [part.type, part.value]),
+    );
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  } catch {
+    return todayIso(now);
+  }
+}
+
 /** Start date of the pay period that contains dateStr. */
 export function payPeriodStartFor(dateStr: string, anchor: string, lengthDays: number): string {
   const len = Math.max(1, lengthDays);
