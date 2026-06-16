@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
 import { router, useRootNavigationState, useSegments } from 'expo-router';
 import { useA0Purchases } from '../lib/a0-purchases-stub';
@@ -42,16 +42,34 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const signedOutProtectedRoute = hydrated && (!user || !token) && !authRoute;
   const profileMissing = hydrated && Boolean(user) && Boolean(token) && !meLoading && me === null;
 
+  // SubscriptionGate renders ABOVE the <Stack> navigator, so in release builds
+  // rootNavigationState.key can flip truthy a beat before the navigator can
+  // actually accept navigation — calling router.replace then throws
+  // "navigate before mounting the Root Layout". Defer to the next tick (the
+  // navigator's mount effects have run by then) and swallow any residual timing
+  // error so a redirect can never crash the whole app. Returns an effect
+  // cleanup that cancels a pending redirect if state changes first.
+  const safeReplace = useCallback((href: Parameters<typeof router.replace>[0]) => {
+    const timer = setTimeout(() => {
+      try {
+        router.replace(href);
+      } catch {
+        // Navigator not ready yet; the effect re-runs when state settles.
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     if (!navigationReady || !signedOutProtectedRoute) return;
-    router.replace('/(auth)/welcome');
-  }, [navigationReady, signedOutProtectedRoute]);
+    return safeReplace('/(auth)/welcome');
+  }, [navigationReady, signedOutProtectedRoute, safeReplace]);
 
   useEffect(() => {
     if (!profileMissing) return;
     clearSession();
-    if (navigationReady && !authRoute) router.replace('/(auth)/welcome');
-  }, [authRoute, clearSession, navigationReady, profileMissing]);
+    if (navigationReady && !authRoute) return safeReplace('/(auth)/welcome');
+  }, [authRoute, clearSession, navigationReady, profileMissing, safeReplace]);
 
   useEffect(() => {
     if (!me?.profile || !user) return;
@@ -94,8 +112,8 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   useEffect(() => {
     if (!navigationReady || !hydrated || !user || !blocked) return;
     if (isAllowedRoute(route)) return;
-    router.replace(`/billing/locked?reason=${reason}`);
-  }, [blocked, hydrated, navigationReady, reason, route, user]);
+    return safeReplace(`/billing/locked?reason=${reason}`);
+  }, [blocked, hydrated, navigationReady, reason, route, user, safeReplace]);
 
 
   useEffect(() => {
