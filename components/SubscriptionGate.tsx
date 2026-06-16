@@ -82,7 +82,7 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   }, [me, user, setSession]);
 
   const { isPremium, isLoading: isPremiumLoading } = useA0Purchases();
-  const allAccess = hasAllAccess(me?.profile.allAccess ?? user?.all_access);
+  const allAccess = hasAllAccess(me?.profile?.allAccess ?? user?.all_access);
   const venueBlocked = config.billingEnabled && !allAccess && billing ? blockedStatuses.has(billing.status) && !isPremiumLoading && !isPremium : false;
   const venueActive = billing ? billing.status === 'active' || billing.status === 'trialing' : false;
   const trialEndsAt = me?.profile?.trialEndsAt ?? null;

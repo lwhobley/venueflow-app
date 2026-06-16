@@ -19,7 +19,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error) {
-    if (__DEV__) console.error('[ErrorBoundary] caught:', error);
+    if (typeof __DEV__ !== 'undefined' && __DEV__) console.error('[ErrorBoundary] caught:', error);
   }
 
   private reset = (goHome: boolean) => {
@@ -48,7 +48,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <Text style={{ color: colors.muted }}>
             This screen hit an error and couldn’t load. Your data is safe — try again or head back home.
           </Text>
-          {__DEV__ ? (
+          {typeof __DEV__ !== 'undefined' && __DEV__ ? (
             <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={3}>
               {error.message}
             </Text>
