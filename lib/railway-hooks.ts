@@ -26,6 +26,7 @@ const queryRoutes: Record<string, Route> = {
   'app.exportTimeEntriesCsv': { path: '/v1/app/time-entries/csv' },
   'staffAuth.listVenueRoles': { path: '/v1/app/venue-roles' },
   'scheduling.getMyAvailability': { path: '/v1/scheduling/availability/me' },
+  'scheduling.getAvailabilitySettings': { path: '/v1/scheduling/availability/settings' },
   'scheduling.listBlackouts': { path: '/v1/scheduling/blackouts' },
   'scheduling.getManagerSchedule': { path: '/v1/scheduling/manager' },
   'scheduling.previewAutoSchedule': { path: (args) => `/v1/scheduling/auto-schedule/preview?weekStartDate=${encodeURIComponent(args.weekStartDate ?? '')}` },
@@ -125,8 +126,14 @@ const mutationRoutes: Record<string, Route> = {
   'scheduling.setMyAvailability': {
     path: '/v1/scheduling/availability/me',
     method: 'POST',
-    body: (args) => ({ rows: args.rows ?? args.availability ?? args }),
+    body: (args) => ({ weekStart: args.weekStart, rows: args.rows ?? args.availability ?? [] }),
     invalidate: [['scheduling', 'getMyAvailability'], ['scheduling', 'getManagerSchedule']],
+  },
+  'scheduling.updateAvailabilitySettings': {
+    path: '/v1/scheduling/availability/settings',
+    method: 'PATCH',
+    body: ({ anchor, lengthDays, availabilityUnlocked }) => ({ anchor, lengthDays, availabilityUnlocked }),
+    invalidate: [['scheduling', 'getAvailabilitySettings'], ['scheduling', 'getMyAvailability'], ['scheduling', 'getManagerSchedule']],
   },
   'scheduling.addBlackout': {
     path: '/v1/scheduling/blackouts',

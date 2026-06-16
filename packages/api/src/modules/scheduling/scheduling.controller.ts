@@ -25,6 +25,17 @@ import {
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { dayLabel, minutesToTime } from '../../common/mappers';
+import {
+  DEFAULT_PAY_PERIOD_ANCHOR,
+  DEFAULT_PAY_PERIOD_LENGTH_DAYS,
+  MAX_PAY_PERIOD_LENGTH_DAYS,
+  MIN_PAY_PERIOD_LENGTH_DAYS,
+  isIsoDate,
+  isWeekLocked,
+  todayIso,
+  upcomingWeeks,
+  weekStartFor,
+} from '../../common/pay-period';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -51,10 +62,27 @@ class AvailabilityBlockDto {
 }
 
 class SetAvailabilityDto {
+  @IsString()
+  weekStart!: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AvailabilityBlockDto)
   rows!: AvailabilityBlockDto[];
+}
+
+class PayPeriodSettingsDto {
+  @IsString()
+  @IsOptional()
+  anchor?: string;
+
+  @IsInt()
+  @IsOptional()
+  lengthDays?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  availabilityUnlocked?: boolean;
 }
 
 class BlackoutDto {
@@ -227,30 +255,53 @@ export class SchedulingController {
   @RequireSubscription()
   @Get('availability/me')
   async getMyAvailability(@VenueScope() scope: Scope) {
-    if (!scope) return [];
+    if (!scope) return { payPeriod: { anchor: DEFAULT_PAY_PERIOD_ANCHOR, lengthDays: DEFAULT_PAY_PERIOD_LENGTH_DAYS, unlocked: false }, weeks: [] };
+    const config = await this.payPeriodConfig(scope.venueId);
+    const today = todayIso();
+    const weekStarts = upcomingWeeks(today, 4);
     const rows = await this.prisma.availability.findMany({
-      where: { profileId: scope.profileId },
+      where: { profileId: scope.profileId, weekStart: { in: weekStarts } },
       orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
     });
-    return rows.map((row) => ({
-      dayIndex: row.dayIndex,
-      startMinutes: row.startMinutes,
-      endMinutes: row.endMinutes,
-      available: row.available,
-    }));
+    const byWeek = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const list = byWeek.get(row.weekStart) ?? [];
+      list.push(row);
+      byWeek.set(row.weekStart, list);
+    }
+    return {
+      payPeriod: config,
+      weeks: weekStarts.map((weekStart) => ({
+        weekStart,
+        locked: isWeekLocked({ weekStart, today, anchor: config.anchor, lengthDays: config.lengthDays, unlocked: config.unlocked }),
+        days: (byWeek.get(weekStart) ?? []).map((row) => ({
+          dayIndex: row.dayIndex,
+          startMinutes: row.startMinutes,
+          endMinutes: row.endMinutes,
+          available: row.available,
+        })),
+      })),
+    };
   }
 
   @RequireSubscription()
   @Post('availability/me')
   async setMyAvailability(@VenueScope() scope: Scope, @Body() body: SetAvailabilityDto) {
     if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
+    if (!isIsoDate(body.weekStart)) throw new BadRequestException('weekStart must be a YYYY-MM-DD date');
+    const weekStart = weekStartFor(body.weekStart);
+    const config = await this.payPeriodConfig(scope.venueId);
+    if (isWeekLocked({ weekStart, today: todayIso(), anchor: config.anchor, lengthDays: config.lengthDays, unlocked: config.unlocked })) {
+      throw new ForbiddenException('Availability for this week is locked. Ask a manager to unlock availability.');
+    }
     await this.prisma.$transaction([
-      this.prisma.availability.deleteMany({ where: { profileId: scope.profileId } }),
+      this.prisma.availability.deleteMany({ where: { profileId: scope.profileId, weekStart } }),
       ...body.rows.map((row) =>
         this.prisma.availability.create({
           data: {
             venueId: scope.venueId,
             profileId: scope.profileId,
+            weekStart,
             dayIndex: row.dayIndex,
             startMinutes: row.startMinutes,
             endMinutes: row.endMinutes,
@@ -260,6 +311,47 @@ export class SchedulingController {
       ),
     ]);
     return { ok: true };
+  }
+
+  @RequireSubscription()
+  @Get('availability/settings')
+  async getAvailabilitySettings(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const config = await this.payPeriodConfig(scope!.venueId);
+    return { anchor: config.anchor, lengthDays: config.lengthDays, availabilityUnlocked: config.unlocked };
+  }
+
+  @RequireSubscription()
+  @Patch('availability/settings')
+  async updateAvailabilitySettings(@VenueScope() scope: Scope, @Body() body: PayPeriodSettingsDto) {
+    this.requireManager(scope);
+    const data: Prisma.VenueUpdateInput = {};
+    if (body.anchor !== undefined) {
+      if (!isIsoDate(body.anchor)) throw new BadRequestException('anchor must be a YYYY-MM-DD date');
+      // Normalize to the Sunday that starts the week so periods align to weeks.
+      data.payPeriodAnchor = weekStartFor(body.anchor);
+    }
+    if (body.lengthDays !== undefined) {
+      if (body.lengthDays < MIN_PAY_PERIOD_LENGTH_DAYS || body.lengthDays > MAX_PAY_PERIOD_LENGTH_DAYS) {
+        throw new BadRequestException(`Pay period must be ${MIN_PAY_PERIOD_LENGTH_DAYS}-${MAX_PAY_PERIOD_LENGTH_DAYS} days`);
+      }
+      data.payPeriodLengthDays = body.lengthDays;
+    }
+    if (body.availabilityUnlocked !== undefined) data.availabilityUnlocked = body.availabilityUnlocked;
+    await this.prisma.venue.update({ where: { id: scope!.venueId }, data });
+    return { ok: true };
+  }
+
+  private async payPeriodConfig(venueId: string) {
+    const venue = await this.prisma.venue.findUnique({
+      where: { id: venueId },
+      select: { payPeriodAnchor: true, payPeriodLengthDays: true, availabilityUnlocked: true },
+    });
+    return {
+      anchor: venue?.payPeriodAnchor ?? DEFAULT_PAY_PERIOD_ANCHOR,
+      lengthDays: venue?.payPeriodLengthDays ?? DEFAULT_PAY_PERIOD_LENGTH_DAYS,
+      unlocked: venue?.availabilityUnlocked ?? false,
+    };
   }
 
   @RequireSubscription()
@@ -317,7 +409,9 @@ export class SchedulingController {
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
       this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
-      this.prisma.availability.findMany({ where: { venueId: scope!.venueId } }),
+      // The weekly schedule grid is day-of-week based; show the current week's
+      // dated availability for conflict highlighting.
+      this.prisma.availability.findMany({ where: { venueId: scope!.venueId, weekStart: weekStartFor(todayIso()) } }),
     ]);
     const availabilityByProfile = new Map<string, typeof availability>();
     for (const row of availability) {

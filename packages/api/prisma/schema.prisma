@@ -269,6 +269,11 @@ model Venue {
   schedulePublishedAt           DateTime?
   schedulePublishedById         String?
   scheduleUpdatedAfterPublishAt DateTime?
+  // Availability lock window. Staff set availability for upcoming pay periods;
+  // a period locks once it begins, unless availabilityUnlocked is set venue-wide.
+  payPeriodAnchor               String?
+  payPeriodLengthDays           Int                     @default(14)
+  availabilityUnlocked          Boolean                 @default(false)
   subscriptionStatus            SubscriptionStatus?
   subscriptionPlatform          SubscriptionPlatform?
   leadsWebhookSecret            String?
@@ -399,6 +404,8 @@ model Availability {
   id           String   @id @default(cuid())
   venueId      String
   profileId    String
+  // Sunday ('YYYY-MM-DD') of the calendar week this availability applies to.
+  weekStart    String
   dayIndex     Int
   startMinutes Int
   endMinutes   Int
@@ -409,7 +416,8 @@ model Availability {
 
   @@index([profileId])
   @@index([venueId])
-  @@index([profileId, dayIndex])
+  @@index([profileId, weekStart])
+  @@index([venueId, weekStart])
 }
 
 model StaffRequest {
