@@ -310,6 +310,16 @@ export default function ReservationsScreen() {
     }
   };
 
+  const statCards = useMemo(
+    () => [
+      { label: 'Active', value: page?.activeCount ?? 0, a: accents[2] },
+      { label: 'Upcoming', value: page?.upcomingCount ?? 0, a: accents[0] },
+      { label: 'Private events', value: reservations.filter((item) => item.isPrivateEvent).length, a: accents[5] },
+      { label: 'Cancelled', value: page?.cancelledCount ?? 0, a: accents[1] },
+    ],
+    [page, reservations],
+  );
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
@@ -331,12 +341,7 @@ export default function ReservationsScreen() {
 
       {/* Stats */}
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-        {[
-          { label: 'Active', value: page?.activeCount ?? 0, a: accents[2] },
-          { label: 'Upcoming', value: page?.upcomingCount ?? 0, a: accents[0] },
-          { label: 'Private events', value: reservations.filter((item) => item.isPrivateEvent).length, a: accents[5] },
-          { label: 'Cancelled', value: page?.cancelledCount ?? 0, a: accents[1] },
-        ].map((s) => (
+        {statCards.map((s) => (
           <Card key={s.label} style={{ flex: 1, backgroundColor: s.a.bg, borderRadius: 16 }}>
             <Card.Content style={{ gap: 2 }}>
               <Text style={{ color: s.a.fg, fontSize: 24, fontWeight: '800' }}>{s.value}</Text>

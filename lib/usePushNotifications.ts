@@ -46,7 +46,7 @@ export function usePushNotifications() {
     }
 
     void register().catch((error) => {
-      console.warn('Unable to register push notifications', error);
+      if (__DEV__) console.warn('Unable to register push notifications', error);
     });
 
     return () => {

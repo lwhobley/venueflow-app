@@ -78,12 +78,22 @@ async function buildPayrollRows(
     }, 0);
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
+  // Build a profileId → entries index in O(N) so each staff member lookup is O(1).
+  // This replaces the previous O(N×M) entries.filter() inside staff.map().
+  const entriesByProfile = new Map<string, typeof entries>();
+  for (const entry of entries) {
+    if (!entry.profileId || !inPeriod(entry)) continue;
+    const list = entriesByProfile.get(entry.profileId) ?? [];
+    list.push(entry);
+    entriesByProfile.set(entry.profileId, list);
+  }
+
   const rows = staff.map((member) => ({
     profileId: member.id as string | null,
     employeeName: member.fullName,
     role: member.role as string,
     jobTitle: member.jobTitle,
-    totalHours: round2(hoursOf(entries.filter((e) => e.profileId === member.id && inPeriod(e)))),
+    totalHours: round2(hoursOf(entriesByProfile.get(member.id) ?? [])),
   }));
 
   // Wage records retained after account deletion (profileId is null) still

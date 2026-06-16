@@ -176,64 +176,65 @@ export class PosController {
       throw new UnauthorizedException('Invalid webhook secret');
     }
 
-    let checksUpserted = 0;
-    for (const check of body.checks ?? []) {
-      const data = {
-        tableLabel: check.tableLabel ?? null,
-        serverName: check.serverName ?? null,
-        guestName: check.guestName ?? null,
-        openedAt: new Date(check.openedAt),
-        closedAt: check.closedAt ? new Date(check.closedAt) : null,
-        subtotalCents: check.subtotalCents,
-        taxCents: check.taxCents ?? null,
-        tipCents: check.tipCents,
-        totalCents: check.totalCents,
-        discountCents: check.discountCents ?? null,
-        compCents: check.compCents ?? null,
-        promoCents: check.promoCents ?? null,
-        guestCount: check.guestCount ?? null,
-        revenueCenter: check.revenueCenter ?? null,
-        tenderType: check.tenderType ?? null,
-        menuItems: check.menuItems ? (check.menuItems as unknown as Prisma.InputJsonValue) : undefined,
-        status: (check.status ?? 'open') as PosCheckStatus,
-      };
-      await this.prisma.posCheck.upsert({
-        where: { venueId_provider_externalCheckId: { venueId, provider, externalCheckId: check.externalCheckId } },
-        create: { venueId, provider, externalCheckId: check.externalCheckId, ...data },
-        update: data,
-      });
-      checksUpserted += 1;
-    }
-
-    let laborUpserted = 0;
-    for (const punch of body.laborPunches ?? []) {
-      const data = {
-        employeeName: punch.employeeName,
-        jobTitle: punch.jobTitle ?? null,
-        clockInAt: new Date(punch.clockInAt),
-        clockOutAt: punch.clockOutAt ? new Date(punch.clockOutAt) : null,
-        regularMinutes: punch.regularMinutes ?? null,
-        overtimeMinutes: punch.overtimeMinutes ?? null,
-        declaredTipsCents: punch.declaredTipsCents ?? null,
-        tipsCents: punch.tipsCents ?? null,
-        regularPayCents: punch.regularPayCents ?? null,
-        overtimePayCents: punch.overtimePayCents ?? null,
-        totalPayCents: punch.totalPayCents ?? null,
-      };
-      await this.prisma.posLaborPunch.upsert({
-        where: {
-          venueId_provider_externalEmployeeId_businessDate: {
-            venueId,
-            provider,
-            externalEmployeeId: punch.externalEmployeeId,
-            businessDate: punch.businessDate,
+    // Batch all upserts into a single transaction to eliminate per-row roundtrips.
+    await this.prisma.$transaction([
+      ...( body.checks ?? []).map((check) => {
+        const data = {
+          tableLabel: check.tableLabel ?? null,
+          serverName: check.serverName ?? null,
+          guestName: check.guestName ?? null,
+          openedAt: new Date(check.openedAt),
+          closedAt: check.closedAt ? new Date(check.closedAt) : null,
+          subtotalCents: check.subtotalCents,
+          taxCents: check.taxCents ?? null,
+          tipCents: check.tipCents,
+          totalCents: check.totalCents,
+          discountCents: check.discountCents ?? null,
+          compCents: check.compCents ?? null,
+          promoCents: check.promoCents ?? null,
+          guestCount: check.guestCount ?? null,
+          revenueCenter: check.revenueCenter ?? null,
+          tenderType: check.tenderType ?? null,
+          menuItems: check.menuItems ? (check.menuItems as unknown as Prisma.InputJsonValue) : undefined,
+          status: (check.status ?? 'open') as PosCheckStatus,
+        };
+        return this.prisma.posCheck.upsert({
+          where: { venueId_provider_externalCheckId: { venueId, provider, externalCheckId: check.externalCheckId } },
+          create: { venueId, provider, externalCheckId: check.externalCheckId, ...data },
+          update: data,
+        });
+      }),
+      ...(body.laborPunches ?? []).map((punch) => {
+        const data = {
+          employeeName: punch.employeeName,
+          jobTitle: punch.jobTitle ?? null,
+          clockInAt: new Date(punch.clockInAt),
+          clockOutAt: punch.clockOutAt ? new Date(punch.clockOutAt) : null,
+          regularMinutes: punch.regularMinutes ?? null,
+          overtimeMinutes: punch.overtimeMinutes ?? null,
+          declaredTipsCents: punch.declaredTipsCents ?? null,
+          tipsCents: punch.tipsCents ?? null,
+          regularPayCents: punch.regularPayCents ?? null,
+          overtimePayCents: punch.overtimePayCents ?? null,
+          totalPayCents: punch.totalPayCents ?? null,
+        };
+        return this.prisma.posLaborPunch.upsert({
+          where: {
+            venueId_provider_externalEmployeeId_businessDate: {
+              venueId,
+              provider,
+              externalEmployeeId: punch.externalEmployeeId,
+              businessDate: punch.businessDate,
+            },
           },
-        },
-        create: { venueId, provider, externalEmployeeId: punch.externalEmployeeId, businessDate: punch.businessDate, ...data },
-        update: data,
-      });
-      laborUpserted += 1;
-    }
+          create: { venueId, provider, externalEmployeeId: punch.externalEmployeeId, businessDate: punch.businessDate, ...data },
+          update: data,
+        });
+      }),
+    ]);
+
+    const checksUpserted = (body.checks ?? []).length;
+    const laborUpserted = (body.laborPunches ?? []).length;
 
     await this.prisma.posConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });
     return { ok: true, checksUpserted, laborUpserted };

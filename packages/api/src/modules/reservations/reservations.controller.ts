@@ -156,28 +156,48 @@ export class ReservationsController {
       throw new UnauthorizedException('Invalid webhook secret');
     }
 
-    let processed = 0;
-    let duplicates = 0;
-    for (const event of body.events.slice(0, MAX_INGEST_EVENTS)) {
-      try {
-        // Claim the event id first; a duplicate delivery trips the unique
-        // constraint and is skipped before we touch the reservation.
-        await this.prisma.reservationSyncEvent.create({
-          data: {
-            venueId,
-            provider,
-            externalEventId: event.externalEventId,
-            eventType: event.eventType,
-            payload: event as unknown as Prisma.InputJsonValue,
-            processedAt: new Date(),
-            status: 'processed',
-          },
-        });
-      } catch (error: any) {
-        if (error?.code === 'P2002') { duplicates += 1; continue; }
-        throw error;
-      }
+    const events = body.events.slice(0, MAX_INGEST_EVENTS);
+    const now = new Date();
 
+    // Phase 1: Claim sync event IDs in bulk (idempotent on unique key).
+    // skipDuplicates silently skips rows whose (venueId, provider, externalEventId) already exist.
+    const { count: claimedCount } = await this.prisma.reservationSyncEvent.createMany({
+      data: events.map((event) => ({
+        venueId,
+        provider,
+        externalEventId: event.externalEventId,
+        eventType: event.eventType,
+        payload: event as unknown as Prisma.InputJsonValue,
+        processedAt: now,
+        status: 'processed',
+      })),
+      skipDuplicates: true,
+    });
+    const duplicates = events.length - claimedCount;
+
+    // Identify which events are genuinely new (just claimed).
+    const claimedRecords = await this.prisma.reservationSyncEvent.findMany({
+      where: { venueId, provider, processedAt: now },
+      select: { externalEventId: true },
+    });
+    const claimedIds = new Set(claimedRecords.map((r) => r.externalEventId));
+    const newEvents = events.filter((e) => claimedIds.has(e.externalEventId));
+
+    // Phase 2: Resolve existing reservations in one query.
+    const externalIds = [...new Set(newEvents.map((e) => e.externalId))];
+    const existingReservations = externalIds.length
+      ? await this.prisma.reservation.findMany({
+          where: { venueId, externalId: { in: externalIds } },
+          select: { id: true, externalId: true },
+        })
+      : [];
+    const existingByExternalId = new Map(existingReservations.map((r) => [r.externalId, r.id]));
+
+    // Phase 3: Partition into creates and updates, execute in a transaction.
+    const toCreate: Prisma.ReservationCreateManyInput[] = [];
+    const toUpdate: Array<{ id: string; data: Prisma.ReservationUpdateInput; externalEventId: string }> = [];
+
+    for (const event of newEvents) {
       const fields = {
         guestName: event.guestName,
         partySize: event.partySize,
@@ -189,22 +209,47 @@ export class ReservationsController {
         notes: event.notes?.trim() ?? null,
         specialRequests: event.specialRequests?.trim() ?? null,
       };
-      const existing = await this.prisma.reservation.findFirst({
-        where: { venueId, externalId: event.externalId },
-        select: { id: true },
-      });
-      const reservation = existing
-        ? await this.prisma.reservation.update({ where: { id: existing.id }, data: fields })
-        : await this.prisma.reservation.create({
-            data: { venueId, source: provider, externalId: event.externalId, ...fields },
-          });
-      await this.prisma.reservationSyncEvent.updateMany({
-        where: { venueId, provider, externalEventId: event.externalEventId },
-        data: { reservationId: reservation.id },
-      });
-      processed += 1;
+      const existingId = existingByExternalId.get(event.externalId);
+      if (existingId) {
+        toUpdate.push({ id: existingId, data: fields, externalEventId: event.externalEventId });
+      } else {
+        toCreate.push({ venueId, source: provider, externalId: event.externalId, ...fields });
+      }
     }
 
+    const reservationIdByExternalEventId = new Map<string, string>();
+    await this.prisma.$transaction(async (tx) => {
+      if (toCreate.length) {
+        await tx.reservation.createMany({ data: toCreate, skipDuplicates: true });
+        const created = await tx.reservation.findMany({
+          where: { venueId, externalId: { in: toCreate.map((c) => c.externalId as string) } },
+          select: { id: true, externalId: true },
+        });
+        const createdById = new Map(created.map((r) => [r.externalId, r.id]));
+        for (const event of newEvents) {
+          const id = createdById.get(event.externalId);
+          if (id && !existingByExternalId.has(event.externalId)) {
+            reservationIdByExternalEventId.set(event.externalEventId, id);
+          }
+        }
+      }
+      for (const { id, data, externalEventId } of toUpdate) {
+        await tx.reservation.update({ where: { id }, data });
+        reservationIdByExternalEventId.set(externalEventId, id);
+      }
+    });
+
+    // Back-fill reservationId on newly-processed sync events.
+    await Promise.all(
+      [...reservationIdByExternalEventId.entries()].map(([externalEventId, reservationId]) =>
+        this.prisma.reservationSyncEvent.updateMany({
+          where: { venueId, provider, externalEventId },
+          data: { reservationId },
+        }),
+      ),
+    );
+
+    const processed = newEvents.length;
     await this.prisma.reservationConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });
     return { ok: true, processed, duplicates };
   }
