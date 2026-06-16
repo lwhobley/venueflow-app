@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -7,7 +7,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { router, useRootNavigationState } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
@@ -31,15 +31,6 @@ export default function CreateVenueScreen() {
   const venue = useAuthStore((s: AuthState) => s.venue);
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const token = useAuthStore((s: AuthState) => s.token);
-  // Wait until the root navigator is mounted before redirecting; navigating
-  // during the first render (e.g. this screen as the initial/restored route)
-  // throws "navigate before mounting the Root Layout".
-  const navigationReady = Boolean(useRootNavigationState()?.key);
-
-  useEffect(() => {
-    if (!navigationReady || !venue) return;
-    router.replace('/(tabs)/home');
-  }, [navigationReady, venue]);
 
   const [businessName, setBusinessName] = useState('');
   const [address, setAddress] = useState('');
@@ -48,7 +39,10 @@ export default function CreateVenueScreen() {
   const [staffRange, setStaffRange] = useState<string>('1-15');
   const [submitting, setSubmitting] = useState(false);
 
-  if (venue) return null;
+  // Once the venue is created, leave onboarding. <Redirect> is render-safe, so
+  // it never throws "navigate before mounting the Root Layout" even when this
+  // screen is the initial/restored route.
+  if (venue) return <Redirect href="/(tabs)/home" />;
 
   const submit = async () => {
     if (!businessName.trim()) {

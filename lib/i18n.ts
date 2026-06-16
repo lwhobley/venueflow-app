@@ -211,7 +211,13 @@ export function useI18n() {
     try {
       return new Intl.DateTimeFormat(intlLocale, options).format(value);
     } catch {
-      return (value instanceof Date ? value : new Date(value)).toDateString();
+      // Non-Intl fallbacks (toTimeString/toDateString don't use Intl): a
+      // time-only request gets a clock string, everything else a date string,
+      // so e.g. formatDate(ts, { hour, minute }) doesn't degrade to a full date.
+      const d = value instanceof Date ? value : new Date(value);
+      const wantsTime = Boolean(options?.hour || options?.minute);
+      const wantsDate = Boolean(options?.year || options?.month || options?.day);
+      return wantsTime && !wantsDate ? d.toTimeString().slice(0, 5) : d.toDateString();
     }
   };
 

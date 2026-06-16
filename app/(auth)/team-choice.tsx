@@ -1,23 +1,16 @@
-import { useEffect } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import { router, useRootNavigationState } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { authCardStyle, authColors as colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 export default function TeamChoiceScreen() {
   const venue = useAuthStore((s: AuthState) => s.venue);
-  // Wait until the root navigator is mounted before redirecting; navigating
-  // during the first render (e.g. this screen as the initial/restored route)
-  // throws "navigate before mounting the Root Layout".
-  const navigationReady = Boolean(useRootNavigationState()?.key);
 
-  useEffect(() => {
-    if (!navigationReady || !venue) return;
-    router.replace('/(tabs)/home');
-  }, [navigationReady, venue]);
-
-  if (venue) return null;
+  // Once a venue exists (created or joined), leave onboarding. <Redirect> is
+  // render-safe, so it never throws "navigate before mounting the Root Layout"
+  // even when this screen is the initial/restored route.
+  if (venue) return <Redirect href="/(tabs)/home" />;
 
   return (
     <KeyboardAvoidingView
