@@ -127,6 +127,5 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
     };
   }, [reason]);
 
-  if (profileMissing) return null;
   return children as never;
 }
