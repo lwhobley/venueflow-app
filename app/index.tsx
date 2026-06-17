@@ -11,8 +11,8 @@ export default function Index() {
   }
 
   // A signed-in user must belong to a venue before reaching the app. New
-  // accounts (and anyone removed from their venue) are sent to team-choice to
-  // join an existing team or create their own.
+  // accounts (and anyone removed from their venue) are sent to invite-only team
+  // onboarding; public App Store builds do not offer business registration.
   const href = !user ? '/(auth)/welcome' : !venue ? '/(auth)/team-choice' : '/(tabs)/home';
   return <Redirect href={href} />;
 }

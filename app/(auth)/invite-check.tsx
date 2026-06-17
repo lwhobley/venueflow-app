@@ -170,7 +170,7 @@ export default function InviteCheckScreen() {
                   No invite found for {contact.trim()}.
                 </Text>
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  Ask your manager to send you an invite, or join a workplace without one.
+                  Ask your manager to send an invite to your email address.
                 </Text>
                 <Button
                   mode="outlined"
@@ -181,13 +181,6 @@ export default function InviteCheckScreen() {
                   }}
                 >
                   Try again
-                </Button>
-                <Button
-                  mode="text"
-                  textColor={colors.muted}
-                  onPress={() => router.push('/(auth)/register')}
-                >
-                  Join without an invite
                 </Button>
               </View>
             )}

@@ -134,9 +134,6 @@ export const appApi = {
     apiRequest<{ valid: boolean; venueName: string; role: string; jobTitle: string; expiresAt: number }>(
       '/v1/app/invite/' + encodeURIComponent(code.trim()),
     ),
-  // Owner setup: create the venue/master account (caller becomes admin/owner).
-  registerVenue: (body: { businessName: string; staffRange: string; ownerName?: string; phone?: string; address?: string; venueType?: string }) =>
-    apiRequest<{ profile: ApiProfile; venue: ApiVenue | null }>('/v1/app/register-venue', { method: 'POST', body }),
   // Solo user joins an existing team later by code.
   joinByCode: (code: string) =>
     apiRequest<{ profile: ApiProfile; venue: ApiVenue | null }>('/v1/app/join', { method: 'POST', body: { code } }),

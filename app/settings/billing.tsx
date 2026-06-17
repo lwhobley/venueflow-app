@@ -18,8 +18,8 @@ export default function BillingScreen() {
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const billing = useQuery(api.app.getMyVenueBilling, isReady && user && venue?.id ? {} : 'skip');
 
-  // The free trial is granted at signup (profile.trialEndsAt), so a fresh user
-  // is already "trialing". Drive the CTA off that, not off "never subscribed".
+  // Trial state is account-scoped. Drive the CTA off that, not off
+  // "never subscribed".
   const trialEndsAt: number | null = me?.profile?.trialEndsAt ?? null;
   const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
   const isPaid = billing?.status === 'active';
@@ -50,9 +50,9 @@ export default function BillingScreen() {
           <Text variant="headlineSmall">Billing</Text>
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
           <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'Not configured'}</Text>
-          {inTrial ? <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in your free trial</Text> : null}
+          {inTrial ? <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in intro access</Text> : null}
           <Text style={{ color: colors.muted }}>The paid plan renews monthly and unlocks the full app for teams of 1-50 people.</Text>
-          <Text style={{ color: colors.muted }}>Current plan: {isPaid ? MONTHLY_PLAN_LABEL : inTrial ? 'Free trial' : 'Not subscribed'}</Text>
+          <Text style={{ color: colors.muted }}>Current plan: {isPaid ? MONTHLY_PLAN_LABEL : inTrial ? 'Intro access' : 'Not subscribed'}</Text>
           <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
 
           {!isPaid ? (

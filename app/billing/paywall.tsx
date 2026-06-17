@@ -36,9 +36,8 @@ export default function PaywallScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // The free trial begins at signup, so anyone here is either already trialing
-  // (action = upgrade to paid) or past it (action = subscribe). "Start free
-  // trial" would be misleading once the trial is already running.
+  // Trial state is account-scoped. Anyone here is either already trialing
+  // (action = upgrade to paid) or past it (action = subscribe).
   const trialEndsAt: number | null = me?.profile?.trialEndsAt ?? null;
   const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
   const ctaLabel = inTrial ? 'Upgrade' : 'Subscribe';
@@ -123,7 +122,7 @@ export default function PaywallScreen() {
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
                 <Text style={{ color: colors.muted, fontWeight: '600' }}>For teams of 1-50 people</Text>
                 <Text style={{ color: colors.success, fontWeight: '600' }}>
-                  {inTrial ? 'Your free trial is active' : 'Includes 14-day free trial'}
+                  {inTrial ? 'Intro access is active' : 'Monthly App Store subscription'}
                 </Text>
                 <Text style={{ color: colors.muted }}>Solo use is free. Upgrade to unlock team scheduling, reservations, the live floor, and team chat.</Text>
                 <Button
@@ -143,7 +142,7 @@ export default function PaywallScreen() {
 
       {!loading && PURCHASES_SUPPORTED && packages.length === 0 ? (
         <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-          Your free trial starts automatically when you sign up. App Store purchasing appears here once the subscription is available.
+          App Store purchasing appears here once the subscription is available.
         </Text>
       ) : null}
 

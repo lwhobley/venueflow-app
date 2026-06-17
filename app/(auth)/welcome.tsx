@@ -184,9 +184,9 @@ export default function WelcomeScreen() {
           style={styles.signUpButton}
           contentStyle={styles.buttonContent}
           labelStyle={styles.buttonLabel}
-          onPress={() => router.push({ pathname: '/(auth)/sign-in', params: { tab: 'signUp' } })}
+          onPress={() => router.push('/(auth)/invite-check')}
         >
-          Sign Up
+          Join with Invite
         </Button>
       </View>
     </View>

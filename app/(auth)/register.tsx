@@ -8,7 +8,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
@@ -29,6 +29,9 @@ export default function RegisterScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const hasInvite = params.inviteFound === '1' && Boolean(params.email) && Boolean(params.venueName);
+
+  if (!hasInvite) return <Redirect href="/(auth)/invite-check" />;
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
@@ -113,7 +116,7 @@ export default function RegisterScreen() {
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
             {params.inviteFound === '1' && params.venueName
               ? `Create your account with the invited email address, then verify it to join ${params.venueName} automatically.`
-              : "You'll search for your workplace after signing up."}
+              : 'Create your account from your manager invite.'}
           </Text>
         </View>
 

@@ -39,7 +39,7 @@ export default function SignInScreen() {
   const invitePhone = typeof phoneParam === 'string' ? phoneParam : undefined;
   const [invitePreview] = useState<InvitePreview | null>(null);
 
-  const [flow, setFlow] = useState<'signIn' | 'signUp'>(tab === 'signIn' ? 'signIn' : 'signUp');
+  const [flow, setFlow] = useState<'signIn' | 'signUp'>(inviteToken && tab !== 'signIn' ? 'signUp' : 'signIn');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -141,7 +141,7 @@ export default function SignInScreen() {
           <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
           {!inviteToken ? (
             <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>
-              Time tracking, scheduling, reservations, and team chat. Start your 14-day free trial now, then join a venue when an owner invites you.
+              Time tracking, scheduling, reservations, and team chat for teams that already use Venue Wrangler.
             </Text>
           ) : null}
         </View>
@@ -158,12 +158,14 @@ export default function SignInScreen() {
               <Text style={{ color: authColors.danger, textAlign: 'center' }}>{formError}</Text>
             ) : null}
 
-            <SegmentedButtons
-              theme={authControlTheme}
-              value={flow}
-              onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
-              buttons={[{ value: 'signUp', label: 'Create account' }, { value: 'signIn', label: 'Sign in' }]}
-            />
+            {inviteToken ? (
+              <SegmentedButtons
+                theme={authControlTheme}
+                value={flow}
+                onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
+                buttons={[{ value: 'signUp', label: 'Create account' }, { value: 'signIn', label: 'Sign in' }]}
+              />
+            ) : null}
 
             {flow === 'signUp' ? (
               <TextInput {...authInputProps} label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
@@ -178,7 +180,7 @@ export default function SignInScreen() {
 
             <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
-                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Start free trial')
+                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Create account')
                 : 'Sign in'}
             </Button>
 
@@ -190,7 +192,7 @@ export default function SignInScreen() {
                 </Text>{' '}and{' '}
                 <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
                   Privacy Policy
-                </Text>. Your 14-day trial starts automatically.
+                </Text>.
               </Text>
             ) : null}
           </Card.Content>
