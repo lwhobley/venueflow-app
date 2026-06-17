@@ -15,6 +15,7 @@ import {
 
 const TERMS_URL = 'https://www.venuewrangler.com/terms';
 const PRIVACY_URL = 'https://www.venuewrangler.com/privacy';
+const INTRODUCTORY_PRICE_LABEL = '$99';
 
 // Shown when RevenueCat returns no live offering yet — e.g. Expo Go / dev
 // (no native key), or before the App Store subscription is approved. Keeps
@@ -24,7 +25,7 @@ const FALLBACK_TIERS: PurchasePackage[] = [
   {
     id: 'venueflow-monthly',
     title: 'Venue Wrangler',
-    priceString: '$99',
+    priceString: INTRODUCTORY_PRICE_LABEL,
     productId: 'com.venuewrangler.monthly',
   },
 ];
@@ -119,7 +120,7 @@ export default function PaywallScreen() {
             <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.lg, ...shadow }}>
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
-                <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> introductory offer</Text></Text>
+                <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{INTRODUCTORY_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> introductory offer</Text></Text>
                 <Text style={{ color: colors.muted, fontWeight: '600' }}>For teams of 1-75 people</Text>
                 <Text style={{ color: colors.success, fontWeight: '600' }}>
                   {inTrial ? 'Intro access is active' : 'Introductory offer through the App Store'}

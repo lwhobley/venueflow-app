@@ -85,7 +85,7 @@ async function main() {
           status: 'trialing',
           platform: null,
           planId: 'venueflow_monthly',
-          priceCents: 9999,
+          priceCents: 9900,
           currency: 'USD',
           trialStartedAt: new Date(),
           trialEndsAt,
