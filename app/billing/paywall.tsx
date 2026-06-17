@@ -24,7 +24,7 @@ const FALLBACK_TIERS: PurchasePackage[] = [
   {
     id: 'venueflow-monthly',
     title: 'Venue Wrangler',
-    priceString: '$99.99',
+    priceString: '$99',
     productId: 'com.venuewrangler.monthly',
   },
 ];
@@ -101,7 +101,7 @@ export default function PaywallScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
         <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Add your team</Text>
-        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Upgrade to one flat monthly plan for teams of 1-50 people to share scheduling, the live floor, time clock, and team chat.</Text>
+        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Upgrade with the introductory offer for teams of 1-75 people to share scheduling, the live floor, time clock, and team chat.</Text>
       </View>
 
       {!PURCHASES_SUPPORTED ? (
@@ -119,10 +119,10 @@ export default function PaywallScreen() {
             <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.lg, ...shadow }}>
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
-                <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-                <Text style={{ color: colors.muted, fontWeight: '600' }}>For teams of 1-50 people</Text>
+                <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> introductory offer</Text></Text>
+                <Text style={{ color: colors.muted, fontWeight: '600' }}>For teams of 1-75 people</Text>
                 <Text style={{ color: colors.success, fontWeight: '600' }}>
-                  {inTrial ? 'Intro access is active' : 'Monthly App Store subscription'}
+                  {inTrial ? 'Intro access is active' : 'Introductory offer through the App Store'}
                 </Text>
                 <Text style={{ color: colors.muted }}>Solo use is free. Upgrade to unlock team scheduling, reservations, the live floor, and team chat.</Text>
                 <Button

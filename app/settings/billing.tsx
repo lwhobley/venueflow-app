@@ -9,7 +9,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling } from '../../lib/permissions';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
-const MONTHLY_PLAN_LABEL = '$99.99 / month';
+const MONTHLY_PLAN_LABEL = '$99 introductory offer';
 
 export default function BillingScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
@@ -51,7 +51,7 @@ export default function BillingScreen() {
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
           <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'Not configured'}</Text>
           {inTrial ? <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in intro access</Text> : null}
-          <Text style={{ color: colors.muted }}>The paid plan renews monthly and unlocks the full app for teams of 1-50 people.</Text>
+          <Text style={{ color: colors.muted }}>The paid plan renews monthly and unlocks the full app for teams of 1-75 people.</Text>
           <Text style={{ color: colors.muted }}>Current plan: {isPaid ? MONTHLY_PLAN_LABEL : inTrial ? 'Intro access' : 'Not subscribed'}</Text>
           <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
 

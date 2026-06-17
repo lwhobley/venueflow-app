@@ -18,9 +18,9 @@ import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappe
 import { ProfileService } from './profile.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
-const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
+const STAFF_RANGES = ['1-15', '16-30', '31-75'] as const;
 const FLAT_PLAN_ID = 'venueflow_monthly';
-const FLAT_PLAN_PRICE_CENTS = 9999;
+const FLAT_PLAN_PRICE_CENTS = 9900;
 const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
