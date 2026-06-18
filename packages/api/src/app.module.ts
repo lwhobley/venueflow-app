@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { EmailModule } from './email/email.module';
 import { HealthController } from './health.controller';
+import { SupportController } from './support.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { VenueModule } from './venue/venue.module';
@@ -59,6 +60,7 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
   ],
   controllers: [
     HealthController,
+    SupportController,
     AuthController,
     AppController,
     AppBillingController,
