@@ -7,6 +7,12 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 
+const DEFAULT_CORS_ORIGINS = [
+  'https://www.venuewrangler.com',
+  'https://venuewrangler.com',
+  'https://venue-wrangler.pages.dev',
+];
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.enableShutdownHooks();
@@ -19,6 +25,7 @@ async function bootstrap() {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+  const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
 
   app.use(helmet());
   app.use(
@@ -38,7 +45,7 @@ async function bootstrap() {
   // Native mobile clients don't send an Origin header, so this does not affect
   // them; it only restricts browsers. Set CORS_ORIGINS for web/dev.
   app.enableCors({
-    origin: origins.length > 0 ? origins : false,
+    origin: allowedOrigins,
     credentials: true,
   });
   app.useGlobalFilters(new AllExceptionsFilter());
