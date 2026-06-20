@@ -188,6 +188,7 @@ export default function WelcomeScreen() {
         >
           Join with Invite
         </Button>
+        <Text style={styles.registerNote}>Register your business at venuewrangler.com</Text>
       </View>
     </View>
   );
@@ -280,6 +281,12 @@ const styles = StyleSheet.create({
   buttonLabel: {
     fontSize: 17,
     fontWeight: '700',
+  },
+  registerNote: {
+    color: colors.muted,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 4,
   },
   signUpButton: {
     borderColor: colors.border,
