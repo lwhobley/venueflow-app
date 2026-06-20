@@ -188,7 +188,7 @@ export default function WelcomeScreen() {
         >
           Join with Invite
         </Button>
-        <Text style={styles.registerNote}>Register your business at venuewrangler.com</Text>
+        <Text style={styles.registerNote}>www.venuewrangler.com</Text>
       </View>
     </View>
   );

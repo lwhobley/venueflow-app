@@ -210,7 +210,7 @@ export default function SignInScreen() {
 
         <View style={{ alignItems: 'center', marginTop: spacing.sm, gap: 6 }}>
           <Text style={{ color: authColors.muted, fontSize: 13, textAlign: 'center' }}>
-            Register your business at venuewrangler.com
+            www.venuewrangler.com
           </Text>
           <Text style={{ color: authColors.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
           <Text style={{ color: authColors.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
