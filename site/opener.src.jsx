@@ -10,9 +10,12 @@
   const React = window.React;
   if (!React) return;
 
-  // How long the overlay plays before cross-fading out. The scene settles ~10s
-  // and holds the finished workspace + tagline; we cut shortly after.
-  const OPENER_DURATION = 11.4;
+  // Wall-clock length of the opener. The ~13s scene is played faster so its
+  // full arc (chaos -> lasso -> features snap in -> tagline) lands within this
+  // window, then the page cross-fades in.
+  const OPENER_WALL_SECONDS = 8;
+  const SCENE_PLAY_TO = 11; // scene-seconds to reach (tagline is fully in ~10.7)
+  const SPEED = SCENE_PLAY_TO / OPENER_WALL_SECONDS;
 
   // ── easing + interpolation (verbatim) ──────────────────────────────────────
   const Easing = {
@@ -44,7 +47,7 @@
     };
   }
 
-  const TimelineContext = React.createContext({ time: 0, duration: OPENER_DURATION, playing: false });
+  const TimelineContext = React.createContext({ time: 0, duration: SCENE_PLAY_TO, playing: false });
   const useTime = () => React.useContext(TimelineContext).time;
 
   // ── Venue Wrangler scene (verbatim) ────────────────────────────────────────
@@ -345,7 +348,7 @@
         const dt = (ts - last) / 1000;
         last = ts;
         setTime((t) => {
-          const next = t + dt;
+          const next = t + dt * SPEED;
           if (next >= duration && !doneRef.current) {
             doneRef.current = true;
             if (onDone) onDone();
@@ -369,7 +372,7 @@
   }
 
   function VenueWranglerOpener({ onDone }) {
-    return <WebStage duration={OPENER_DURATION} onDone={onDone}><VWScene /></WebStage>;
+    return <WebStage duration={SCENE_PLAY_TO} onDone={onDone}><VWScene /></WebStage>;
   }
 
   window.VenueWranglerOpener = VenueWranglerOpener;
