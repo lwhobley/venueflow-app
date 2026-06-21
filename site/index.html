@@ -355,8 +355,28 @@
       .footer a { display: inline-block; margin: 12px 18px 0 0; }
     }
   </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* Opening transition overlay (plays once per session, then dissolves into the page). */
+    #vw-opener { display: none; position: fixed; inset: 0; z-index: 9999; background: #FBD4B6; opacity: 1; transition: opacity .85s ease; }
+    #vw-opener.vw-show { display: block; }
+    #vw-opener.vw-hide { opacity: 0; pointer-events: none; }
+    html.vw-lock, html.vw-lock body { overflow: hidden; }
+    #vw-skip { display: none; position: fixed; right: 20px; bottom: 20px; z-index: 10000;
+      font-family: 'Nunito', system-ui, sans-serif; font-weight: 700; font-size: 14px; color: #2B2A33;
+      background: rgba(255,255,255,0.82); border: 1px solid rgba(0,0,0,0.08); padding: 9px 16px;
+      border-radius: 999px; cursor: pointer; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+      box-shadow: 0 6px 18px rgba(20,20,40,0.14); }
+    #vw-skip.vw-show { display: block; }
+    #vw-skip:hover { background: #fff; }
+    @media (prefers-reduced-motion: reduce) { #vw-opener, #vw-skip { display: none !important; } }
+  </style>
 </head>
 <body>
+  <div id="vw-opener" aria-hidden="true"></div>
+  <button id="vw-skip" type="button" aria-label="Skip intro">Skip intro &rsaquo;</button>
   <nav class="nav">
     <div class="wrap nav-inner">
       <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">VW</span> Venue Wrangler</a>
@@ -634,6 +654,59 @@
         button.disabled = false;
       }
     });
+  </script>
+  <script>
+  /* Opening transition: play the Venue Wrangler intro once per session, then
+     dissolve into the landing page. Fails safe — the overlay is JS-gated and
+     can never trap the page (reduced-motion, no-JS, load error, or timeout all
+     reveal the page). */
+  (function () {
+    var KEY = 'vw-opener-seen';
+    var host = document.getElementById('vw-opener');
+    var skip = document.getElementById('vw-skip');
+    if (!host) return;
+    var reduced = false, seen = false;
+    try { reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+    try { seen = !!sessionStorage.getItem(KEY); } catch (e) {}
+    if (seen || reduced) { host.remove(); if (skip) skip.remove(); return; }
+
+    document.documentElement.classList.add('vw-lock');
+    host.classList.add('vw-show');
+
+    var finished = false;
+    function finish() {
+      if (finished) return; finished = true;
+      try { sessionStorage.setItem(KEY, '1'); } catch (e) {}
+      host.classList.add('vw-hide');
+      if (skip) skip.classList.remove('vw-show');
+      document.documentElement.classList.remove('vw-lock');
+      setTimeout(function () { host.remove(); if (skip) skip.remove(); }, 950);
+    }
+    if (skip) skip.addEventListener('click', finish);
+    var safety = setTimeout(finish, 16000);
+
+    function loadScript(src, integrity) {
+      return new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src; s.async = false; s.crossOrigin = 'anonymous';
+        if (integrity) s.integrity = integrity;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { reject(new Error('failed ' + src)); };
+        document.head.appendChild(s);
+      });
+    }
+
+    loadScript('https://unpkg.com/react@18.3.1/umd/react.production.min.js', 'sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z')
+      .then(function () { return loadScript('https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js', 'sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1'); })
+      .then(function () { return loadScript('opener.js'); })
+      .then(function () {
+        if (!window.VenueWranglerOpener || !window.React || !window.ReactDOM) { finish(); return; }
+        if (skip) skip.classList.add('vw-show');
+        var root = window.ReactDOM.createRoot(host);
+        root.render(window.React.createElement(window.VenueWranglerOpener, { onDone: function () { clearTimeout(safety); finish(); } }));
+      })
+      .catch(function () { finish(); });
+  })();
   </script>
 </body>
 </html>
