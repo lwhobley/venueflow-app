@@ -337,7 +337,7 @@ export default function FloorEditorScreen() {
   const saveFloorPlan = useMutation(api.floor.saveFloorPlan);
   const clearActiveFloorPlan = useMutation(api.floor.clearActiveFloorPlan);
 
-  const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canEdit = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const [tables, setTables] = useState<DraftTable[]>([]);
   const [chairs, setChairs] = useState<DraftChair[]>([]);

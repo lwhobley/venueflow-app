@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, ScrollView, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { router } from 'expo-router';
@@ -90,9 +90,9 @@ export default function ReservationsScreenWrapper() {
 
 function ReservationsScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
+  const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const page = useQuery(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
@@ -326,11 +326,15 @@ function ReservationsScreen() {
   );
 
   return (
-    <ScrollView
+    <FlatList
+      data={sorted}
+      keyExtractor={(item) => item.id}
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
-    >
+      removeClippedSubviews
+      ListHeaderComponent={(
+        <>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <View style={{ gap: 4, flex: 1 }}>
           <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Reservations</Text>
@@ -549,11 +553,8 @@ function ReservationsScreen() {
           ) : null}
         </Card.Content>
       </Card>
-      <FlatList
-        data={sorted}
-        keyExtractor={(item) => item.id}
-        scrollEnabled={false}
-        removeClippedSubviews
+        </>
+      )}
         renderItem={({ item: res }) => {
           const sc = statusColor[res.status] ?? { bg: colors.cream, fg: colors.muted };
           const seated = res.status === 'seated';
@@ -623,7 +624,6 @@ function ReservationsScreen() {
             </View>
           );
         }}
-      />
-    </ScrollView>
+    />
   );
 }

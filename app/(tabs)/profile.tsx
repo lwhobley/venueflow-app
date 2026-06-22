@@ -17,9 +17,9 @@ export default function ProfileScreen() {
   const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const serverRole = me?.profile.role ?? null;
-  const allAccess = me?.profile.allAccess ?? user?.all_access;
-  const canManage = canManageVenue(serverRole ?? user?.role, allAccess);
-  const canViewBilling = canManageBilling(serverRole ?? user?.role, allAccess);
+  const allAccess = me?.profile.allAccess ?? false;
+  const canManage = Boolean(serverRole && canManageVenue(serverRole, allAccess));
+  const canViewBilling = Boolean(serverRole && canManageBilling(serverRole, allAccess));
   const { signOut } = useAuthActions();
   const deleteAccount = useMutation(api.app.deleteMyAccount);
   const [confirmDelete, setConfirmDelete] = useState(false);

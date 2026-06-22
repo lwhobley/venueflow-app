@@ -101,7 +101,7 @@ function ScheduleScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const [managerTab, setManagerTab] = useState<'calendar' | 'requests' | 'blackouts'>('calendar');
   const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');

@@ -51,7 +51,7 @@ export default function BarStockScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
   const stock = useQuery(api.barInventory.getBarStock, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
   const upsertBarItem = useMutation(api.barInventory.upsertBarItem);
   const recordMovement = useMutation(api.barInventory.recordBarStockMovement);

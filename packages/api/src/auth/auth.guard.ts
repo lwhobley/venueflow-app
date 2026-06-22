@@ -19,6 +19,17 @@ export type AuthenticatedRequest = Request & {
   user?: AuthUser;
 };
 
+// Short TTL on session lookups so revocation propagates within seconds
+// while still saving a DB round-trip per request on hot paths.
+const SESSION_CACHE_TTL_MS = 30_000;
+type CachedSession = { userId: string; expiresAt: number; cachedAt: number };
+const sessionCache = new Map<string, CachedSession>();
+
+/** Drop a session from the in-process cache so logout takes effect immediately. */
+export function invalidateCachedSession(sessionId: string): void {
+  sessionCache.delete(sessionId);
+}
+
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
@@ -59,11 +70,33 @@ export class AuthGuard implements CanActivate {
     if (!payload.sid) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
-    const session = await this.prisma.session.findUnique({
-      where: { id: payload.sid },
-      select: { userId: true, expiresAt: true },
-    });
-    if (!session || session.userId !== payload.sub || session.expiresAt.getTime() <= Date.now()) {
+    const now = Date.now();
+    const cached = sessionCache.get(payload.sid);
+    let session: { userId: string; expiresAt: number } | null;
+    if (cached && now - cached.cachedAt < SESSION_CACHE_TTL_MS && cached.expiresAt > now) {
+      session = { userId: cached.userId, expiresAt: cached.expiresAt };
+    } else {
+      const row = await this.prisma.session.findUnique({
+        where: { id: payload.sid },
+        select: { userId: true, expiresAt: true },
+      });
+      session = row ? { userId: row.userId, expiresAt: row.expiresAt.getTime() } : null;
+      if (session) {
+        sessionCache.set(payload.sid, { userId: session.userId, expiresAt: session.expiresAt, cachedAt: now });
+      } else {
+        sessionCache.delete(payload.sid);
+      }
+      // Opportunistic cleanup to keep the map from growing unbounded.
+      if (sessionCache.size > 5000) {
+        for (const [key, value] of sessionCache) {
+          if (now - value.cachedAt > SESSION_CACHE_TTL_MS || value.expiresAt <= now) {
+            sessionCache.delete(key);
+          }
+        }
+      }
+    }
+    if (!session || session.userId !== payload.sub || session.expiresAt <= now) {
+      sessionCache.delete(payload.sid);
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 

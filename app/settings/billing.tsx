@@ -25,7 +25,7 @@ export default function BillingScreen() {
   const isPaid = billing?.status === 'active';
   const trialDaysLeft = inTrial ? Math.max(0, Math.ceil((trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
   const upgradeLabel = inTrial ? 'Upgrade' : 'Subscribe';
-  const canEditBilling = canManageBilling(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canEditBilling = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
 
   if (me === undefined) {
     return (

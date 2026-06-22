@@ -84,7 +84,7 @@ export default function ChatScreen() {
   const groups = (conversations?.groups ?? []) as any[];
   const dms = (conversations?.dms ?? []) as any[];
   const dmByName = useMemo(() => new Map(dms.map((d) => [d.title, d])), [dms]);
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const palette = accents;
   const colorFor = (i: number) => palette[i % palette.length].fg;

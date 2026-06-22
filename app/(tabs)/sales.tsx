@@ -345,11 +345,19 @@ function SalesScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const profileLoading = isReady && me === undefined;
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const [tab, setTab] = useState<'summary' | 'servers' | 'items' | 'labor'>('summary');
   const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
 
+  if (profileLoading) {
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
+        <Text style={{ color: colors.muted }}>Loading…</Text>
+      </ScrollView>
+    );
+  }
   if (!canManage) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>

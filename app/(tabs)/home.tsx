@@ -48,7 +48,7 @@ export default function HomeScreen() {
   const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
   const venueName = dashboard?.venue.name ?? venue?.name ?? 'Individual account';
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
-  const canManage = canManageVenue(role, dashboard?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(dashboard && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const managerInsights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip');
   const today = new Date();
@@ -288,24 +288,6 @@ export default function HomeScreen() {
             )}
           </CommandSurface>
 
-          <CommandSurface palette={palette} style={{ flexGrow: 1, flexBasis: 240, gap: spacing.md }}>
-            <CommandText palette={palette} variant="title">{t('dashboard.floorControl')}</CommandText>
-            {[
-              [t('dashboard.seatingFlow'), 0, palette.primary],
-              [t('dashboard.kitchenFire'), 0, palette.warning],
-              [t('dashboard.barQueue'), 0, openShifts ? palette.danger : palette.success],
-            ].map(([label, value, color]) => (
-              <View key={String(label)} style={{ gap: spacing.xs }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <CommandText palette={palette} variant="caption">{String(label)}</CommandText>
-                  <CommandText palette={palette} variant="caption">{formatNumber(Number(value))}%</CommandText>
-                </View>
-                <View style={{ height: 8, borderRadius: 99, backgroundColor: palette.surfaceSoft, overflow: 'hidden' }}>
-                  <View style={{ width: `${Math.min(100, Number(value))}%`, height: '100%', backgroundColor: String(color), borderRadius: 99 }} />
-                </View>
-              </View>
-            ))}
-          </CommandSurface>
         </View>
       ) : (
         <CosmicInsights />

@@ -111,9 +111,10 @@ export default function StaffScreenWrapper() {
 
 function StaffScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
+  const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const profileLoading = isReady && me === undefined;
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -238,6 +239,13 @@ function StaffScreen() {
     if (selectedStaffId === member._id) clearForm();
   };
 
+  if (profileLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
+        <Text style={{ color: colors.muted }}>Loading…</Text>
+      </View>
+    );
+  }
   if (!canManage) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
@@ -252,7 +260,14 @@ function StaffScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
+    <FlatList
+      data={staff}
+      keyExtractor={(item) => item._id}
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md }}
+      removeClippedSubviews
+      ListHeaderComponent={(
+        <>
       <View style={{ gap: 4 }}>
         <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
           Staff Management
@@ -403,11 +418,8 @@ function StaffScreen() {
           ) : null}
         </Card.Content>
       </Card>
-      <FlatList
-        data={staff}
-        keyExtractor={(item) => item._id}
-        scrollEnabled={false}
-        removeClippedSubviews
+        </>
+      )}
         renderItem={({ item: member }) => (
           <Card style={{ backgroundColor: member._id === selectedStaffId ? '#F6E8E4' : colors.cream, marginBottom: spacing.sm }}>
             <Card.Content style={{ gap: 6 }}>
@@ -442,7 +454,6 @@ function StaffScreen() {
             </Card.Content>
           </Card>
         )}
-      />
-    </ScrollView>
+    />
   );
 }

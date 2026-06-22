@@ -247,7 +247,7 @@ function GuestsScreenInner() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
   const guestList = useQuery(api.guests.listGuests, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as GuestListResponse | undefined;
   const guests = guestList?.guests;
   const upsertGuest = useMutation(api.guests.upsertGuest);

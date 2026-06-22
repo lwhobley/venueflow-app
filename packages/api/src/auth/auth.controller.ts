@@ -9,6 +9,7 @@ import { promisify } from 'util';
 const pbkdf2Async = promisify(pbkdf2);
 import { Public } from './public.decorator';
 import { CurrentUser } from './current-user.decorator';
+import { invalidateCachedSession } from './auth.guard';
 import type { AuthUser } from './auth.guard';
 import { getClientIp } from '../common/http';
 import { assertWithinSharedRateLimit } from '../common/rate-limit';
@@ -379,14 +380,18 @@ export class AuthController {
   async logout(@CurrentUser() user: AuthUser) {
     if (user.sid) {
       await this.prisma.session.deleteMany({ where: { id: user.sid, userId: user.sub } });
+      invalidateCachedSession(user.sid);
     }
     return { ok: true };
   }
 
-  // Revoke every session for the account (all devices).
+  // Revoke every session for the account (all devices). The in-process session
+  // cache will expire stale entries within SESSION_CACHE_TTL_MS (30s); we only
+  // explicitly invalidate the caller's sid since we don't know the others here.
   @Post('logout-all')
   async logoutAll(@CurrentUser() user: AuthUser) {
     await this.prisma.session.deleteMany({ where: { userId: user.sub } });
+    if (user.sid) invalidateCachedSession(user.sid);
     return { ok: true };
   }
 

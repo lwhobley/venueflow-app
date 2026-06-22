@@ -5,6 +5,7 @@ import { colors, spacing } from '../../lib/theme';
 import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { canManageBilling } from '../../lib/permissions';
+import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
@@ -20,8 +21,9 @@ export default function BillingLockedScreen() {
   const params = useLocalSearchParams<{ reason?: string }>();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
+  const { me } = useAuthenticatedSession();
   const reason = Array.isArray(params.reason) ? params.reason[0] : params.reason ?? 'never_subscribed';
-  const canPay = canManageBilling(user?.role, user?.all_access);
+  const canPay = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

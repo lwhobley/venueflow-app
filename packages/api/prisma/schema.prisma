@@ -303,6 +303,8 @@ model Venue {
   posConnections                PosConnection[]
   posLaborPunches               PosLaborPunch[]
   crmActivityLogs               CrmActivityLog[]
+  crmBeos                       CrmBeo[]
+  crmContracts                  CrmContract[]
   paymentMethods                PaymentMethod[]
   invoices                      Invoice[]
   venueRoles                    VenueRole[]
@@ -905,6 +907,7 @@ model CrmBeo {
   status              BeoStatus
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+  venue               Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
   lead                CrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@index([venueId])
@@ -934,6 +937,7 @@ model CrmContract {
   status              ContractStatus
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
+  venue               Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
   lead                CrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@index([venueId])

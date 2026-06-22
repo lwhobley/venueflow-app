@@ -17,7 +17,7 @@ export default function VenueSettingsScreen() {
 
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const [name, setName] = useState(venue?.name ?? '');
   const [lat, setLat] = useState(venue ? String(venue.latitude) : '');

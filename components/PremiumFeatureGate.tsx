@@ -12,9 +12,9 @@ import { hasAllAccess } from '../lib/permissions';
 // features until it expires; after that the user must upgrade. When billing is
 // disabled (local/dev builds) the feature is always unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
-  const { user, me, isAuthLoading } = useAuthenticatedSession();
+  const { me, isAuthLoading } = useAuthenticatedSession();
   const { isPremium, isLoading } = useA0Purchases();
-  const allAccess = hasAllAccess(me?.profile.allAccess ?? user?.all_access);
+  const allAccess = hasAllAccess(me?.profile.allAccess);
 
   // Avoid flashing the upsell while entitlement or profile is still resolving.
   if (isLoading || isAuthLoading || me === undefined) {

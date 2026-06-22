@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   ForbiddenException,
@@ -26,6 +27,7 @@ import { TableShape, TableSection } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { withSerializableRetry } from '../../common/tx-retry';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
@@ -460,15 +462,31 @@ export class FloorController {
     if (unknown.length) throw new BadRequestException('One or more tables are not on this venue\'s floor plan');
 
     const endsAt = new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60 * 1000);
-    // Release any prior active assignments for this reservation first so repeat
-    // calls re-point the reservation instead of stacking duplicate holds.
-    await this.prisma.$transaction([
-      this.prisma.tableAssignment.updateMany({
+    // Release prior assignments for THIS reservation, then check each requested
+    // table for active overlaps from OTHER reservations, then create the new
+    // holds — all inside a Serializable transaction so two managers can't
+    // simultaneously assign overlapping holds to the same table.
+    await withSerializableRetry(this.prisma, async (tx) => {
+      await tx.tableAssignment.updateMany({
         where: { venueId: scope.venueId, reservationId: body.reservationId, releasedAt: null },
         data: { releasedAt: new Date(), releasedReason: 'reassigned' },
-      }),
-      ...body.tableIds.map((tableId) =>
-        this.prisma.tableAssignment.create({
+      });
+      const conflict = await tx.tableAssignment.findFirst({
+        where: {
+          venueId: scope.venueId,
+          tableId: { in: body.tableIds },
+          releasedAt: null,
+          startsAt: { lt: endsAt },
+          endsAt: { gt: reservation.reservationTime },
+          NOT: { reservationId: body.reservationId },
+        },
+        select: { tableId: true },
+      });
+      if (conflict) {
+        throw new ConflictException(`Table ${conflict.tableId} is already booked for this time window`);
+      }
+      for (const tableId of body.tableIds) {
+        await tx.tableAssignment.create({
           data: {
             venueId: scope.venueId,
             reservationId: body.reservationId,
@@ -477,9 +495,9 @@ export class FloorController {
             startsAt: reservation.reservationTime,
             endsAt,
           },
-        }),
-      ),
-    ]);
+        });
+      }
+    });
     return { ok: true };
   }
 

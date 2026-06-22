@@ -35,7 +35,7 @@ function IntegrationsScreenInner() {
   const user = useAuthStore((state: AuthState) => state.user);
   const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
   const overview = useQuery(api.pos.getPosOverview, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const reservationOverview = useQuery(
     api.reservationIntegrations.getReservationIntegrationOverview,

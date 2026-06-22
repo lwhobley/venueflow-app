@@ -166,7 +166,7 @@ function FloorScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canEdit = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
   const activeFloor = floor ?? null;
   const reservationQueue = unassignedReservations ?? [];
   const waitlistQueue = openWaitlist ?? [];

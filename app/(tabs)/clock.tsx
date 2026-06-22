@@ -49,9 +49,6 @@ export default function ClockScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady } = useAuthenticatedSession();
-  // Admin/owner/manager are salaried: they don't punch a time clock.
-  const salaried = canManageVenue(user?.role, user?.all_access);
-  const isAdmin = salaried;
   const [location, setLocation] = useState<CurrentLocation | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [now, setNow] = useState(() => new Date());
@@ -62,6 +59,9 @@ export default function ClockScreen() {
   const { data: timeClock } = useApiQuery<any | null>(['app', 'time-clock'], '/v1/app/time-clock', isReady);
   const clockIn = useApiMutation(appApi.clockIn, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
   const clockOut = useApiMutation(appApi.clockOut, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
+  // Admin/owner/manager are salaried: they don't punch a time clock.
+  const salaried = Boolean(dashboard?.profile && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
+  const isAdmin = salaried;
 
   const rawVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
   const activeVenue = useMemo(() => {
