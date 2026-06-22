@@ -68,6 +68,11 @@ const queryRoutes: Record<string, Route> = {
   'crm.listBeos': { path: (args) => `/v1/crm/beos?page=${args.page ?? 0}&limit=${args.limit ?? 100}` },
   'crm.listContracts': { path: (args) => `/v1/crm/contracts?page=${args.page ?? 0}&limit=${args.limit ?? 100}` },
   'crm.getLead': { path: (args) => `/v1/crm/leads/${args.leadId}` },
+  'crm.getForecast': { path: '/v1/crm/forecast' },
+  'crm.getSourceRoi': { path: '/v1/crm/source-roi' },
+  'crm.getStaleLeads': { path: (args) => `/v1/crm/stale-leads${args?.days ? `?days=${args.days}` : ''}` },
+  'crm.getLeadActivity': { path: (args) => `/v1/crm/leads/${args.leadId}/activity` },
+  'crm.listTemplates': { path: '/v1/crm/templates' },
   'reservationIntegrations.getReservationIntegrationOverview': { path: '/v1/integrations/reservations' },
 };
 
@@ -273,6 +278,29 @@ const mutationRoutes: Record<string, Route> = {
   'crm.saveContract': { path: '/v1/crm/contracts', method: 'POST', body: stripVenue, invalidate: [['crm', 'contracts']] },
   'crm.convertBeoToContract': { path: (args) => `/v1/crm/beos/${args.beoId ?? args.id}/convert`, method: 'POST', body: () => ({}), invalidate: [['crm', 'beos'], ['crm', 'contracts']] },
   'crm.addNote': { path: (args) => `/v1/crm/leads/${args.leadId}/notes`, method: 'POST', body: ({ text }) => ({ text }), invalidate: [['crm', 'leads']] },
+  'crm.emailBeo': {
+    path: (args) => `/v1/crm/beos/${args.beoId}/email`,
+    method: 'POST',
+    body: ({ toEmail, message }) => ({ toEmail, message }),
+    invalidate: [['crm', 'beos']],
+  },
+  'crm.saveTemplate': {
+    path: '/v1/crm/templates',
+    method: 'POST',
+    body: stripVenue,
+    invalidate: [['crm', 'templates']],
+  },
+  'crm.deleteTemplate': {
+    path: (args) => `/v1/crm/templates/${args.templateId}`,
+    method: 'DELETE',
+    body: () => ({}),
+    invalidate: [['crm', 'templates']],
+  },
+  'crm.renderTemplate': {
+    path: (args) => `/v1/crm/templates/${args.templateId}/render`,
+    method: 'POST',
+    body: ({ leadId, beoId }) => ({ leadId, beoId }),
+  },
   'reservations.saveReservation': { path: '/v1/reservations', method: 'POST', body: stripVenue, invalidate: [['reservations', 'page']] },
   'reservations.removeReservation': { path: (args) => `/v1/reservations/${args.reservationId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['reservations', 'page']] },
   'payroll.recordPayrollExport': { path: '/v1/payroll/record-export', method: 'POST', body: stripVenue },

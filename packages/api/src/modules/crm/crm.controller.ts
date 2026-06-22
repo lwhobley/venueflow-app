@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   NotFoundException,
@@ -18,9 +19,10 @@ import {
   IsString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CrmLeadStatus, BeoStatus, ContractStatus } from '@prisma/client';
+import { CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -236,9 +238,161 @@ function makeContractNumber(): string {
   return `C-${now.toString(36).toUpperCase().slice(-6)}${Math.random().toString(36).toUpperCase().slice(2, 5)}`;
 }
 
+// Weighted probabilities used for the pipeline forecast. Tuned to industry
+// norms — early stages discount more, won is realized revenue.
+const STAGE_PROBABILITY: Record<string, number> = {
+  new: 0.05,
+  contacted: 0.15,
+  qualified: 0.3,
+  proposal_sent: 0.5,
+  negotiating: 0.7,
+  won: 1.0,
+  lost: 0,
+  unqualified: 0,
+  on_hold: 0.1,
+};
+
+// Stages we expect to move within a reasonable window. Won/lost/unqualified
+// are terminal; on_hold is intentionally parked.
+const ACTIVE_STAGES: CrmLeadStatus[] = ['new', 'contacted', 'qualified', 'proposal_sent', 'negotiating'];
+
+class EmailBeoDto {
+  @IsString()
+  toEmail!: string;
+
+  @IsString()
+  @IsOptional()
+  message?: string;
+}
+
+class SaveTemplateDto {
+  @IsString()
+  @IsOptional()
+  templateId?: string;
+
+  @IsString()
+  name!: string;
+
+  @IsString()
+  subject!: string;
+
+  @IsString()
+  body!: string;
+
+  @IsString()
+  @IsOptional()
+  variables?: string;
+}
+
+class RenderTemplateDto {
+  @IsString()
+  @IsOptional()
+  leadId?: string;
+
+  @IsString()
+  @IsOptional()
+  beoId?: string;
+}
+
+function substituteVariables(template: string, context: Record<string, string>): string {
+  // {{key}} → context[key]; unknown keys collapse to '' (don't leak braces).
+  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => context[key] ?? '');
+}
+
+function htmlEscape(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatEventDate(date: Date | null): string {
+  return date
+    ? date.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : 'TBD';
+}
+
+function formatMoneyCents(cents: number | null | undefined): string {
+  return cents != null ? `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'TBD';
+}
+
+type BeoRenderInput = {
+  eventName: string;
+  eventDate: Date | null;
+  eventType: string | null;
+  guestCount: number | null;
+  venueSpace: string | null;
+  setupStyle: string | null;
+  fbMinimumCents: number | null;
+  depositCents: number | null;
+  depositDueDate: Date | null;
+  menuAppetizers: string | null;
+  menuEntrees: string | null;
+  menuDesserts: string | null;
+  menuBarPackage: string | null;
+  specialRequirements: string | null;
+  lead?: { fullName: string; email: string | null } | null;
+};
+
+function renderBeoText(beo: BeoRenderInput, venueName: string, message?: string): string {
+  const rows: string[][] = [
+    ['Event', beo.eventName],
+    ['Date / Time', formatEventDate(beo.eventDate)],
+    ['Guest count', String(beo.guestCount ?? 'TBD')],
+    ['Space', beo.venueSpace ?? 'TBD'],
+    ['Setup', beo.setupStyle ?? 'TBD'],
+    ['F&B minimum', formatMoneyCents(beo.fbMinimumCents)],
+    ['Deposit', formatMoneyCents(beo.depositCents)],
+    ['Deposit due', beo.depositDueDate ? beo.depositDueDate.toLocaleDateString('en-US') : 'TBD'],
+    ['Appetizers', beo.menuAppetizers ?? '—'],
+    ['Entrées', beo.menuEntrees ?? '—'],
+    ['Desserts', beo.menuDesserts ?? '—'],
+    ['Bar', beo.menuBarPackage ?? '—'],
+    ['Special requirements', beo.specialRequirements ?? '—'],
+  ];
+  const greeting = beo.lead?.fullName ? `Hi ${beo.lead.fullName.split(' ')[0]},\n\n` : '';
+  const intro = message ? `${message}\n\n` : `Please review the event details below for ${venueName}.\n\n`;
+  const lines = rows.map(([k, v]) => `${k}: ${v}`).join('\n');
+  return `${greeting}${intro}${lines}\n\nThank you,\n${venueName}\n`;
+}
+
+function renderBeoHtml(beo: BeoRenderInput, venueName: string, message?: string): string {
+  const rows: Array<[string, string]> = [
+    ['Event', beo.eventName],
+    ['Date / Time', formatEventDate(beo.eventDate)],
+    ['Guest count', String(beo.guestCount ?? 'TBD')],
+    ['Space', beo.venueSpace ?? 'TBD'],
+    ['Setup', beo.setupStyle ?? 'TBD'],
+    ['F&B minimum', formatMoneyCents(beo.fbMinimumCents)],
+    ['Deposit', formatMoneyCents(beo.depositCents)],
+    ['Deposit due', beo.depositDueDate ? beo.depositDueDate.toLocaleDateString('en-US') : 'TBD'],
+    ['Appetizers', beo.menuAppetizers ?? '—'],
+    ['Entrées', beo.menuEntrees ?? '—'],
+    ['Desserts', beo.menuDesserts ?? '—'],
+    ['Bar', beo.menuBarPackage ?? '—'],
+    ['Special requirements', beo.specialRequirements ?? '—'],
+  ];
+  const tableRows = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 12px;color:#6F6A5F;border-bottom:1px solid #eee;font-weight:600;">${htmlEscape(k)}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;">${htmlEscape(v)}</td></tr>`)
+    .join('');
+  const greeting = beo.lead?.fullName ? `<p>Hi ${htmlEscape(beo.lead.fullName.split(' ')[0])},</p>` : '';
+  const intro = message ? `<p>${htmlEscape(message)}</p>` : `<p>Please review the event details below for <strong>${htmlEscape(venueName)}</strong>.</p>`;
+  return `<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#23241F;max-width:600px;margin:0 auto;padding:24px;">
+<h2 style="color:#2F7D46;margin:0 0 16px;">${htmlEscape(venueName)} — Banquet Event Order</h2>
+${greeting}
+${intro}
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">${tableRows}</table>
+<p style="color:#6F6A5F;font-size:13px;">Thank you,<br/>${htmlEscape(venueName)}</p>
+</body></html>`;
+}
+
 @Controller('v1/crm')
 export class CrmController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly email: EmailService,
+  ) {}
 
   @RequireSubscription('active')
   @Get('leads')
@@ -374,7 +528,11 @@ export class CrmController {
       if (body.estimatedValueCents !== undefined) patch.estimatedValueCents = body.estimatedValueCents;
 
       await this.prisma.crmLead.update({ where: { id: body.leadId }, data: patch });
-
+      // Record status changes specifically — they're the most useful timeline
+      // event. Generic field edits would just be noise.
+      if (body.status !== undefined && body.status !== existing.status) {
+        await this.logActivity(scope.venueId, body.leadId, scope.profileId, 'status_changed', `${existing.status} → ${body.status}`);
+      }
       return { leadId: body.leadId };
     }
 
@@ -395,7 +553,7 @@ export class CrmController {
         updatedAt: now,
       },
     });
-
+    await this.logActivity(scope.venueId, lead.id, scope.profileId, 'lead_created', body.source ? `Source: ${body.source}` : null);
     return { leadId: lead.id };
   }
 
@@ -426,7 +584,7 @@ export class CrmController {
       where: { id: lead.id },
       data: { lastActivityAt: now, updatedAt: now },
     });
-
+    await this.logActivity(scope.venueId, lead.id, scope.profileId, 'note_added', text.slice(0, 120));
     return { noteId: note.id };
   }
 
@@ -493,7 +651,17 @@ export class CrmController {
 
       const patch: Record<string, any> = { ...fields };
       if (body.status !== undefined) patch.status = body.status as BeoStatus;
-      await this.prisma.crmBeo.update({ where: { id: body.beoId }, data: patch });
+      const updated = await this.prisma.crmBeo.update({ where: { id: body.beoId }, data: patch });
+      // Sync confirmed BEOs to a reservation hold so private events block the
+      // floor plan instead of letting another booking overlap the same space.
+      const becameConfirmed = body.status === 'confirmed' && existing.status !== 'confirmed';
+      const alreadyConfirmed = (body.status === undefined || body.status === 'confirmed') && updated.status === 'confirmed';
+      if ((becameConfirmed || alreadyConfirmed) && updated.eventDate) {
+        await this.syncBeoToReservation(scope.venueId, updated);
+      }
+      if (existing.leadId && body.status !== undefined && body.status !== existing.status) {
+        await this.logActivity(scope.venueId, existing.leadId, scope.profileId, 'beo_status_changed', `${existing.status} → ${body.status}`);
+      }
       return { beoId: body.beoId };
     }
 
@@ -511,8 +679,11 @@ export class CrmController {
         where: { id: body.leadId },
         data: { lastActivityAt: now, updatedAt: now },
       });
+      await this.logActivity(scope.venueId, body.leadId, scope.profileId, 'beo_created', beo.eventName);
     }
-
+    if (beo.status === 'confirmed' && beo.eventDate) {
+      await this.syncBeoToReservation(scope.venueId, beo);
+    }
     return { beoId: beo.id };
   }
 
@@ -653,6 +824,337 @@ export class CrmController {
     }
 
     return { contractId: contract.id };
+  }
+
+  // ============================================================
+  // Pipeline forecast — weighted by stage probability.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('forecast')
+  async getPipelineForecast(@VenueScope() scope: Scope) {
+    requireManager(scope);
+    const leads = await this.prisma.crmLead.findMany({
+      where: { venueId: scope.venueId, deletedAt: null },
+      select: { status: true, estimatedValueCents: true },
+    });
+
+    const byStage = new Map<string, { count: number; rawValueCents: number; weightedValueCents: number }>();
+    let totalWeighted = 0;
+    let totalRaw = 0;
+    let wonCount = 0;
+    let wonValueCents = 0;
+    for (const lead of leads) {
+      const status = lead.status as string;
+      const value = lead.estimatedValueCents ?? 0;
+      const probability = STAGE_PROBABILITY[status] ?? 0;
+      const weighted = Math.round(value * probability);
+      const row = byStage.get(status) ?? { count: 0, rawValueCents: 0, weightedValueCents: 0 };
+      row.count += 1;
+      row.rawValueCents += value;
+      row.weightedValueCents += weighted;
+      byStage.set(status, row);
+      totalRaw += value;
+      totalWeighted += weighted;
+      if (status === 'won') {
+        wonCount += 1;
+        wonValueCents += value;
+      }
+    }
+    return {
+      byStage: Array.from(byStage.entries()).map(([stage, row]) => ({
+        stage,
+        probability: STAGE_PROBABILITY[stage] ?? 0,
+        ...row,
+      })),
+      totals: {
+        leadCount: leads.length,
+        rawValueCents: totalRaw,
+        weightedValueCents: totalWeighted,
+        wonCount,
+        wonValueCents,
+      },
+    };
+  }
+
+  // ============================================================
+  // Lead source ROI: counts, won-rate, and revenue by source.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('source-roi')
+  async getSourceRoi(@VenueScope() scope: Scope) {
+    requireManager(scope);
+    const leads = await this.prisma.crmLead.findMany({
+      where: { venueId: scope.venueId, deletedAt: null },
+      select: { source: true, status: true, estimatedValueCents: true },
+    });
+    const bySource = new Map<string, { source: string; leadCount: number; wonCount: number; lostCount: number; pipelineValueCents: number; wonValueCents: number }>();
+    for (const lead of leads) {
+      const source = lead.source ?? '(unspecified)';
+      const row = bySource.get(source) ?? { source, leadCount: 0, wonCount: 0, lostCount: 0, pipelineValueCents: 0, wonValueCents: 0 };
+      row.leadCount += 1;
+      const value = lead.estimatedValueCents ?? 0;
+      row.pipelineValueCents += value;
+      if (lead.status === 'won') {
+        row.wonCount += 1;
+        row.wonValueCents += value;
+      } else if (lead.status === 'lost' || lead.status === 'unqualified') {
+        row.lostCount += 1;
+      }
+      bySource.set(source, row);
+    }
+    return Array.from(bySource.values())
+      .map((row) => ({
+        ...row,
+        winRate: row.leadCount > 0 ? row.wonCount / row.leadCount : 0,
+      }))
+      .sort((a, b) => b.wonValueCents - a.wonValueCents);
+  }
+
+  // ============================================================
+  // Stale leads: active-stage leads with no activity for N days.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('stale-leads')
+  async getStaleLeads(@VenueScope() scope: Scope, @Query('days') daysQuery?: string) {
+    requireManager(scope);
+    const days = Math.max(1, Math.min(60, Number(daysQuery) || 5));
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const leads = await this.prisma.crmLead.findMany({
+      where: {
+        venueId: scope.venueId,
+        deletedAt: null,
+        status: { in: ACTIVE_STAGES },
+        OR: [{ lastActivityAt: { lt: cutoff } }, { lastActivityAt: null }],
+      },
+      orderBy: [{ lastActivityAt: 'asc' }, { createdAt: 'asc' }],
+      take: 50,
+    });
+    return {
+      thresholdDays: days,
+      leads: leads.map((l) => ({
+        id: l.id,
+        fullName: l.fullName,
+        status: l.status,
+        email: l.email,
+        phone: l.phone,
+        lastActivityAt: toMs(l.lastActivityAt),
+        estimatedValueCents: l.estimatedValueCents ?? 0,
+        daysSinceActivity: Math.floor((Date.now() - (l.lastActivityAt ?? l.createdAt).getTime()) / (24 * 60 * 60 * 1000)),
+      })),
+    };
+  }
+
+  // ============================================================
+  // Activity timeline for a lead.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('leads/:id/activity')
+  async getLeadActivity(@VenueScope() scope: Scope, @Param('id') id: string) {
+    requireManager(scope);
+    const lead = await this.prisma.crmLead.findFirst({
+      where: { id, venueId: scope.venueId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+    const rows = await this.prisma.crmActivityLog.findMany({
+      where: { venueId: scope.venueId, leadId: id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const actorIds = [...new Set(rows.map((r) => r.actorId).filter((id): id is string => Boolean(id)))];
+    const actors = actorIds.length
+      ? await this.prisma.profile.findMany({ where: { id: { in: actorIds } }, select: { id: true, fullName: true } })
+      : [];
+    const actorMap = new Map(actors.map((a) => [a.id, a.fullName]));
+    return rows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      detail: row.detail,
+      actorId: row.actorId,
+      actorName: row.actorId ? actorMap.get(row.actorId) ?? null : null,
+      createdAt: row.createdAt.getTime(),
+    }));
+  }
+
+  // ============================================================
+  // Email BEO to a recipient with the rendered event details.
+  // ============================================================
+  @RequireSubscription('active')
+  @Post('beos/:id/email')
+  async emailBeo(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: EmailBeoDto) {
+    requireManager(scope);
+    const beo = await this.prisma.crmBeo.findFirst({
+      where: { id, venueId: scope.venueId },
+      include: { lead: { select: { fullName: true, email: true } } },
+    });
+    if (!beo) throw new NotFoundException('BEO not found');
+    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { name: true } });
+    const subject = `${venue?.name ?? 'Venue'} — Banquet Event Order: ${beo.eventName}`;
+    const text = renderBeoText(beo, venue?.name ?? 'Venue', body.message);
+    const html = renderBeoHtml(beo, venue?.name ?? 'Venue', body.message);
+    await this.email.sendOrThrow({ to: body.toEmail, subject, text, html });
+    if (beo.leadId) {
+      await this.logActivity(scope.venueId, beo.leadId, scope.profileId, 'beo_emailed', `→ ${body.toEmail}`);
+    }
+    return { ok: true };
+  }
+
+  // ============================================================
+  // Email templates: CRUD + render with substitution.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('templates')
+  async listTemplates(@VenueScope() scope: Scope) {
+    requireManager(scope);
+    const rows = await this.prisma.emailTemplate.findMany({
+      where: { venueId: scope.venueId },
+      orderBy: { name: 'asc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      subject: row.subject,
+      body: row.body,
+      variables: row.variables ? row.variables.split(',').map((v) => v.trim()).filter(Boolean) : [],
+      updatedAt: row.updatedAt.getTime(),
+    }));
+  }
+
+  @RequireSubscription('active')
+  @Post('templates')
+  async saveTemplate(@VenueScope() scope: Scope, @Body() body: SaveTemplateDto) {
+    requireManager(scope);
+    const data = {
+      venueId: scope.venueId,
+      name: body.name.trim(),
+      subject: body.subject,
+      body: body.body,
+      variables: body.variables ?? null,
+    };
+    if (!data.name) throw new BadRequestException('Template name is required');
+    if (body.templateId) {
+      const existing = await this.prisma.emailTemplate.findFirst({ where: { id: body.templateId, venueId: scope.venueId } });
+      if (!existing) throw new NotFoundException('Template not found');
+      const updated = await this.prisma.emailTemplate.update({ where: { id: body.templateId }, data });
+      return { templateId: updated.id };
+    }
+    const created = await this.prisma.emailTemplate.create({ data });
+    return { templateId: created.id };
+  }
+
+  @RequireSubscription('active')
+  @Delete('templates/:id')
+  async deleteTemplate(@VenueScope() scope: Scope, @Param('id') id: string) {
+    requireManager(scope);
+    const existing = await this.prisma.emailTemplate.findFirst({ where: { id, venueId: scope.venueId } });
+    if (!existing) throw new NotFoundException('Template not found');
+    await this.prisma.emailTemplate.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  // Render a template's subject + body against lead/BEO context. Used by the
+  // UI to preview what an email will look like before sending.
+  @RequireSubscription('active')
+  @Post('templates/:id/render')
+  async renderTemplate(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: RenderTemplateDto) {
+    requireManager(scope);
+    const template = await this.prisma.emailTemplate.findFirst({ where: { id, venueId: scope.venueId } });
+    if (!template) throw new NotFoundException('Template not found');
+    const context = await this.buildTemplateContext(scope.venueId, body.leadId, body.beoId);
+    return {
+      subject: substituteVariables(template.subject, context),
+      body: substituteVariables(template.body, context),
+      context,
+    };
+  }
+
+  // ============================================================
+  // Helpers
+  // ============================================================
+  private async logActivity(venueId: string, leadId: string, actorId: string | null, kind: string, detail: string | null) {
+    try {
+      await this.prisma.crmActivityLog.create({
+        data: { venueId, leadId, actorId, kind, detail: detail ?? null },
+      });
+    } catch {
+      // Activity log is best-effort; never block the calling mutation.
+    }
+  }
+
+  private async syncBeoToReservation(venueId: string, beo: {
+    id: string;
+    leadId: string | null;
+    eventName: string;
+    eventDate: Date | null;
+    guestCount: number | null;
+    venueSpace: string | null;
+    setupStyle: string | null;
+    menuAppetizers: string | null;
+    menuEntrees: string | null;
+  }) {
+    if (!beo.eventDate) return;
+    const lead = beo.leadId
+      ? await this.prisma.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { fullName: true, phone: true, email: true, company: true } })
+      : null;
+    // We tag the reservation with the BEO id so subsequent edits update the
+    // same row instead of creating duplicates. Uses tags[] since there's no
+    // dedicated FK column.
+    const beoTag = `beo:${beo.id}`;
+    const existing = await this.prisma.reservation.findFirst({
+      where: { venueId, deletedAt: null, tags: { has: beoTag } },
+    });
+    const menuNotes = [beo.menuAppetizers, beo.menuEntrees].filter(Boolean).join(' / ') || null;
+    const data = {
+      venueId,
+      guestName: lead?.fullName ?? beo.eventName,
+      guestPhone: lead?.phone ?? null,
+      guestEmail: lead?.email ?? null,
+      guestCompany: lead?.company ?? null,
+      partySize: beo.guestCount ?? 1,
+      reservationTime: beo.eventDate,
+      durationMinutes: 240,
+      source: ReservationSource.direct,
+      status: ReservationStatus.confirmed,
+      isPrivateEvent: true,
+      eventName: beo.eventName,
+      eventStatus: 'confirmed',
+      eventSpace: beo.venueSpace,
+      setupStyle: beo.setupStyle,
+      menuNotes,
+      tags: [beoTag, 'private_event'],
+    };
+    if (existing) {
+      await this.prisma.reservation.update({ where: { id: existing.id }, data });
+    } else {
+      await this.prisma.reservation.create({ data });
+    }
+  }
+
+  private async buildTemplateContext(venueId: string, leadId?: string, beoId?: string) {
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { name: true } });
+    const ctx: Record<string, string> = { 'venue.name': venue?.name ?? '' };
+    if (leadId) {
+      const lead = await this.prisma.crmLead.findFirst({ where: { id: leadId, venueId }, select: { fullName: true, email: true, phone: true, company: true, source: true } });
+      if (lead) {
+        ctx['lead.name'] = lead.fullName;
+        ctx['lead.firstName'] = lead.fullName.split(/\s+/)[0] ?? lead.fullName;
+        ctx['lead.email'] = lead.email ?? '';
+        ctx['lead.phone'] = lead.phone ?? '';
+        ctx['lead.company'] = lead.company ?? '';
+        ctx['lead.source'] = lead.source ?? '';
+      }
+    }
+    if (beoId) {
+      const beo = await this.prisma.crmBeo.findFirst({ where: { id: beoId, venueId } });
+      if (beo) {
+        ctx['event.name'] = beo.eventName;
+        ctx['event.date'] = beo.eventDate ? beo.eventDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
+        ctx['event.space'] = beo.venueSpace ?? '';
+        ctx['event.guestCount'] = String(beo.guestCount ?? '');
+        ctx['event.deposit'] = beo.depositCents ? `$${(beo.depositCents / 100).toFixed(2)}` : '';
+      }
+    }
+    return ctx;
   }
 
   private mapBeo(b: {

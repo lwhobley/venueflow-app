@@ -305,6 +305,7 @@ model Venue {
   crmActivityLogs               CrmActivityLog[]
   crmBeos                       CrmBeo[]
   crmContracts                  CrmContract[]
+  emailTemplates                EmailTemplate[]
   paymentMethods                PaymentMethod[]
   invoices                      Invoice[]
   venueRoles                    VenueRole[]
@@ -958,6 +959,24 @@ model CrmActivityLog {
 
   @@index([leadId, createdAt])
   @@index([venueId, createdAt])
+}
+
+model EmailTemplate {
+  id        String   @id @default(cuid())
+  venueId   String
+  name      String
+  subject   String
+  body      String
+  // Comma-separated list of variables consumed by this template, e.g.
+  // "guest.name,event.date". Used only for the UI hint; rendering looks up
+  // {{name}}/{{event.date}} dynamically from the substitution context.
+  variables String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([venueId, name])
+  @@index([venueId])
 }
 
 model Subscription {
