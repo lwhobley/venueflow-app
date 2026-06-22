@@ -188,7 +188,7 @@ export default function WelcomeScreen() {
         >
           Join with Invite
         </Button>
-        <Text style={styles.registerNote}>www.venuewrangler.com</Text>
+        <Text style={styles.registerNote}>Sign in with your Venue Wrangler team account</Text>
       </View>
     </View>
   );

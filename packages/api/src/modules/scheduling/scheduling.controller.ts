@@ -248,6 +248,15 @@ type ShiftWithProfile = {
   profile?: { fullName: string } | null;
 };
 
+type TemplateShiftSlot = {
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  jobTitle: string;
+  station: string;
+  notes?: string | null;
+};
+
 type AvailabilityWindow = Pick<Availability, 'dayIndex' | 'startMinutes' | 'endMinutes' | 'available'>;
 
 function availabilityCovers(rows: AvailabilityWindow[] | undefined, shift: { dayIndex: number; startMinutes: number; endMinutes: number }) {
@@ -486,6 +495,93 @@ export class SchedulingController {
   }
 
   @RequireSubscription()
+  @Get('labor-forecast')
+  async getLaborForecast(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const now = new Date();
+    const weekEnd = new Date(now);
+    weekEnd.setDate(now.getDate() + 7);
+    const [shifts, reservations, venueEvents] = await Promise.all([
+      this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } }),
+      this.prisma.reservation.findMany({
+        where: {
+          venueId: scope!.venueId,
+          deletedAt: null,
+          reservationTime: { gte: now, lt: weekEnd },
+          status: { notIn: ['cancelled', 'no_show'] },
+        },
+        select: { reservationTime: true, partySize: true, isPrivateEvent: true },
+      }),
+      this.prisma.venueEvent.findMany({
+        where: {
+          venueId: scope!.venueId,
+          startsAt: { gte: now, lt: weekEnd },
+        },
+        select: { startsAt: true, expectedGuests: true },
+      }),
+    ]);
+
+    const scheduledByDay = new Map<number, { minutes: number; people: Set<string> }>();
+    for (const shift of shifts) {
+      const row = scheduledByDay.get(shift.dayIndex) ?? { minutes: 0, people: new Set<string>() };
+      row.minutes += Math.max(0, shift.endMinutes - shift.startMinutes);
+      if (shift.profileId) row.people.add(shift.profileId);
+      scheduledByDay.set(shift.dayIndex, row);
+    }
+
+    const demandByDay = new Map<number, { covers: number; privateEvents: number }>();
+    for (const reservation of reservations) {
+      const dayIndex = reservation.reservationTime.getDay();
+      const row = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
+      row.covers += reservation.partySize;
+      if (reservation.isPrivateEvent) row.privateEvents += 1;
+      demandByDay.set(dayIndex, row);
+    }
+    for (const event of venueEvents) {
+      const dayIndex = event.startsAt.getDay();
+      const row = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
+      row.covers += event.expectedGuests ?? 0;
+      row.privateEvents += 1;
+      demandByDay.set(dayIndex, row);
+    }
+
+    const days = Array.from({ length: 7 }, (_, offset) => {
+      const date = new Date(now);
+      date.setDate(now.getDate() + offset);
+      const dayIndex = date.getDay();
+      const scheduled = scheduledByDay.get(dayIndex);
+      const demand = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
+      const scheduledHours = Math.round(((scheduled?.minutes ?? 0) / 60) * 10) / 10;
+      const suggestedHours = Math.max(0, Math.round((demand.covers / 8 + demand.privateEvents * 6) * 10) / 10);
+      const gapHours = Math.round((suggestedHours - scheduledHours) * 10) / 10;
+      return {
+        dayIndex,
+        dayLabel: dayLabel(dayIndex),
+        covers: demand.covers,
+        privateEvents: demand.privateEvents,
+        scheduledPeople: scheduled?.people.size ?? 0,
+        scheduledHours,
+        suggestedHours,
+        gapHours,
+        status: gapHours > 4 ? 'under' : gapHours < -6 ? 'over' : 'balanced',
+      };
+    });
+
+    const totalCovers = days.reduce((sum, day) => sum + day.covers, 0);
+    const totalScheduledHours = Math.round(days.reduce((sum, day) => sum + day.scheduledHours, 0) * 10) / 10;
+    const totalSuggestedHours = Math.round(days.reduce((sum, day) => sum + day.suggestedHours, 0) * 10) / 10;
+    return {
+      days,
+      totals: {
+        covers: totalCovers,
+        scheduledHours: totalScheduledHours,
+        suggestedHours: totalSuggestedHours,
+        gapHours: Math.round((totalSuggestedHours - totalScheduledHours) * 10) / 10,
+      },
+    };
+  }
+
+  @RequireSubscription()
   @Post('shifts')
   async createShift(@VenueScope() scope: Scope, @Body() body: ShiftDto) {
     this.requireManager(scope);
@@ -625,16 +721,27 @@ export class SchedulingController {
       coworkers: shifts
         .filter((shift) => shift.dayIndex === dayIndex && shift.profileId && shift.profileId !== scope.profileId)
         .map((shift) => ({
+          shiftId: shift.id,
           profileId: shift.profileId,
+          name: shift.profile?.fullName ?? 'Teammate',
           memberName: shift.profile?.fullName ?? 'Teammate',
           jobTitle: shift.jobTitle,
+          station: shift.station,
+          dayIndex: shift.dayIndex,
+          startMinutes: shift.startMinutes,
+          endMinutes: shift.endMinutes,
           startTime: minutesToTime(shift.startMinutes),
           endTime: minutesToTime(shift.endMinutes),
+          withMe: mine.some((myShift) =>
+            myShift.dayIndex === shift.dayIndex &&
+            myShift.startMinutes < shift.endMinutes &&
+            myShift.endMinutes > shift.startMinutes,
+          ),
         })),
     }));
     return {
-      mine: mine.map((shift) => this.mapEmployeeShift(shift)),
-      open: open.map((shift) => this.mapEmployeeShift(shift)),
+      mine: mine.map((shift) => this.mapEmployeeShift(shift, true)),
+      open: open.map((shift) => this.mapEmployeeShift(shift, false)),
       roster,
     };
   }
@@ -729,6 +836,7 @@ export class SchedulingController {
     const name = body.name.trim();
     if (!name) throw new BadRequestException('Enter a template name');
     const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } });
+    if (shifts.length === 0) throw new BadRequestException('Create at least one shift before saving a template.');
     const row = await this.prisma.scheduleTemplate.create({
       data: {
         venueId: scope!.venueId,
@@ -739,6 +847,7 @@ export class SchedulingController {
           endMinutes: shift.endMinutes,
           jobTitle: shift.jobTitle,
           station: shift.station,
+          notes: shift.notes,
         })) as Prisma.InputJsonValue,
       },
     });
@@ -751,9 +860,9 @@ export class SchedulingController {
     this.requireManager(scope);
     const template = await this.prisma.scheduleTemplate.findFirst({ where: { id, venueId: scope!.venueId } });
     if (!template) throw new NotFoundException('Template not found');
-    const slots = Array.isArray(template.shifts) ? template.shifts : [];
-    const creates = slots.map((slot) => {
-      const row = slot as { dayIndex: number; startMinutes: number; endMinutes: number; jobTitle: string; station: string };
+    const slots = this.parseTemplateSlots(template.shifts);
+    if (slots.length === 0) throw new BadRequestException('This template has no shifts to apply.');
+    const creates = slots.map((row) => {
       return this.prisma.scheduleShift.create({
         data: {
           venueId: scope!.venueId,
@@ -762,6 +871,7 @@ export class SchedulingController {
           endMinutes: row.endMinutes,
           jobTitle: row.jobTitle,
           station: row.station,
+          notes: row.notes?.trim() || null,
           status: 'open',
         },
       });
@@ -1232,11 +1342,13 @@ export class SchedulingController {
     };
   }
 
-  private mapEmployeeShift(shift: ShiftWithProfile) {
+  private mapEmployeeShift(shift: ShiftWithProfile, mine: boolean) {
     return {
       _id: shift.id,
       dayIndex: shift.dayIndex,
       dayLabel: dayLabel(shift.dayIndex),
+      startMinutes: shift.startMinutes,
+      endMinutes: shift.endMinutes,
       startTime: minutesToTime(shift.startMinutes),
       endTime: minutesToTime(shift.endMinutes),
       memberId: shift.profileId,
@@ -1245,7 +1357,30 @@ export class SchedulingController {
       station: shift.station,
       status: shift.status,
       notes: shift.notes ?? undefined,
+      mine,
+      conflict: false,
     };
+  }
+
+  private parseTemplateSlots(value: Prisma.JsonValue): TemplateShiftSlot[] {
+    if (!Array.isArray(value)) return [];
+    return value.map((slot) => {
+      if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
+        throw new BadRequestException('Template contains an invalid shift.');
+      }
+      const row = slot as Record<string, unknown>;
+      const parsed = {
+        dayIndex: Number(row.dayIndex),
+        startMinutes: Number(row.startMinutes),
+        endMinutes: Number(row.endMinutes),
+        jobTitle: typeof row.jobTitle === 'string' ? row.jobTitle.trim() : '',
+        station: typeof row.station === 'string' ? row.station.trim() : '',
+        notes: typeof row.notes === 'string' ? row.notes : null,
+      };
+      ensureValidShiftWindow(parsed.dayIndex, parsed.startMinutes, parsed.endMinutes);
+      if (!parsed.jobTitle || !parsed.station) throw new BadRequestException('Template contains an invalid shift.');
+      return parsed;
+    });
   }
 
   private shiftLabel(shift: { dayIndex: number; startMinutes: number; endMinutes: number }) {

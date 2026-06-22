@@ -29,6 +29,7 @@ const queryRoutes: Record<string, Route> = {
   'scheduling.getAvailabilitySettings': { path: '/v1/scheduling/availability/settings' },
   'scheduling.listBlackouts': { path: '/v1/scheduling/blackouts' },
   'scheduling.getManagerSchedule': { path: '/v1/scheduling/manager' },
+  'scheduling.getLaborForecast': { path: '/v1/scheduling/labor-forecast' },
   'scheduling.previewAutoSchedule': { path: (args) => `/v1/scheduling/auto-schedule/preview?weekStartDate=${encodeURIComponent(args.weekStartDate ?? '')}` },
   'scheduling.listScheduleTemplates': { path: '/v1/scheduling/templates' },
   'scheduling.getMySchedule': { path: '/v1/scheduling/me' },
@@ -366,7 +367,7 @@ function clockInvalidations() {
 }
 
 function scheduleInvalidations() {
-  return [['scheduling', 'getManagerSchedule'], ['scheduling', 'getMySchedule'], ['scheduling', 'getMyShiftSwaps'], ['scheduling', 'listShiftSwaps']];
+  return [['scheduling', 'getManagerSchedule'], ['scheduling', 'getLaborForecast'], ['scheduling', 'getMySchedule'], ['scheduling', 'getMyShiftSwaps'], ['scheduling', 'listShiftSwaps']];
 }
 
 function defaultQueryResult(key: string) {

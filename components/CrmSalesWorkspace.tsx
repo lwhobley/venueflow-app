@@ -35,8 +35,15 @@ type BeoRow = {
   eventType?: string;
   guestCount?: number;
   venueSpace?: string;
+  setupStyle?: string;
   fbMinimumCents?: number;
   depositCents?: number;
+  menuAppetizers?: string;
+  menuEntrees?: string;
+  menuDesserts?: string;
+  menuBarPackage?: string;
+  specialRequirements?: string;
+  internalNotes?: string;
   status: string;
   updatedAt: number;
 };
@@ -120,8 +127,15 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
   const [eventType, setEventType] = useState('Private dining');
   const [eventGuests, setEventGuests] = useState('');
   const [eventSpace, setEventSpace] = useState('');
+  const [eventSetup, setEventSetup] = useState('');
   const [eventMinimum, setEventMinimum] = useState('');
   const [eventDeposit, setEventDeposit] = useState('');
+  const [eventApps, setEventApps] = useState('');
+  const [eventEntrees, setEventEntrees] = useState('');
+  const [eventDesserts, setEventDesserts] = useState('');
+  const [eventBar, setEventBar] = useState('');
+  const [eventSpecial, setEventSpecial] = useState('');
+  const [eventInternal, setEventInternal] = useState('');
   const [noteText, setNoteText] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
@@ -210,8 +224,15 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         eventType: eventType.trim() || undefined,
         guestCount: Number(eventGuests) || undefined,
         venueSpace: eventSpace.trim() || undefined,
+        setupStyle: eventSetup.trim() || undefined,
         fbMinimumCents: parseDollars(eventMinimum),
         depositCents: parseDollars(eventDeposit),
+        menuAppetizers: eventApps.trim() || undefined,
+        menuEntrees: eventEntrees.trim() || undefined,
+        menuDesserts: eventDesserts.trim() || undefined,
+        menuBarPackage: eventBar.trim() || undefined,
+        specialRequirements: eventSpecial.trim() || undefined,
+        internalNotes: eventInternal.trim() || undefined,
         status: 'draft',
       });
       setShowEventForm(false);
@@ -219,8 +240,15 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setEventDate('');
       setEventGuests('');
       setEventSpace('');
+      setEventSetup('');
       setEventMinimum('');
       setEventDeposit('');
+      setEventApps('');
+      setEventEntrees('');
+      setEventDesserts('');
+      setEventBar('');
+      setEventSpecial('');
+      setEventInternal('');
       setMessage('BEO draft created.');
       return beoId;
     } catch (err) {
@@ -340,8 +368,22 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
               <TextInput label="Type" value={eventType} onChangeText={setEventType} mode="outlined" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
               <TextInput label="Space" value={eventSpace} onChangeText={setEventSpace} mode="outlined" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
+              <TextInput label="Setup" value={eventSetup} onChangeText={setEventSetup} mode="outlined" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
               <TextInput label="F&B minimum" value={eventMinimum} onChangeText={setEventMinimum} mode="outlined" keyboardType="numeric" style={{ width: 150, backgroundColor: colors.surface }} />
               <TextInput label="Deposit" value={eventDeposit} onChangeText={setEventDeposit} mode="outlined" keyboardType="numeric" style={{ width: 130, backgroundColor: colors.surface }} />
+            </View>
+            <Text variant="titleSmall" style={{ fontWeight: '800' }}>Food and beverage</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <TextInput label="Appetizers" value={eventApps} onChangeText={setEventApps} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+              <TextInput label="Entrees" value={eventEntrees} onChangeText={setEventEntrees} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <TextInput label="Desserts" value={eventDesserts} onChangeText={setEventDesserts} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+              <TextInput label="Bar package" value={eventBar} onChangeText={setEventBar} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <TextInput label="Guest requirements" value={eventSpecial} onChangeText={setEventSpecial} mode="outlined" multiline style={{ flex: 1, minWidth: 230, backgroundColor: colors.surface }} />
+              <TextInput label="Internal run-of-show notes" value={eventInternal} onChangeText={setEventInternal} mode="outlined" multiline style={{ flex: 1, minWidth: 230, backgroundColor: colors.surface }} />
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }}>
               <Button mode="outlined" textColor={colors.primary} onPress={() => void createEventDoc()}>Save BEO</Button>
@@ -506,6 +548,22 @@ function EventsView({ beos, onConvert }: { beos: BeoRow[] | undefined; onConvert
             <Chip compact>{beo.status}</Chip>
           </View>
           <Text style={{ color: colors.muted }}>Space {beo.venueSpace ?? 'TBD'} - Minimum {money(beo.fbMinimumCents)} - Deposit {money(beo.depositCents)}</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {beo.eventType ? <Chip compact>{beo.eventType}</Chip> : null}
+            {beo.setupStyle ? <Chip compact>{beo.setupStyle}</Chip> : null}
+            {beo.menuBarPackage ? <Chip compact>{beo.menuBarPackage}</Chip> : null}
+          </View>
+          {[
+            { label: 'Apps', value: beo.menuAppetizers },
+            { label: 'Entrees', value: beo.menuEntrees },
+            { label: 'Dessert', value: beo.menuDesserts },
+            { label: 'Guest needs', value: beo.specialRequirements },
+            { label: 'Run-of-show', value: beo.internalNotes },
+          ].filter((item) => item.value).map((item) => (
+            <Text key={item.label} style={{ color: colors.charcoal, fontSize: 12 }}>
+              <Text style={{ fontWeight: '800' }}>{item.label}: </Text>{item.value}
+            </Text>
+          ))}
           <Button compact mode="outlined" icon="file-sign" textColor={colors.primary} onPress={() => void onConvert(beo._id)}>Convert to contract</Button>
         </View>
       ))}
