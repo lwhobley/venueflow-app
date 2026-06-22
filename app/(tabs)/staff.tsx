@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { ScrollView, Share, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -49,7 +50,7 @@ function Dropdown({
   placeholder?: string;
   options: Array<{ value: string; label: string }>;
   onSelect: (value: string) => void;
-  style?: any;
+  style?: import('react-native').ViewStyle;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value);
@@ -104,7 +105,11 @@ type StaffMember = {
   venueId: string | null;
 };
 
-export default function StaffScreen() {
+export default function StaffScreenWrapper() {
+  return <ScreenErrorBoundary><StaffScreen /></ScreenErrorBoundary>;
+}
+
+function StaffScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
@@ -312,7 +317,7 @@ export default function StaffScreen() {
           />
           {inviteLinkErr ? <Text style={{ color: colors.danger }}>{inviteLinkErr}</Text> : null}
           {inviteLinkMsg ? <Text style={{ color: accents[2].fg }}>{inviteLinkMsg}</Text> : null}
-          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()}>
+          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel="Generate and share invite link">
             Generate & share invite link
           </Button>
         </Card.Content>
@@ -361,7 +366,7 @@ export default function StaffScreen() {
               ))}
             </View>
           </View>
-          <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()}>
+          <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()} accessibilityLabel={selectedStaff ? 'Update staff member' : 'Add staff member'}>
             {selectedStaff ? 'Update staff member' : 'Add staff member'}
           </Button>
           {selectedStaff ? (
@@ -395,44 +400,49 @@ export default function StaffScreen() {
           <Text variant="titleMedium">Venue staff</Text>
           {staff.length === 0 ? (
             <Text style={{ color: colors.muted }}>No staff added yet.</Text>
-          ) : (
-            staff.map((member: StaffMember) => (
-              <Card key={member._id} style={{ backgroundColor: member._id === selectedStaffId ? '#F6E8E4' : colors.cream }}>
-                <Card.Content style={{ gap: 6 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: '700' }}>{member.fullName}</Text>
-                      <Text style={{ color: colors.muted }}>{member.email}</Text>
-                    </View>
-                    <Chip compact>{member.role}</Chip>
-                  </View>
-                  <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
-                  {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>Phone: {member.phone}</Text> : null}
-                  {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>DOB: {member.dateOfBirth}</Text> : null}
-                  {member.certifications?.length > 0 ? (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                      {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
-                    </View>
-                  ) : null}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    <Button mode="outlined" onPress={() => fillFromStaff(member)}>
-                      Edit
-                    </Button>
-                    <Button mode="outlined" onPress={() => void onDeactivate(member)}>
-                      Deactivate
-                    </Button>
-                    {selectedStaffId === member._id ? (
-                      <Button mode="text" textColor={colors.primary} onPress={clearForm}>
-                        Deselect
-                      </Button>
-                    ) : null}
-                  </View>
-                </Card.Content>
-              </Card>
-            ))
-          )}
+          ) : null}
         </Card.Content>
       </Card>
+      <FlatList
+        data={staff}
+        keyExtractor={(item) => item._id}
+        scrollEnabled={false}
+        removeClippedSubviews
+        renderItem={({ item: member }) => (
+          <Card style={{ backgroundColor: member._id === selectedStaffId ? '#F6E8E4' : colors.cream, marginBottom: spacing.sm }}>
+            <Card.Content style={{ gap: 6 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontWeight: '700' }}>{member.fullName}</Text>
+                  <Text style={{ color: colors.muted }}>{member.email}</Text>
+                </View>
+                <Chip compact>{member.role}</Chip>
+              </View>
+              <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
+              {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>Phone: {member.phone}</Text> : null}
+              {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>DOB: {member.dateOfBirth}</Text> : null}
+              {member.certifications?.length > 0 ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                  {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
+                </View>
+              ) : null}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <Button mode="outlined" onPress={() => fillFromStaff(member)}>
+                  Edit
+                </Button>
+                <Button mode="outlined" onPress={() => void onDeactivate(member)}>
+                  Deactivate
+                </Button>
+                {selectedStaffId === member._id ? (
+                  <Button mode="text" textColor={colors.primary} onPress={clearForm}>
+                    Deselect
+                  </Button>
+                ) : null}
+              </View>
+            </Card.Content>
+          </Card>
+        )}
+      />
     </ScrollView>
   );
 }

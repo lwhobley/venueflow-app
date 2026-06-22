@@ -248,8 +248,8 @@ export function MyShifts() {
               <View key={sw._id} style={{ padding: 10, borderRadius: 12, backgroundColor: accents[0].bg, gap: 6 }}>
                 <Text>{sw.requesterName} wants you to take {sw.requesterShift}{sw.targetShift ? ` in exchange for your ${sw.targetShift}` : ''}.</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: true }), 'Swap accepted — pending manager approval.')}>Accept</Button>
-                  <Button compact mode="text" textColor={colors.danger} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: false }), 'Swap declined.')}>Decline</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: true }), 'Swap accepted — pending manager approval.')} accessibilityLabel="Accept swap">Accept</Button>
+                  <Button compact mode="text" textColor={colors.danger} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: false }), 'Swap declined.')} accessibilityLabel="Decline swap">Decline</Button>
                 </View>
               </View>
             ))}

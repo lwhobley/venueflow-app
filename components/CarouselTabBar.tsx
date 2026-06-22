@@ -51,7 +51,8 @@ export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarP
             <Pressable
               key={route.key}
               onPress={onPress}
-              accessibilityRole="button"
+              accessibilityRole="tab"
+              accessibilityLabel={label}
               accessibilityState={isFocused ? { selected: true } : {}}
               style={{
                 minWidth: 68,

@@ -3,9 +3,10 @@ import { useMutation as useReactMutation, useQuery as useReactQuery, useQueryCli
 import { apiRequest } from './api-client';
 import type { RailwayFunctionRef } from './railway-api';
 
-type QueryArgs = Record<string, any> | 'skip' | undefined;
+type QueryArgs = Record<string, unknown> | 'skip' | undefined;
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- route fns are type-erased by design */
 type Route = {
   path: string | ((args: any) => string);
   method?: Method;

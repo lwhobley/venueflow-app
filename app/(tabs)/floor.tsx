@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Text } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -137,7 +138,11 @@ function formatMinutes(minutes: number) {
   return hours > 0 ? `${hours}h ${remaining}m` : `${remaining}m`;
 }
 
-export default function FloorScreen() {
+export default function FloorScreenWrapper() {
+  return <ScreenErrorBoundary><FloorScreen /></ScreenErrorBoundary>;
+}
+
+function FloorScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const user = useAuthStore((state: AuthState) => state.user);
   const { isReady } = useAuthenticatedSession();

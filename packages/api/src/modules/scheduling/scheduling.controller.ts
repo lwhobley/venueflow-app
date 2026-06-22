@@ -36,6 +36,7 @@ import {
   weeksToCover,
   weekStartFor,
 } from '../../common/pay-period';
+import { zonedDayOfWeek } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -498,6 +499,11 @@ export class SchedulingController {
   @Get('labor-forecast')
   async getLaborForecast(@VenueScope() scope: Scope) {
     this.requireManager(scope);
+    const venue = await this.prisma.venue.findUnique({
+      where: { id: scope!.venueId },
+      select: { timezone: true },
+    });
+    const tz = venue?.timezone ?? null;
     const now = new Date();
     const weekEnd = new Date(now);
     weekEnd.setDate(now.getDate() + 7);
@@ -531,14 +537,14 @@ export class SchedulingController {
 
     const demandByDay = new Map<number, { covers: number; privateEvents: number }>();
     for (const reservation of reservations) {
-      const dayIndex = reservation.reservationTime.getDay();
+      const dayIndex = zonedDayOfWeek(tz, reservation.reservationTime.getTime());
       const row = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
       row.covers += reservation.partySize;
       if (reservation.isPrivateEvent) row.privateEvents += 1;
       demandByDay.set(dayIndex, row);
     }
     for (const event of venueEvents) {
-      const dayIndex = event.startsAt.getDay();
+      const dayIndex = zonedDayOfWeek(tz, event.startsAt.getTime());
       const row = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
       row.covers += event.expectedGuests ?? 0;
       row.privateEvents += 1;
@@ -548,7 +554,7 @@ export class SchedulingController {
     const days = Array.from({ length: 7 }, (_, offset) => {
       const date = new Date(now);
       date.setDate(now.getDate() + offset);
-      const dayIndex = date.getDay();
+      const dayIndex = zonedDayOfWeek(tz, date.getTime());
       const scheduled = scheduledByDay.get(dayIndex);
       const demand = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
       const scheduledHours = Math.round(((scheduled?.minutes ?? 0) / 60) * 10) / 10;

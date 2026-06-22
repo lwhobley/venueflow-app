@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import helmet from 'helmet';
+import type { Request } from 'express';
 import { json, urlencoded } from 'express';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -10,7 +11,6 @@ import { AllExceptionsFilter } from './common/all-exceptions.filter';
 const DEFAULT_CORS_ORIGINS = [
   'https://www.venuewrangler.com',
   'https://venuewrangler.com',
-  'https://venue-wrangler.pages.dev',
 ];
 
 async function bootstrap() {
@@ -28,13 +28,16 @@ async function bootstrap() {
   const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
 
   app.use(helmet());
+  const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
   app.use(
     json({
-      limit: config.get<string>('JSON_BODY_LIMIT', '8mb'),
-      // Stash the raw bytes only for the Stripe webhook, which needs them to
-      // verify the signature (the parsed JSON is not byte-identical).
-      verify: (req: any, _res, buf) => {
-        if (typeof req.url === 'string' && req.url.includes('/billing/stripe/webhook')) {
+      limit: config.get<string>('JSON_BODY_LIMIT', '1mb'),
+      verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
+        const url = req.originalUrl ?? req.url ?? '';
+        // Match path without query string; trailing slashes are not produced by
+        // Stripe, but accept them defensively.
+        const path = url.split('?')[0].replace(/\/+$/, '');
+        if (path === STRIPE_WEBHOOK_PATH) {
           req.rawBody = buf;
         }
       },

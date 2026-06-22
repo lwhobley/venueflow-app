@@ -11,6 +11,7 @@ import {
 import { IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
 import { Role } from '@prisma/client';
 import { canManageRole, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapProfile } from '../../common/mappers';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -65,6 +66,7 @@ export class StaffController {
     private readonly email: EmailService,
   ) {}
 
+  @RequireSubscription()
   @Get()
   async listVenueStaff(@VenueScope() scope: Scope) {
     if (!scope || !isAdminRole(scope.role)) return [];
@@ -76,6 +78,7 @@ export class StaffController {
       .map(mapProfile);
   }
 
+  @RequireSubscription()
   @Post()
   async upsertVenueStaff(@VenueScope() scope: Scope, @Body() body: UpsertStaffDto) {
     if (!scope || !isAdminRole(scope.role)) {
@@ -141,6 +144,7 @@ export class StaffController {
     return mapProfile(created);
   }
 
+  @RequireSubscription()
   @Delete(':id')
   async deactivateVenueStaff(@VenueScope() scope: Scope, @Param('id') id: string) {
     if (!scope || !isAdminRole(scope.role)) {

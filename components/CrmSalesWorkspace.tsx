@@ -6,6 +6,7 @@ import { api } from '../lib/railway-api';
 import type { Id } from '../lib/ids';
 import { accents, colors, spacing } from '../lib/theme';
 import { useIsDesktop } from '../lib/responsive';
+import { AnimatedTab } from './AppCard';
 
 type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal_sent' | 'negotiating' | 'won' | 'lost' | 'unqualified' | 'on_hold';
 type WorkspaceView = 'dashboard' | 'pipeline' | 'contacts' | 'events' | 'contracts';
@@ -392,33 +393,35 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
           </View>
         ) : null}
 
-        {view === 'dashboard' ? (
-          <DashboardView stats={stats} leads={leads} beos={beos} contracts={contracts} onSelectLead={setSelectedLeadId} onView={setView} />
-        ) : null}
+        <AnimatedTab tabKey={view}>
+          {view === 'dashboard' ? (
+            <DashboardView stats={stats} leads={leads} beos={beos} contracts={contracts} onSelectLead={setSelectedLeadId} onView={setView} />
+          ) : null}
 
-        {view === 'pipeline' ? (
-          <PipelineView leads={leads} selectedLeadId={selectedLead?._id ?? null} onSelectLead={setSelectedLeadId} onMove={(leadId, status) => void updateLeadStatus(leadId, status)} />
-        ) : null}
+          {view === 'pipeline' ? (
+            <PipelineView leads={leads} selectedLeadId={selectedLead?._id ?? null} onSelectLead={setSelectedLeadId} onMove={(leadId, status) => void updateLeadStatus(leadId, status)} />
+          ) : null}
 
-        {view === 'contacts' ? (
-          <ContactsView leads={leads} search={leadSearch} onSearch={setLeadSearch} onSelectLead={setSelectedLeadId} />
-        ) : null}
+          {view === 'contacts' ? (
+            <ContactsView leads={leads} search={leadSearch} onSearch={setLeadSearch} onSelectLead={setSelectedLeadId} />
+          ) : null}
 
-        {view === 'events' ? (
-          <EventsView beos={beos} onConvert={async (beoId) => {
-            if (!venueId) return;
-            try {
-              await convertBeoToContract({ venueId, beoId });
-              setMessage('Converted BEO to contract.');
-            } catch (err) {
-              setMessage(`Failed to convert: ${errMsg(err)}`);
-            }
-          }} />
-        ) : null}
+          {view === 'events' ? (
+            <EventsView beos={beos} onConvert={async (beoId) => {
+              if (!venueId) return;
+              try {
+                await convertBeoToContract({ venueId, beoId });
+                setMessage('Converted BEO to contract.');
+              } catch (err) {
+                setMessage(`Failed to convert: ${errMsg(err)}`);
+              }
+            }} />
+          ) : null}
 
-        {view === 'contracts' ? (
-          <ContractsView contracts={contracts} />
-        ) : null}
+          {view === 'contracts' ? (
+            <ContractsView contracts={contracts} />
+          ) : null}
+        </AnimatedTab>
 
         <Divider />
 

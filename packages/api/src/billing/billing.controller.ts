@@ -170,7 +170,13 @@ export class BillingController {
           ? ('cancelled' as SubscriptionStatus)
           : STRIPE_STATUS_MAP[object.status] ?? null;
       if (!status) return { ok: true, ignored: true };
-      const price = object.items?.data?.[0]?.price ?? {};
+      const firstItem = object.items?.data?.[0] ?? {};
+      const price = firstItem.price ?? {};
+      // Stripe API 2025-03-31+ moved current_period_* from the subscription
+      // object onto each item. Read from the item first; fall back to the
+      // legacy top-level fields for older API versions.
+      const periodStart = firstItem.current_period_start ?? object.current_period_start;
+      const periodEnd = firstItem.current_period_end ?? object.current_period_end;
       await this.applyStripeSubscription({
         venueId,
         status,
@@ -179,8 +185,8 @@ export class BillingController {
         currency: typeof price.currency === 'string' ? price.currency.toUpperCase() : null,
         externalSubscriptionId: typeof object.id === 'string' ? object.id : null,
         externalCustomerId: typeof object.customer === 'string' ? object.customer : null,
-        currentPeriodStart: unixToDate(object.current_period_start),
-        currentPeriodEnd: unixToDate(object.current_period_end),
+        currentPeriodStart: unixToDate(periodStart),
+        currentPeriodEnd: unixToDate(periodEnd),
         cancelAtPeriodEnd: Boolean(object.cancel_at_period_end),
         eventId: event.id,
         eventType: event.type,

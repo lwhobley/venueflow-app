@@ -10,6 +10,7 @@ import { accents, colors, spacing } from '../../lib/theme';
 import { useIsDesktop } from '../../lib/responsive';
 import { AutoScheduleModal } from './AutoScheduleModal';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
+import { CollapsibleSection } from '../AppCard';
 
 type ShiftSnapshot = {
   dayIndex: number;
@@ -536,51 +537,46 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm, flexWrap: 'wrap' }}>
-            <View style={{ flex: 1, minWidth: 220 }}>
-              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Labor forecast</Text>
-              <Text style={{ color: colors.muted }}>Next 7 days from reservations, private events, and scheduled hours.</Text>
+      <CollapsibleSection
+        title="Labor forecast"
+        subtitle="Next 7 days from reservations, private events, and scheduled hours."
+        rightAdornment={forecastTotals ? (
+          <Chip compact style={{ backgroundColor: forecastTotals.gapHours > 0 ? '#FFF5DA' : forecastTotals.gapHours < 0 ? '#E1FBF3' : colors.cream }}>
+            {forecastTotals.gapHours > 0 ? `${forecastTotals.gapHours}h short` : forecastTotals.gapHours < 0 ? `${Math.abs(forecastTotals.gapHours)}h cushion` : 'Balanced'}
+          </Chip>
+        ) : null}
+      >
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+          {[
+            { label: 'Forecast covers', value: String(forecastTotals?.covers ?? 0), tone: colors.primary },
+            { label: 'Scheduled', value: `${forecastTotals?.scheduledHours ?? 0}h`, tone: colors.secondary },
+            { label: 'Suggested', value: `${forecastTotals?.suggestedHours ?? 0}h`, tone: colors.warning },
+          ].map((metric) => (
+            <View key={metric.label} style={{ minWidth: 135, flexGrow: 1, padding: spacing.sm, borderRadius: 8, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+              <Text style={{ color: metric.tone, fontSize: 20, fontWeight: '800' }}>{metric.value}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>{metric.label}</Text>
             </View>
-            {forecastTotals ? (
-              <Chip compact style={{ backgroundColor: forecastTotals.gapHours > 0 ? '#FFF5DA' : forecastTotals.gapHours < 0 ? '#E1FBF3' : colors.cream }}>
-                {forecastTotals.gapHours > 0 ? `${forecastTotals.gapHours}h short` : forecastTotals.gapHours < 0 ? `${Math.abs(forecastTotals.gapHours)}h cushion` : 'Balanced'}
-              </Chip>
-            ) : null}
+          ))}
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            {(forecast?.days ?? []).map((row) => {
+              const bg = row.status === 'under' ? '#FFF5DA' : row.status === 'over' ? '#FDE7E9' : '#E1FBF3';
+              const fg = row.status === 'under' ? colors.warning : row.status === 'over' ? colors.danger : colors.success;
+              return (
+                <View key={row.dayIndex} style={{ width: 150, padding: spacing.sm, borderRadius: 8, backgroundColor: bg, gap: 3 }}>
+                  <Text style={{ color: fg, fontWeight: '800' }}>{row.dayLabel} - {row.status}</Text>
+                  <Text style={{ color: colors.charcoal }}>{row.covers} covers - {row.privateEvents} events</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{row.scheduledPeople} people - {row.scheduledHours}h scheduled</Text>
+                  <Text style={{ color: fg, fontSize: 12, fontWeight: '700' }}>
+                    {row.gapHours > 0 ? `${row.gapHours}h short` : row.gapHours < 0 ? `${Math.abs(row.gapHours)}h cushion` : 'On target'}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            {[
-              { label: 'Forecast covers', value: String(forecastTotals?.covers ?? 0), tone: colors.primary },
-              { label: 'Scheduled', value: `${forecastTotals?.scheduledHours ?? 0}h`, tone: colors.secondary },
-              { label: 'Suggested', value: `${forecastTotals?.suggestedHours ?? 0}h`, tone: colors.warning },
-            ].map((metric) => (
-              <View key={metric.label} style={{ minWidth: 135, flexGrow: 1, padding: spacing.sm, borderRadius: 8, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
-                <Text style={{ color: metric.tone, fontSize: 20, fontWeight: '800' }}>{metric.value}</Text>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>{metric.label}</Text>
-              </View>
-            ))}
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              {(forecast?.days ?? []).map((row) => {
-                const bg = row.status === 'under' ? '#FFF5DA' : row.status === 'over' ? '#FDE7E9' : '#E1FBF3';
-                const fg = row.status === 'under' ? colors.warning : row.status === 'over' ? colors.danger : colors.success;
-                return (
-                  <View key={row.dayIndex} style={{ width: 150, padding: spacing.sm, borderRadius: 8, backgroundColor: bg, gap: 3 }}>
-                    <Text style={{ color: fg, fontWeight: '800' }}>{row.dayLabel} - {row.status}</Text>
-                    <Text style={{ color: colors.charcoal }}>{row.covers} covers - {row.privateEvents} events</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>{row.scheduledPeople} people - {row.scheduledHours}h scheduled</Text>
-                    <Text style={{ color: fg, fontSize: 12, fontWeight: '700' }}>
-                      {row.gapHours > 0 ? `${row.gapHours}h short` : row.gapHours < 0 ? `${Math.abs(row.gapHours)}h cushion` : 'On target'}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          </ScrollView>
-        </Card.Content>
-      </Card>
+        </ScrollView>
+      </CollapsibleSection>
 
       <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: spacing.md, alignItems: 'flex-start' }}>
         <View style={{ width: isDesktop ? 280 : '100%', gap: spacing.md }}>
@@ -661,32 +657,27 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
         </View>
 
         <View style={{ flex: 1, width: isDesktop ? undefined : '100%', gap: spacing.md }}>
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
-                <View>
-                  <Text variant="titleMedium" style={{ fontWeight: '800' }}>Coverage</Text>
-                  <Text style={{ color: colors.muted }}>Role coverage by daypart</Text>
-                </View>
-                {overBudget ? <Chip compact textStyle={{ color: colors.danger }}>Over labor budget</Chip> : <Chip compact>On budget</Chip>}
+          <CollapsibleSection
+            title="Coverage"
+            subtitle="Role coverage by daypart"
+            rightAdornment={overBudget ? <Chip compact textStyle={{ color: colors.danger }}>Over labor budget</Chip> : <Chip compact>On budget</Chip>}
+          >
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                {coverageRows.map((row) => {
+                  const bg = row.state === 'Under' ? '#FDE7E9' : row.state === 'Over' ? '#FFF5DA' : '#E1FBF3';
+                  const fg = row.state === 'Under' ? colors.danger : row.state === 'Over' ? colors.warning : colors.success;
+                  return (
+                    <View key={row.key} style={{ width: 138, padding: spacing.sm, borderRadius: 8, backgroundColor: bg }}>
+                      <Text style={{ color: fg, fontWeight: '800' }}>{row.state}</Text>
+                      <Text style={{ color: colors.charcoal }}>{row.role}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>{row.part}: {row.count}/{row.target}</Text>
+                    </View>
+                  );
+                })}
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                  {coverageRows.map((row) => {
-                    const bg = row.state === 'Under' ? '#FDE7E9' : row.state === 'Over' ? '#FFF5DA' : '#E1FBF3';
-                    const fg = row.state === 'Under' ? colors.danger : row.state === 'Over' ? colors.warning : colors.success;
-                    return (
-                      <View key={row.key} style={{ width: 138, padding: spacing.sm, borderRadius: 8, backgroundColor: bg }}>
-                        <Text style={{ color: fg, fontWeight: '800' }}>{row.state}</Text>
-                        <Text style={{ color: colors.charcoal }}>{row.role}</Text>
-                        <Text style={{ color: colors.muted, fontSize: 12 }}>{row.part}: {row.count}/{row.target}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            </Card.Content>
-          </Card>
+            </ScrollView>
+          </CollapsibleSection>
 
           <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
             <Card.Content style={{ gap: spacing.sm }}>
@@ -787,57 +778,54 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             </Card.Content>
           </Card>
 
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Templates</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>
-                Save the current week as reusable open shifts, then add it to a week or replace the week entirely.
-              </Text>
-              <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
-                <TextInput dense label="Template name" value={templateName} onChangeText={setTemplateName} mode="outlined" style={{ width: isDesktop ? 260 : '100%', backgroundColor: colors.surface }} />
-                <Button mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim() }); setTemplateName(''); }, 'Template saved.')}>
-                  Save week
-                </Button>
-              </View>
-              <View style={{ gap: spacing.sm }}>
-                {templateList.length === 0 ? <Text style={{ color: colors.muted }}>No saved schedule templates yet.</Text> : null}
-                {templateList.map((template) => (
-                  <View
-                    key={template._id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      gap: spacing.sm,
-                      padding: spacing.sm,
-                      borderRadius: 8,
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                      backgroundColor: colors.background,
-                    }}
-                  >
-                    <View style={{ flex: 1, minWidth: 150 }}>
-                      <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{template.name}</Text>
-                      <Text style={{ color: colors.muted, fontSize: 12 }}>{template.shiftCount} open shifts</Text>
-                    </View>
-                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
-                      Add
-                    </Button>
-                    <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
-                      Replace
-                    </Button>
-                    <IconButton
-                      icon="trash-can-outline"
-                      size={18}
-                      iconColor={colors.danger}
-                      accessibilityLabel={`Delete ${template.name} template`}
-                      onPress={() => void safe(() => deleteTemplate({ venueId, templateId: template._id }), 'Template deleted.')}
-                    />
+          <CollapsibleSection
+            title="Templates"
+            subtitle={templateList.length ? `${templateList.length} saved` : 'Save and reuse weekly patterns'}
+          >
+            <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
+              <TextInput dense label="Template name" value={templateName} onChangeText={setTemplateName} mode="outlined" style={{ width: isDesktop ? 260 : '100%', backgroundColor: colors.surface }} />
+              <Button mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim() }); setTemplateName(''); }, 'Template saved.')}>
+                Save week
+              </Button>
+            </View>
+            <View style={{ gap: spacing.sm }}>
+              {templateList.length === 0 ? <Text style={{ color: colors.muted }}>No saved schedule templates yet.</Text> : null}
+              {templateList.map((template) => (
+                <View
+                  key={template._id}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: spacing.sm,
+                    padding: spacing.sm,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    backgroundColor: colors.background,
+                  }}
+                >
+                  <View style={{ flex: 1, minWidth: 150 }}>
+                    <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{template.name}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>{template.shiftCount} open shifts</Text>
                   </View>
-                ))}
-              </View>
-            </Card.Content>
-          </Card>
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
+                    Add
+                  </Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
+                    Replace
+                  </Button>
+                  <IconButton
+                    icon="trash-can-outline"
+                    size={18}
+                    iconColor={colors.danger}
+                    accessibilityLabel={`Delete ${template.name} template`}
+                    onPress={() => void safe(() => deleteTemplate({ venueId, templateId: template._id }), 'Template deleted.')}
+                  />
+                </View>
+              ))}
+            </View>
+          </CollapsibleSection>
         </View>
 
         <View style={{ width: isDesktop ? 310 : '100%' }}>

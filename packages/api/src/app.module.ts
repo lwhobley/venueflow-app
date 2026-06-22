@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
@@ -39,6 +40,7 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
       isGlobal: true,
       envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env.local', '.env'],
     }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
     AuthModule,
     VenueModule,
@@ -71,6 +73,9 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
     StaffController,
   ],
   providers: [
+    // Throttle FIRST so unauthenticated attackers can't hammer the auth check
+    // without ever incrementing the rate-limit counter.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Protect every route by default. Opt out explicitly with @Public().
     { provide: APP_GUARD, useExisting: AuthGuard },
     // Resolve profile+venue once per request and expose via request.venueScope.

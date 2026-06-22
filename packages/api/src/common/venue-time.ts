@@ -38,6 +38,16 @@ function tzOffsetMs(timeZone: string, at: Date): number {
   return wallClockAsUtc - at.getTime();
 }
 
+/** The venue-local day-of-week (0 = Sunday … 6 = Saturday) at the given instant. */
+export function zonedDayOfWeek(timeZone: string | null | undefined, ts: number): number {
+  const tz = safeTimeZone(timeZone);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).formatToParts(new Date(ts)).map((p) => [p.type, p.value]),
+  );
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[parts.weekday] ?? new Date(ts).getUTCDay();
+}
+
 /** The venue-local calendar date (YYYY-MM-DD) of the given instant. */
 export function zonedIsoDate(timeZone: string | null | undefined, ts: number): string {
   return new Intl.DateTimeFormat('en-CA', {

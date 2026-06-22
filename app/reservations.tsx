@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { FlatList, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { router } from 'expo-router';
 import { useMutation, useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
@@ -83,7 +84,11 @@ function dollarsToCents(value: string) {
   return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : undefined;
 }
 
-export default function ReservationsScreen() {
+export default function ReservationsScreenWrapper() {
+  return <ScreenErrorBoundary><ReservationsScreen /></ScreenErrorBoundary>;
+}
+
+function ReservationsScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
@@ -363,7 +368,7 @@ export default function ReservationsScreen() {
           </View>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             <TextInput label="Phone (optional)" value={wlPhone} onChangeText={setWlPhone} mode="outlined" dense keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <Button mode="contained" buttonColor={colors.primary} onPress={() => void addWalkIn()}>Add</Button>
+            <Button mode="contained" buttonColor={colors.primary} onPress={() => void addWalkIn()} accessibilityLabel="Add walk-in to waitlist">Add</Button>
           </View>
           {waitlistError ? <Text style={{ color: colors.danger }}>{waitlistError}</Text> : null}
           {waitlist.length === 0 ? (
@@ -522,7 +527,7 @@ export default function ReservationsScreen() {
                 ) : null}
                 <TextInput label="Guest notes / requests" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()}>Create reservation</Button>
+                <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()} accessibilityLabel="Create reservation">Create reservation</Button>
               </>
             ) : null}
           </Card.Content>
@@ -541,79 +546,84 @@ export default function ReservationsScreen() {
             <Text style={{ color: colors.muted }}>Loading…</Text>
           ) : sorted.length === 0 ? (
             <Text style={{ color: colors.muted }}>No reservations for {listDateRange.shortLabel.toLowerCase()}.</Text>
-          ) : (
-            sorted.map((res) => {
-              const sc = statusColor[res.status] ?? { bg: colors.cream, fg: colors.muted };
-              const seated = res.status === 'seated';
-              const cancelled = res.status === 'cancelled' || res.status === 'no_show' || res.status === 'completed';
-              return (
-                <View key={res.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View>
-                      <Text style={{ fontWeight: '800' }}>{fmtDay(res.reservationTime)}</Text>
-                      <Text style={{ color: colors.muted, fontSize: 13 }}>{fmtResTime(res.reservationTime)}</Text>
-                    </View>
-                    <Chip compact style={{ backgroundColor: sc.bg }} textStyle={{ color: sc.fg }}>{res.status.replace('_', ' ')}</Chip>
-                  </View>
-                  <Text>{res.guestName} · party of {res.partySize}</Text>
-                  <Text style={{ color: colors.muted }}>{res.source.replace('_', ' ')}</Text>
-                  {res.guestCompany ? <Text style={{ color: colors.muted }}>{res.guestCompany}</Text> : null}
-                  {res.occasion ? <Chip compact style={{ alignSelf: 'flex-start' }}>{res.occasion}</Chip> : null}
-                  {res.isPrivateEvent ? (
-                    <Card style={{ backgroundColor: accents[5].bg, borderRadius: 12 }}>
-                      <Card.Content style={{ gap: 4 }}>
-                        <Text style={{ color: accents[5].fg, fontWeight: '800' }}>{res.eventName || 'Private event'}</Text>
-                        <Text style={{ color: colors.muted }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || 'Event details pending'}</Text>
-                        {res.estimatedValueCents ? <Text style={{ color: colors.muted }}>Estimated value ${(res.estimatedValueCents / 100).toLocaleString()}</Text> : null}
-                      </Card.Content>
-                    </Card>
-                  ) : null}
-
-                  {res.notes || res.specialRequests ? <Text style={{ color: colors.muted }}>{res.notes ?? res.specialRequests}</Text> : null}
-                  {res.tags?.length ? (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                      {res.tags.map((tag) => (
-                        <Chip key={tag} compact>{tag}</Chip>
-                      ))}
-                    </View>
-                  ) : null}
-
-                  {canManage ? (
-                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                      {!seated && !cancelled ? (
-                        <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => setAssigningId(assigningId === res.id ? null : res.id)}>
-                          {assigningId === res.id ? 'Pick a table…' : 'Assign table'}
-                        </Button>
-                      ) : null}
-                      <Button compact mode="text" textColor={colors.danger} icon="delete-outline" onPress={() => void deleteReservation(res)}>Delete</Button>
-                    </View>
-                  ) : null}
-
-                  {assigningId === res.id ? (
-                    <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: 12, padding: 10 }}>
-                      <Text style={{ color: colors.muted }}>Tap an open table to reserve, or long-actions to seat now:</Text>
-                      {openTables.length === 0 ? (
-                        <Text style={{ color: colors.danger }}>No open tables. Build a floor plan first.</Text>
-                      ) : (
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                          {openTables.map((t) => (
-                            <View key={t.table._id} style={{ gap: 4, alignItems: 'center' }}>
-                              <Chip onPress={() => void assignToTable(res, t.table._id, false)}>
-                                {t.table.label} · {t.table.seats}
-                              </Chip>
-                              <Button compact mode="text" textColor={accents[2].fg} onPress={() => void assignToTable(res, t.table._id, true)}>Seat</Button>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })
-          )}
+          ) : null}
         </Card.Content>
       </Card>
+      <FlatList
+        data={sorted}
+        keyExtractor={(item) => item.id}
+        scrollEnabled={false}
+        removeClippedSubviews
+        renderItem={({ item: res }) => {
+          const sc = statusColor[res.status] ?? { bg: colors.cream, fg: colors.muted };
+          const seated = res.status === 'seated';
+          const cancelled = res.status === 'cancelled' || res.status === 'no_show' || res.status === 'completed';
+          return (
+            <View style={{ paddingVertical: 10, paddingHorizontal: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6, backgroundColor: colors.surface }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View>
+                  <Text style={{ fontWeight: '800' }}>{fmtDay(res.reservationTime)}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 13 }}>{fmtResTime(res.reservationTime)}</Text>
+                </View>
+                <Chip compact style={{ backgroundColor: sc.bg }} textStyle={{ color: sc.fg }}>{res.status.replace('_', ' ')}</Chip>
+              </View>
+              <Text>{res.guestName} · party of {res.partySize}</Text>
+              <Text style={{ color: colors.muted }}>{res.source.replace('_', ' ')}</Text>
+              {res.guestCompany ? <Text style={{ color: colors.muted }}>{res.guestCompany}</Text> : null}
+              {res.occasion ? <Chip compact style={{ alignSelf: 'flex-start' }}>{res.occasion}</Chip> : null}
+              {res.isPrivateEvent ? (
+                <Card style={{ backgroundColor: accents[5].bg, borderRadius: 12 }}>
+                  <Card.Content style={{ gap: 4 }}>
+                    <Text style={{ color: accents[5].fg, fontWeight: '800' }}>{res.eventName || 'Private event'}</Text>
+                    <Text style={{ color: colors.muted }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || 'Event details pending'}</Text>
+                    {res.estimatedValueCents ? <Text style={{ color: colors.muted }}>Estimated value ${(res.estimatedValueCents / 100).toLocaleString()}</Text> : null}
+                  </Card.Content>
+                </Card>
+              ) : null}
+
+              {res.notes || res.specialRequests ? <Text style={{ color: colors.muted }}>{res.notes ?? res.specialRequests}</Text> : null}
+              {res.tags?.length ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {res.tags.map((tag) => (
+                    <Chip key={tag} compact>{tag}</Chip>
+                  ))}
+                </View>
+              ) : null}
+
+              {canManage ? (
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                  {!seated && !cancelled ? (
+                    <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => setAssigningId(assigningId === res.id ? null : res.id)}>
+                      {assigningId === res.id ? 'Pick a table…' : 'Assign table'}
+                    </Button>
+                  ) : null}
+                  <Button compact mode="text" textColor={colors.danger} icon="delete-outline" onPress={() => void deleteReservation(res)}>Delete</Button>
+                </View>
+              ) : null}
+
+              {assigningId === res.id ? (
+                <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: 12, padding: 10 }}>
+                  <Text style={{ color: colors.muted }}>Tap an open table to reserve, or long-actions to seat now:</Text>
+                  {openTables.length === 0 ? (
+                    <Text style={{ color: colors.danger }}>No open tables. Build a floor plan first.</Text>
+                  ) : (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {openTables.map((t) => (
+                        <View key={t.table._id} style={{ gap: 4, alignItems: 'center' }}>
+                          <Chip onPress={() => void assignToTable(res, t.table._id, false)}>
+                            {t.table.label} · {t.table.seats}
+                          </Chip>
+                          <Button compact mode="text" textColor={accents[2].fg} onPress={() => void assignToTable(res, t.table._id, true)}>Seat</Button>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ) : null}
+            </View>
+          );
+        }}
+      />
     </ScrollView>
   );
 }

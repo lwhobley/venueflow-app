@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, SegmentedButtons, Switch, Text, TextInput } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -230,7 +231,11 @@ function parseLeadLines(value: string, defaultSource: string): LeadImportRow[] {
     .filter((row) => row.fullName);
 }
 
-export default function GuestsScreen() {
+export default function GuestsScreenWrapper() {
+  return <ScreenErrorBoundary><GuestsScreen /></ScreenErrorBoundary>;
+}
+
+function GuestsScreen() {
   return (
     <PremiumFeatureGate feature="CRM">
       <GuestsScreenInner />
@@ -473,7 +478,7 @@ function GuestsScreenInner() {
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest directory</Text>
                 <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowLeadImport((value) => !value)}>
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowLeadImport((value) => !value)} accessibilityLabel={showLeadImport ? 'Close lead import' : 'Import leads'}>
                     {showLeadImport ? 'Close leads' : 'Import leads'}
                   </Button>
                   <Button compact mode={showForm ? 'text' : 'contained'} buttonColor={showForm ? undefined : colors.primary} onPress={() => {
@@ -513,7 +518,7 @@ function GuestsScreenInner() {
                       style={{ backgroundColor: colors.surface, minHeight: 130 }}
                     />
                     {leadMessage ? <Text style={{ color: leadMessage.startsWith('Could') || leadMessage.startsWith('Paste') ? colors.danger : colors.charcoal }}>{leadMessage}</Text> : null}
-                    <Button mode="contained" buttonColor={colors.primary} loading={leadBusy} disabled={leadBusy} onPress={() => void importLeads()}>
+                    <Button mode="contained" buttonColor={colors.primary} loading={leadBusy} disabled={leadBusy} onPress={() => void importLeads()} accessibilityLabel="Ingest leads">
                       Ingest leads
                     </Button>
                   </Card.Content>

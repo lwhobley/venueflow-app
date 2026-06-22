@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Card, Chip, SegmentedButtons, Text } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
+import { AnimatedTab } from '../../components/AppCard';
 import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -335,7 +337,11 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   );
 }
 
-export default function SalesScreen() {
+export default function SalesScreenWrapper() {
+  return <ScreenErrorBoundary><SalesScreen /></ScreenErrorBoundary>;
+}
+
+function SalesScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
@@ -396,10 +402,12 @@ export default function SalesScreen() {
         </ScrollView>
 
         {/* Content */}
-        {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
-        {tab === 'servers' && <ServersTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
-        {tab === 'items' && <ItemsTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
-        {tab === 'labor' && <LaborTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+        <AnimatedTab tabKey={tab}>
+          {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+          {tab === 'servers' && <ServersTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+          {tab === 'items' && <ItemsTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+          {tab === 'labor' && <LaborTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+        </AnimatedTab>
       </ScrollView>
     </PremiumFeatureGate>
   );

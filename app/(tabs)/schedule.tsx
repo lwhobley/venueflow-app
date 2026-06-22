@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, SegmentedButtons, Snackbar, Text } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
+import { AnimatedTab } from '../../components/AppCard';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -54,7 +56,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
               <Text>{sw.requesterName} → {sw.targetName}</Text>
               <Text style={{ color: colors.muted }}>{sw.requesterShift}{sw.targetShift ? ` ⇄ ${sw.targetShift}` : ' (give-away)'} · {sw.status}</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: true }), 'Swap approved.')}>Approve</Button>
+                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: true }), 'Swap approved.')} accessibilityLabel="Approve swap">Approve</Button>
                 <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: false }), 'Swap denied.')}>Deny</Button>
               </View>
             </View>
@@ -75,7 +77,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
               <Text>{request.details}</Text>
               {request.status === 'pending' ? (
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' }), 'Request approved.')}>Approve</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' }), 'Request approved.')} accessibilityLabel="Approve request">Approve</Button>
                   <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' }), 'Request denied.')}>Deny</Button>
                 </View>
               ) : null}
@@ -91,7 +93,11 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
   );
 }
 
-export default function ScheduleScreen() {
+export default function ScheduleScreenWrapper() {
+  return <ScreenErrorBoundary><ScheduleScreen /></ScreenErrorBoundary>;
+}
+
+function ScheduleScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
@@ -132,13 +138,15 @@ export default function ScheduleScreen() {
               { value: 'blackouts', label: 'Blackouts' },
             ]}
           />
-          {managerTab === 'calendar' ? (
-            <ManagerCalendar venueId={venue.id} />
-          ) : managerTab === 'requests' ? (
-            <RequestQueue venueId={venue.id} />
-          ) : (
-            <BlackoutManager venueId={venue.id} />
-          )}
+          <AnimatedTab tabKey={managerTab}>
+            {managerTab === 'calendar' ? (
+              <ManagerCalendar venueId={venue.id} />
+            ) : managerTab === 'requests' ? (
+              <RequestQueue venueId={venue.id} />
+            ) : (
+              <BlackoutManager venueId={venue.id} />
+            )}
+          </AnimatedTab>
         </>
       ) : (
         <>
@@ -150,7 +158,9 @@ export default function ScheduleScreen() {
               { value: 'availability', label: 'Availability' },
             ]}
           />
-          {staffTab === 'shifts' ? <MyShifts /> : <AvailabilityEditor />}
+          <AnimatedTab tabKey={staffTab}>
+            {staffTab === 'shifts' ? <MyShifts /> : <AvailabilityEditor />}
+          </AnimatedTab>
         </>
       )}
     </ScrollView>
