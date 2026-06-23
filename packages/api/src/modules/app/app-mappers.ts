@@ -35,7 +35,7 @@ export function mapVenue(venue: { id: string; name: string; latitude: number; lo
 }
 
 export function mapProfile(
-  profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; trialEndsAt?: Date | null; phone?: string | null; altPhone?: string | null; address?: string | null; dateOfBirth?: Date | null; certifications?: string[] },
+  profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; trialEndsAt?: Date | null; phone?: string | null; altPhone?: string | null; address?: string | null; dateOfBirth?: Date | null; certifications?: string[]; sickHoursAccrued?: number; ptoHoursAccrued?: number },
   emailVerified = false,
 ) {
   return {
@@ -59,6 +59,10 @@ export function mapProfile(
     address: profile.address ?? null,
     dateOfBirth: profile.dateOfBirth?.toISOString() ?? null,
     certifications: profile.certifications ?? [],
+    sickHoursAccrued: profile.sickHoursAccrued ?? 40.0,
+    sick_hours_accrued: profile.sickHoursAccrued ?? 40.0,
+    ptoHoursAccrued: profile.ptoHoursAccrued ?? 80.0,
+    pto_hours_accrued: profile.ptoHoursAccrued ?? 80.0,
   };
 }
 
@@ -103,6 +107,7 @@ export function mapClockEntry(
     clockOutAccuracyM: number | null;
     clockOutMocked: boolean | null;
     isOpen: boolean;
+    breaks?: any;
   },
   // Null when the staff member deleted their account; wage records are
   // retained with a snapshotted name (entry.profileFullName).
@@ -148,5 +153,6 @@ export function mapClockEntry(
     clock_out_mocked: entry.clockOutMocked,
     isOpen: entry.isOpen,
     is_open: entry.isOpen,
+    breaks: entry.breaks ?? null,
   };
 }

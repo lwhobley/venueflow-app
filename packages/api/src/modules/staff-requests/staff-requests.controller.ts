@@ -31,8 +31,17 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
 
-const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'availability', 'shift_swap', 'open_shift', 'other'];
+const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'availability', 'shift_swap', 'open_shift', 'sick_leave', 'time_correction', 'other'];
 const REVIEW_STATUSES = ['approved', 'denied', 'cancelled'];
+
+function calculateRequestHours(startStr?: string | null, endStr?: string | null): number {
+  if (!startStr) return 8.0;
+  const start = new Date(startStr);
+  const end = endStr ? new Date(endStr) : start;
+  const diffTime = Math.abs(end.getTime() - start.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  return diffDays * 8.0;
+}
 
 class AvailabilityBlockDto {
   @IsInt()
@@ -190,6 +199,56 @@ export class StaffRequestsController {
     }
 
     const reviewer = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+
+    // Handle approval side-effects
+    if (body.status === 'approved') {
+      if (request.kind === 'sick_leave') {
+        const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
+        const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: request.profileId } });
+        await this.prisma.profile.update({
+          where: { id: profile.id },
+          data: { sickHoursAccrued: Math.max(0, profile.sickHoursAccrued - hours) },
+        });
+      } else if (request.kind === 'time_off') {
+        const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
+        const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: request.profileId } });
+        await this.prisma.profile.update({
+          where: { id: profile.id },
+          data: { ptoHoursAccrued: Math.max(0, profile.ptoHoursAccrued - hours) },
+        });
+      } else if (request.kind === 'time_correction') {
+        const correction = (request.availability as any) || {};
+        if (correction.timeEntryId) {
+          await this.prisma.timeEntry.update({
+            where: { id: correction.timeEntryId },
+            data: {
+              clockInAt: new Date(correction.clockInAt),
+              clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : null,
+              isOpen: correction.clockOutAt ? false : true,
+            },
+          });
+        } else {
+          await this.prisma.timeEntry.create({
+            data: {
+              profileId: request.profileId,
+              venueId: request.venueId,
+              clockInAt: new Date(correction.clockInAt),
+              clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : new Date(correction.clockInAt + 8 * 60 * 60 * 1000),
+              clockInLat: 0,
+              clockInLng: 0,
+              clockInAccuracyM: 0,
+              clockInMocked: false,
+              clockOutLat: 0,
+              clockOutLng: 0,
+              clockOutAccuracyM: 0,
+              clockOutMocked: false,
+              isOpen: false,
+            },
+          });
+        }
+      }
+    }
+
     const updated = await this.prisma.staffRequest.update({
       where: { id: request.id },
       data: {

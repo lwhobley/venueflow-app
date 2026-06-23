@@ -152,10 +152,14 @@ export const appApi = {
   getMyTimeClock: () => apiRequest<any | null>('/v1/app/time-clock'),
   clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-in', { method: 'POST', body }),
   clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-out', { method: 'POST', body }),
+  breakStart: (body: { type: 'paid' | 'unpaid' }) => apiRequest('/v1/app/time-clock/break-start', { method: 'POST', body }),
+  breakEnd: () => apiRequest('/v1/app/time-clock/break-end', { method: 'POST' }),
   listVenueStaff: () => apiRequest<any[]>('/v1/app/staff'),
   upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string; phone?: string; altPhone?: string; address?: string; dateOfBirth?: string; certifications?: string[] }) =>
     apiRequest('/v1/app/staff', { method: 'POST', body }),
   deactivateVenueStaff: (staffId: string) => apiRequest('/v1/app/staff/' + staffId, { method: 'DELETE' }),
+  createStaffRequest: (body: { kind: string; title: string; details: string; availability?: any }) =>
+    apiRequest('/v1/staff-requests', { method: 'POST', body }),
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
     apiRequest<any>('/v1/app/venue', { method: 'PATCH', body }),
   deleteMyAccount: () => apiRequest('/v1/app/me', { method: 'DELETE' }),

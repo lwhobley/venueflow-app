@@ -274,6 +274,7 @@ model Venue {
   payPeriodAnchor               String?
   payPeriodLengthDays           Int                     @default(14)
   availabilityUnlocked          Boolean                 @default(false)
+  earlyClockInWindowMin         Int                     @default(10)
   subscriptionStatus            SubscriptionStatus?
   subscriptionPlatform          SubscriptionPlatform?
   leadsWebhookSecret            String?
@@ -341,6 +342,8 @@ model Profile {
   venueId          String?
   membershipStatus MembershipStatus?
   allAccess        Boolean           @default(false)
+  sickHoursAccrued Float             @default(40.0)
+  ptoHoursAccrued  Float             @default(80.0)
   trialEndsAt      DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -545,6 +548,7 @@ model TimeEntry {
   clockOutAccuracyM Float?
   clockOutMocked    Boolean?
   isOpen            Boolean
+  breaks            Json?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   venue             Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)

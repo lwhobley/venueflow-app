@@ -5,7 +5,7 @@ import {
   Get,
   Post,
 } from '@nestjs/common';
-import { IsBoolean, IsNumber } from 'class-validator';
+import { IsBoolean, IsNumber, IsString, IsIn } from 'class-validator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
@@ -30,6 +30,12 @@ class ClockPunchDto {
 
   @IsBoolean()
   mocked!: boolean;
+}
+
+class BreakStartDto {
+  @IsString()
+  @IsIn(['paid', 'unpaid'])
+  type!: 'paid' | 'unpaid';
 }
 
 @Controller('v1/time-clock')
@@ -151,7 +157,14 @@ export class TimeClockController {
     const regularHours = closed.reduce((sum, entry) => {
       const outAt = entry.clockOutAt?.getTime();
       if (!outAt || now - outAt > weekMs) return sum;
-      return sum + (outAt - entry.clockInAt.getTime()) / 3600000;
+      let durationMs = outAt - entry.clockInAt.getTime();
+      const breaks = (entry.breaks as any[]) || [];
+      for (const b of breaks) {
+        if (b.type === 'unpaid' && b.startAt && b.endAt) {
+          durationMs -= (b.endAt - b.startAt);
+        }
+      }
+      return sum + Math.max(0, durationMs) / 3600000;
     }, 0);
     const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -159,7 +172,8 @@ export class TimeClockController {
       isClockedIn: open.length > 0,
       openSince: open[0]?.clockInAt.getTime() ?? null,
       regularHours: round1(regularHours),
-      sickHours: 0,
+      sickHours: profile.sickHoursAccrued,
+      ptoHours: profile.ptoHoursAccrued,
       totalHours: round1(regularHours),
       punches,
     };
@@ -179,6 +193,30 @@ export class TimeClockController {
     if (active) throw new BadRequestException('Already clocked in');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+
+    if (!isAdminRole(scope.role)) {
+      const today = new Date().getDay();
+      const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+      const shift = await this.prisma.scheduleShift.findFirst({
+        where: {
+          venueId: venue.id,
+          profileId: profile.id,
+          dayIndex: today,
+          status: 'scheduled',
+        },
+        orderBy: { startMinutes: 'asc' },
+      });
+      if (shift) {
+        const earlyWindow = venue.earlyClockInWindowMin ?? 10;
+        if (minutesNow < shift.startMinutes - earlyWindow) {
+          const formattedStart = minutesToTime(shift.startMinutes);
+          throw new BadRequestException(
+            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
+          );
+        }
+      }
+    }
+
     try {
       const entry = await this.prisma.timeEntry.create({
         data: {
@@ -227,5 +265,60 @@ export class TimeClockController {
       },
     });
     return mapClockEntry(entry, profile, venue);
+  }
+
+  @RequireSubscription()
+  @Post('break-start')
+  async startBreak(@VenueScope() scope: Scope, @Body() body: BreakStartDto) {
+    if (!scope) throw new BadRequestException('Profile is not initialized');
+    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
+    if (!venue) throw new BadRequestException('Assigned venue not found');
+
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: scope.profileId, isOpen: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreak = breaks.find((b: any) => b.endAt === null);
+    if (activeBreak) throw new BadRequestException('Already on a break');
+
+    const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
+    const updated = await this.prisma.timeEntry.update({
+      where: { id: entry.id },
+      data: { breaks: newBreaks },
+    });
+    return mapClockEntry(updated, profile, venue);
+  }
+
+  @RequireSubscription()
+  @Post('break-end')
+  async endBreak(@VenueScope() scope: Scope) {
+    if (!scope) throw new BadRequestException('Profile is not initialized');
+    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
+    if (!venue) throw new BadRequestException('Assigned venue not found');
+
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: scope.profileId, isOpen: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
+    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
+
+    const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+    const newBreaks = [...breaks];
+    newBreaks[activeBreakIndex] = {
+      ...newBreaks[activeBreakIndex],
+      endAt: Date.now(),
+    };
+
+    const updated = await this.prisma.timeEntry.update({
+      where: { id: entry.id },
+      data: { breaks: newBreaks },
+    });
+    return mapClockEntry(updated, profile, venue);
   }
 }

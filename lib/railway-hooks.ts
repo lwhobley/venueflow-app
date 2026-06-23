@@ -97,6 +97,8 @@ const mutationRoutes: Record<string, Route> = {
   'app.deleteMyAccount': { path: '/v1/app/me', method: 'DELETE' },
   'app.clockIn': { path: '/v1/app/clock-in', method: 'POST', body: locationBody, invalidate: clockInvalidations() },
   'app.clockOut': { path: '/v1/app/clock-out', method: 'POST', body: locationBody, invalidate: clockInvalidations() },
+  'app.breakStart': { path: '/v1/app/time-clock/break-start', method: 'POST', body: (args) => ({ type: args.type }), invalidate: clockInvalidations() },
+  'app.breakEnd': { path: '/v1/app/time-clock/break-end', method: 'POST', body: () => ({}), invalidate: clockInvalidations() },
   'app.upsertVenueStaff': {
     path: '/v1/app/staff',
     method: 'POST',

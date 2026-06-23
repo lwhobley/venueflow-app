@@ -16,6 +16,7 @@ type TimeEntryRow = {
   clockOutAccuracyM: number | null;
   clockOutMocked: boolean | null;
   isOpen: boolean;
+  breaks: any;
 };
 
 export function dayLabel(index: number): string {
@@ -50,6 +51,7 @@ export function mapClockEntry(entry: TimeEntryRow, profile: ClockProfile, venue:
     clockOutAccuracyM: entry.clockOutAccuracyM ?? null,
     clockOutMocked: entry.clockOutMocked ?? null,
     isOpen: entry.isOpen,
+    breaks: entry.breaks ?? null,
   };
 }
 
@@ -66,6 +68,8 @@ type ProfileRow = {
   certifications: string[];
   venueId: string | null;
   allAccess: boolean;
+  sickHoursAccrued: number;
+  ptoHoursAccrued: number;
 };
 
 export function mapProfile(profile: ProfileRow) {
@@ -82,6 +86,8 @@ export function mapProfile(profile: ProfileRow) {
     certifications: profile.certifications ?? [],
     venueId: profile.venueId,
     allAccess: profile.allAccess,
+    sickHoursAccrued: profile.sickHoursAccrued,
+    ptoHoursAccrued: profile.ptoHoursAccrued,
   };
 }
 

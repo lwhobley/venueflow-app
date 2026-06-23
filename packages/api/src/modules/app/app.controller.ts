@@ -14,7 +14,7 @@ import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappers';
+import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
 import { ProfileService } from './profile.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -104,6 +104,12 @@ class ClockDto {
 
   @IsBoolean()
   mocked!: boolean;
+}
+
+class BreakStartDto {
+  @IsString()
+  @IsIn(['paid', 'unpaid'])
+  type!: 'paid' | 'unpaid';
 }
 
 class VenueRoleDto {
@@ -485,10 +491,25 @@ export class AppController {
       .sort((a, b) => a.at - b.at);
     const regularHours = entries.reduce((sum, entry) => {
       if (!entry.clockOutAt || entry.clockOutAt.getTime() < weekAgo) return sum;
-      return sum + (entry.clockOutAt.getTime() - entry.clockInAt.getTime()) / 3600000;
+      let durationMs = entry.clockOutAt.getTime() - entry.clockInAt.getTime();
+      const breaks = (entry.breaks as any[]) || [];
+      for (const b of breaks) {
+        if (b.type === 'unpaid' && b.startAt && b.endAt) {
+          durationMs -= (b.endAt - b.startAt);
+        }
+      }
+      return sum + Math.max(0, durationMs) / 3600000;
     }, 0);
     const rounded = Math.round(regularHours * 10) / 10;
-    return { isClockedIn: Boolean(open), openSince: toMs(open?.clockInAt), regularHours: rounded, sickHours: 0, totalHours: rounded, punches };
+    return {
+      isClockedIn: Boolean(open),
+      openSince: toMs(open?.clockInAt),
+      regularHours: rounded,
+      sickHours: profile.sickHoursAccrued,
+      ptoHours: profile.ptoHoursAccrued,
+      totalHours: rounded,
+      punches,
+    };
   }
 
   @UseGuards(AuthGuard)
@@ -500,6 +521,30 @@ export class AppController {
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
     if (existing) throw new BadRequestException('Already clocked in');
+
+    if (!isAdminRole(profile.role)) {
+      const today = new Date().getDay();
+      const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+      const shift = await this.prisma.scheduleShift.findFirst({
+        where: {
+          venueId: venue.id,
+          profileId: profile.id,
+          dayIndex: today,
+          status: 'scheduled',
+        },
+        orderBy: { startMinutes: 'asc' },
+      });
+      if (shift) {
+        const earlyWindow = venue.earlyClockInWindowMin ?? 10;
+        if (minutesNow < shift.startMinutes - earlyWindow) {
+          const formattedStart = minutesToTime(shift.startMinutes);
+          throw new BadRequestException(
+            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
+          );
+        }
+      }
+    }
+
     try {
       const entry = await this.prisma.timeEntry.create({
         data: {
@@ -545,6 +590,57 @@ export class AppController {
       include: { profile: true, venue: true },
     });
     return mapClockEntry(entry, entry.profile, entry.venue);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('time-clock/break-start')
+  async startBreak(@CurrentUser() user: AuthUser, @Body() body: BreakStartDto) {
+    const profile = await this.requireVenueProfile(user);
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: profile.id, isOpen: true },
+      include: { profile: true, venue: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreak = breaks.find((b: any) => b.endAt === null);
+    if (activeBreak) throw new BadRequestException('Already on a break');
+
+    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
+    const updated = await this.prisma.timeEntry.update({
+      where: { id: entry.id },
+      data: { breaks: newBreaks },
+      include: { profile: true, venue: true },
+    });
+    return mapClockEntry(updated, updated.profile, updated.venue);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('time-clock/break-end')
+  async endBreak(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireVenueProfile(user);
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: profile.id, isOpen: true },
+      include: { profile: true, venue: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
+    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
+
+    const newBreaks = [...breaks];
+    newBreaks[activeBreakIndex] = {
+      ...newBreaks[activeBreakIndex],
+      endAt: Date.now(),
+    };
+
+    const updated = await this.prisma.timeEntry.update({
+      where: { id: entry.id },
+      data: { breaks: newBreaks },
+      include: { profile: true, venue: true },
+    });
+    return mapClockEntry(updated, updated.profile, updated.venue);
   }
 
   @UseGuards(AuthGuard)
