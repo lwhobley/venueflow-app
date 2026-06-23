@@ -25,6 +25,7 @@ export default function InviteAcceptScreen() {
     phone?: string;
   }>();
 
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -32,6 +33,7 @@ export default function InviteAcceptScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const validate = (): string | null => {
+    if (!fullName.trim()) return 'Enter your name.';
     if (!email.trim().includes('@')) return 'Enter a valid email address.';
     if (password.length < 6) return 'Password must be at least 6 characters.';
     if (password !== confirmPassword) return 'Passwords do not match.';
@@ -50,6 +52,7 @@ export default function InviteAcceptScreen() {
         phone,
         password,
         flow: 'signUp',
+        fullName: fullName.trim(),
         inviteToken: token,
       });
       const { profile, venue, token: authToken } = resp;
@@ -76,7 +79,13 @@ export default function InviteAcceptScreen() {
         token: authToken,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(tabs)/home');
+      // Route to email verification — verify-email.tsx will call redeemInvite
+      // with the invite token after code confirmation to finalize team membership.
+      if (!profile.emailVerified) {
+        router.replace({ pathname: '/(auth)/verify-email', params: { invite: token } });
+      } else {
+        router.replace('/(tabs)/home');
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
       setError(msg);
@@ -123,6 +132,13 @@ export default function InviteAcceptScreen() {
               <Text style={{ color: colors.danger, textAlign: 'center' }}>{error}</Text>
             ) : null}
 
+            <TextInput
+              {...inputProps}
+              label="Your name"
+              value={fullName}
+              onChangeText={setFullName}
+              mode="outlined"
+            />
             <TextInput
               {...inputProps}
               label="Email"

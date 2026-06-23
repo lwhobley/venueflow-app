@@ -981,10 +981,10 @@ export class AppController {
     const updated = await this.prisma.$transaction(async (tx) => {
       const invite = await this.findRedeemableInvite(codeOrToken, tx);
       if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
-      if (!invite.email) {
-        throw new ForbiddenException('Ask your manager to resend this invite to your email address before joining.');
-      }
-      if (invite.email.toLowerCase() !== email.toLowerCase()) {
+      // Email-specific invites: enforce that the redeeming user's verified email
+      // matches the invite's target. Link-based invites (no email on the invite)
+      // are open to any authenticated user — the short-lived token is the auth.
+      if (invite.email && invite.email.toLowerCase() !== email.toLowerCase()) {
         throw new ForbiddenException('This invite was sent to a different email address.');
       }
       const claimed = await tx.invite.updateMany({

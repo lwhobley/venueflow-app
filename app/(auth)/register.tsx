@@ -81,19 +81,13 @@ export default function RegisterScreen() {
         token,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (venue) {
-        Alert.alert(
-          'Account created',
-          `Welcome to Venue Wrangler! You have successfully joined the team at ${venue.name}.`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                router.replace('/(tabs)/home');
-              },
-            },
-          ]
-        );
+      // Always verify email first — verify-email.tsx calls redeemMyInvite after
+      // the code is confirmed, which will automatically claim the unclaimed staff
+      // profile and link this account to the venue.
+      if (!profile.emailVerified) {
+        router.replace('/(auth)/verify-email');
+      } else if (venue) {
+        router.replace('/(tabs)/home');
       } else {
         router.replace('/(auth)/team-choice');
       }

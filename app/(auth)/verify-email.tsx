@@ -51,7 +51,16 @@ export default function VerifyEmailScreen() {
             : null,
           token,
         });
-        router.replace('/(tabs)/home');
+        const venueName = redemption.venue?.name;
+        if (venueName) {
+          Alert.alert(
+            'Welcome to the team! 🎉',
+            `You've successfully joined ${venueName} on Venue Wrangler. Your manager will be in touch with your schedule.`,
+            [{ text: 'Get Started', onPress: () => router.replace('/(tabs)/home') }],
+          );
+        } else {
+          router.replace('/(tabs)/home');
+        }
         return;
       }
       if (user) {

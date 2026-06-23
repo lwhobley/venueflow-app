@@ -61,13 +61,6 @@ export default function SignInScreen() {
       inviteToken: options?.inviteToken,
     });
 
-    if (options?.inviteToken && !last.venue) {
-      Alert.alert(
-        'Invite pending',
-        'This invite could not be applied. Ask your manager for a fresh invite or to add your email to the roster.',
-      );
-    }
-
     const { profile, venue, token } = last;
     setSession({
       user: {
@@ -92,7 +85,18 @@ export default function SignInScreen() {
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
+    // After signup, route to email verification first.
+    // verify-email.tsx calls redeemInvite / redeemMyInvite after code entry
+    // to finalize venue membership before taking the user into the app.
+    if (!profile.emailVerified && flow === 'signUp') {
+      if (options?.inviteToken) {
+        router.replace({ pathname: '/(auth)/verify-email', params: { invite: options.inviteToken } });
+      } else {
+        router.replace('/(auth)/verify-email');
+      }
+    } else {
+      router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
+    }
   };
 
   const resetExistingSession = () => {
