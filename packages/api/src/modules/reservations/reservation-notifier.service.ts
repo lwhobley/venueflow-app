@@ -44,21 +44,18 @@ export class ReservationNotifierService {
     const venueName = reservation.venue.name;
     const when = formatBookingTime(reservation.reservationTime);
     const subject = `${venueName} — Reservation confirmed for ${when}`;
-    const text = [
-      `Hi ${reservation.guestName.split(' ')[0] ?? reservation.guestName},`,
-      '',
-      `We're looking forward to seeing you at ${venueName}.`,
-      '',
-      `When: ${when}`,
-      `Party: ${reservation.partySize}`,
-      reservation.specialRequests ? `Notes: ${reservation.specialRequests}` : null,
-      '',
-      'If your plans change, please reply to this email so we can offer the table to another guest.',
-      '',
-      `— ${venueName}`,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const guestFirstName = reservation.guestName.split(' ')[0] ?? reservation.guestName;
+    const text =
+      `Hi ${guestFirstName},\n\n` +
+      `We're looking forward to seeing you at ${venueName}. Here are your reservation details:\n\n` +
+      `Reservation Details\n` +
+      `Detail\tInfo\n` +
+      `Venue\t${venueName}\n` +
+      `Date & Time\t${when}\n` +
+      `Party Size\t${reservation.partySize}\n` +
+      (reservation.specialRequests ? `Notes\t${reservation.specialRequests}\n` : '') + '\n' +
+      `If your plans change, please reply to this email so we can offer the table to another guest.\n\n` +
+      `— The Team at ${venueName}`;
     await this.email.send({
       to: reservation.guestEmail,
       subject,
@@ -101,15 +98,17 @@ export class ReservationNotifierService {
       const venueName = reservation.venue.name;
       const when = formatBookingTime(reservation.reservationTime);
       const subject = `${venueName} — Reminder: ${when}`;
-      const text = [
-        `Hi ${reservation.guestName.split(' ')[0] ?? reservation.guestName},`,
-        '',
-        `A quick reminder that we'll see you at ${venueName} on ${when} for a party of ${reservation.partySize}.`,
-        '',
-        'If anything has changed, please reply and let us know.',
-        '',
-        `— ${venueName}`,
-      ].join('\n');
+      const guestFirstName = reservation.guestName.split(' ')[0] ?? reservation.guestName;
+      const text =
+        `Hi ${guestFirstName},\n\n` +
+        `This is a quick reminder for your upcoming reservation at ${venueName}. We look forward to seeing you!\n\n` +
+        `Reservation Details\n` +
+        `Detail\tInfo\n` +
+        `Venue\t${venueName}\n` +
+        `Date & Time\t${when}\n` +
+        `Party Size\t${reservation.partySize}\n\n` +
+        `If anything has changed, please reply and let us know.\n\n` +
+        `— The Team at ${venueName}`;
       try {
         await this.email.sendOrThrow({ to: reservation.guestEmail, subject, text });
         sent += 1;
@@ -159,14 +158,15 @@ export class ReservationNotifierService {
       await this.email.sendOrThrow({
         to: entry.guestEmail,
         subject: `${venueName} — Your table is ready`,
-        text: [
-          `Hi ${entry.guestName.split(' ')[0] ?? entry.guestName},`,
-          '',
-          `Good news — a table for ${entry.partySize} just opened up at ${venueName}.`,
-          'Please check in with the host within 10 minutes to claim it.',
-          '',
-          `— ${venueName}`,
-        ].join('\n'),
+        text:
+          `Hi ${entry.guestName.split(' ')[0] ?? entry.guestName},\n\n` +
+          `Good news — a table for ${entry.partySize} just opened up at ${venueName}. Here are the details:\n\n` +
+          `Table Details\n` +
+          `Detail\tInfo\n` +
+          `Venue\t${venueName}\n` +
+          `Party Size\t${entry.partySize}\n\n` +
+          `Please check in with the host within 10 minutes to claim your table.\n\n` +
+          `— The Team at ${venueName}`,
       });
     } catch (err) {
       // Revert the claim if email sending fails.

@@ -170,9 +170,31 @@ export class StaffRequestsController {
       title: 'New staff request',
       body: `${profile.fullName} submitted ${body.kind.replace('_', ' ')}: ${body.title}`,
     });
+    const kindLabel = body.kind.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const reqStart = body.requestedRangeStart || body.requestedForDate;
+    const reqEnd = body.requestedRangeEnd || body.requestedForDate || reqStart;
+    const dateRangeStr = reqStart && reqEnd ? (reqStart === reqEnd ? reqStart : `${reqStart} – ${reqEnd}`) : null;
+
     void this.email.sendToVenueManagers(scope.venueId, {
-      subject: `New ${body.kind.replace('_', ' ')} request`,
-      text: `${profile.fullName} submitted a ${body.kind.replace('_', ' ')} request.\n\nTitle: ${body.title}\nDetails: ${body.details}`,
+      subject: `Staff Request — ${kindLabel}: Action Required`,
+      text:
+        `Hi Manager,\n\n` +
+        `${profile.fullName} has submitted a new ${kindLabel.toLowerCase()} request. Please review and take action in the Venue Wrangler app.\n\n` +
+        `Request Details\n` +
+        `Detail\tInfo\n` +
+        `Employee\t${profile.fullName}\n` +
+        `Request Type\t${kindLabel}\n` +
+        `Title\t${body.title}\n` +
+        `Details\t${body.details}\n` +
+        (dateRangeStr ? `Date/Range\t${dateRangeStr}\n` : '') + '\n' +
+        `How to Respond\n` +
+        `1. Open the Venue Wrangler app\n` +
+        `2. Go to Requests & Approvals\n` +
+        `3. Select the request\n` +
+        `4. Tap Approve or Deny — the employee will be notified instantly\n\n` +
+        `Pending requests can also be managed from your Operations Dashboard.\n\n` +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
 
     return mapStaffRequest(request);
@@ -300,11 +322,24 @@ export class StaffRequestsController {
         body.responseNotes?.trim() ||
         `${reviewer.fullName} marked your ${request.kind.replace('_', ' ')} request ${body.status}.`,
     });
+    const kindLabel = request.kind.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const statusText = body.status.charAt(0).toUpperCase() + body.status.slice(1);
+    const noteText = body.responseNotes?.trim();
+
     void this.email.sendToProfile(request.profileId, {
-      subject: `Your request was ${body.status}`,
+      subject: `Your ${kindLabel} Request Has Been ${statusText}`,
       text:
-        body.responseNotes?.trim() ||
-        `${reviewer.fullName} marked your ${request.kind.replace('_', ' ')} request ${body.status}.`,
+        `Hi there,\n\n` +
+        `Your ${kindLabel.toLowerCase()} request has been ${body.status} by your manager. Here are the details:\n\n` +
+        `Request Review Details\n` +
+        `Detail\tInfo\n` +
+        `Request Type\t${kindLabel}\n` +
+        `Title\t${request.title}\n` +
+        `Status\t${statusText}\n` +
+        `Reviewed By\t${reviewer.fullName}\n` +
+        (noteText ? `Manager's Note\t${noteText}\n` : '') + '\n' +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
 
     return mapStaffRequest(updated);

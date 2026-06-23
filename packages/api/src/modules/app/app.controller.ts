@@ -195,10 +195,22 @@ export class AppController {
       include: { venue: true },
     });
 
+    const venueName = profile.venue?.name ?? 'your venue';
     void this.email.send({
       to: profile.email,
-      subject: 'Your Venue Wrangler account was updated',
-      text: `Hi ${profile.fullName},\n\nYour Venue Wrangler account profile was updated.`,
+      subject: 'Your Venue Wrangler Account Was Updated',
+      text:
+        `Hi ${profile.fullName},\n\n` +
+        `Your Venue Wrangler account profile was successfully updated. Here are your current profile details:\n\n` +
+        `Updated Profile Details\n` +
+        `Detail\tInfo\n` +
+        `Name\t${profile.fullName}\n` +
+        `Role\t${profile.role}\n` +
+        `Job Title\t${profile.jobTitle}\n` +
+        (profile.venueId ? `Venue\t${venueName}\n` : '') + '\n' +
+        `If you have any questions or did not authorize this, please contact support.\n\n` +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
 
     return {
@@ -706,11 +718,19 @@ export class AppController {
     if (email) {
       void this.email.send({
         to: email,
-        subject: `Join ${venueName}`,
+        subject: `Invitation: Join the Team at ${venueName} on Venue Wrangler`,
         text:
-          `${profile.fullName} invited you to join ${venueName}.\n\n` +
-          `Open the Venue Wrangler app, choose "Join a team", and enter this code:\n\n  ${code}\n\n` +
-          `Or open this link on your phone:\n${inviteUrl}\n\nThis invite expires in 7 days.`,
+          `Hi there,\n\n` +
+          `You have been invited by ${profile.fullName} to join the team at ${venueName} on Venue Wrangler.\n\n` +
+          `To accept your invitation and join the venue:\n\n` +
+          `1. Open the Venue Wrangler app on your phone and choose "Join a team"\n` +
+          `2. Enter the following invite code when prompted:\n\n` +
+          `   ${code}\n\n` +
+          `Alternatively, you can tap this link directly on your mobile device:\n` +
+          `${inviteUrl}\n\n` +
+          `Note: This invitation is valid for 7 days.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
       });
     }
     return {
@@ -903,8 +923,14 @@ export class AppController {
     ]);
     void this.email.send({
       to: deletedAccountEmail,
-      subject: 'Your Venue Wrangler account was deleted',
-      text: `Hi ${deletedAccountName},\n\nYour Venue Wrangler account has been deleted. Any retained time records remain available to the venue for wage and compliance records.`,
+      subject: 'Your Venue Wrangler Account Has Been Deleted',
+      text:
+        `Hi ${deletedAccountName},\n\n` +
+        `Your Venue Wrangler account has been successfully deleted.\n\n` +
+        `Please note that any retained timeclock records remain available to the venue as employer wage and compliance records in accordance with federal and local regulations.\n\n` +
+        `Thank you for using Venue Wrangler.\n\n` +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
     return { ok: true };
   }

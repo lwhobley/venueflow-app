@@ -298,8 +298,13 @@ export class AuthController {
     if (account?.email) {
       void this.email.send({
         to: account.email,
-        subject: 'Your Venue Wrangler password was changed',
-        text: 'Your Venue Wrangler password was changed. If you did not make this change, reset your password immediately and contact support.',
+        subject: 'Security Alert: Your Venue Wrangler Password Has Been Changed',
+        text:
+          `Hi there,\n\n` +
+          `Your Venue Wrangler account password was successfully changed.\n\n` +
+          `If you did not make this change, please reset your password immediately in the app and contact our support team at support@venuewrangler.com to secure your account.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
       });
     }
     return { ok: true };
@@ -371,11 +376,15 @@ export class AuthController {
       });
       await this.email.sendOrThrow({
         to: account.email,
-        subject: 'Reset your Venue Wrangler password',
+        subject: 'Reset Your Venue Wrangler Password',
         text:
           `Hi ${account.profile?.fullName ?? 'there'},\n\n` +
-          `Use this code to reset your Venue Wrangler password: ${code}\n\n` +
-          'The code expires in 60 minutes. If you did not request a reset, you can ignore this email.',
+          `We received a request to reset the password for your Venue Wrangler account.\n\n` +
+          `To complete your password reset, enter the following code when prompted in the app:\n\n` +
+          `   ${code}\n\n` +
+          `Note: This code is valid for 60 minutes. If you did not request a password reset, you can safely ignore this email — your account remains secure.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
       });
     }
     return { ok: true };
@@ -637,11 +646,15 @@ export class AuthController {
     });
     await this.email.sendOrThrow({
       to: email,
-      subject: 'Verify your Venue Wrangler email',
+      subject: 'Verify Your Venue Wrangler Email Address',
       text:
         `Hi ${fullName?.trim() || 'there'},\n\n` +
-        `Use this code to verify your email address in Venue Wrangler: ${code}\n\n` +
-        'This code expires in 24 hours.',
+        `Thank you for signing up for Venue Wrangler!\n\n` +
+        `To complete your registration and verify your email address, please enter the following verification code in the app:\n\n` +
+        `   ${code}\n\n` +
+        `Note: This verification code is valid for 24 hours.\n\n` +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
   }
 }

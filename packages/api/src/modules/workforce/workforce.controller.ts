@@ -410,13 +410,19 @@ export class WorkforceController {
     const to = request.user.profile?.email ?? request.user.email;
     if (!to) return;
     const name = request.user.profile?.fullName ?? 'there';
+    const statusText = decision === 'approved' ? 'Approved' : 'Rejected';
     void this.email.send({
       to,
-      subject: `Your request to join ${request.venue.name} was ${decision}`,
+      subject: `Your request to join ${request.venue.name} was ${statusText}`,
       text:
-        decision === 'approved'
-          ? `Hi ${name},\n\nYour request to join ${request.venue.name} was approved. You can now open Venue Wrangler and access the team.`
-          : `Hi ${name},\n\nYour request to join ${request.venue.name} was rejected.${note ? `\n\nNote: ${note}` : ''}`,
+        `Hi ${name},\n\n` +
+        `Your request to join ${request.venue.name} has been ${statusText.toLowerCase()} by a manager.\n\n` +
+        (decision === 'approved'
+          ? `You can now log in to the Venue Wrangler app to access your team dashboard and start viewing your shifts.\n\n`
+          : (note ? `Manager's Note:\n${note}\n\n` : '') +
+            `Please reach out to your venue manager directly if you have any questions or require further assistance.\n\n`) +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
   }
 

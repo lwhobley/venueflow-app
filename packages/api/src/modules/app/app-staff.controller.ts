@@ -96,12 +96,29 @@ export class AppStaffController {
       : await this.prisma.profile.create({
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         });
+    const venueName = viewer.venue?.name ?? 'your venue';
     void this.email.send({
       to: row.email,
-      subject: existing ? 'Your Venue Wrangler team profile was updated' : `You were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'}`,
+      subject: existing ? 'Your Venue Wrangler Profile Has Been Updated' : `Invitation: Join the Team at ${venueName} on Venue Wrangler`,
       text: existing
-        ? `Hi ${row.fullName},\n\nYour team profile for ${viewer.venue?.name ?? 'your venue'} was updated.\n\nRole: ${row.role}\nJob title: ${row.jobTitle}`
-        : `Hi ${row.fullName},\n\nYou were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'} as ${row.jobTitle}.\n\nCreate an account or sign in with this email address to join the team.`,
+        ? `Hi ${row.fullName},\n\n` +
+          `Your team profile for ${venueName} was updated. Here are your current profile details:\n\n` +
+          `Updated Profile Details\n` +
+          `Detail\tInfo\n` +
+          `Name\t${row.fullName}\n` +
+          `Role\t${row.role}\n` +
+          `Job Title\t${row.jobTitle}\n\n` +
+          `If you did not request these changes or have any questions, please contact your venue administrator.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`
+        : `Hi ${row.fullName},\n\n` +
+          `Welcome! You have been added to the team at ${venueName} as a ${row.jobTitle}.\n\n` +
+          `To view your schedule, manage your availability, and request shift swaps, please join the venue using the steps below:\n\n` +
+          `1. Create a Venue Wrangler account or sign in using your email: ${row.email}\n` +
+          `2. You will be automatically linked to the venue and can access your dashboard right away.\n\n` +
+          `We're excited to have you on board!\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
     });
     return mapProfile(row);
   }
