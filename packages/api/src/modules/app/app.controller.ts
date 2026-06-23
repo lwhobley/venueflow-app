@@ -800,7 +800,43 @@ export class AppController {
       take: 2,
     });
     if (matches.length === 0) {
-      return { redeemed: false };
+      const unclaimedProfile = await this.prisma.profile.findFirst({
+        where: {
+          userId: null,
+          email: { equals: email, mode: 'insensitive' },
+          venueId: { not: null },
+        },
+        include: { venue: true },
+      });
+
+      if (!unclaimedProfile) {
+        return { redeemed: false };
+      }
+
+      const profile = await this.getProfile(user);
+      if (!profile) throw new NotFoundException('Profile not found');
+
+      const updated = await this.prisma.$transaction(async (tx) => {
+        // Delete temporary profile created on signup
+        await tx.profile.delete({
+          where: { id: profile.id },
+        });
+
+        // Adopt the unclaimed profile
+        return tx.profile.update({
+          where: { id: unclaimedProfile.id },
+          data: {
+            userId: user.sub,
+          },
+          include: { venue: true },
+        });
+      });
+
+      return {
+        redeemed: true,
+        profile: mapProfile(updated, true),
+        venue: updated.venue ? mapVenue(updated.venue) : null,
+      };
     }
     if (matches.length > 1) {
       throw new BadRequestException('Multiple pending invites were found for this email. Use the specific invite link from your manager.');

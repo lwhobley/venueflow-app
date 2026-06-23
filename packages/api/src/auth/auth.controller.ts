@@ -450,16 +450,35 @@ export class AuthController {
       });
       let result;
       if (existingByUser) {
-        result = await tx.profile.update({
-          where: { id: existingByUser.id },
-          data: {
-            email,
-            ...(trimmedFullName ? { fullName: trimmedFullName } : {}),
-            ...(grant ?? {}),
-            ...(existingByUser.trialEndsAt ? {} : { trialEndsAt }),
-          },
-          include: { venue: true },
-        });
+        const unclaimedProfile = emailVerified
+          ? await tx.profile.findFirst({
+              where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
+              orderBy: { createdAt: 'asc' },
+              include: { venue: true },
+            })
+          : null;
+
+        if (unclaimedProfile && (!existingByUser.venueId || existingByUser.venueId === unclaimedProfile.venueId)) {
+          // Delete existing dummy profile
+          await tx.profile.delete({ where: { id: existingByUser.id } });
+          // Adopt unclaimed profile
+          result = await tx.profile.update({
+            where: { id: unclaimedProfile.id },
+            data: { userId },
+            include: { venue: true },
+          });
+        } else {
+          result = await tx.profile.update({
+            where: { id: existingByUser.id },
+            data: {
+              email,
+              ...(trimmedFullName ? { fullName: trimmedFullName } : {}),
+              ...(grant ?? {}),
+              ...(existingByUser.trialEndsAt ? {} : { trialEndsAt }),
+            },
+            include: { venue: true },
+          });
+        }
       } else {
         // Only adopt a manager-precreated (unclaimed) profile when a valid
         // invite authorizes access to that venue. Email match alone is NOT

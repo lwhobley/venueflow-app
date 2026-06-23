@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi, type InviteCheckResult } from '../../lib/api-client';
+import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
 
 type Stage =
@@ -21,6 +22,10 @@ type Stage =
   | { kind: 'used' };
 
 export default function InviteCheckScreen() {
+  const user = useAuthStore((s: AuthState) => s.user);
+  const token = useAuthStore((s: AuthState) => s.token);
+  const setSession = useAuthStore((s: AuthState) => s.setSession);
+
   const [contact, setContact] = useState('');
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'entry' });
@@ -52,12 +57,55 @@ export default function InviteCheckScreen() {
     }
   };
 
-  const continueWithInvite = (invite: Extract<InviteCheckResult, { status: 'found' }>) => {
+  const continueWithInvite = async (invite: Extract<InviteCheckResult, { status: 'found' }>) => {
     if (!looksLikeEmail) {
       Alert.alert(
         'Use your email invite',
         'For security, team invites now attach only after email verification. Ask your manager to send the invite to your email address.',
       );
+      return;
+    }
+    if (user) {
+      if (!user.email_verified) {
+        router.push('/(auth)/verify-email');
+        return;
+      }
+      setLoading(true);
+      try {
+        const redemption = await appApi.redeemMyInvite();
+        if (redemption.redeemed && redemption.profile) {
+          setSession({
+            user: {
+              id: redemption.profile._id,
+              email: redemption.profile.email,
+              full_name: redemption.profile.fullName,
+              email_verified: true,
+              role: redemption.profile.role,
+              job_title: redemption.profile.jobTitle,
+              venue_id: redemption.profile.venueId ?? null,
+              all_access: redemption.profile.allAccess === true,
+            },
+            venue: redemption.venue
+              ? {
+                  id: redemption.venue._id,
+                  name: redemption.venue.name,
+                  latitude: redemption.venue.latitude,
+                  longitude: redemption.venue.longitude,
+                  geofence_radius_m: redemption.venue.geofenceRadiusM,
+                }
+              : null,
+            token,
+          });
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          router.replace('/(tabs)/home');
+        } else {
+          Alert.alert('Could not join team', 'We could not attach your profile. Ask your manager to verify your invite details.');
+        }
+      } catch (e) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong. Try again.');
+      } finally {
+        setLoading(false);
+      }
       return;
     }
     router.push({
@@ -140,16 +188,19 @@ export default function InviteCheckScreen() {
                   Role: {stage.invite.jobTitle}
                 </Text>
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  Sign up with this invited email address, then verify your email to join the team automatically.
+                  {user
+                    ? 'Confirm your invite to join the team automatically.'
+                    : 'Sign up with this invited email address, then verify your email to join the team automatically.'}
                 </Text>
                 <Button
                   mode="contained"
                   buttonColor={colors.primary}
                   textColor={colors.buttonText}
+                  loading={loading}
                   onPress={() => continueWithInvite(stage.invite)}
                   style={{ marginTop: 4 }}
                 >
-                  Create account
+                  {user ? 'Join Team' : 'Create account'}
                 </Button>
                 <Button
                   mode="text"

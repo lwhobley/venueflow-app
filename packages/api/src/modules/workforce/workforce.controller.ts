@@ -91,7 +91,29 @@ export class WorkforceController {
     });
 
     if (!invite) {
-      return { status: 'not_found' };
+      const unclaimedProfile = await this.prisma.profile.findFirst({
+        where: {
+          userId: null,
+          venueId: { not: null },
+          ...(email
+            ? { email: { equals: email, mode: 'insensitive' } }
+            : { phone: phone ? { equals: phone } : undefined }),
+        },
+        include: { venue: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!unclaimedProfile || !unclaimedProfile.venue) {
+        return { status: 'not_found' };
+      }
+
+      return {
+        status: 'found',
+        venueName: unclaimedProfile.venue.name,
+        jobTitle: unclaimedProfile.jobTitle,
+        role: unclaimedProfile.role,
+        expiresAt: unclaimedProfile.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000,
+      };
     }
     if (invite.usedBy) {
       return { status: 'used' };
