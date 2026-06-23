@@ -12,7 +12,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { Availability, Prisma, ShiftStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Type, plainToInstance } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -21,6 +21,9 @@ import {
   IsOptional,
   IsString,
   ValidateNested,
+  Min,
+  Max,
+  validateSync,
 } from 'class-validator';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
@@ -105,9 +108,13 @@ class ShiftDto {
   dayIndex!: number;
 
   @IsInt()
+  @Min(0)
+  @Max(1440)
   startMinutes!: number;
 
   @IsInt()
+  @Min(0)
+  @Max(1440)
   endMinutes!: number;
 
   @IsString()
@@ -140,6 +147,33 @@ class LaborBudgetDto {
 class TemplateDto {
   @IsString()
   name!: string;
+}
+
+class TemplateShiftDto {
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  dayIndex!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  startMinutes!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  endMinutes!: number;
+
+  @IsString()
+  jobTitle!: string;
+
+  @IsString()
+  station!: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
 }
 
 class ApplyTemplateDto {
@@ -1532,21 +1566,13 @@ export class SchedulingController {
   private parseTemplateSlots(value: Prisma.JsonValue): TemplateShiftSlot[] {
     if (!Array.isArray(value)) return [];
     return value.map((slot) => {
-      if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
+      const parsed = plainToInstance(TemplateShiftDto, slot);
+      const errors = validateSync(parsed, { whitelist: true, forbidNonWhitelisted: true });
+      if (errors.length > 0) {
         throw new BadRequestException('Template contains an invalid shift.');
       }
-      const row = slot as Record<string, unknown>;
-      const parsed = {
-        dayIndex: Number(row.dayIndex),
-        startMinutes: Number(row.startMinutes),
-        endMinutes: Number(row.endMinutes),
-        jobTitle: typeof row.jobTitle === 'string' ? row.jobTitle.trim() : '',
-        station: typeof row.station === 'string' ? row.station.trim() : '',
-        notes: typeof row.notes === 'string' ? row.notes : null,
-      };
       ensureValidShiftWindow(parsed.dayIndex, parsed.startMinutes, parsed.endMinutes);
-      if (!parsed.jobTitle || !parsed.station) throw new BadRequestException('Template contains an invalid shift.');
-      return parsed;
+      return parsed as TemplateShiftSlot;
     });
   }
 

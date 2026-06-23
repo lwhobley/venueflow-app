@@ -12,7 +12,7 @@ import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
-import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
+import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -72,8 +72,9 @@ export class TimeClockController {
 
     if (isAdminRole(scope.role)) {
       const now = Date.now();
-      const today = new Date().getDay();
-      const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+      const tz = venue.timezone ?? null;
+      const today = zonedDayOfWeek(tz, now);
+      const minutesNow = zonedMinutesOfDay(tz, now);
       const openByProfile = new Set(
         entries.filter((entry) => entry.isOpen).map((entry) => entry.profileId),
       );
@@ -130,7 +131,10 @@ export class TimeClockController {
 
   @Get('me')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
-    const profile = await this.prisma.profile.findFirst({ where: { userId: user.sub } });
+    const profile = await this.prisma.profile.findFirst({ 
+      where: { userId: user.sub },
+      include: { venue: { select: { timezone: true } } },
+    });
     if (!profile) return null;
 
     // Only today's punches and the last week of hours are reported, so bound
@@ -143,7 +147,8 @@ export class TimeClockController {
     const open = all.filter((entry) => entry.isOpen);
     const closed = all.filter((entry) => !entry.isOpen);
 
-    const startOfToday = new Date().setHours(0, 0, 0, 0);
+    const tz = profile.venue?.timezone ?? null;
+    const startOfToday = zonedDayBounds(tz, 0).start;
     const now = Date.now();
     const punches: { type: 'in' | 'out'; at: number }[] = [];
     for (const entry of all) {

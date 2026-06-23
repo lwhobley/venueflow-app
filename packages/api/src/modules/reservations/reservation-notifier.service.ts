@@ -7,8 +7,9 @@ const REMINDER_WINDOW_MIN_HOURS = 20;
 const REMINDER_WINDOW_MAX_HOURS = 28;
 const REMINDER_BATCH_LIMIT = 200;
 
-function formatBookingTime(time: Date): string {
+function formatBookingTime(time: Date, timeZone: string | null): string {
   return time.toLocaleString('en-US', {
+    timeZone: timeZone ?? 'UTC',
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -38,11 +39,11 @@ export class ReservationNotifierService {
 
     const reservation = await this.prisma.reservation.findUnique({
       where: { id: reservationId },
-      include: { venue: { select: { name: true } } },
+      include: { venue: { select: { name: true, timezone: true } } },
     });
     if (!reservation?.guestEmail) return;
     const venueName = reservation.venue.name;
-    const when = formatBookingTime(reservation.reservationTime);
+    const when = formatBookingTime(reservation.reservationTime, reservation.venue.timezone);
     const subject = `${venueName} — Reservation confirmed for ${when}`;
     const guestFirstName = reservation.guestName.split(' ')[0] ?? reservation.guestName;
     const text =
@@ -81,7 +82,7 @@ export class ReservationNotifierService {
         reservationTime: { gte: minTime, lte: maxTime },
         guestEmail: { not: null },
       },
-      include: { venue: { select: { name: true } } },
+      include: { venue: { select: { name: true, timezone: true } } },
       take: REMINDER_BATCH_LIMIT,
     });
     let sent = 0;
@@ -96,7 +97,7 @@ export class ReservationNotifierService {
       if (claimed.count === 0) continue; // already claimed or deleted
 
       const venueName = reservation.venue.name;
-      const when = formatBookingTime(reservation.reservationTime);
+      const when = formatBookingTime(reservation.reservationTime, reservation.venue.timezone);
       const subject = `${venueName} — Reminder: ${when}`;
       const guestFirstName = reservation.guestName.split(' ')[0] ?? reservation.guestName;
       const text =

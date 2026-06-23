@@ -20,11 +20,12 @@ async function bootstrap() {
   // reflect the real client (used for rate-limit keys), not the proxy.
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
   const config = app.get(ConfigService);
+  const isValidOrigin = (o: string) => /^https?:\/\//i.test(o) || o === '*';
   const origins = config
     .get<string>('CORS_ORIGINS', '')
     .split(',')
     .map((origin) => origin.trim())
-    .filter(Boolean);
+    .filter((origin) => origin && isValidOrigin(origin));
   const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
 
   app.use(helmet());

@@ -9,12 +9,12 @@ import { promisify } from 'util';
 const pbkdf2Async = promisify(pbkdf2);
 import { Public } from './public.decorator';
 import { CurrentUser } from './current-user.decorator';
-import { invalidateCachedSession } from './auth.guard';
 import type { AuthUser } from './auth.guard';
 import { getClientIp } from '../common/http';
 import { assertWithinSharedRateLimit } from '../common/rate-limit';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthService } from './auth.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 // Matches the JWT's 30-day expiry so a session and its token expire together.
@@ -101,6 +101,7 @@ export class AuthController {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly email: EmailService,
+    private readonly authService: AuthService,
   ) {}
 
   @Public()
@@ -116,7 +117,7 @@ export class AuthController {
       if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
         throw new UnauthorizedException('Too many failed sign-in attempts. Try again later.');
       }
-      if (!user?.password || !(await verifyPassword(body.password, user.password.salt, user.password.passwordHash, user.password.iterations))) {
+      if (!user?.password || !(await this.authService.verifyPassword(body.password, user.password.salt, user.password.iterations, user.password.passwordHash))) {
         if (user) {
           await this.recordFailedSignIn(user.id, user.failedSignInCount, user.lockedUntil);
         }
@@ -132,7 +133,7 @@ export class AuthController {
       // count is below the current target.
       if (user.password.iterations < PASSWORD_ITERATIONS) {
         try {
-          const upgraded = await hashPassword(body.password);
+          const upgraded = await this.authService.hashPassword(body.password);
           await this.prisma.passwordCredential.update({
             where: { userId: user.id },
             data: { salt: upgraded.salt, passwordHash: upgraded.hash, iterations: PASSWORD_ITERATIONS },
@@ -157,7 +158,7 @@ export class AuthController {
 
     const phone = body.phone?.trim().replace(/[\s\-().+]/g, '') || undefined;
 
-    const result = await hashPassword(body.password);
+    const result = await this.authService.hashPassword(body.password);
     let nextUserId: string;
     try {
       nextUserId = await this.prisma.$transaction(async (tx) => {
@@ -277,10 +278,10 @@ export class AuthController {
     await assertWithinSharedRateLimit(this.prisma, `change-password:${user.sub}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
     const existing = await this.prisma.passwordCredential.findUnique({ where: { userId: user.sub } });
     if (existing) {
-      const ok = await verifyPassword(body.currentPassword ?? '', existing.salt, existing.passwordHash, existing.iterations);
+      const ok = await this.authService.verifyPassword(body.currentPassword ?? '', existing.salt, existing.iterations, existing.passwordHash);
       if (!ok) throw new UnauthorizedException('Current password is incorrect.');
     }
-    const next = await hashPassword(body.newPassword);
+    const next = await this.authService.hashPassword(body.newPassword);
     await this.prisma.passwordCredential.upsert({
       where: { userId: user.sub },
       update: { salt: next.salt, passwordHash: next.hash, iterations: PASSWORD_ITERATIONS },
@@ -339,7 +340,7 @@ export class AuthController {
     if (account.emailVerificationSentAt.getTime() + EMAIL_CODE_TTL_MS < Date.now()) {
       throw new BadRequestException('That verification code has expired. Request a new code.');
     }
-    if (account.emailVerificationCodeHash !== hashOneTimeCode(body.code)) {
+    if (account.emailVerificationCodeHash !== this.authService.hashOneTimeCode(body.code)) {
       throw new BadRequestException('That verification code is not valid.');
     }
     await this.prisma.user.update({
@@ -365,11 +366,11 @@ export class AuthController {
       select: { id: true, email: true, profile: { select: { fullName: true } } },
     });
     if (account?.email) {
-      const code = makeOneTimeCode();
+      const code = this.authService.generateOneTimeCode();
       await this.prisma.user.update({
         where: { id: account.id },
         data: {
-          passwordResetCodeHash: hashOneTimeCode(code),
+          passwordResetCodeHash: this.authService.hashOneTimeCode(code),
           passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
           passwordResetSentAt: new Date(),
         },
@@ -409,11 +410,11 @@ export class AuthController {
       !account?.passwordResetCodeHash ||
       !account.passwordResetExpiresAt ||
       account.passwordResetExpiresAt.getTime() < Date.now() ||
-      account.passwordResetCodeHash !== hashOneTimeCode(body.code)
+      account.passwordResetCodeHash !== this.authService.hashOneTimeCode(body.code)
     ) {
       throw new BadRequestException('That password reset code is invalid or expired.');
     }
-    const next = await hashPassword(body.newPassword);
+    const next = await this.authService.hashPassword(body.newPassword);
     await this.prisma.$transaction([
       this.prisma.passwordCredential.upsert({
         where: { userId: account.id },
@@ -449,162 +450,25 @@ export class AuthController {
   @Post('logout')
   async logout(@CurrentUser() user: AuthUser) {
     if (user.sid) {
-      await this.prisma.session.deleteMany({ where: { id: user.sid, userId: user.sub } });
-      invalidateCachedSession(user.sid);
+      await this.prisma.session.delete({ where: { id: user.sid } });
     }
     return { ok: true };
   }
 
-  // Revoke every session for the account (all devices). The in-process session
-  // cache will expire stale entries within SESSION_CACHE_TTL_MS (30s); we only
-  // explicitly invalidate the caller's sid since we don't know the others here.
+  // Revoke every session for the account (all devices).
   @Post('logout-all')
   async logoutAll(@CurrentUser() user: AuthUser) {
     await this.prisma.session.deleteMany({ where: { userId: user.sub } });
-    if (user.sid) invalidateCachedSession(user.sid);
     return { ok: true };
   }
 
   private async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string, rawPhone?: string) {
-    const trialEndsAt = new Date(Date.now() + TRIAL_DURATION_MS);
+    const { session, profile } = await this.authService.issueSession(userId, email, fullName, inviteToken, rawPhone);
     const account = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { emailVerifiedAt: true },
     });
     const emailVerified = Boolean(account?.emailVerifiedAt);
-    // inviteToken may be the long deep-link token OR the short human code.
-    const inviteValue = inviteToken?.trim();
-    const invite = inviteValue
-      ? emailVerified
-      ? await this.prisma.invite.findFirst({
-          where: {
-            OR: [{ token: inviteValue }, { code: { equals: inviteValue, mode: 'insensitive' } }],
-            usedBy: null,
-            expiresAt: { gt: new Date() },
-          },
-        })
-      : null
-      : null;
-    if (invite?.email && invite.email.toLowerCase() !== email) {
-      throw new UnauthorizedException('This invite was sent to a different email address.');
-    }
-    const phone = rawPhone?.trim().replace(/[\s\-().+]/g, '') || undefined;
-    if (!invite?.email && invite?.phone && invite.phone !== phone) {
-      throw new UnauthorizedException('This invite was sent to a different mobile number.');
-    }
-    const trimmedFullName = fullName?.trim();
-    const profile = await this.prisma.$transaction(async (tx) => {
-      // Consume the invite atomically so it can only be redeemed once, even
-      // under concurrent signups. The guarded updateMany is the lock: the loser
-      // sees count 0 and proceeds as if no invite was supplied.
-      let activeInvite = invite;
-      if (invite) {
-        const claimed = await tx.invite.updateMany({
-          where: { id: invite.id, usedBy: null },
-          data: { usedBy: `pending:${userId}` },
-        });
-        if (claimed.count === 0) activeInvite = null;
-      }
-
-      const grant = activeInvite
-        ? { venueId: activeInvite.venueId, role: activeInvite.role, jobTitle: activeInvite.jobTitle }
-        : null;
-
-      const existingByUser = await tx.profile.findUnique({
-        where: { userId },
-        include: { venue: true },
-      });
-      let result;
-      if (existingByUser) {
-        const unclaimedProfile = emailVerified
-          ? await tx.profile.findFirst({
-              where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
-              orderBy: { createdAt: 'asc' },
-              include: { venue: true },
-            })
-          : null;
-
-        if (unclaimedProfile && (!existingByUser.venueId || existingByUser.venueId === unclaimedProfile.venueId)) {
-          // Delete existing dummy profile
-          await tx.profile.delete({ where: { id: existingByUser.id } });
-          // Adopt unclaimed profile
-          result = await tx.profile.update({
-            where: { id: unclaimedProfile.id },
-            data: { userId },
-            include: { venue: true },
-          });
-        } else {
-          result = await tx.profile.update({
-            where: { id: existingByUser.id },
-            data: {
-              email,
-              ...(trimmedFullName ? { fullName: trimmedFullName } : {}),
-              ...(grant ?? {}),
-              ...(existingByUser.trialEndsAt ? {} : { trialEndsAt }),
-            },
-            include: { venue: true },
-          });
-        }
-      } else {
-        // Only adopt a manager-precreated (unclaimed) profile when a valid
-        // invite authorizes access to that venue. Email match alone is NOT
-        // proof of ownership — signup does not verify email — so without an
-        // invite we never claim an existing profile; we create a fresh one.
-        const claimedProfile = (grant
-          ? await tx.profile.findFirst({
-              where: { userId: null, venueId: grant.venueId, email: { equals: email, mode: 'insensitive' } },
-              orderBy: { createdAt: 'asc' },
-              include: { venue: true },
-            })
-          : await tx.profile.findFirst({
-              where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
-              orderBy: { createdAt: 'asc' },
-              include: { venue: true },
-            })) || null;
-        if (claimedProfile) {
-          result = await tx.profile.update({
-            where: { id: claimedProfile.id },
-            data: {
-              userId,
-              email,
-              fullName: trimmedFullName || claimedProfile.fullName,
-              role: grant?.role ?? claimedProfile.role,
-              jobTitle: grant?.jobTitle ?? claimedProfile.jobTitle,
-              venueId: grant?.venueId ?? claimedProfile.venueId,
-              trialEndsAt: claimedProfile.trialEndsAt ?? trialEndsAt,
-            },
-            include: { venue: true },
-          });
-        } else {
-          result = await tx.profile.create({
-            data: {
-              userId,
-              email,
-              fullName: trimmedFullName || email.split('@')[0] || 'Team Member',
-              role: grant?.role ?? 'staff',
-              jobTitle: grant?.jobTitle ?? 'Staff',
-              venueId: grant?.venueId ?? undefined,
-              trialEndsAt,
-            },
-            include: { venue: true },
-          });
-        }
-      }
-
-      // Re-point the consumed invite from the sentinel to the real profile.
-      if (activeInvite) {
-        await tx.invite.update({ where: { id: activeInvite.id }, data: { usedBy: result.id } });
-      }
-      return result;
-    });
-
-    // Create a revocable session and bind the JWT to it (sid). The session is
-    // deleted on logout / password change / account deletion, invalidating the
-    // token before its 30-day JWT expiry.
-    const session = await this.prisma.session.create({
-      data: { userId, expiresAt: new Date(Date.now() + SESSION_DURATION_MS) },
-      select: { id: true },
-    });
     const token = await this.jwt.signAsync({
       sub: userId,
       email,
@@ -636,11 +500,11 @@ export class AuthController {
   }
 
   private async sendVerificationEmail(userId: string, email: string, fullName?: string) {
-    const code = makeOneTimeCode();
+    const code = this.authService.generateOneTimeCode();
     await this.prisma.user.update({
       where: { id: userId },
       data: {
-        emailVerificationCodeHash: hashOneTimeCode(code),
+        emailVerificationCodeHash: this.authService.hashOneTimeCode(code),
         emailVerificationSentAt: new Date(),
       },
     });
