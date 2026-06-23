@@ -27,6 +27,7 @@ import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { ReservationNotifierService } from './reservation-notifier.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 const RESERVATION_STATUSES = ['requested', 'confirmed', 'checked_in', 'seated', 'completed', 'no_show', 'cancelled'] as const;
@@ -130,9 +131,23 @@ class ReservationIngestDto {
   events!: ReservationSyncEventDto[];
 }
 
+class ReservationHoldDto {
+  @IsString()
+  startsAt!: string;
+
+  @IsString()
+  endsAt!: string;
+
+  @IsString()
+  reason!: string;
+}
+
 @Controller('v1/reservations')
 export class ReservationsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifier: ReservationNotifierService,
+  ) {}
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
     if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
@@ -336,6 +351,20 @@ export class ReservationsController {
       durationMinutes: 90,
     };
 
+    // Block bookings that overlap a manager-imposed hold.
+    const endTime = new Date(reservationTime.getTime() + 90 * 60 * 1000);
+    const hold = await this.prisma.reservationHold.findFirst({
+      where: {
+        venueId: scope.venueId,
+        startsAt: { lt: endTime },
+        endsAt: { gt: reservationTime },
+      },
+      select: { reason: true },
+    });
+    if (hold) {
+      throw new BadRequestException(`This time conflicts with a hold: ${hold.reason}`);
+    }
+
     if (body.reservationId) {
       const existing = await this.prisma.reservation.findFirst({
         where: { id: body.reservationId, venueId: scope.venueId },
@@ -345,11 +374,183 @@ export class ReservationsController {
         where: { id: existing.id },
         data,
       });
+      // Send confirmation if status just became confirmed and we have an email
+      // we haven't already confirmed against.
+      if (
+        updated.guestEmail &&
+        updated.status === 'confirmed' &&
+        existing.status !== 'confirmed' &&
+        !updated.confirmationSentAt
+      ) {
+        void this.notifier.sendConfirmation(updated.id);
+      }
       return { id: updated.id };
     }
 
     const created = await this.prisma.reservation.create({ data });
+    if (created.guestEmail && created.status === 'confirmed') {
+      void this.notifier.sendConfirmation(created.id);
+    }
     return { id: created.id };
+  }
+
+  // ============================================================
+  // Cover-pacing: 15-min buckets of booked covers for a given date.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('cover-pacing')
+  async getCoverPacing(@VenueScope() scope: Scope, @Query('date') date?: string) {
+    this.requireManager(scope);
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException('Pass ?date=YYYY-MM-DD');
+    }
+    const start = new Date(`${date}T00:00:00.000Z`);
+    const end = new Date(`${date}T23:59:59.999Z`);
+
+    const [reservations, plan] = await Promise.all([
+      this.prisma.reservation.findMany({
+        where: {
+          venueId: scope.venueId,
+          deletedAt: null,
+          status: { notIn: ['cancelled', 'no_show'] },
+          reservationTime: { gte: start, lte: end },
+        },
+        select: { reservationTime: true, partySize: true, durationMinutes: true },
+      }),
+      this.prisma.floorPlan.findFirst({
+        where: { venueId: scope.venueId, isActive: true },
+        include: { tables: { select: { seats: true, isReservable: true } } },
+      }),
+    ]);
+
+    const seatingCapacity = (plan?.tables ?? [])
+      .filter((t) => t.isReservable)
+      .reduce((sum, t) => sum + t.seats, 0);
+
+    // 96 buckets of 15 minutes covering the venue's day.
+    const buckets: Array<{ slot: number; startsAt: number; covers: number }> = [];
+    for (let i = 0; i < 96; i += 1) {
+      buckets.push({ slot: i, startsAt: start.getTime() + i * 15 * 60 * 1000, covers: 0 });
+    }
+    for (const r of reservations) {
+      // Count a reservation in every 15-min slot it overlaps so a 7pm party
+      // of 6 with a 90-min turn shows up in 6 buckets, accurately reflecting
+      // kitchen load.
+      const startMs = r.reservationTime.getTime();
+      const endMs = startMs + r.durationMinutes * 60 * 1000;
+      const firstSlot = Math.max(0, Math.floor((startMs - start.getTime()) / (15 * 60 * 1000)));
+      const lastSlot = Math.min(95, Math.floor((endMs - 1 - start.getTime()) / (15 * 60 * 1000)));
+      for (let i = firstSlot; i <= lastSlot; i += 1) {
+        buckets[i].covers += r.partySize;
+      }
+    }
+
+    const peak = buckets.reduce((max, b) => Math.max(max, b.covers), 0);
+    return {
+      date,
+      seatingCapacity,
+      peakCovers: peak,
+      totalReservations: reservations.length,
+      buckets: buckets.filter((b) => b.covers > 0 || (b.slot >= 40 && b.slot <= 92)).map((b) => ({
+        startsAt: b.startsAt,
+        covers: b.covers,
+      })),
+    };
+  }
+
+  // ============================================================
+  // Guest preference autofill: lookup by email or phone.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('guest-autofill')
+  async guestAutofill(
+    @VenueScope() scope: Scope,
+    @Query('email') email?: string,
+    @Query('phone') phone?: string,
+  ) {
+    this.requireManager(scope);
+    const cleanEmail = email?.trim().toLowerCase();
+    const cleanPhone = phone?.replace(/[^\d+]/g, '');
+    if (!cleanEmail && !cleanPhone) return { guest: null };
+    const guest = await this.prisma.guest.findFirst({
+      where: {
+        venueId: scope.venueId,
+        deletedAt: null,
+        OR: [
+          ...(cleanEmail ? [{ email: cleanEmail }] : []),
+          ...(cleanPhone ? [{ phone: cleanPhone }] : []),
+        ],
+      },
+    });
+    if (!guest) return { guest: null };
+    const recent = await this.prisma.reservation.findFirst({
+      where: { venueId: scope.venueId, deletedAt: null, guestId: guest.id, completedAt: { not: null } },
+      orderBy: { completedAt: 'desc' },
+      select: { completedAt: true, partySize: true },
+    });
+    return {
+      guest: {
+        id: guest.id,
+        fullName: guest.fullName,
+        email: guest.email,
+        phone: guest.phone,
+        favoriteTable: guest.favoriteTable,
+        preferredServer: guest.preferredServer,
+        dietaryNotes: guest.dietaryNotes,
+        tags: guest.tags,
+        lifecycleStage: guest.lifecycleStage,
+        lastVisitAt: recent?.completedAt?.getTime() ?? null,
+        lastPartySize: recent?.partySize ?? null,
+      },
+    };
+  }
+
+  // ============================================================
+  // Reservation holds: block off date/time windows.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('holds')
+  async listHolds(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const now = new Date();
+    const rows = await this.prisma.reservationHold.findMany({
+      where: { venueId: scope.venueId, endsAt: { gte: now } },
+      orderBy: { startsAt: 'asc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      startsAt: row.startsAt.getTime(),
+      endsAt: row.endsAt.getTime(),
+      reason: row.reason,
+    }));
+  }
+
+  @RequireSubscription('active')
+  @Post('holds')
+  async createHold(@VenueScope() scope: Scope, @Body() body: ReservationHoldDto) {
+    this.requireManager(scope);
+    const startsAt = new Date(body.startsAt);
+    const endsAt = new Date(body.endsAt);
+    if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime())) {
+      throw new BadRequestException('Invalid date');
+    }
+    if (endsAt <= startsAt) throw new BadRequestException('endsAt must be after startsAt');
+    const reason = body.reason.trim();
+    if (!reason) throw new BadRequestException('reason is required');
+    const created = await this.prisma.reservationHold.create({
+      data: { venueId: scope.venueId, startsAt, endsAt, reason },
+    });
+    return { id: created.id };
+  }
+
+  @RequireSubscription('active')
+  @Delete('holds/:id')
+  async deleteHold(@VenueScope() scope: Scope, @Param('id') id: string) {
+    this.requireManager(scope);
+    const existing = await this.prisma.reservationHold.findFirst({ where: { id, venueId: scope.venueId } });
+    if (!existing) throw new BadRequestException('Hold not found');
+    await this.prisma.reservationHold.delete({ where: { id } });
+    return { ok: true };
   }
 
   @RequireSubscription('active')

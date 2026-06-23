@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthController } from './auth/auth.controller';
@@ -41,6 +42,7 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
       envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env.local', '.env'],
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     VenueModule,

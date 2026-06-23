@@ -306,6 +306,7 @@ model Venue {
   crmBeos                       CrmBeo[]
   crmContracts                  CrmContract[]
   emailTemplates                EmailTemplate[]
+  reservationHolds              ReservationHold[]
   paymentMethods                PaymentMethod[]
   invoices                      Invoice[]
   venueRoles                    VenueRole[]
@@ -637,6 +638,13 @@ model Reservation {
   seatedAt            DateTime?
   completedAt         DateTime?
   notes               String?
+  // Timestamp the reminder email was sent. NULL = not yet reminded; the
+  // reminder cron looks for upcoming bookings with this still null.
+  reminderSentAt      DateTime?
+  // Timestamp the confirmation email was sent (set when status first hits
+  // confirmed and guestEmail exists). Prevents duplicate confirmations on
+  // status flips.
+  confirmationSentAt  DateTime?
   deletedAt           DateTime?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
@@ -647,6 +655,7 @@ model Reservation {
   @@index([guestId])
   @@index([externalId])
   @@index([venueId, externalId])
+  @@index([reminderSentAt, reservationTime])
 }
 
 model Waitlist {
@@ -655,11 +664,15 @@ model Waitlist {
   guestId     String?
   guestName   String
   guestPhone  String?
+  guestEmail  String?
   partySize   Int
   source      String
   status      WaitlistStatus
   requestedAt DateTime
   readyAt     DateTime?
+  // Set when the auto-notifier emails the guest that a table is ready.
+  // Prevents re-notifying on subsequent table releases.
+  notifiedAt  DateTime?
   notes       String?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -667,6 +680,22 @@ model Waitlist {
 
   @@index([venueId, requestedAt])
   @@index([venueId, status])
+}
+
+// A manager-imposed block on a date/time window so the venue won't accept
+// reservations during it (staff meeting, private buyout, deep clean). The
+// reservation create path warns when the requested time overlaps a hold.
+model ReservationHold {
+  id        String   @id @default(cuid())
+  venueId   String
+  startsAt  DateTime
+  endsAt    DateTime
+  reason    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, startsAt])
 }
 
 model FloorPlan {

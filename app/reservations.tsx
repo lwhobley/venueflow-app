@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../components/ErrorBoundary';
@@ -97,6 +97,7 @@ function ReservationsScreen() {
   const page = useQuery(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const waitlistData = useQuery(api.floorBinding.getOpenWaitlist, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const holds = useQuery(api.reservations.listHolds, isReady && venue?.id ? { venueId: venue.id } : 'skip') as Array<{ id: string; startsAt: number; endsAt: number; reason: string }> | undefined;
   const saveReservation = useMutation(api.reservations.saveReservation);
   const removeReservation = useMutation(api.reservations.removeReservation);
   const assignReservation = useMutation(api.floorBinding.assignReservationToTables);
@@ -104,19 +105,29 @@ function ReservationsScreen() {
   const markWaitlistReady = useMutation(api.floorBinding.markWaitlistReady);
   const removeFromWaitlist = useMutation(api.floorBinding.removeFromWaitlist);
   const assignWaitlist = useMutation(api.floorBinding.assignWaitlistToTables);
+  const createHold = useMutation(api.reservations.createHold);
+  const deleteHold = useMutation(api.reservations.deleteHold);
 
   // Waitlist form/state
   const [wlName, setWlName] = useState('');
   const [wlParty, setWlParty] = useState(2);
   const [wlPhone, setWlPhone] = useState('');
+  const [wlEmail, setWlEmail] = useState('');
   const [seatingWaitlistId, setSeatingWaitlistId] = useState<string | null>(null);
   const waitlist = useMemo(() => (waitlistData ?? []) as Array<{ id: string; guestName: string; partySize: number; requestedAt: number; readyAt: number | null; notes: string | null }>, [waitlistData]);
 
   const addWalkIn = async () => {
     if (!venue?.id || !wlName.trim()) return;
-    await addToWaitlist({ venueId: venue.id, guestName: wlName.trim(), partySize: wlParty, guestPhone: wlPhone.trim() || undefined });
+    await addToWaitlist({
+      venueId: venue.id,
+      guestName: wlName.trim(),
+      partySize: wlParty,
+      guestPhone: wlPhone.trim() || undefined,
+      email: wlEmail.trim() || undefined,
+    });
     setWlName('');
     setWlPhone('');
+    setWlEmail('');
     setWlParty(2);
   };
 
@@ -194,6 +205,47 @@ function ReservationsScreen() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
+
+  // Pacing chart bound to the create-form date so the manager sees the load
+  // they're about to add to.
+  const pacing = useQuery(
+    api.reservations.getCoverPacing,
+    isReady && venue?.id && date ? { venueId: venue.id, date } : 'skip',
+  ) as { date: string; seatingCapacity: number; peakCovers: number; totalReservations: number; buckets: Array<{ startsAt: number; covers: number }> } | undefined;
+
+  // Guest autofill: looks up an existing Guest by email or phone. Surfaces
+  // preferences inline so hosts don't have to re-ask "do you still want
+  // table 12?" every visit.
+  const autofillKey = guestEmail.trim() || guestPhone.replace(/[^\d+]/g, '');
+  const autofill = useQuery(
+    api.reservations.guestAutofill,
+    isReady && venue?.id && showForm && autofillKey.length >= 3
+      ? { venueId: venue.id, email: guestEmail.trim() || undefined, phone: guestPhone.replace(/[^\d+]/g, '') || undefined }
+      : 'skip',
+  ) as { guest: { id: string; fullName: string; favoriteTable: string | null; preferredServer: string | null; dietaryNotes: string | null; tags: string[]; lifecycleStage: string | null; lastVisitAt: number | null; lastPartySize: number | null } | null } | undefined;
+
+  // Hold form
+  const [holdDate, setHoldDate] = useState('');
+  const [holdStart, setHoldStart] = useState('19:00');
+  const [holdEnd, setHoldEnd] = useState('22:00');
+  const [holdReason, setHoldReason] = useState('');
+  const [holdError, setHoldError] = useState<string | null>(null);
+
+  const submitHold = async () => {
+    if (!venue?.id || !holdDate || !holdReason.trim()) {
+      setHoldError('Date and reason are required.');
+      return;
+    }
+    try {
+      const startsAt = new Date(`${holdDate}T${holdStart}:00`).toISOString();
+      const endsAt = new Date(`${holdDate}T${holdEnd}:00`).toISOString();
+      await createHold({ venueId: venue.id, startsAt, endsAt, reason: holdReason.trim() });
+      setHoldReason('');
+      setHoldError(null);
+    } catch (err) {
+      setHoldError(err instanceof Error ? err.message : 'Failed to create hold.');
+    }
+  };
 
   const { selected: listDateRange, setSelected: setListDateRange, presets: listPresets } = useDateRange('today');
 
@@ -360,6 +412,73 @@ function ReservationsScreen() {
         ))}
       </View>
 
+      {/* Cover pacing */}
+      {pacing && pacing.buckets.length > 0 ? (
+        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
+              <View>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Cover pacing — {pacing.date}</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  Peak {pacing.peakCovers} covers · {pacing.totalReservations} bookings · seating capacity {pacing.seatingCapacity || '—'}
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 100 }}>
+              {pacing.buckets.map((b, i) => {
+                const ratio = pacing.peakCovers > 0 ? b.covers / pacing.peakCovers : 0;
+                const overCapacity = pacing.seatingCapacity > 0 && b.covers > pacing.seatingCapacity;
+                return (
+                  <View key={i} style={{ flex: 1, height: '100%', justifyContent: 'flex-end' }}>
+                    <View style={{ height: `${Math.max(2, ratio * 100)}%`, backgroundColor: overCapacity ? colors.danger : colors.primary, borderRadius: 2 }} />
+                  </View>
+                );
+              })}
+            </View>
+            {pacing.seatingCapacity > 0 && pacing.peakCovers > pacing.seatingCapacity ? (
+              <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '700' }}>
+                Peak exceeds seating capacity — consider spreading bookings or pacing the kitchen.
+              </Text>
+            ) : null}
+          </Card.Content>
+        </Card>
+      ) : null}
+
+      {/* Reservation holds */}
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Holds & blocked time</Text>
+          <Text style={{ color: colors.muted, fontSize: 12 }}>
+            Block off windows (staff meeting, buyout, deep clean) so the booking form refuses overlapping reservations.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+            <TextInput label="Date" value={holdDate} onChangeText={setHoldDate} mode="outlined" dense placeholder="YYYY-MM-DD" style={{ width: 150, backgroundColor: colors.surface }} />
+            <TextInput label="Start" value={holdStart} onChangeText={setHoldStart} mode="outlined" dense style={{ width: 90, backgroundColor: colors.surface }} />
+            <TextInput label="End" value={holdEnd} onChangeText={setHoldEnd} mode="outlined" dense style={{ width: 90, backgroundColor: colors.surface }} />
+            <TextInput label="Reason" value={holdReason} onChangeText={setHoldReason} mode="outlined" dense style={{ flex: 1, minWidth: 160, backgroundColor: colors.surface }} />
+            <Button mode="contained" buttonColor={colors.primary} onPress={() => void submitHold()} accessibilityLabel="Add reservation hold">Hold</Button>
+          </View>
+          {holdError ? <Text style={{ color: colors.danger, fontSize: 12 }}>{holdError}</Text> : null}
+          {(holds ?? []).length === 0 ? (
+            <Text style={{ color: colors.muted }}>No upcoming holds.</Text>
+          ) : (
+            (holds ?? []).map((h) => (
+              <View key={h.id} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.charcoal, fontWeight: '700' }}>{h.reason}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>
+                    {new Date(h.startsAt).toLocaleString()} → {new Date(h.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </Text>
+                </View>
+                <Button compact mode="text" textColor={colors.danger} onPress={() => void (venue?.id && deleteHold({ venueId: venue.id, holdId: h.id }))}>
+                  Remove
+                </Button>
+              </View>
+            ))
+          )}
+        </Card.Content>
+      </Card>
+
       {/* Waitlist */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
@@ -372,8 +491,12 @@ function ReservationsScreen() {
           </View>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             <TextInput label="Phone (optional)" value={wlPhone} onChangeText={setWlPhone} mode="outlined" dense keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <TextInput label="Email (auto-notify)" value={wlEmail} onChangeText={setWlEmail} mode="outlined" dense autoCapitalize="none" keyboardType="email-address" style={{ flex: 1, backgroundColor: colors.surface }} />
             <Button mode="contained" buttonColor={colors.primary} onPress={() => void addWalkIn()} accessibilityLabel="Add walk-in to waitlist">Add</Button>
           </View>
+          <Text style={{ color: colors.muted, fontSize: 11 }}>
+            Adding an email lets us auto-notify this guest when a fitting table opens up.
+          </Text>
           {waitlistError ? <Text style={{ color: colors.danger }}>{waitlistError}</Text> : null}
           {waitlist.length === 0 ? (
             <Text style={{ color: colors.muted }}>No one waiting.</Text>
@@ -441,6 +564,27 @@ function ReservationsScreen() {
                   <TextInput label="Phone number" value={guestPhone} onChangeText={setGuestPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                   <TextInput label="Email" value={guestEmail} onChangeText={setGuestEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                 </View>
+                {autofill?.guest ? (
+                  <Card style={{ backgroundColor: accents[2].bg, borderRadius: 12 }}>
+                    <Card.Content style={{ gap: 4, padding: spacing.sm }}>
+                      <Text style={{ color: accents[2].fg, fontWeight: '800' }}>Returning guest — {autofill.guest.fullName}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>
+                        {autofill.guest.lastVisitAt
+                          ? `Last visit ${new Date(autofill.guest.lastVisitAt).toLocaleDateString()}${autofill.guest.lastPartySize ? ` · party of ${autofill.guest.lastPartySize}` : ''}`
+                          : 'No prior visits logged'}
+                        {autofill.guest.lifecycleStage ? ` · ${autofill.guest.lifecycleStage}` : ''}
+                      </Text>
+                      {autofill.guest.favoriteTable ? <Text style={{ color: colors.muted, fontSize: 12 }}>Favorite table: {autofill.guest.favoriteTable}</Text> : null}
+                      {autofill.guest.preferredServer ? <Text style={{ color: colors.muted, fontSize: 12 }}>Preferred server: {autofill.guest.preferredServer}</Text> : null}
+                      {autofill.guest.dietaryNotes ? <Text style={{ color: colors.danger, fontSize: 12 }}>Dietary: {autofill.guest.dietaryNotes}</Text> : null}
+                      <Button compact mode="text" textColor={colors.primary} onPress={() => {
+                        const [first, ...rest] = autofill.guest!.fullName.split(' ');
+                        setGuestFirstName(first ?? '');
+                        setGuestLastName(rest.join(' '));
+                      }}>Use this name</Button>
+                    </Card.Content>
+                  </Card>
+                ) : null}
                 <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                   <TextInput label="Company (optional)" value={guestCompany} onChangeText={setGuestCompany} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                   <TextInput label="Occasion" value={occasion} onChangeText={setOccasion} mode="outlined" placeholder="Birthday, anniversary, business dinner" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />

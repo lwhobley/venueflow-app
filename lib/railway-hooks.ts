@@ -73,6 +73,12 @@ const queryRoutes: Record<string, Route> = {
   'crm.getStaleLeads': { path: (args) => `/v1/crm/stale-leads${args?.days ? `?days=${args.days}` : ''}` },
   'crm.getLeadActivity': { path: (args) => `/v1/crm/leads/${args.leadId}/activity` },
   'crm.listTemplates': { path: '/v1/crm/templates' },
+  'reservations.getCoverPacing': { path: (args) => `/v1/reservations/cover-pacing?date=${encodeURIComponent(args.date)}` },
+  'reservations.guestAutofill': {
+    path: (args) =>
+      `/v1/reservations/guest-autofill${args?.email ? `?email=${encodeURIComponent(args.email)}` : args?.phone ? `?phone=${encodeURIComponent(args.phone)}` : ''}`,
+  },
+  'reservations.listHolds': { path: '/v1/reservations/holds' },
   'reservationIntegrations.getReservationIntegrationOverview': { path: '/v1/integrations/reservations' },
 };
 
@@ -303,6 +309,17 @@ const mutationRoutes: Record<string, Route> = {
   },
   'reservations.saveReservation': { path: '/v1/reservations', method: 'POST', body: stripVenue, invalidate: [['reservations', 'page']] },
   'reservations.removeReservation': { path: (args) => `/v1/reservations/${args.reservationId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['reservations', 'page']] },
+  'reservations.createHold': {
+    path: '/v1/reservations/holds',
+    method: 'POST',
+    body: ({ startsAt, endsAt, reason }) => ({ startsAt, endsAt, reason }),
+    invalidate: [['reservations', 'holds']],
+  },
+  'reservations.deleteHold': {
+    path: (args) => `/v1/reservations/holds/${args.holdId}`,
+    method: 'DELETE',
+    invalidate: [['reservations', 'holds']],
+  },
   'payroll.recordPayrollExport': { path: '/v1/payroll/record-export', method: 'POST', body: stripVenue },
   'push.registerPushToken': {
     path: '/v1/push/token',

@@ -28,6 +28,7 @@ import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { withSerializableRetry } from '../../common/tx-retry';
+import { ReservationNotifierService } from '../reservations/reservation-notifier.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
@@ -107,6 +108,10 @@ class AddWaitlistDto {
 
   @IsString()
   @IsOptional()
+  email?: string;
+
+  @IsString()
+  @IsOptional()
   notes?: string;
 }
 
@@ -131,7 +136,10 @@ function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
 
 @Controller('v1/floor')
 export class FloorController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifier: ReservationNotifierService,
+  ) {}
 
   @RequireSubscription('active')
   @Get('active')
@@ -398,6 +406,7 @@ export class FloorController {
         guestName: body.guestName.trim(),
         partySize: body.partySize,
         guestPhone: body.phone?.trim() ?? null,
+        guestEmail: body.email?.trim() ?? null,
         notes: body.notes?.trim() ?? null,
         source: 'walk_in',
         status: 'waiting',
@@ -509,6 +518,13 @@ export class FloorController {
       where: { venueId: scope.venueId, tableId, releasedAt: null },
       data: { releasedAt: new Date(), releasedReason: 'manual' },
     });
+    // Find seats freed up by the released table so we can match a waitlist
+    // entry whose party fits. Best-effort; fire-and-forget so the manager
+    // action returns immediately.
+    const table = await this.prisma.floorTable.findUnique({ where: { id: tableId }, select: { seats: true } });
+    if (table && table.seats > 0) {
+      void this.notifier.notifyNextWaitlist(scope.venueId, table.seats);
+    }
     return { ok: true };
   }
 }
