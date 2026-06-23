@@ -5,17 +5,28 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Header,
   NotFoundException,
   Param,
   Post,
   Patch,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
-import { IsArray, IsOptional, IsString } from 'class-validator';
+import type { Response } from 'express';
+import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { Public } from '../../auth/public.decorator';
+import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+
+// Chat photo uploads. Kept small — images are picker-compressed (quality 0.5)
+// before they reach us; reject anything larger so the DB store stays lean.
+const ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -60,6 +71,16 @@ class ReactDto {
 class EditMessageDto {
   @IsString()
   text!: string;
+}
+
+class UploadImageDto {
+  // Base64-encoded image bytes (no data: prefix), as produced by expo-image-picker.
+  @IsString()
+  dataBase64!: string;
+
+  @IsString()
+  @IsIn(ALLOWED_IMAGE_MIME)
+  mimeType!: string;
 }
 
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
@@ -467,7 +488,7 @@ export class ChatController {
   @Post('messages/:id/react')
   async toggleReaction(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ReactDto) {
     if (!scope) throw new ForbiddenException('No venue profile found');
-    const msg = await this.prisma.message.findUnique({ where: { id } });
+    const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
     if (!msg) throw new NotFoundException('Message not found');
 
     const reactions = (msg.reactions as Record<string, string[]> | null) || {};
@@ -498,7 +519,7 @@ export class ChatController {
   @Patch('messages/:id')
   async editMessage(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: EditMessageDto) {
     if (!scope) throw new ForbiddenException('No venue profile found');
-    const msg = await this.prisma.message.findUnique({ where: { id } });
+    const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
     if (!msg) throw new NotFoundException('Message not found');
 
     const text = body.text.trim();
@@ -510,6 +531,45 @@ export class ChatController {
     });
 
     return { ok: true, text };
+  }
+
+  @RequireSubscription('active')
+  @Post('images')
+  async uploadImage(@VenueScope() scope: Scope, @Body() body: UploadImageDto) {
+    if (!scope) throw new ForbiddenException('No venue profile found');
+
+    const data = Buffer.from(body.dataBase64, 'base64');
+    if (data.length === 0) throw new BadRequestException('Image is empty');
+    if (data.length > MAX_IMAGE_BYTES) throw new BadRequestException('Image is too large (max 5MB)');
+
+    const image = await this.prisma.chatImage.create({
+      data: {
+        venueId: scope.venueId,
+        mimeType: body.mimeType,
+        data,
+        uploadedBy: scope.profileId,
+      },
+      select: { id: true },
+    });
+
+    // Relative path so the stored value stays portable across environments;
+    // the client resolves it against its configured API base when rendering.
+    return { imageUrl: `/v1/chat/images/${image.id}` };
+  }
+
+  // Public capability URL: the cuid is unguessable and only ever appears in the
+  // owning venue's messages, so it serves as the access token (same model as an
+  // image CDN's signed URL). Bypasses auth so React Native <Image> can load it
+  // directly without attaching a bearer header.
+  @Public()
+  @SkipVenueScope()
+  @Get('images/:id')
+  @Header('Cache-Control', 'public, max-age=31536000, immutable')
+  async getImage(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    const image = await this.prisma.chatImage.findUnique({ where: { id } });
+    if (!image) throw new NotFoundException('Image not found');
+    res.setHeader('Content-Type', image.mimeType);
+    return new StreamableFile(image.data);
   }
 }
 

@@ -20,7 +20,7 @@ import {
   IsString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
+import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
@@ -656,33 +656,47 @@ export class CrmController {
 
       const patch: Record<string, any> = { ...fields };
       if (body.status !== undefined) patch.status = body.status as BeoStatus;
-      const updated = await this.prisma.crmBeo.update({ where: { id: body.beoId }, data: patch });
-      // Sync confirmed BEOs to a reservation so private events block the
-      // floor plan instead of letting another booking overlap the same space.
-      // Only re-sync when the status just flipped to confirmed OR when a
-      // reservation-relevant field actually changed on an already-confirmed BEO.
-      const becameConfirmed = body.status === 'confirmed' && existing.status !== 'confirmed';
-      const relevantFieldChanged =
-        updated.status === 'confirmed' &&
-        (body.eventDate !== undefined ||
-         body.guestCount !== undefined ||
-         body.venueSpace !== undefined);
-      if ((becameConfirmed || relevantFieldChanged) && updated.eventDate) {
-        await this.syncBeoToReservation(scope.venueId, updated);
-      }
+      // Update the BEO and sync its reservation atomically. A hold conflict
+      // throws inside syncBeoToReservation, which rolls back the BEO update so
+      // we never leave a confirmed BEO without its blocking reservation.
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const u = await tx.crmBeo.update({ where: { id: body.beoId }, data: patch });
+        // Sync confirmed BEOs to a reservation so private events block the
+        // floor plan instead of letting another booking overlap the same space.
+        // Only re-sync when the status just flipped to confirmed OR when a
+        // reservation-relevant field actually changed on an already-confirmed BEO.
+        const becameConfirmed = body.status === 'confirmed' && existing.status !== 'confirmed';
+        const relevantFieldChanged =
+          u.status === 'confirmed' &&
+          (body.eventDate !== undefined ||
+           body.guestCount !== undefined ||
+           body.venueSpace !== undefined);
+        if ((becameConfirmed || relevantFieldChanged) && u.eventDate) {
+          await this.syncBeoToReservation(tx, scope.venueId, u);
+        }
+        return u;
+      });
       if (existing.leadId && body.status !== undefined && body.status !== existing.status) {
         await this.logActivity(scope.venueId, existing.leadId, scope.profileId, 'beo_status_changed', `${existing.status} → ${body.status}`);
       }
       return { beoId: body.beoId };
     }
 
-    const beo = await this.prisma.crmBeo.create({
-      data: {
-        ...fields,
-        venueId: scope.venueId,
-        status: (body.status ?? 'draft') as BeoStatus,
-        createdAt: now,
-      },
+    // Create the BEO and (if confirmed) its blocking reservation atomically so
+    // a hold conflict can't leave an orphaned confirmed BEO behind.
+    const beo = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.crmBeo.create({
+        data: {
+          ...fields,
+          venueId: scope.venueId,
+          status: (body.status ?? 'draft') as BeoStatus,
+          createdAt: now,
+        },
+      });
+      if (created.status === 'confirmed' && created.eventDate) {
+        await this.syncBeoToReservation(tx, scope.venueId, created);
+      }
+      return created;
     });
 
     if (body.leadId) {
@@ -691,9 +705,6 @@ export class CrmController {
         data: { lastActivityAt: now, updatedAt: now },
       });
       await this.logActivity(scope.venueId, body.leadId, scope.profileId, 'beo_created', beo.eventName);
-    }
-    if (beo.status === 'confirmed' && beo.eventDate) {
-      await this.syncBeoToReservation(scope.venueId, beo);
     }
     return { beoId: beo.id };
   }
@@ -1095,7 +1106,7 @@ export class CrmController {
     }
   }
 
-  private async syncBeoToReservation(venueId: string, beo: {
+  private async syncBeoToReservation(db: Prisma.TransactionClient, venueId: string, beo: {
     id: string;
     leadId: string | null;
     eventName: string;
@@ -1112,7 +1123,7 @@ export class CrmController {
     // manager-imposed hold — same guard that saveReservation uses.
     const eventDurationMs = 240 * 60 * 1000; // 4 hours, same as durationMinutes below
     const eventEnd = new Date(beo.eventDate.getTime() + eventDurationMs);
-    const hold = await this.prisma.reservationHold.findFirst({
+    const hold = await db.reservationHold.findFirst({
       where: {
         venueId,
         startsAt: { lt: eventEnd },
@@ -1127,13 +1138,13 @@ export class CrmController {
     }
 
     const lead = beo.leadId
-      ? await this.prisma.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { fullName: true, phone: true, email: true, company: true } })
+      ? await db.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { fullName: true, phone: true, email: true, company: true } })
       : null;
     // We tag the reservation with the BEO id so subsequent edits update the
     // same row instead of creating duplicates. Uses tags[] since there's no
     // dedicated FK column.
     const beoTag = `beo:${beo.id}`;
-    const existing = await this.prisma.reservation.findFirst({
+    const existing = await db.reservation.findFirst({
       where: { venueId, deletedAt: null, tags: { has: beoTag } },
     });
     const menuNotes = [beo.menuAppetizers, beo.menuEntrees].filter(Boolean).join(' / ') || null;
@@ -1157,9 +1168,9 @@ export class CrmController {
       tags: [beoTag, 'private_event'],
     };
     if (existing) {
-      await this.prisma.reservation.update({ where: { id: existing.id }, data });
+      await db.reservation.update({ where: { id: existing.id }, data });
     } else {
-      await this.prisma.reservation.create({ data });
+      await db.reservation.create({ data });
     }
   }
 

@@ -12,6 +12,7 @@ import { assertWithinGeofence } from '../../common/geofence';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
@@ -523,8 +524,9 @@ export class AppController {
     if (existing) throw new BadRequestException('Already clocked in');
 
     if (!isAdminRole(profile.role)) {
-      const today = new Date().getDay();
-      const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+      const nowMs = Date.now();
+      const today = zonedDayOfWeek(venue.timezone, nowMs);
+      const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
       const shift = await this.prisma.scheduleShift.findFirst({
         where: {
           venueId: venue.id,

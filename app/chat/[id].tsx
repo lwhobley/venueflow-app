@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
+import { resolveMediaUrl } from '../../lib/api-client';
 import type { Id } from '../../lib/ids';
 import { colors, spacing, accents } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
@@ -52,6 +53,7 @@ export default function ConversationScreen() {
   const deleteConversation = useMutation(api.chat.deleteConversation);
   const toggleReaction = useMutation(api.chat.toggleReaction);
   const editMessage = useMutation(api.chat.editMessage);
+  const uploadImage = useMutation(api.chat.uploadImage);
   const claimOpenShift = useMutation(api.scheduling.claimOpenShift);
   const respondToShiftSwap = useMutation(api.scheduling.respondToShiftSwap);
 
@@ -74,6 +76,14 @@ export default function ConversationScreen() {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(t);
   }, [messages.length]);
+
+  // Auto-dismiss the toast 3s after it's set. Runs once per toast value rather
+  // than spawning a new timer on every render.
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const onSend = async () => {
     const t = text.trim();
@@ -113,16 +123,21 @@ export default function ConversationScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       quality: 0.5,
+      base64: true,
     });
 
-    if (!result.canceled && result.assets[0]?.uri && conversationId) {
-      const mockImages = [
-        'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=500&q=80',
-        'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=500&q=80',
-        'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=500&q=80',
-      ];
-      const pickedMock = mockImages[Math.floor(Math.random() * mockImages.length)];
-      await sendMessage({ conversationId, text: 'Shared a photo', imageUrl: pickedMock });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset?.base64 || !conversationId) return;
+
+    setError(null);
+    try {
+      const { imageUrl } = await uploadImage({
+        dataBase64: asset.base64,
+        mimeType: asset.mimeType ?? 'image/jpeg',
+      });
+      await sendMessage({ conversationId, text: 'Shared a photo', imageUrl });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not upload photo.');
     }
   };
 
@@ -255,7 +270,7 @@ export default function ConversationScreen() {
                     >
                       {/* Render Image Attachment */}
                       {m.imageUrl ? (
-                        <Image source={{ uri: m.imageUrl }} style={{ width: 220, height: 150, borderRadius: 12, marginBottom: 6 }} resizeMode="cover" />
+                        <Image source={{ uri: resolveMediaUrl(m.imageUrl) }} style={{ width: 220, height: 150, borderRadius: 12, marginBottom: 6 }} resizeMode="cover" />
                       ) : null}
 
                       {/* Render Content */}
@@ -392,7 +407,6 @@ export default function ConversationScreen() {
             </View>
           </Portal>
         ) : null}
-        {toast ? (() => { setTimeout(() => setToast(null), 3000); return null; })() : null}
       </KeyboardAvoidingView>
     </Portal.Host>
   );

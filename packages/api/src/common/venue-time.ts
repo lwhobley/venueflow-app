@@ -48,6 +48,17 @@ export function zonedDayOfWeek(timeZone: string | null | undefined, ts: number):
   return map[parts.weekday] ?? new Date(ts).getUTCDay();
 }
 
+/** Minutes since midnight (0–1439) in the venue's local time at the given instant. */
+export function zonedMinutesOfDay(timeZone: string | null | undefined, ts: number): number {
+  const tz = safeTimeZone(timeZone);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false })
+      .formatToParts(new Date(ts))
+      .map((p) => [p.type, p.value]),
+  );
+  return (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+}
+
 /** The venue-local calendar date (YYYY-MM-DD) of the given instant. */
 export function zonedIsoDate(timeZone: string | null | undefined, ts: number): string {
   return new Intl.DateTimeFormat('en-CA', {

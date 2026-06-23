@@ -286,6 +286,7 @@ model Venue {
   availability                  Availability[]
   conversations                 Conversation[]
   conversationReads             ConversationRead[]
+  chatImages                    ChatImage[]
   notifications                 NotificationEvent[]
   pushTokens                    PushToken[]
   timeEntries                   TimeEntry[]
@@ -501,6 +502,20 @@ model ConversationRead {
 
   @@unique([conversationId, profileId])
   @@index([conversationId])
+}
+
+// Binary store for chat photo attachments. Served via an unguessable
+// capability URL (GET /v1/chat/images/:id) the same way an image CDN would.
+model ChatImage {
+  id         String   @id @default(cuid())
+  venueId    String
+  mimeType   String
+  data       Bytes
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+  venue      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
 }
 
 model NotificationEvent {

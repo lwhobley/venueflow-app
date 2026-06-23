@@ -204,23 +204,30 @@ export class StaffRequestsController {
     if (body.status === 'approved') {
       if (request.kind === 'sick_leave') {
         const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
-        const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: request.profileId } });
-        await this.prisma.profile.update({
-          where: { id: profile.id },
-          data: { sickHoursAccrued: Math.max(0, profile.sickHoursAccrued - hours) },
-        });
+        // Atomic decrement clamped at zero so two concurrent approvals can't
+        // both read the same balance and under-deduct (lost update).
+        await this.prisma.$executeRaw`
+          UPDATE "Profile"
+          SET "sickHoursAccrued" = GREATEST(0, "sickHoursAccrued" - ${hours})
+          WHERE id = ${request.profileId}`;
       } else if (request.kind === 'time_off') {
         const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
-        const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: request.profileId } });
-        await this.prisma.profile.update({
-          where: { id: profile.id },
-          data: { ptoHoursAccrued: Math.max(0, profile.ptoHoursAccrued - hours) },
-        });
+        await this.prisma.$executeRaw`
+          UPDATE "Profile"
+          SET "ptoHoursAccrued" = GREATEST(0, "ptoHoursAccrued" - ${hours})
+          WHERE id = ${request.profileId}`;
       } else if (request.kind === 'time_correction') {
         const correction = (request.availability as any) || {};
         if (correction.timeEntryId) {
+          // Only correct a time entry that belongs to this venue AND the same
+          // staff member who filed the request — never a foreign entry id
+          // smuggled in via the client-supplied availability blob.
+          const target = await this.prisma.timeEntry.findFirst({
+            where: { id: correction.timeEntryId, venueId: request.venueId, profileId: request.profileId },
+          });
+          if (!target) throw new BadRequestException('Time entry not found for this request');
           await this.prisma.timeEntry.update({
-            where: { id: correction.timeEntryId },
+            where: { id: target.id },
             data: {
               clockInAt: new Date(correction.clockInAt),
               clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : null,

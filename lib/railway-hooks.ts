@@ -268,6 +268,7 @@ const mutationRoutes: Record<string, Route> = {
   'chat.sendMessage': { path: (args) => `/v1/chat/conversations/${args.conversationId}/messages`, method: 'POST', body: (args) => ({ text: args.text, shiftId: args.shiftId, swapId: args.swapId, imageUrl: args.imageUrl }), invalidate: [['chat', 'getMessages']] },
   'chat.toggleReaction': { path: (args) => `/v1/chat/messages/${args.messageId}/react`, method: 'POST', body: ({ emoji }) => ({ emoji }), invalidate: [['chat', 'getMessages']] },
   'chat.editMessage': { path: (args) => `/v1/chat/messages/${args.messageId}`, method: 'PATCH', body: ({ text }) => ({ text }), invalidate: [['chat', 'getMessages']] },
+  'chat.uploadImage': { path: '/v1/chat/images', method: 'POST', body: ({ dataBase64, mimeType }) => ({ dataBase64, mimeType }) },
   'floor.saveFloorPlan': { path: '/v1/floor', method: 'POST', body: ({ tables }) => ({ tables }), invalidate: [['floor', 'active'], ['floor', 'stats']] },
   'floor.clearActiveFloorPlan': { path: '/v1/floor', method: 'DELETE', invalidate: [['floor', 'active'], ['floor', 'stats']] },
   'tables.markDirty': { path: (args) => `/v1/floor/tables/${args.tableId ?? args.id ?? args}/status`, method: 'PATCH', body: () => ({ status: 'dirty' }), invalidate: [['floor', 'active'], ['floor', 'stats']] },

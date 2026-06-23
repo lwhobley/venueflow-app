@@ -12,6 +12,7 @@ import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
+import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -195,8 +196,9 @@ export class TimeClockController {
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
 
     if (!isAdminRole(scope.role)) {
-      const today = new Date().getDay();
-      const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+      const nowMs = Date.now();
+      const today = zonedDayOfWeek(venue.timezone, nowMs);
+      const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
       const shift = await this.prisma.scheduleShift.findFirst({
         where: {
           venueId: venue.id,

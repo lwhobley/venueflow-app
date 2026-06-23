@@ -51,6 +51,16 @@ function getApiBaseUrl() {
   return configuredApiBaseUrl;
 }
 
+/**
+ * Resolve a media reference to an absolute URL for <Image>. Server-stored chat
+ * photos come back as relative paths (e.g. /v1/chat/images/<id>); legacy or
+ * external URLs are already absolute and pass through unchanged.
+ */
+export function resolveMediaUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${getApiBaseUrl()}${path}`;
+}
+
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
