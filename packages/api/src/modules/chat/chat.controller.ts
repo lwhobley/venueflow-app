@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Patch,
 } from '@nestjs/common';
 import { IsArray, IsOptional, IsString } from 'class-validator';
 import { isAdminRole } from '../../auth/roles';
@@ -37,6 +38,28 @@ class CreateGroupDto {
 class SendMessageDto {
   @IsString()
   text!: string;
+
+  @IsString()
+  @IsOptional()
+  shiftId?: string;
+
+  @IsString()
+  @IsOptional()
+  swapId?: string;
+
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
+}
+
+class ReactDto {
+  @IsString()
+  emoji!: string;
+}
+
+class EditMessageDto {
+  @IsString()
+  text!: string;
 }
 
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
@@ -47,10 +70,98 @@ function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
 export class ChatController {
   constructor(private readonly prisma: PrismaService) {}
 
+  async ensureContextualConversations(venueId: string) {
+    const profiles = await this.prisma.profile.findMany({
+      where: { venueId },
+      select: { id: true, jobTitle: true, role: true, allAccess: true },
+    });
+    const managerIds = profiles.filter((p) => isAdminRole(p.role) || p.allAccess).map((p) => p.id);
+
+    // 1. Ensure Role Channels
+    const roles = Array.from(new Set(profiles.map((p) => p.jobTitle || p.role).filter(Boolean)));
+    for (const role of roles) {
+      const roleMemberIds = Array.from(new Set([
+        ...managerIds,
+        ...profiles.filter((p) => p.jobTitle === role || p.role === role).map((p) => p.id)
+      ]));
+      
+      const existing = await this.prisma.conversation.findFirst({
+        where: { venueId, type: 'role', roleName: role },
+      });
+      if (!existing) {
+        await this.prisma.conversation.create({
+          data: {
+            venueId,
+            type: 'role',
+            roleName: role,
+            name: `#Role - ${role}`,
+            memberIds: roleMemberIds,
+          }
+        });
+      } else {
+        await this.prisma.conversation.update({
+          where: { id: existing.id },
+          data: { memberIds: roleMemberIds },
+        });
+      }
+    }
+
+    // 2. Ensure Shift Crew Channels for the current week
+    const today = new Date();
+    const sunday = new Date(today);
+    sunday.setDate(today.getDate() - today.getDay());
+    sunday.setHours(0, 0, 0, 0);
+
+    const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      const d = new Date(sunday);
+      d.setDate(sunday.getDate() + dayIndex);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayLabel = dayLabels[dayIndex];
+
+      const scheduledShifts = await this.prisma.scheduleShift.findMany({
+        where: { venueId, dayIndex },
+        select: { profileId: true },
+      });
+      const scheduledProfileIds = scheduledShifts.map((s) => s.profileId).filter(Boolean) as string[];
+      
+      const crewMemberIds = Array.from(new Set([
+        ...managerIds,
+        ...scheduledProfileIds,
+      ]));
+
+      if (crewMemberIds.length > 0) {
+        const existing = await this.prisma.conversation.findFirst({
+          where: { venueId, type: 'shift', shiftDate: dateStr },
+        });
+        if (!existing) {
+          await this.prisma.conversation.create({
+            data: {
+              venueId,
+              type: 'shift',
+              shiftDate: dateStr,
+              name: `#Crew - ${dayLabel} (${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`,
+              memberIds: crewMemberIds,
+            }
+          });
+        } else {
+          await this.prisma.conversation.update({
+            where: { id: existing.id },
+            data: { memberIds: crewMemberIds },
+          });
+        }
+      }
+    }
+  }
+
   @RequireSubscription('active')
   @Get('conversations')
   async listConversations(@VenueScope() scope: Scope) {
-    if (!scope) return { groups: [], dms: [] };
+    if (!scope) return { groups: [], dms: [], roles: [], shifts: [] };
+
+    // Automatically synchronize role & crew chats on list view
+    await this.ensureContextualConversations(scope.venueId);
 
     const all = await this.prisma.conversation.findMany({
       where: { venueId: scope.venueId },
@@ -63,21 +174,43 @@ export class ChatController {
     });
     const nameById = new Map(staff.map((s) => [s.id, s.fullName]));
 
-    const groups = all
-      .filter((c) => c.type === 'group' && canAccessConversation(c.memberIds, c.type, scope.profileId))
-      .map((c) => ({
+    const myReads = await this.prisma.conversationRead.findMany({
+      where: { venueId: scope.venueId, profileId: scope.profileId },
+    });
+    const readAtByConvId = new Map(myReads.map((r) => [r.conversationId, r.readAt]));
+
+    const mapConv = (c: typeof all[0]) => {
+      const lastRead = readAtByConvId.get(c.id);
+      const unread = c.lastMessageAt && (!lastRead || lastRead < c.lastMessageAt);
+      return {
         _id: c.id,
         id: c.id,
-        type: 'group' as const,
+        type: c.type,
         title: c.name ?? 'Group',
         lastMessageText: c.lastMessageText ?? null,
         lastMessageAt: c.lastMessageAt?.getTime() ?? null,
-      }));
+        unread: Boolean(unread),
+      };
+    };
+
+    const groups = all
+      .filter((c) => c.type === 'group' && canAccessConversation(c.memberIds, c.type, scope.profileId))
+      .map(mapConv);
+
+    const roles = all
+      .filter((c) => c.type === 'role' && canAccessConversation(c.memberIds, c.type, scope.profileId))
+      .map(mapConv);
+
+    const shifts = all
+      .filter((c) => c.type === 'shift' && canAccessConversation(c.memberIds, c.type, scope.profileId))
+      .map(mapConv);
 
     const dms = all
       .filter((c) => c.type === 'dm' && c.memberIds.includes(scope.profileId))
       .map((c) => {
         const otherId = c.memberIds.find((id) => id !== scope.profileId);
+        const lastRead = readAtByConvId.get(c.id);
+        const unread = c.lastMessageAt && (!lastRead || lastRead < c.lastMessageAt);
         return {
           _id: c.id,
           id: c.id,
@@ -85,11 +218,12 @@ export class ChatController {
           title: (otherId && nameById.get(otherId)) || 'Direct message',
           lastMessageText: c.lastMessageText ?? null,
           lastMessageAt: c.lastMessageAt?.getTime() ?? null,
+          unread: Boolean(unread),
         };
       })
       .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0));
 
-    return { groups, dms };
+    return { groups, dms, roles, shifts };
   }
 
   @RequireSubscription('active')
@@ -115,7 +249,7 @@ export class ChatController {
     if (!scope) throw new ForbiddenException('No venue profile found');
 
     const existing = await this.prisma.conversation.findFirst({
-      where: { venueId: scope.venueId, type: 'group' },
+      where: { venueId: scope.venueId, type: 'group', name: GENERAL_GROUP_NAME },
     });
 
     if (existing) return { conversationId: existing.id };
@@ -174,7 +308,6 @@ export class ChatController {
     if (!name) throw new BadRequestException('Enter a group name');
     if (name.length > 100) throw new BadRequestException('Group name must be 100 characters or fewer');
 
-    // Always include the creator so they retain access to the group they made.
     const memberIds = Array.from(new Set([scope.profileId, ...body.memberIds]));
     const conv = await this.prisma.conversation.create({
       data: {
@@ -232,6 +365,37 @@ export class ChatController {
       title = (otherId && nameById.get(otherId)) || 'Direct message';
     }
 
+    // Upsert read receipt for current user
+    await this.prisma.conversationRead.upsert({
+      where: {
+        conversationId_profileId: {
+          conversationId: id,
+          profileId: scope.profileId,
+        }
+      },
+      create: {
+        conversationId: id,
+        profileId: scope.profileId,
+        venueId: scope.venueId,
+        readAt: new Date(),
+      },
+      update: {
+        readAt: new Date(),
+      }
+    });
+
+    const reads = await this.prisma.conversationRead.findMany({
+      where: { conversationId: id },
+      select: { profileId: true, readAt: true },
+    });
+
+    const readReceipts = reads
+      .filter((r) => r.profileId !== scope.profileId)
+      .map((r) => ({
+        name: nameById.get(r.profileId) || 'Teammate',
+        readAt: r.readAt.getTime(),
+      }));
+
     const recent = await this.prisma.message.findMany({
       where: { conversationId: id },
       orderBy: { createdAt: 'desc' },
@@ -241,6 +405,7 @@ export class ChatController {
 
     return {
       title,
+      readReceipts,
       messages: messages.map((m) => ({
         _id: m.id,
         id: m.id,
@@ -248,6 +413,10 @@ export class ChatController {
         senderName: (m.senderId && nameById.get(m.senderId)) || 'Former teammate',
         createdAt: m.createdAt.getTime(),
         mine: m.senderId === scope.profileId,
+        shiftId: m.shiftId,
+        swapId: m.swapId,
+        imageUrl: m.imageUrl,
+        reactions: m.reactions || {},
       })),
     };
   }
@@ -276,6 +445,9 @@ export class ChatController {
         venueId: conv.venueId,
         senderId: scope.profileId,
         text,
+        shiftId: body.shiftId || null,
+        swapId: body.swapId || null,
+        imageUrl: body.imageUrl || null,
         createdAt: now,
       },
     });
@@ -290,13 +462,62 @@ export class ChatController {
 
     return { _id: msg.id, id: msg.id };
   }
+
+  @RequireSubscription('active')
+  @Post('messages/:id/react')
+  async toggleReaction(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ReactDto) {
+    if (!scope) throw new ForbiddenException('No venue profile found');
+    const msg = await this.prisma.message.findUnique({ where: { id } });
+    if (!msg) throw new NotFoundException('Message not found');
+
+    const reactions = (msg.reactions as Record<string, string[]> | null) || {};
+    const emoji = body.emoji;
+    let users = reactions[emoji] || [];
+
+    if (users.includes(scope.profileId)) {
+      users = users.filter((uid) => uid !== scope.profileId);
+    } else {
+      users.push(scope.profileId);
+    }
+
+    if (users.length === 0) {
+      delete reactions[emoji];
+    } else {
+      reactions[emoji] = users;
+    }
+
+    await this.prisma.message.update({
+      where: { id },
+      data: { reactions },
+    });
+
+    return { ok: true, reactions };
+  }
+
+  @RequireSubscription('active')
+  @Patch('messages/:id')
+  async editMessage(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: EditMessageDto) {
+    if (!scope) throw new ForbiddenException('No venue profile found');
+    const msg = await this.prisma.message.findUnique({ where: { id } });
+    if (!msg) throw new NotFoundException('Message not found');
+
+    const text = body.text.trim();
+    if (!text) throw new BadRequestException('Text is required');
+
+    await this.prisma.message.update({
+      where: { id },
+      data: { text },
+    });
+
+    return { ok: true, text };
+  }
 }
 
 function canAccessConversation(memberIds: string[], type: string, profileId: string) {
   if (type === 'dm') {
     return memberIds.includes(profileId);
   }
-  if (type === 'group' && memberIds.length > 0) {
+  if ((type === 'group' || type === 'role' || type === 'shift') && memberIds.length > 0) {
     return memberIds.includes(profileId);
   }
   return true;

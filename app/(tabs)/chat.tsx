@@ -31,7 +31,7 @@ function Avatar({ name, color }: { name: string; color: string }) {
 
 type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 
-function Row({ name, subtitle, color, icon, onPress, onDelete }: { name: string; subtitle?: string | null; color: string; icon?: MaterialIconName; onPress: () => void; onDelete?: () => void }) {
+function Row({ name, subtitle, color, icon, unread, onPress, onDelete }: { name: string; subtitle?: string | null; color: string; icon?: MaterialIconName; unread?: boolean; onPress: () => void; onDelete?: () => void }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <Pressable onPress={onPress} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
@@ -42,9 +42,14 @@ function Row({ name, subtitle, color, icon, onPress, onDelete }: { name: string;
         ) : (
           <Avatar name={name} color={color} />
         )}
-        <View style={{ flex: 1, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 8 }}>
-          <Text style={{ fontWeight: '700' }}>{name}</Text>
-          {subtitle ? <Text style={{ color: colors.muted }} numberOfLines={1}>{subtitle}</Text> : null}
+        <View style={{ flex: 1, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={{ fontWeight: unread ? '900' : '700', color: unread ? colors.primary : colors.charcoal }}>{name}</Text>
+            {subtitle ? <Text style={{ color: unread ? colors.primary : colors.muted, fontWeight: unread ? '600' : '400' }} numberOfLines={1}>{subtitle}</Text> : null}
+          </View>
+          {unread && (
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary, marginRight: 4 }} />
+          )}
         </View>
       </Pressable>
       {onDelete ? <IconButton icon="delete-outline" iconColor={colors.danger} onPress={onDelete} /> : null}
@@ -56,7 +61,7 @@ type DirectoryEntry = { _id: string; fullName: string; role: string; jobTitle: s
 
 export default function ChatScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
+  const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const ensureSetup = useMutation(api.chat.ensureChatSetup);
   const openDm = useMutation(api.chat.openDm);
@@ -70,26 +75,24 @@ export default function ChatScreen() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Run chat setup once when the venue becomes ready. `ensureSetup` is
-  // intentionally excluded from deps — it must not re-trigger this effect.
   useEffect(() => {
     if (!isReady || !venue?.id) return;
     setError(null);
     void ensureSetup({ venueId: venue.id }).catch((e: unknown) => {
       setError(e instanceof Error ? e.message : 'Could not prepare chat.');
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, venue?.id]);
 
   const groups = (conversations?.groups ?? []) as any[];
   const dms = (conversations?.dms ?? []) as any[];
+  const roles = (conversations?.roles ?? []) as any[];
+  const shifts = (conversations?.shifts ?? []) as any[];
   const dmByName = useMemo(() => new Map(dms.map((d) => [d.title, d])), [dms]);
   const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const palette = accents;
   const colorFor = (i: number) => palette[i % palette.length].fg;
 
-  // Group teammates by their position (jobTitle) for the left-hand team list.
   const byPosition = useMemo(() => {
     const map = new Map<string, DirectoryEntry[]>();
     for (const person of (directory ?? []) as DirectoryEntry[]) {
@@ -154,6 +157,26 @@ export default function ChatScreen() {
       <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Chat</Text>
       {error ? <HelperText type="error" visible>{error}</HelperText> : null}
 
+      {/* Role Channels */}
+      {roles.length > 0 ? (
+        <View style={{ marginBottom: spacing.xs }}>
+          <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Role channels</Text>
+          {roles.map((r, i) => (
+            <Row key={r._id} name={r.title} subtitle={r.lastMessageText ?? 'Sync with teammates in this role'} color={colorFor(i)} icon="pound" unread={r.unread} onPress={() => router.push(`/chat/${r._id}`)} />
+          ))}
+        </View>
+      ) : null}
+
+      {/* Shift Crew Channels */}
+      {shifts.length > 0 ? (
+        <View style={{ marginBottom: spacing.xs }}>
+          <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Shift crew chats</Text>
+          {shifts.map((s, i) => (
+            <Row key={s._id} name={s.title} subtitle={s.lastMessageText ?? 'Chat with today\'s shift crew'} color={colorFor(i + 3)} icon="clock-outline" unread={s.unread} onPress={() => router.push(`/chat/${s._id}`)} />
+          ))}
+        </View>
+      ) : null}
+
       {/* Group chats: All Staff + any custom groups, plus a way to create more. */}
       <View>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -178,7 +201,7 @@ export default function ChatScreen() {
           </View>
         ) : null}
         {groups.map((g) => (
-          <Row key={g._id} name={g.title} subtitle={g.lastMessageText ?? 'Tap to open the group chat'} color={colors.primary} icon="account-group" onPress={() => router.push(`/chat/${g._id}`)} onDelete={canManage ? () => void onDeleteConversation(g._id) : undefined} />
+          <Row key={g._id} name={g.title} subtitle={g.lastMessageText ?? 'Tap to open the group chat'} color={colors.primary} icon="account-group" unread={g.unread} onPress={() => router.push(`/chat/${g._id}`)} onDelete={canManage ? () => void onDeleteConversation(g._id) : undefined} />
         ))}
       </View>
 
@@ -187,14 +210,14 @@ export default function ChatScreen() {
         <View>
           <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Direct messages</Text>
           {dms.map((d, i) => (
-            <Row key={d._id} name={d.title} subtitle={d.lastMessageText} color={colorFor(i)} onPress={() => router.push(`/chat/${d._id}`)} onDelete={canManage ? () => void onDeleteConversation(d._id) : undefined} />
+            <Row key={d._id} name={d.title} subtitle={d.lastMessageText} color={colorFor(i)} unread={d.unread} onPress={() => router.push(`/chat/${d._id}`)} onDelete={canManage ? () => void onDeleteConversation(d._id) : undefined} />
           ))}
         </View>
       ) : null}
 
       {/* Team, grouped by position. Tap a teammate to open (or start) a DM. */}
       <View>
-        <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Team</Text>
+        <Text style={{ color: colors.muted, fontWeight: '700', marginBottom: 4 }}>Team directory</Text>
         {directory === undefined ? (
           <Text style={{ color: colors.muted }}>Loading teammates…</Text>
         ) : byPosition.length === 0 ? (

@@ -285,6 +285,7 @@ model Venue {
   shiftSwaps                    ShiftSwap[]
   availability                  Availability[]
   conversations                 Conversation[]
+  conversationReads             ConversationRead[]
   notifications                 NotificationEvent[]
   pushTokens                    PushToken[]
   timeEntries                   TimeEntry[]
@@ -461,8 +462,11 @@ model Conversation {
   memberIds       String[]
   lastMessageAt   DateTime?
   lastMessageText String?
+  roleName        String?
+  shiftDate       String?
   venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
   messages        Message[]
+  reads           ConversationRead[]
 
   @@index([venueId])
 }
@@ -476,10 +480,27 @@ model Message {
   senderId       String?
   text           String
   createdAt      DateTime     @default(now())
+  shiftId        String?
+  swapId         String?
+  imageUrl       String?
+  reactions      Json?
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         Profile?     @relation(fields: [senderId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
+}
+
+model ConversationRead {
+  id             String       @id @default(cuid())
+  conversationId String
+  profileId      String
+  venueId        String
+  readAt         DateTime     @default(now())
+  venue          Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, profileId])
+  @@index([conversationId])
 }
 
 model NotificationEvent {
