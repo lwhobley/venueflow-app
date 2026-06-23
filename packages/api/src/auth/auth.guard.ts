@@ -21,6 +21,12 @@ export type AuthenticatedRequest = Request & {
 
 // Short TTL on session lookups so revocation propagates within seconds
 // while still saving a DB round-trip per request on hot paths.
+//
+// NOTE: This cache is process-local. On multi-replica deployments (Railway),
+// invalidateCachedSession() only clears the cache on the instance that
+// handled the logout request. Other instances may serve a revoked session
+// for up to SESSION_CACHE_TTL_MS (30s). Acceptable for now; migrate to
+// Redis if the window becomes a compliance concern.
 const SESSION_CACHE_TTL_MS = 30_000;
 type CachedSession = { userId: string; expiresAt: number; cachedAt: number };
 const sessionCache = new Map<string, CachedSession>();

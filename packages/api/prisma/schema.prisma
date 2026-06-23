@@ -197,24 +197,24 @@ enum WorkplaceJoinRequestStatus {
 }
 
 model User {
-  id           String                @id @default(cuid())
-  email        String?               @unique
-  phone        String?               @unique
-  emailVerifiedAt         DateTime?
+  id                        String                 @id @default(cuid())
+  email                     String?                @unique
+  phone                     String?                @unique
+  emailVerifiedAt           DateTime?
   emailVerificationCodeHash String?
-  emailVerificationSentAt DateTime?
-  passwordResetCodeHash   String?
-  passwordResetExpiresAt  DateTime?
-  passwordResetSentAt     DateTime?
-  failedSignInCount       Int       @default(0)
-  lockedUntil             DateTime?
-  createdAt    DateTime              @default(now())
+  emailVerificationSentAt   DateTime?
+  passwordResetCodeHash     String?
+  passwordResetExpiresAt    DateTime?
+  passwordResetSentAt       DateTime?
+  failedSignInCount         Int                    @default(0)
+  lockedUntil               DateTime?
+  createdAt                 DateTime               @default(now())
   // userId is unique on Profile, so this is effectively one-to-one.
-  profile      Profile?
-  sessions     Session[]
-  accounts     AuthAccount[]
-  password     PasswordCredential?
-  joinRequests WorkplaceJoinRequest[]
+  profile                   Profile?
+  sessions                  Session[]
+  accounts                  AuthAccount[]
+  password                  PasswordCredential?
+  joinRequests              WorkplaceJoinRequest[]
 }
 
 model Session {
@@ -326,8 +326,8 @@ model Venue {
 }
 
 model Profile {
-  id               String           @id @default(cuid())
-  userId           String?          @unique
+  id               String            @id @default(cuid())
+  userId           String?           @unique
   tokenIdentifier  String?
   email            String
   fullName         String
@@ -337,22 +337,22 @@ model Profile {
   altPhone         String?
   address          String?
   dateOfBirth      DateTime?
-  certifications   String[]         @default([])
+  certifications   String[]          @default([])
   venueId          String?
   membershipStatus MembershipStatus?
-  allAccess        Boolean          @default(false)
+  allAccess        Boolean           @default(false)
   trialEndsAt      DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  user             User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
-  venue            Venue?           @relation(fields: [venueId], references: [id], onDelete: SetNull)
-  shifts          ScheduleShift[]
-  availability    Availability[]
-  pushTokens      PushToken[]
-  timeEntries     TimeEntry[]
-  staffRequests   StaffRequest[]
-  sentMessages    Message[]
-  crmNotes        CrmNote[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  user             User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  venue            Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  shifts           ScheduleShift[]
+  availability     Availability[]
+  pushTokens       PushToken[]
+  timeEntries      TimeEntry[]
+  staffRequests    StaffRequest[]
+  sentMessages     Message[]
+  crmNotes         CrmNote[]
 
   @@index([venueId])
   @@index([email])
@@ -970,6 +970,7 @@ model CrmContract {
   venue               Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
   lead                CrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
+  @@unique([contractNumber])
   @@index([venueId])
   @@index([leadId])
   @@index([beoId])
@@ -1309,17 +1310,17 @@ model Invite {
 }
 
 model WorkplaceJoinRequest {
-  id           String                     @id @default(cuid())
+  id           String                      @id @default(cuid())
   venueId      String
   userId       String
-  status       WorkplaceJoinRequestStatus @default(pending)
+  status       WorkplaceJoinRequestStatus  @default(pending)
   decidedAt    DateTime?
   decidedById  String?
   decisionNote String?
-  createdAt    DateTime                   @default(now())
-  updatedAt    DateTime                   @updatedAt
-  venue        Venue                      @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  user         User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  venue        Venue                       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  user         User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   events       WorkplaceJoinRequestEvent[]
 
   @@index([venueId])

@@ -287,6 +287,9 @@ export class ReservationsController {
     };
     if (date) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Invalid date');
+      // NOTE: Date boundaries use UTC. For venues not in UTC this means the
+      // window may not align with local midnight. Until the Venue model stores
+      // a timezone, callers should be aware of this offset.
       const start = new Date(`${date}T00:00:00.000Z`);
       const end = new Date(`${date}T23:59:59.999Z`);
       where['reservationTime'] = { gte: start, lte: end };
@@ -404,6 +407,8 @@ export class ReservationsController {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new BadRequestException('Pass ?date=YYYY-MM-DD');
     }
+    // NOTE: Date boundaries use UTC — see getReservationsPage comment for
+    // the timezone caveat. Will be venue-local once Venue stores a tz.
     const start = new Date(`${date}T00:00:00.000Z`);
     const end = new Date(`${date}T23:59:59.999Z`);
 

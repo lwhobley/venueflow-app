@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   IsArray,
+  IsEmail,
   IsIn,
   IsInt,
   IsNumber,
@@ -26,6 +27,7 @@ import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { randomUUID } from 'crypto';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -234,8 +236,10 @@ function toMs(date: Date | null | undefined): number | null {
 }
 
 function makeContractNumber(): string {
-  const now = Date.now();
-  return `C-${now.toString(36).toUpperCase().slice(-6)}${Math.random().toString(36).toUpperCase().slice(2, 5)}`;
+  // Use a UUID-derived suffix for collision resistance. The previous
+  // Date.now() approach could collide within the same millisecond.
+  const uuid = randomUUID().replace(/-/g, '');
+  return `C-${uuid.slice(0, 9).toUpperCase()}`;
 }
 
 // Weighted probabilities used for the pipeline forecast. Tuned to industry
@@ -257,7 +261,7 @@ const STAGE_PROBABILITY: Record<string, number> = {
 const ACTIVE_STAGES: CrmLeadStatus[] = ['new', 'contacted', 'qualified', 'proposal_sent', 'negotiating'];
 
 class EmailBeoDto {
-  @IsString()
+  @IsEmail({}, { message: 'toEmail must be a valid email address' })
   toEmail!: string;
 
   @IsString()
@@ -304,7 +308,8 @@ function htmlEscape(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function formatEventDate(date: Date | null): string {
@@ -652,11 +657,17 @@ export class CrmController {
       const patch: Record<string, any> = { ...fields };
       if (body.status !== undefined) patch.status = body.status as BeoStatus;
       const updated = await this.prisma.crmBeo.update({ where: { id: body.beoId }, data: patch });
-      // Sync confirmed BEOs to a reservation hold so private events block the
+      // Sync confirmed BEOs to a reservation so private events block the
       // floor plan instead of letting another booking overlap the same space.
+      // Only re-sync when the status just flipped to confirmed OR when a
+      // reservation-relevant field actually changed on an already-confirmed BEO.
       const becameConfirmed = body.status === 'confirmed' && existing.status !== 'confirmed';
-      const alreadyConfirmed = (body.status === undefined || body.status === 'confirmed') && updated.status === 'confirmed';
-      if ((becameConfirmed || alreadyConfirmed) && updated.eventDate) {
+      const relevantFieldChanged =
+        updated.status === 'confirmed' &&
+        (body.eventDate !== undefined ||
+         body.guestCount !== undefined ||
+         body.venueSpace !== undefined);
+      if ((becameConfirmed || relevantFieldChanged) && updated.eventDate) {
         await this.syncBeoToReservation(scope.venueId, updated);
       }
       if (existing.leadId && body.status !== undefined && body.status !== existing.status) {
@@ -983,15 +994,18 @@ export class CrmController {
   @Post('beos/:id/email')
   async emailBeo(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: EmailBeoDto) {
     requireManager(scope);
-    const beo = await this.prisma.crmBeo.findFirst({
-      where: { id, venueId: scope.venueId },
-      include: { lead: { select: { fullName: true, email: true } } },
-    });
+    const [beo, venue] = await Promise.all([
+      this.prisma.crmBeo.findFirst({
+        where: { id, venueId: scope.venueId },
+        include: { lead: { select: { fullName: true, email: true } } },
+      }),
+      this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { name: true } }),
+    ]);
     if (!beo) throw new NotFoundException('BEO not found');
-    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { name: true } });
-    const subject = `${venue?.name ?? 'Venue'} — Banquet Event Order: ${beo.eventName}`;
-    const text = renderBeoText(beo, venue?.name ?? 'Venue', body.message);
-    const html = renderBeoHtml(beo, venue?.name ?? 'Venue', body.message);
+    const venueName = venue?.name ?? 'Venue';
+    const subject = `${venueName} — Banquet Event Order: ${beo.eventName}`;
+    const text = renderBeoText(beo, venueName, body.message);
+    const html = renderBeoHtml(beo, venueName, body.message);
     await this.email.sendOrThrow({ to: body.toEmail, subject, text, html });
     if (beo.leadId) {
       await this.logActivity(scope.venueId, beo.leadId, scope.profileId, 'beo_emailed', `→ ${body.toEmail}`);
@@ -1093,6 +1107,25 @@ export class CrmController {
     menuEntrees: string | null;
   }) {
     if (!beo.eventDate) return;
+
+    // Block BEO-to-reservation sync if the event window overlaps a
+    // manager-imposed hold — same guard that saveReservation uses.
+    const eventDurationMs = 240 * 60 * 1000; // 4 hours, same as durationMinutes below
+    const eventEnd = new Date(beo.eventDate.getTime() + eventDurationMs);
+    const hold = await this.prisma.reservationHold.findFirst({
+      where: {
+        venueId,
+        startsAt: { lt: eventEnd },
+        endsAt: { gt: beo.eventDate },
+      },
+      select: { reason: true },
+    });
+    if (hold) {
+      throw new BadRequestException(
+        `Cannot sync BEO to reservation — time conflicts with a hold: ${hold.reason}`,
+      );
+    }
+
     const lead = beo.leadId
       ? await this.prisma.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { fullName: true, phone: true, email: true, company: true } })
       : null;
@@ -1131,28 +1164,32 @@ export class CrmController {
   }
 
   private async buildTemplateContext(venueId: string, leadId?: string, beoId?: string) {
-    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { name: true } });
+    // Fire all three independent queries in parallel to reduce latency from
+    // ~3× sequential round-trips to ~1× (the slowest query).
+    const [venue, lead, beo] = await Promise.all([
+      this.prisma.venue.findUnique({ where: { id: venueId }, select: { name: true } }),
+      leadId
+        ? this.prisma.crmLead.findFirst({ where: { id: leadId, venueId }, select: { fullName: true, email: true, phone: true, company: true, source: true } })
+        : null,
+      beoId
+        ? this.prisma.crmBeo.findFirst({ where: { id: beoId, venueId } })
+        : null,
+    ]);
     const ctx: Record<string, string> = { 'venue.name': venue?.name ?? '' };
-    if (leadId) {
-      const lead = await this.prisma.crmLead.findFirst({ where: { id: leadId, venueId }, select: { fullName: true, email: true, phone: true, company: true, source: true } });
-      if (lead) {
-        ctx['lead.name'] = lead.fullName;
-        ctx['lead.firstName'] = lead.fullName.split(/\s+/)[0] ?? lead.fullName;
-        ctx['lead.email'] = lead.email ?? '';
-        ctx['lead.phone'] = lead.phone ?? '';
-        ctx['lead.company'] = lead.company ?? '';
-        ctx['lead.source'] = lead.source ?? '';
-      }
+    if (lead) {
+      ctx['lead.name'] = lead.fullName;
+      ctx['lead.firstName'] = lead.fullName.split(/\s+/)[0] ?? lead.fullName;
+      ctx['lead.email'] = lead.email ?? '';
+      ctx['lead.phone'] = lead.phone ?? '';
+      ctx['lead.company'] = lead.company ?? '';
+      ctx['lead.source'] = lead.source ?? '';
     }
-    if (beoId) {
-      const beo = await this.prisma.crmBeo.findFirst({ where: { id: beoId, venueId } });
-      if (beo) {
-        ctx['event.name'] = beo.eventName;
-        ctx['event.date'] = beo.eventDate ? beo.eventDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
-        ctx['event.space'] = beo.venueSpace ?? '';
-        ctx['event.guestCount'] = String(beo.guestCount ?? '');
-        ctx['event.deposit'] = beo.depositCents ? `$${(beo.depositCents / 100).toFixed(2)}` : '';
-      }
+    if (beo) {
+      ctx['event.name'] = beo.eventName;
+      ctx['event.date'] = beo.eventDate ? beo.eventDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
+      ctx['event.space'] = beo.venueSpace ?? '';
+      ctx['event.guestCount'] = String(beo.guestCount ?? '');
+      ctx['event.deposit'] = beo.depositCents ? `$${(beo.depositCents / 100).toFixed(2)}` : '';
     }
     return ctx;
   }

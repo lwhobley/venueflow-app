@@ -28,12 +28,19 @@ export class ReservationNotifierService {
 
   /** Send a "your reservation is confirmed" email immediately on booking. */
   async sendConfirmation(reservationId: string): Promise<void> {
+    // Atomically claim the confirmation slot. If two concurrent calls race,
+    // only the one that sees count === 1 proceeds — the other returns early.
+    const claimed = await this.prisma.reservation.updateMany({
+      where: { id: reservationId, confirmationSentAt: null, deletedAt: null },
+      data: { confirmationSentAt: new Date() },
+    });
+    if (claimed.count === 0) return; // already sent, deleted, or not found
+
     const reservation = await this.prisma.reservation.findUnique({
       where: { id: reservationId },
       include: { venue: { select: { name: true } } },
     });
-    if (!reservation?.guestEmail || reservation.deletedAt) return;
-    if (reservation.confirmationSentAt) return;
+    if (!reservation?.guestEmail) return;
     const venueName = reservation.venue.name;
     const when = formatBookingTime(reservation.reservationTime);
     const subject = `${venueName} — Reservation confirmed for ${when}`;
@@ -56,10 +63,6 @@ export class ReservationNotifierService {
       to: reservation.guestEmail,
       subject,
       text,
-    });
-    await this.prisma.reservation.update({
-      where: { id: reservation.id },
-      data: { confirmationSentAt: new Date() },
     });
   }
 

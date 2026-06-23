@@ -263,9 +263,12 @@ export class FloorController {
         },
       });
 
-      for (const table of body.tables) {
-        const created = await tx.floorTable.create({
-          data: {
+      // Batch-create tables, states, and chairs to avoid N+1 round-trips that
+      // hold the transaction lock. A 30-table floor plan drops from 60+ sequential
+      // queries to 4 batched ones.
+      if (body.tables.length > 0) {
+        await tx.floorTable.createMany({
+          data: body.tables.map((table) => ({
             floorPlanId: plan.id,
             label: table.label,
             shape: (table.shape as TableShape) ?? 'square',
@@ -278,29 +281,37 @@ export class FloorController {
             section: 'main' as TableSection,
             minSpend: 0,
             isReservable: true,
-          },
+          })),
         });
 
-        await tx.tableState.create({
-          data: {
+        const createdTables = await tx.floorTable.findMany({
+          where: { floorPlanId: plan.id },
+          select: { id: true },
+        });
+
+        await tx.tableState.createMany({
+          data: createdTables.map((t) => ({
             venueId,
-            tableId: created.id,
-            status: 'available',
+            tableId: t.id,
+            status: 'available' as const,
             lastActivityAt: new Date(),
-          },
+          })),
         });
 
-        for (const chair of table.chairs ?? []) {
-          await tx.floorChair.create({
-            data: {
+        // Collect all chairs across all tables for a single batch insert.
+        const allChairs = body.tables.flatMap(
+          (table) =>
+            (table.chairs ?? []).map((chair) => ({
               venueId,
               floorPlanId: plan.id,
               x: chair.x,
               y: chair.y,
               rotation: chair.rotation,
               label: chair.label ?? null,
-            },
-          });
+            })),
+        );
+        if (allChairs.length > 0) {
+          await tx.floorChair.createMany({ data: allChairs });
         }
       }
 
