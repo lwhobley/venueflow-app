@@ -504,13 +504,13 @@ model ConversationRead {
   @@index([conversationId])
 }
 
-// Binary store for chat photo attachments. Served via an unguessable
-// capability URL (GET /v1/chat/images/:id) the same way an image CDN would.
+// S3 store for chat photo attachments. Served via an unguessable
+// capability URL (GET /v1/chat/images/:id) that redirects to S3 pre-signed URL.
 model ChatImage {
   id         String   @id @default(cuid())
   venueId    String
   mimeType   String
-  data       Bytes
+  s3Key      String
   uploadedBy String?
   createdAt  DateTime @default(now())
   venue      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)

@@ -22,6 +22,7 @@ import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { S3ImageService } from './s3-image.service';
 
 // Chat photo uploads. Kept small — images are picker-compressed (quality 0.5)
 // before they reach us; reject anything larger so the DB store stays lean.
@@ -89,7 +90,10 @@ function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
 
 @Controller('v1/chat')
 export class ChatController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3ImageService: S3ImageService,
+  ) {}
 
   async ensureContextualConversations(venueId: string) {
     const profiles = await this.prisma.profile.findMany({
@@ -542,11 +546,13 @@ export class ChatController {
     if (data.length === 0) throw new BadRequestException('Image is empty');
     if (data.length > MAX_IMAGE_BYTES) throw new BadRequestException('Image is too large (max 5MB)');
 
+    const s3Key = await this.s3ImageService.upload(data, body.mimeType, scope.venueId);
+
     const image = await this.prisma.chatImage.create({
       data: {
         venueId: scope.venueId,
         mimeType: body.mimeType,
-        data,
+        s3Key,
         uploadedBy: scope.profileId,
       },
       select: { id: true },
@@ -564,12 +570,11 @@ export class ChatController {
   @Public()
   @SkipVenueScope()
   @Get('images/:id')
-  @Header('Cache-Control', 'public, max-age=31536000, immutable')
-  async getImage(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+  async getImage(@Param('id') id: string, @Res() res: Response) {
     const image = await this.prisma.chatImage.findUnique({ where: { id } });
     if (!image) throw new NotFoundException('Image not found');
-    res.setHeader('Content-Type', image.mimeType);
-    return new StreamableFile(image.data);
+    const url = await this.s3ImageService.getPresignedUrl(image.s3Key);
+    return res.redirect(302, url);
   }
 }
 
