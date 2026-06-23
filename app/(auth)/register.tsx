@@ -81,7 +81,22 @@ export default function RegisterScreen() {
         token,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(auth)/team-choice');
+      if (venue) {
+        Alert.alert(
+          'Account created',
+          `Welcome to Venue Wrangler! You have successfully joined the team at ${venue.name}.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                router.replace('/(tabs)/home');
+              },
+            },
+          ]
+        );
+      } else {
+        router.replace('/(auth)/team-choice');
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
       Alert.alert('Could not create account', msg);

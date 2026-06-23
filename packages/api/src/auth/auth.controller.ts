@@ -206,8 +206,10 @@ export class AuthController {
       to: email,
       subject: 'Welcome to Venue Wrangler',
       text:
-        `Hi ${session.profile.fullName},\n\nYour Venue Wrangler account has been created and your 14-day free trial has started.\n\n` +
-        'Check your email for the verification code before creating or joining a team.',
+        `Hi ${session.profile.fullName},\n\nYour Venue Wrangler account has been created.\n\n` +
+        (session.venue
+          ? `You have successfully joined the team at ${session.venue.name}!`
+          : 'Check your email for the verification code before creating or joining a team.'),
     });
     return session;
   }
@@ -484,17 +486,29 @@ export class AuthController {
         // invite authorizes access to that venue. Email match alone is NOT
         // proof of ownership — signup does not verify email — so without an
         // invite we never claim an existing profile; we create a fresh one.
-        const claimedProfile = grant
+        const claimedProfile = (grant
           ? await tx.profile.findFirst({
               where: { userId: null, venueId: grant.venueId, email: { equals: email, mode: 'insensitive' } },
               orderBy: { createdAt: 'asc' },
               include: { venue: true },
             })
-          : null;
+          : await tx.profile.findFirst({
+              where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
+              orderBy: { createdAt: 'asc' },
+              include: { venue: true },
+            })) || null;
         if (claimedProfile) {
           result = await tx.profile.update({
             where: { id: claimedProfile.id },
-            data: { userId, email, fullName: trimmedFullName || claimedProfile.fullName, ...grant!, trialEndsAt: claimedProfile.trialEndsAt ?? trialEndsAt },
+            data: {
+              userId,
+              email,
+              fullName: trimmedFullName || claimedProfile.fullName,
+              role: grant?.role ?? claimedProfile.role,
+              jobTitle: grant?.jobTitle ?? claimedProfile.jobTitle,
+              venueId: grant?.venueId ?? claimedProfile.venueId,
+              trialEndsAt: claimedProfile.trialEndsAt ?? trialEndsAt,
+            },
             include: { venue: true },
           });
         } else {
