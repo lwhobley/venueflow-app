@@ -142,7 +142,11 @@ export class AuthController {
       return this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
     }
 
-    if (user?.password && user.emailVerifiedAt) {
+    // Reject signup whenever a password already exists, regardless of
+    // verification state. Unverified accounts must use resend-verification or
+    // password-reset to recover — allowing signup to overwrite an existing
+    // password would let an attacker hijack unverified accounts.
+    if (user?.password) {
       throw new BadRequestException('An account already exists for this email. Sign in instead.');
     }
 

@@ -588,6 +588,11 @@ export class AppController {
   @Post('invites')
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
+    // Only owner, admin, or allAccess profiles may create manager-level invites.
+    // A plain manager can only invite staff, matching the canManageRole policy
+    // enforced on direct staff edits.
+    const canElevate = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess;
+    const inviteRole = body.role === 'manager' && canElevate ? 'manager' : 'staff';
     const email = body.email?.trim().toLowerCase() || null;
     const token = randomBytes(18).toString('base64url');
     const code = await this.uniqueInviteCode();
@@ -597,7 +602,7 @@ export class AppController {
         email,
         token,
         code,
-        role: body.role === 'manager' ? 'manager' : 'staff',
+        role: inviteRole,
         jobTitle: body.jobTitle?.trim() || 'Team Member',
         createdBy: profile.id,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),

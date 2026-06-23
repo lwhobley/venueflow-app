@@ -97,7 +97,10 @@ export class StaffController {
       existing.find((item) => item.email.toLowerCase() === body.email.toLowerCase()) ?? null;
 
     if (member) {
-      await this.assertCanManageTarget(scope, member);
+      // Only apply the last-owner guard when the role is actually being
+      // changed to a non-owner/admin value (i.e. a demotion).
+      const isDemoting = isOwnerOrAdminRole(member.role) && !isOwnerOrAdminRole(body.role);
+      await this.assertCanManageTarget(scope, member, isDemoting);
       const updated = await this.prisma.profile.update({
         where: { id: member.id },
         data: {
@@ -156,7 +159,7 @@ export class StaffController {
     if (staff.venueId !== scope.venueId) {
       throw new ForbiddenException('Staff member does not belong to this venue');
     }
-    await this.assertCanManageTarget(scope, staff);
+    await this.assertCanManageTarget(scope, staff, true);
 
     const updated = await this.prisma.profile.update({
       where: { id: staff.id },
@@ -168,13 +171,17 @@ export class StaffController {
   private async assertCanManageTarget(
     scope: NonNullable<Scope>,
     target: { id: string; role: Role; venueId: string | null },
+    demotingOrRemoving = false,
   ) {
     // Editing your own profile is always allowed; the last-owner guard below
     // still prevents a sole owner from self-demoting out of access.
     if (target.id !== scope.profileId && !canManageRole(scope.role, target.role, scope.allAccess)) {
       throw new ForbiddenException('You cannot modify this staff member');
     }
-    if (isOwnerOrAdminRole(target.role)) {
+    // Only enforce the last-owner/admin guard when the operation would actually
+    // remove or demote the target. Harmless edits (name, phone, job title) on
+    // the sole owner/admin are safe and should not be blocked.
+    if (demotingOrRemoving && isOwnerOrAdminRole(target.role)) {
       const ownerAdminCount = await this.prisma.profile.count({
         where: { venueId: scope.venueId, role: { in: ['owner', 'admin'] } },
       });

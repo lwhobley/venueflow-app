@@ -165,7 +165,7 @@ export const appApi = {
     apiRequest<InviteCheckResult>('/v1/workforce/invite-check', { method: 'POST', body }),
   searchVenues: (q: string) =>
     apiRequest<{ venues: VenueSearchResult[] }>(`/v1/workforce/venues/search?q=${encodeURIComponent(q)}`),
-  submitJoinRequest: (body: { venueId: string }) =>
+  submitJoinRequest: (body: { venueId: string; code: string }) =>
     apiRequest<JoinRequestResult>('/v1/workforce/join-request', { method: 'POST', body }),
   listMyJoinRequests: () =>
     apiRequest<{ requests: any[] }>('/v1/workforce/join-requests'),

@@ -78,7 +78,8 @@ export class AppStaffController {
     }
     const existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
     if (existing) {
-      await this.assertCanManageLegacyStaffTarget(viewer, existing);
+      const isDemoting = isOwnerOrAdminRole(existing.role) && !isOwnerOrAdminRole(body.role);
+      await this.assertCanManageLegacyStaffTarget(viewer, existing, isDemoting);
     }
     const employeeFields = {
       phone: body.phone?.trim() || null,
@@ -111,7 +112,7 @@ export class AppStaffController {
     const viewer = await this.profiles.requireManagerProfile(user);
     const staff = await this.prisma.profile.findFirst({ where: { id: staffId, venueId: viewer.venueId! } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    await this.assertCanManageLegacyStaffTarget(viewer, staff);
+    await this.assertCanManageLegacyStaffTarget(viewer, staff, true);
     const updated = await this.prisma.profile.update({ where: { id: staff.id }, data: { venueId: null } });
     return mapProfile(updated);
   }
@@ -119,13 +120,17 @@ export class AppStaffController {
   private async assertCanManageLegacyStaffTarget(
     viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null },
     target: { id: string; role: Role; venueId: string | null },
+    demotingOrRemoving = false,
   ) {
     // Editing your own profile is always allowed; the last-owner guard below
     // still prevents a sole owner from self-demoting out of access.
     if (target.id !== viewer.id && !canManageRole(viewer.role, target.role, viewer.allAccess)) {
       throw new ForbiddenException('You cannot modify this staff member');
     }
-    if (isOwnerOrAdminRole(target.role)) {
+    // Only enforce the last-owner/admin guard when the operation would actually
+    // remove or demote the target. Harmless edits (name, phone, job title) on
+    // the sole owner/admin are safe and should not be blocked.
+    if (demotingOrRemoving && isOwnerOrAdminRole(target.role)) {
       const ownerAdminCount = await this.prisma.profile.count({
         where: { venueId: viewer.venueId, role: { in: ['owner', 'admin'] } },
       });
