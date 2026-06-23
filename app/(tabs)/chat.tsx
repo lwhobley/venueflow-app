@@ -108,8 +108,8 @@ export default function ChatScreen() {
     if (!venue?.id) return;
     setError(null);
     try {
-      const id = await openDm({ venueId: venue.id, otherProfileId: otherId as Id<'profiles'> });
-      router.push(`/chat/${id}`);
+      const result = await openDm({ venueId: venue.id, targetProfileId: otherId as Id<'profiles'> });
+      router.push(`/chat/${result?.conversationId ?? result}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not open direct message.');
     }

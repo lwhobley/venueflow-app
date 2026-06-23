@@ -90,6 +90,14 @@ export class ReservationNotifierService {
     let sent = 0;
     for (const reservation of candidates) {
       if (!reservation.guestEmail) continue;
+
+      // Atomically claim the slot before sending the email.
+      const claimed = await this.prisma.reservation.updateMany({
+        where: { id: reservation.id, reminderSentAt: null, deletedAt: null },
+        data: { reminderSentAt: new Date() },
+      });
+      if (claimed.count === 0) continue; // already claimed or deleted
+
       const venueName = reservation.venue.name;
       const when = formatBookingTime(reservation.reservationTime);
       const subject = `${venueName} — Reminder: ${when}`;
@@ -104,12 +112,13 @@ export class ReservationNotifierService {
       ].join('\n');
       try {
         await this.email.sendOrThrow({ to: reservation.guestEmail, subject, text });
-        await this.prisma.reservation.update({
-          where: { id: reservation.id },
-          data: { reminderSentAt: new Date() },
-        });
         sent += 1;
       } catch (err) {
+        // Revert the claim if email sending fails so it can be retried later.
+        await this.prisma.reservation.update({
+          where: { id: reservation.id },
+          data: { reminderSentAt: null },
+        });
         this.logger.warn(`Reservation reminder failed for ${reservation.id}: ${(err as Error).message}`);
       }
     }
@@ -137,6 +146,14 @@ export class ReservationNotifierService {
       include: { venue: { select: { name: true } } },
     });
     if (!entry?.guestEmail) return;
+
+    // Atomically claim the slot before sending the email.
+    const claimed = await this.prisma.waitlist.updateMany({
+      where: { id: entry.id, notifiedAt: null, status: 'waiting' },
+      data: { notifiedAt: new Date(), readyAt: new Date() },
+    });
+    if (claimed.count === 0) return; // already claimed or status changed
+
     const venueName = entry.venue.name;
     try {
       await this.email.sendOrThrow({
@@ -151,13 +168,12 @@ export class ReservationNotifierService {
           `— ${venueName}`,
         ].join('\n'),
       });
-      // readyAt acts as the "table is available" signal; status stays
-       // 'waiting' until the host actually seats them via the floor screen.
+    } catch (err) {
+      // Revert the claim if email sending fails.
       await this.prisma.waitlist.update({
         where: { id: entry.id },
-        data: { notifiedAt: new Date(), readyAt: new Date() },
+        data: { notifiedAt: null, readyAt: null },
       });
-    } catch (err) {
       this.logger.warn(`Waitlist notify failed for ${entry.id}: ${(err as Error).message}`);
     }
   }
