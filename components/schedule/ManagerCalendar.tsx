@@ -290,8 +290,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
 
   const messageStaff = (profileId: Id<'profiles'>) =>
     safe(async () => {
-      const id = await openDm({ venueId, otherProfileId: profileId });
-      router.push(`/chat/${id}`);
+      const result = await openDm({ venueId, targetProfileId: profileId });
+      router.push(`/chat/${result?.conversationId ?? result}`);
     });
 
   const runUndo = () => {

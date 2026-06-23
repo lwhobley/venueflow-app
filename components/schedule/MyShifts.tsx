@@ -78,8 +78,8 @@ export function MyShifts() {
   const messageTeammate = (profileId: Id<'profiles'>) =>
     run(async () => {
       if (!venue?.id) return;
-      const id = await openDm({ venueId: venue.id, otherProfileId: profileId });
-      router.push(`/chat/${id}`);
+      const result = await openDm({ venueId: venue.id, targetProfileId: profileId });
+      router.push(`/chat/${result?.conversationId ?? result}`);
     });
 
   const teammates = useMemo(() => (directory ?? []) as { _id: Id<'profiles'>; fullName: string; jobTitle: string }[], [directory]);

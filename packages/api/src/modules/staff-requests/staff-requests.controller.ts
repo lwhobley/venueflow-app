@@ -235,23 +235,48 @@ export class StaffRequestsController {
             },
           });
         } else {
-          await this.prisma.timeEntry.create({
-            data: {
+          // No specific entry ID — find an existing open entry for this profile
+          // on the same calendar day and correct it. Only create a new entry if
+          // none exists (the employee genuinely forgot to clock in).
+          const correctedClockIn = new Date(correction.clockInAt);
+          const dayStart = new Date(correctedClockIn);
+          dayStart.setHours(0, 0, 0, 0);
+          const dayEnd = new Date(dayStart.getTime() + 86400000);
+          const existing = await this.prisma.timeEntry.findFirst({
+            where: {
               profileId: request.profileId,
               venueId: request.venueId,
-              clockInAt: new Date(correction.clockInAt),
-              clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : new Date(correction.clockInAt + 8 * 60 * 60 * 1000),
-              clockInLat: 0,
-              clockInLng: 0,
-              clockInAccuracyM: 0,
-              clockInMocked: false,
-              clockOutLat: 0,
-              clockOutLng: 0,
-              clockOutAccuracyM: 0,
-              clockOutMocked: false,
-              isOpen: false,
+              clockInAt: { gte: dayStart, lt: dayEnd },
             },
           });
+          if (existing) {
+            await this.prisma.timeEntry.update({
+              where: { id: existing.id },
+              data: {
+                clockInAt: correctedClockIn,
+                clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : null,
+                isOpen: !correction.clockOutAt,
+              },
+            });
+          } else {
+            await this.prisma.timeEntry.create({
+              data: {
+                profileId: request.profileId,
+                venueId: request.venueId,
+                clockInAt: correctedClockIn,
+                clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : new Date(correction.clockInAt + 8 * 60 * 60 * 1000),
+                clockInLat: 0,
+                clockInLng: 0,
+                clockInAccuracyM: 0,
+                clockInMocked: false,
+                clockOutLat: 0,
+                clockOutLng: 0,
+                clockOutAccuracyM: 0,
+                clockOutMocked: false,
+                isOpen: false,
+              },
+            });
+          }
         }
       }
     }

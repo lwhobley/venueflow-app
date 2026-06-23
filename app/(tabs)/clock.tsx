@@ -179,6 +179,10 @@ export default function ClockScreen() {
         Alert.alert('Error', 'Invalid date or time values.');
         return;
       }
+      if (clockOutAt <= clockInAt) {
+        Alert.alert('Error', 'Clock-out time must be after clock-in time.');
+        return;
+      }
       await createCorrectionRequest.mutateAsync({
         kind: 'time_correction',
         title: `Timesheet correction request for ${correctionDate}`,

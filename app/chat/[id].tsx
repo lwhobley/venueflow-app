@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View, Image } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Button, HelperText, IconButton, Text, TextInput, Dialog, Portal, Card, Chip } from 'react-native-paper';
+import { Button, HelperText, IconButton, Text, TextInput, Dialog, Portal, Card } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
@@ -66,7 +66,9 @@ export default function ConversationScreen() {
   const [showShareDialog, setShowShareDialog] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
+  const messagesRef = useRef<any[]>([]);
   const messages = (data?.messages ?? []) as any[];
+  messagesRef.current = messages;
   const readReceipts = (data?.readReceipts ?? []) as any[];
 
   const mineShifts = myScheduleData?.mine ?? [];
@@ -174,9 +176,12 @@ export default function ConversationScreen() {
             <Pressable
               key={idx}
               onPress={() => {
-                const newLines = [...lines];
-                newLines[idx] = isUnchecked ? `[x] ${label}` : `[ ] ${label}`;
-                void onUpdateChecklist(messageId, newLines.join('\n'));
+                // Read the latest message text from the ref to avoid a stale
+                // closure when two items are tapped in quick succession.
+                const current = messagesRef.current.find((msg: any) => (msg.id ?? msg._id) === messageId);
+                const currentLines = (current?.text ?? msgText).split('\n');
+                currentLines[idx] = currentLines[idx]?.startsWith('[ ]') ? `[x] ${label}` : `[ ] ${label}`;
+                void onUpdateChecklist(messageId, currentLines.join('\n'));
               }}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 }}
             >
