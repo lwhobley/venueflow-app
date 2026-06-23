@@ -358,8 +358,9 @@ function renderBeoText(beo: BeoRenderInput, venueName: string, message?: string)
   ];
   const greeting = beo.lead?.fullName ? `Hi ${beo.lead.fullName.split(' ')[0]},\n\n` : '';
   const intro = message ? `${message}\n\n` : `Please review the event details below for ${venueName}.\n\n`;
-  const lines = rows.map(([k, v]) => `${k}: ${v}`).join('\n');
-  return `${greeting}${intro}${lines}\n\nThank you,\n${venueName}\n`;
+  const tableHeader = `Event Details\nDetail\tInfo\n`;
+  const lines = rows.map(([k, v]) => `${k}\t${v}`).join('\n');
+  return `${greeting}${intro}${tableHeader}${lines}\n\nThank you,\n${venueName}\n`;
 }
 
 function renderBeoHtml(beo: BeoRenderInput, venueName: string, message?: string): string {

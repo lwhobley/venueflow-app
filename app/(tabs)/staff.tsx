@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, ScrollView, Share, View } from 'react-native';
+import { Alert, FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
@@ -218,25 +218,39 @@ function StaffScreen() {
 
   const onSubmit = async () => {
     if (!venue?.id || !canManage) return;
-    await upsertStaff({
-      venueId: venue.id,
-      fullName,
-      email,
-      role,
-      jobTitle,
-      phone: phone.trim() || undefined,
-      altPhone: altPhone.trim() || undefined,
-      address: address.trim() || undefined,
-      dateOfBirth: dateOfBirth.trim() || undefined,
-      certifications: certifications.length > 0 ? certifications : undefined,
-    });
-    clearForm();
+    try {
+      await upsertStaff({
+        venueId: venue.id,
+        staffId: selectedStaffId ?? undefined,
+        fullName,
+        email,
+        role,
+        jobTitle,
+        phone: phone.trim() || undefined,
+        altPhone: altPhone.trim() || undefined,
+        address: address.trim() || undefined,
+        dateOfBirth: dateOfBirth.trim() || undefined,
+        certifications: certifications.length > 0 ? certifications : undefined,
+      });
+      clearForm();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save staff');
+    }
   };
 
   const onDeactivate = async (member: StaffMember) => {
     if (!canManage) return;
-    await deactivateStaff({ staffId: member._id as Id<'profiles'> });
-    if (selectedStaffId === member._id) clearForm();
+    Alert.alert('Deactivate Staff', `Are you sure you want to remove ${member.fullName}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Deactivate', style: 'destructive', onPress: async () => {
+        try {
+          await deactivateStaff({ staffId: member._id as Id<'profiles'> });
+          if (selectedStaffId === member._id) clearForm();
+        } catch (e) {
+          Alert.alert('Error', e instanceof Error ? e.message : 'Action failed');
+        }
+      }}
+    ]);
   };
 
   if (profileLoading) {

@@ -102,7 +102,7 @@ const mutationRoutes: Record<string, Route> = {
   'app.upsertVenueStaff': {
     path: '/v1/app/staff',
     method: 'POST',
-    body: ({ venueId, email, fullName, role, jobTitle, phone, altPhone, address, dateOfBirth, certifications }) => ({ venueId, email, fullName, role, jobTitle, phone, altPhone, address, dateOfBirth, certifications }),
+    body: ({ venueId, staffId, email, fullName, role, jobTitle, phone, altPhone, address, dateOfBirth, certifications }) => ({ venueId, staffId, email, fullName, role, jobTitle, phone, altPhone, address, dateOfBirth, certifications }),
     invalidate: [['app', 'listVenueStaff'], ['app', 'getDashboard']],
   },
   'app.deactivateVenueStaff': {

@@ -76,6 +76,10 @@ class TableDto {
   @IsIn(TABLE_SHAPES)
   shape!: string;
 
+  @IsString()
+  @IsOptional()
+  section?: string;
+
   @IsInt()
   @Min(1)
   capacity!: number;
@@ -278,7 +282,7 @@ export class FloorController {
             width: table.width,
             height: table.height,
             rotation: 0,
-            section: 'main' as TableSection,
+            section: (table.section as TableSection) ?? 'main',
             minSpend: 0,
             isReservable: true,
           })),

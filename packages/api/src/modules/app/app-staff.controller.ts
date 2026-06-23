@@ -12,6 +12,10 @@ import { ProfileService } from './profile.service';
 
 class StaffDto {
   @IsString()
+  @IsOptional()
+  staffId?: string;
+
+  @IsString()
   venueId!: string;
 
   @IsEmail()
@@ -76,7 +80,13 @@ export class AppStaffController {
     if (!viewerIsOwnerOrAdmin && ['admin', 'owner', 'manager'].includes(body.role)) {
       throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
     }
-    const existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
+    let existing;
+    if (body.staffId) {
+      existing = await this.prisma.profile.findFirst({ where: { id: body.staffId, venueId: body.venueId } });
+      if (!existing) throw new NotFoundException('Staff member not found');
+    } else {
+      existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
+    }
     if (existing) {
       const isDemoting = isOwnerOrAdminRole(existing.role) && !isOwnerOrAdminRole(body.role);
       await this.assertCanManageLegacyStaffTarget(viewer, existing, isDemoting);

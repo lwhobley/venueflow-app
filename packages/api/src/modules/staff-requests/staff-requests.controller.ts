@@ -23,6 +23,7 @@ import { Prisma, RequestStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapStaffRequest } from '../../common/mappers';
+import { zonedDayOfWeek } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -238,7 +239,37 @@ export class StaffRequestsController {
           UPDATE "Profile"
           SET "ptoHoursAccrued" = GREATEST(0, "ptoHoursAccrued" - ${hours})
           WHERE id = ${request.profileId}`;
-      } else if (request.kind === 'time_correction') {
+      }
+      
+      if (request.kind === 'sick_leave' || request.kind === 'time_off') {
+        const reqStart = request.requestedRangeStart || request.requestedForDate;
+        const reqEnd = request.requestedRangeEnd || request.requestedForDate || reqStart;
+        if (reqStart && reqEnd) {
+          const venue = await this.prisma.venue.findUnique({ where: { id: request.venueId }, select: { timezone: true } });
+          const tz = venue?.timezone ?? null;
+          const start = new Date(reqStart);
+          const end = new Date(reqEnd);
+          const dayIndices: number[] = [];
+          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            dayIndices.push(zonedDayOfWeek(tz, d.getTime()));
+          }
+          if (dayIndices.length > 0) {
+            await this.prisma.scheduleShift.updateMany({
+              where: {
+                venueId: request.venueId,
+                profileId: request.profileId,
+                dayIndex: { in: dayIndices },
+              },
+              data: {
+                profileId: null,
+                status: 'open',
+              },
+            });
+          }
+        }
+      }
+
+      if (request.kind === 'time_correction') {
         const correction = (request.availability as any) || {};
         if (correction.timeEntryId) {
           // Only correct a time entry that belongs to this venue AND the same
