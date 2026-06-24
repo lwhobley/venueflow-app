@@ -276,6 +276,8 @@ export class BarInventoryController {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
     const movement = await this.prisma.$transaction(async (tx) => {
+      const lockKey = `bar-inventory-${itemId}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const item = await tx.barInventoryItem.findFirst({ where: { id: itemId, venueId } });
       if (!item) throw new NotFoundException('Item not found');
       const previousOnHand = item.onHand;

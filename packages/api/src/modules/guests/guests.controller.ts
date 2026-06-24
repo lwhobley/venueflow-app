@@ -387,9 +387,10 @@ export class GuestsController {
   async rotateLeadsWebhookSecret(@VenueScope() scope: Scope) {
     this.requireManager(scope);
     const secret = crypto.randomBytes(32).toString('hex');
+    const hashedSecret = 'sha256:' + crypto.createHash('sha256').update(secret).digest('hex');
     await this.prisma.venue.update({
       where: { id: scope.venueId },
-      data: { leadsWebhookSecret: secret },
+      data: { leadsWebhookSecret: hashedSecret },
     });
     return { webhookSecret: secret };
   }

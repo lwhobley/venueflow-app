@@ -431,7 +431,12 @@ export class SchedulingController {
       where: { venueId: scope.venueId },
       orderBy: { startDate: 'asc' },
     });
-    return rows.map((row) => ({ _id: row.id, startDate: row.startDate, endDate: row.endDate, reason: row.reason }));
+    return rows.map((row) => ({
+      _id: row.id,
+      startDate: row.startDate.toISOString().split('T')[0],
+      endDate: row.endDate.toISOString().split('T')[0],
+      reason: row.reason,
+    }));
   }
 
   @RequireSubscription()
@@ -447,8 +452,8 @@ export class SchedulingController {
     const row = await this.prisma.blackoutDate.create({
       data: {
         venueId: scope!.venueId,
-        startDate,
-        endDate,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
         reason: body.reason.trim() || 'Blackout',
         createdBy: scope!.profileId,
       },

@@ -17,6 +17,7 @@ import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
 import { ProfileService } from './profile.service';
+import { syncTeamMemberCount } from '../../common/team-sync';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
@@ -291,6 +292,7 @@ export class AppController {
           trialEndsAt,
         },
       });
+      await syncTeamMemberCount(tx, venue.id);
       return { profile, venue };
     });
 
@@ -786,11 +788,13 @@ export class AppController {
         data: { usedBy: profile.id },
       });
       if (claimed.count === 0) throw new BadRequestException('That invite has already been used.');
-      return tx.profile.update({
+      const up = await tx.profile.update({
         where: { id: profile.id },
         data: { venueId: invite.venueId, role: invite.role, jobTitle: invite.jobTitle },
         include: { venue: true },
       });
+      await syncTeamMemberCount(tx, invite.venueId);
+      return up;
     });
 
     const emailVerified = await this.isEmailVerified(user.sub);
@@ -906,21 +910,24 @@ export class AppController {
         throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
       }
     }
-    await this.prisma.$transaction([
-      this.prisma.pushToken.deleteMany({ where: { profileId: profile.id } }),
-      this.prisma.availability.deleteMany({ where: { profileId: profile.id } }),
+    await this.prisma.$transaction(async (tx) => {
+      await tx.pushToken.deleteMany({ where: { profileId: profile.id } });
+      await tx.availability.deleteMany({ where: { profileId: profile.id } });
       // Time entries are employer wage records (FLSA retention) — keep them.
       // Snapshot the name; deleting the profile then SetNulls the linkage.
-      this.prisma.timeEntry.updateMany({
+      await tx.timeEntry.updateMany({
         where: { profileId: profile.id },
         data: { profileFullName: profile.fullName, isOpen: false },
-      }),
-      this.prisma.scheduleShift.updateMany({ where: { profileId: profile.id }, data: { profileId: null, status: 'open' } }),
-      this.prisma.session.deleteMany({ where: { userId: user.sub } }),
-      this.prisma.authAccount.deleteMany({ where: { userId: user.sub } }),
-      this.prisma.profile.delete({ where: { id: profile.id } }),
-      this.prisma.user.deleteMany({ where: { id: user.sub } }),
-    ]);
+      });
+      await tx.scheduleShift.updateMany({ where: { profileId: profile.id }, data: { profileId: null, status: 'open' } });
+      await tx.session.deleteMany({ where: { userId: user.sub } });
+      await tx.authAccount.deleteMany({ where: { userId: user.sub } });
+      await tx.profile.delete({ where: { id: profile.id } });
+      await tx.user.deleteMany({ where: { id: user.sub } });
+      if (profile.venueId) {
+        await syncTeamMemberCount(tx, profile.venueId);
+      }
+    });
     void this.email.send({
       to: deletedAccountEmail,
       subject: 'Your Venue Wrangler Account Has Been Deleted',
@@ -994,7 +1001,7 @@ export class AppController {
       if (claimed.count === 0) {
         throw new BadRequestException('That invite has already been used.');
       }
-      return tx.profile.update({
+      const up = await tx.profile.update({
         where: { id: profile.id },
         data: {
           email,
@@ -1004,6 +1011,8 @@ export class AppController {
         },
         include: { venue: true },
       });
+      await syncTeamMemberCount(tx, invite.venueId);
+      return up;
     });
 
     return {

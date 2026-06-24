@@ -17,6 +17,7 @@ import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { syncTeamMemberCount } from '../../common/team-sync';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -134,20 +135,24 @@ export class StaffController {
       return mapProfile(updated);
     }
 
-    const created = await this.prisma.profile.create({
-      data: {
-        tokenIdentifier: `${body.email.toLowerCase()}:invited:${Date.now()}`,
-        email: body.email.toLowerCase(),
-        fullName: body.fullName,
-        role: body.role as Role,
-        jobTitle: body.jobTitle,
-        venueId: scope.venueId,
-        phone: body.phone?.trim() || null,
-        altPhone: body.altPhone?.trim() || null,
-        address: body.address?.trim() || null,
-        dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
-        certifications: body.certifications ?? [],
-      },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const c = await tx.profile.create({
+        data: {
+          tokenIdentifier: `${body.email.toLowerCase()}:invited:${Date.now()}`,
+          email: body.email.toLowerCase(),
+          fullName: body.fullName,
+          role: body.role as Role,
+          jobTitle: body.jobTitle,
+          venueId: scope.venueId,
+          phone: body.phone?.trim() || null,
+          altPhone: body.altPhone?.trim() || null,
+          address: body.address?.trim() || null,
+          dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+          certifications: body.certifications ?? [],
+        },
+      });
+      await syncTeamMemberCount(tx, scope.venueId);
+      return c;
     });
     void this.email.send({
       to: created.email,
@@ -179,9 +184,13 @@ export class StaffController {
     }
     await this.assertCanManageTarget(scope, staff, true);
 
-    const updated = await this.prisma.profile.update({
-      where: { id: staff.id },
-      data: { venueId: null },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.profile.update({
+        where: { id: staff.id },
+        data: { venueId: null },
+      });
+      await syncTeamMemberCount(tx, scope.venueId);
+      return u;
     });
     return mapProfile(updated);
   }

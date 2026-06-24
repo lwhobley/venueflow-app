@@ -9,6 +9,11 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
  */
 export function secretsMatch(provided: string | null | undefined, expected: string | null | undefined): boolean {
   if (!provided || !expected) return false;
+  if (expected.startsWith('sha256:')) {
+    const providedHash = 'sha256:' + createHash('sha256').update(provided).digest('hex');
+    if (providedHash.length !== expected.length) return false;
+    return timingSafeEqual(Buffer.from(providedHash), Buffer.from(expected));
+  }
   const a = createHash('sha256').update(provided).digest();
   const b = createHash('sha256').update(expected).digest();
   return timingSafeEqual(a, b);

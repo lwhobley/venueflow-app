@@ -137,10 +137,16 @@ export class StaffRequestsController {
         const blackouts = await this.prisma.blackoutDate.findMany({
           where: { venueId: scope.venueId },
         });
-        const hit = blackouts.find((b) => reqStart <= b.endDate && b.startDate <= reqEnd);
+        const hit = blackouts.find((b) => {
+          const bStart = b.startDate.toISOString().split('T')[0];
+          const bEnd = b.endDate.toISOString().split('T')[0];
+          return reqStart <= bEnd && bStart <= reqEnd;
+        });
         if (hit) {
+          const bStartStr = hit.startDate.toISOString().split('T')[0];
+          const bEndStr = hit.endDate.toISOString().split('T')[0];
           throw new BadRequestException(
-            `Time off is blacked out ${hit.startDate}${hit.endDate !== hit.startDate ? ` – ${hit.endDate}` : ''} (${hit.reason}). Please choose other dates.`,
+            `Time off is blacked out ${bStartStr}${bEndStr !== bStartStr ? ` – ${bEndStr}` : ''} (${hit.reason}). Please choose other dates.`,
           );
         }
       }

@@ -96,11 +96,31 @@ export class ChatController {
   ) {}
 
   async ensureContextualConversations(venueId: string) {
-    const profiles = await this.prisma.profile.findMany({
-      where: { venueId },
-      select: { id: true, jobTitle: true, role: true, allAccess: true },
-    });
+    const [profiles, allShifts, existingConvs] = await Promise.all([
+      this.prisma.profile.findMany({
+        where: { venueId },
+        select: { id: true, jobTitle: true, role: true, allAccess: true },
+      }),
+      this.prisma.scheduleShift.findMany({
+        where: { venueId },
+        select: { profileId: true, dayIndex: true },
+      }),
+      this.prisma.conversation.findMany({
+        where: { venueId, type: { in: ['role', 'shift'] } },
+      }),
+    ]);
+
     const managerIds = profiles.filter((p) => isAdminRole(p.role) || p.allAccess).map((p) => p.id);
+
+    // Group existing by roleName/shiftDate
+    const existingRolesMap = new Map(existingConvs.filter((c) => c.type === 'role' && c.roleName).map((c) => [c.roleName!, c]));
+    const existingShiftsMap = new Map(existingConvs.filter((c) => c.type === 'shift' && c.shiftDate).map((c) => [c.shiftDate!, c]));
+
+    const helperArraysEqual = (a: string[], b: string[]) => {
+      if (a.length !== b.length) return false;
+      const setA = new Set(a);
+      return b.every((x) => setA.has(x));
+    };
 
     // 1. Ensure Role Channels
     const roles = Array.from(new Set(profiles.map((p) => p.jobTitle || p.role).filter(Boolean)));
@@ -108,26 +128,28 @@ export class ChatController {
       const roleMemberIds = Array.from(new Set([
         ...managerIds,
         ...profiles.filter((p) => p.jobTitle === role || p.role === role).map((p) => p.id)
-      ]));
+      ])).sort();
       
-      const existing = await this.prisma.conversation.findFirst({
-        where: { venueId, type: 'role', roleName: role },
-      });
+      const existing = existingRolesMap.get(role);
+      const name = `#Role - ${role}`;
       if (!existing) {
         await this.prisma.conversation.create({
           data: {
             venueId,
             type: 'role',
             roleName: role,
-            name: `#Role - ${role}`,
+            name,
             memberIds: roleMemberIds,
           }
         });
       } else {
-        await this.prisma.conversation.update({
-          where: { id: existing.id },
-          data: { memberIds: roleMemberIds },
-        });
+        const sortedExistingMembers = [...existing.memberIds].sort();
+        if (!helperArraysEqual(roleMemberIds, sortedExistingMembers) || existing.name !== name) {
+          await this.prisma.conversation.update({
+            where: { id: existing.id },
+            data: { memberIds: roleMemberIds, name },
+          });
+        }
       }
     }
 
@@ -139,42 +161,47 @@ export class ChatController {
 
     const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+    // Group shifts by dayIndex in memory
+    const shiftsByDay = Array.from({ length: 7 }, () => [] as string[]);
+    for (const s of allShifts) {
+      if (s.profileId) {
+        shiftsByDay[s.dayIndex].push(s.profileId);
+      }
+    }
+
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
       const d = new Date(sunday);
       d.setDate(sunday.getDate() + dayIndex);
       const dateStr = d.toISOString().split('T')[0];
       const dayLabel = dayLabels[dayIndex];
 
-      const scheduledShifts = await this.prisma.scheduleShift.findMany({
-        where: { venueId, dayIndex },
-        select: { profileId: true },
-      });
-      const scheduledProfileIds = scheduledShifts.map((s) => s.profileId).filter(Boolean) as string[];
-      
+      const scheduledProfileIds = shiftsByDay[dayIndex];
       const crewMemberIds = Array.from(new Set([
         ...managerIds,
         ...scheduledProfileIds,
-      ]));
+      ])).sort();
 
       if (crewMemberIds.length > 0) {
-        const existing = await this.prisma.conversation.findFirst({
-          where: { venueId, type: 'shift', shiftDate: dateStr },
-        });
+        const existing = existingShiftsMap.get(dateStr);
+        const name = `#Crew - ${dayLabel} (${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
         if (!existing) {
           await this.prisma.conversation.create({
             data: {
               venueId,
               type: 'shift',
               shiftDate: dateStr,
-              name: `#Crew - ${dayLabel} (${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`,
+              name,
               memberIds: crewMemberIds,
             }
           });
         } else {
-          await this.prisma.conversation.update({
-            where: { id: existing.id },
-            data: { memberIds: crewMemberIds },
-          });
+          const sortedExistingMembers = [...existing.memberIds].sort();
+          if (!helperArraysEqual(crewMemberIds, sortedExistingMembers) || existing.name !== name) {
+            await this.prisma.conversation.update({
+              where: { id: existing.id },
+              data: { memberIds: crewMemberIds, name },
+            });
+          }
         }
       }
     }
@@ -461,7 +488,22 @@ export class ChatController {
     }
 
     const text = body.text.trim();
-    if (!text) throw new BadRequestException('Message text is required');
+
+    let imageUrl: string | null = null;
+    if (body.imageUrl) {
+      const match = body.imageUrl.match(/\/v1\/chat\/images\/([a-zA-Z0-9_-]+)/);
+      if (!match) {
+        throw new BadRequestException('Invalid image URL format');
+      }
+      const imageId = match[1];
+      const image = await this.prisma.chatImage.findUnique({ where: { id: imageId } });
+      if (!image || image.venueId !== scope.venueId) {
+        throw new BadRequestException('Image not found or does not belong to this venue');
+      }
+      imageUrl = `/v1/chat/images/${image.id}`;
+    }
+
+    if (!text && !imageUrl) throw new BadRequestException('Message text or image is required');
 
     const now = new Date();
     const msg = await this.prisma.message.create({
@@ -472,7 +514,7 @@ export class ChatController {
         text,
         shiftId: body.shiftId || null,
         swapId: body.swapId || null,
-        imageUrl: body.imageUrl || null,
+        imageUrl,
         createdAt: now,
       },
     });
@@ -481,7 +523,7 @@ export class ChatController {
       where: { id: conv.id },
       data: {
         lastMessageAt: now,
-        lastMessageText: text.slice(0, 80),
+        lastMessageText: (text || '📷 Image').slice(0, 80),
       },
     });
 
