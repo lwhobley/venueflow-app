@@ -489,6 +489,7 @@ model Message {
   sender         Profile?     @relation(fields: [senderId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
+  @@index([senderId])
 }
 
 model ConversationRead {
@@ -502,6 +503,7 @@ model ConversationRead {
 
   @@unique([conversationId, profileId])
   @@index([conversationId])
+  @@index([venueId])
 }
 
 // S3 store for chat photo attachments. Served via an unguessable
@@ -543,6 +545,7 @@ model NotificationRead {
 
   @@unique([notificationId, profileId])
   @@index([profileId])
+  @@index([venueId])
 }
 
 model PushToken {
@@ -956,6 +959,7 @@ model CrmNote {
 
   @@index([leadId, createdAt])
   @@index([venueId])
+  @@index([authorId])
 }
 
 model CrmBeo {
@@ -1225,6 +1229,7 @@ model ReservationSyncEvent {
   @@unique([venueId, provider, externalEventId])
   @@index([provider, externalEventId])
   @@index([venueId, processedAt])
+  @@index([reservationId])
 }
 
 model BarInventoryItem {

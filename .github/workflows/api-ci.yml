@@ -36,6 +36,12 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/venuetest?sslmode=disable
       DATABASE_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/venuetest?sslmode=disable
       JWT_SECRET: ci-test-secret-not-used-in-prod
+      # S3ImageService requires these at boot (getOrThrow). The smoke test only
+      # checks that the app starts and serves /api/health; no S3 calls are made,
+      # so placeholder values are sufficient.
+      AWS_ACCESS_KEY_ID: ci-test-access-key
+      AWS_SECRET_ACCESS_KEY: ci-test-secret-key
+      AWS_S3_BUCKET: ci-test-bucket
 
     steps:
       - uses: actions/checkout@v4

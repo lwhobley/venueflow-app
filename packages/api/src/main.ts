@@ -32,7 +32,9 @@ async function bootstrap() {
   const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
   app.use(
     json({
-      limit: config.get<string>('JSON_BODY_LIMIT', '1mb'),
+      // Chat images are uploaded as base64 inside a JSON body (up to 5MB raw,
+      // ~6.7MB once base64-encoded), so the default must exceed that.
+      limit: config.get<string>('JSON_BODY_LIMIT', '8mb'),
       verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
         const url = req.originalUrl ?? req.url ?? '';
         // Match path without query string; trailing slashes are not produced by
