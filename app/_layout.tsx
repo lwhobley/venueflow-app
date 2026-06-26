@@ -14,6 +14,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { consumeWebHandoff } from '../lib/web-handoff';
 import { configurePurchases } from '../lib/purchases';
+import { DesktopWebStyles } from '../components/DesktopWebStyles';
 
 const shouldIgnoreWebError = (message: string) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||
@@ -95,6 +96,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <PaperProvider theme={makePaperTheme(themeMode)}>
+            <DesktopWebStyles />
             <A0PurchaseProvider config={{ appUserId: venueId ?? undefined, debug }}>
               {/* Top inset keeps content below the status bar / notch; the tab
                   bar and screens handle the bottom inset. */}

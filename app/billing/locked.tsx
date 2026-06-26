@@ -24,6 +24,7 @@ export default function BillingLockedScreen() {
   const params = useLocalSearchParams<{ reason?: string }>();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
+  const clearSession = useAuthStore((state: AuthState) => state.clearSession);
   const { me } = useAuthenticatedSession();
   const reason = Array.isArray(params.reason) ? params.reason[0] : params.reason ?? 'never_subscribed';
   const canPay = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
@@ -82,7 +83,14 @@ export default function BillingLockedScreen() {
               </Text>
             )}
 
-            <Button mode="text" textColor={colors.primary} onPress={() => router.replace('/(auth)/welcome')}>
+            <Button
+              mode="text"
+              textColor={colors.primary}
+              onPress={() => {
+                clearSession();
+                router.replace('/(auth)/welcome');
+              }}
+            >
               Sign out
             </Button>
             <Button mode="text" textColor={colors.primary} onPress={() => Linking.openURL('mailto:support@venuewrangler.com')}>

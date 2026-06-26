@@ -18,13 +18,10 @@ export function DesktopSidebar({ state, descriptors, navigation }: BottomTabBarP
   const palette = useDesignTheme();
   const { t } = useI18n();
 
-  // expo-router strips `href` from options and encodes `href: null` (a hidden
-  // tab) as tabBarItemStyle.display === 'none'. Filter on that signal so
-  // gated/hidden routes don't leak into the rail. (Visible href routes keep
-  // their style untouched, so only hidden ones match.)
+  // Match CarouselTabBar: Expo Router keeps hidden tabs as `href: null`.
   const visible = state.routes.filter((route: TabRoute) => {
-    const itemStyle = descriptors[route.key].options.tabBarItemStyle as { display?: string } | undefined;
-    return itemStyle?.display !== 'none';
+    const opts = descriptors[route.key].options as { href?: string | null };
+    return opts.href !== null;
   });
 
   return (
