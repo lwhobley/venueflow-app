@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script async src="https://createcdn.com/la.js" data-layout-site="i4sjodqbofn2pqkx"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Venue Wrangler | Operations software for restaurants, bars, and venues</title>
@@ -571,6 +572,8 @@
 
   <script>
     const API_BASE = "https://venue-wranglerapi-production.up.railway.app/api";
+    // Where the web app is served (same origin). Workspace creation continues here.
+    const APP_PATH = "/app";
     const modal = document.getElementById("demoModal");
     document.querySelectorAll("[data-open-demo]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -645,8 +648,12 @@
         window.localStorage.setItem("venuewrangler_token", session.token);
         window.localStorage.setItem("venuewrangler_workspace", JSON.stringify(result.venue));
         statusEl.className = "status success";
-        statusEl.textContent = `Workspace created for ${result.venue?.name || data.businessName}. Log in to the iOS app with this same email and password.`;
+        statusEl.textContent = `Workspace created for ${result.venue?.name || data.businessName}. Opening your workspace...`;
         form.reset();
+        // Continue into the web app on the same origin. The app reads the
+        // session token from localStorage (same-origin handoff) and lands the
+        // owner signed in. APP_PATH is same-site so the JWT never hits the URL.
+        window.location.assign(APP_PATH);
       } catch (error) {
         statusEl.className = "status error";
         statusEl.textContent = error.message || "Could not create the workspace.";

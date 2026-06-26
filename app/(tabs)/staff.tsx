@@ -7,6 +7,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
+import { useDesktopContentStyle } from '../../lib/responsive';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
@@ -253,6 +254,8 @@ function StaffScreen() {
     ]);
   };
 
+  const listContentStyle = useDesktopContentStyle({ flexGrow: 1, padding: spacing.lg, gap: spacing.md });
+
   if (profileLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
@@ -278,7 +281,7 @@ function StaffScreen() {
       data={staff}
       keyExtractor={(item) => item._id}
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md }}
+      contentContainerStyle={listContentStyle}
       removeClippedSubviews
       ListHeaderComponent={(
         <>

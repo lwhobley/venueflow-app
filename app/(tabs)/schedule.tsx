@@ -7,6 +7,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
+import { useDesktopContentStyle } from '../../lib/responsive';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
@@ -105,11 +106,12 @@ function ScheduleScreen() {
 
   const [managerTab, setManagerTab] = useState<'calendar' | 'requests' | 'blackouts'>('calendar');
   const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');
+  const contentContainerStyle = useDesktopContentStyle({ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl });
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+      contentContainerStyle={contentContainerStyle}
       showsVerticalScrollIndicator={false}
     >
       <View style={{ gap: 4 }}>

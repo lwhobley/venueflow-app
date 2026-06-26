@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -12,6 +12,7 @@ import { makePaperTheme, useAppearanceStore, designPalettes } from '../lib/theme
 import { SubscriptionGate } from '../components/SubscriptionGate';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
+import { consumeWebHandoff } from '../lib/web-handoff';
 import { configurePurchases } from '../lib/purchases';
 
 const shouldIgnoreWebError = (message: string) =>
@@ -34,6 +35,16 @@ export default function RootLayout() {
   const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
   const queryClient = useMemo(() => new QueryClient(), []);
   const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
+  const storeHydrated = useAuthStore((state: AuthState) => state.hydrated);
+
+  // Consume a session handed off from the marketing site (venuewrangler.com) so
+  // a user who just created a workspace lands signed in. Runs after the store
+  // rehydrates so persist can't race-overwrite the adopted token. Native skips.
+  const [handoffChecked, setHandoffChecked] = useState(Platform.OS !== 'web');
+  useEffect(() => {
+    if (Platform.OS !== 'web' || handoffChecked || !storeHydrated) return;
+    void consumeWebHandoff().finally(() => setHandoffChecked(true));
+  }, [handoffChecked, storeHydrated]);
 
   // Initialize in-app purchases (RevenueCat) keyed to the venue so a purchase
   // ties to the tenant. No-op on web and when no key is configured.
@@ -75,7 +86,7 @@ export default function RootLayout() {
     };
   }, []);
 
-  if (!fontsReady) {
+  if (!fontsReady || !handoffChecked) {
     return <View style={{ flex: 1, backgroundColor: palette.background }} />;
   }
 

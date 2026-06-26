@@ -15,6 +15,7 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { spacing, useAppearanceStore, useDesignTheme } from '../../lib/theme';
+import { useDesktopContentStyle } from '../../lib/responsive';
 import { LocaleCode, useI18n, useLocaleStore } from '../../lib/i18n';
 import { canManageVenue } from '../../lib/permissions';
 
@@ -41,6 +42,7 @@ export default function HomeScreen() {
   const setThemeMode = useAppearanceStore((state) => state.setMode);
   const setLocale = useLocaleStore((state) => state.setLocale);
   const { locale, t, formatCurrency, formatDate, formatNumber } = useI18n();
+  const contentContainerStyle = useDesktopContentStyle({ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl });
   const loading = dashboard === undefined;
 
   const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? '';
@@ -113,7 +115,7 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: palette.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+      contentContainerStyle={contentContainerStyle}
       showsVerticalScrollIndicator={false}
     >
       <View style={{ gap: spacing.md, paddingTop: spacing.sm }}>
