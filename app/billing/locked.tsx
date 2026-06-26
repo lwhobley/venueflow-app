@@ -1,11 +1,14 @@
-import { Linking, ScrollView, View } from 'react-native';
+import { Linking, Platform, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { colors, spacing } from '../../lib/theme';
 import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useWebBilling } from '../../lib/web-billing';
 import { canManageBilling } from '../../lib/permissions';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+
+const isWeb = Platform.OS === 'web';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
@@ -24,6 +27,7 @@ export default function BillingLockedScreen() {
   const { me } = useAuthenticatedSession();
   const reason = Array.isArray(params.reason) ? params.reason[0] : params.reason ?? 'never_subscribed';
   const canPay = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
+  const { startCheckout, openPortal, busy, error } = useWebBilling();
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -54,12 +58,23 @@ export default function BillingLockedScreen() {
               </>
             ) : canPay ? (
               <>
-                <Button mode="contained" buttonColor={colors.primary} onPress={() => router.push('/billing/paywall')}>
+                <Button
+                  mode="contained"
+                  buttonColor={colors.primary}
+                  loading={isWeb && busy}
+                  onPress={() => (isWeb ? void startCheckout() : router.push('/billing/paywall'))}
+                >
                   Subscribe
                 </Button>
-                <Button mode="outlined" textColor={colors.primary} onPress={() => void Linking.openURL(APPLE_SUBSCRIPTIONS_URL)}>
+                <Button
+                  mode="outlined"
+                  textColor={colors.primary}
+                  loading={isWeb && busy}
+                  onPress={() => (isWeb ? void openPortal() : void Linking.openURL(APPLE_SUBSCRIPTIONS_URL))}
+                >
                   Manage subscription
                 </Button>
+                {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
               </>
             ) : (
               <Text style={{ color: colors.muted }}>

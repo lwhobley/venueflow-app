@@ -155,6 +155,9 @@ export const appApi = {
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
   syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
     apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),
+  // Web pays via Stripe; both return a URL to redirect the browser to.
+  createStripeCheckout: () => apiRequest<{ url: string }>('/v1/app/billing/stripe/checkout', { method: 'POST' }),
+  createStripePortal: () => apiRequest<{ url: string }>('/v1/app/billing/stripe/portal', { method: 'POST' }),
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),
   getNotifications: () => apiRequest<any[]>('/v1/app/notifications'),
   markNotificationRead: (notificationId: string) => apiRequest('/v1/app/notifications/' + notificationId + '/read', { method: 'POST' }),

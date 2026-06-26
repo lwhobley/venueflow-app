@@ -1,4 +1,4 @@
-import { Linking, View } from 'react-native';
+import { Linking, Platform, View } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useQuery } from '../../lib/railway-hooks';
@@ -6,7 +6,10 @@ import { api } from '../../lib/railway-api';
 import { colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { useWebBilling } from '../../lib/web-billing';
 import { canManageBilling } from '../../lib/permissions';
+
+const isWeb = Platform.OS === 'web';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 const MONTHLY_PLAN_LABEL = '$99.99 / month';
@@ -17,6 +20,7 @@ export default function BillingScreen() {
   const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const billing = useQuery(api.app.getMyVenueBilling, isReady && user && venue?.id ? {} : 'skip');
+  const { startCheckout, openPortal, busy, error } = useWebBilling();
 
   // Trial state is account-scoped. Drive the CTA off that, not off
   // "never subscribed".
@@ -56,13 +60,24 @@ export default function BillingScreen() {
           <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
 
           {!isPaid ? (
-            <Button mode="contained" buttonColor={colors.primary} onPress={() => router.push('/billing/paywall')}>
+            <Button
+              mode="contained"
+              buttonColor={colors.primary}
+              loading={isWeb && busy}
+              onPress={() => (isWeb ? void startCheckout() : router.push('/billing/paywall'))}
+            >
               {upgradeLabel}
             </Button>
           ) : null}
-          <Button mode="outlined" textColor={colors.primary} onPress={() => void Linking.openURL(APPLE_SUBSCRIPTIONS_URL)}>
+          <Button
+            mode="outlined"
+            textColor={colors.primary}
+            loading={isWeb && busy}
+            onPress={() => (isWeb ? void openPortal() : void Linking.openURL(APPLE_SUBSCRIPTIONS_URL))}
+          >
             Manage subscription
           </Button>
+          {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
           <Button mode="text" textColor={colors.primary} onPress={() => router.push('/(tabs)/profile')}>
             Back to profile
           </Button>
