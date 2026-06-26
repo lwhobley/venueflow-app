@@ -2,8 +2,10 @@ name: Deploy Cloudflare Pages
 
 on:
   push:
+    # Desktop web app lives on its own branch (kept separate from the mobile
+    # app on main) and deploys itself. Do not merge this into main.
     branches:
-      - main
+      - desktop-web
     paths:
       # Marketing site, the web app (served at /app), and anything its bundle
       # is built from. A change to app code must redeploy the /app build too.
