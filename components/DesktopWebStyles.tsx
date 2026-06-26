@@ -12,7 +12,10 @@ export function DesktopWebStyles() {
     style.id = STYLE_ID;
     style.textContent = `
       @media (min-width: 900px) {
-        [role="button"] {
+        button,
+        [role="button"],
+        div:has(> button),
+        div:has(> [role="button"]) {
           align-self: flex-start !important;
           flex-grow: 0 !important;
           flex-basis: auto !important;
@@ -20,12 +23,20 @@ export function DesktopWebStyles() {
           max-width: min(100%, 360px) !important;
         }
 
+        button[aria-label="tab"],
         [role="button"][aria-label="tab"],
         [role="tab"],
         [role="menuitem"],
         [role="checkbox"],
         [role="radio"],
-        [role="switch"] {
+        [role="switch"],
+        div:has(> button[aria-label="tab"]),
+        div:has(> [role="button"][aria-label="tab"]),
+        div:has(> [role="tab"]),
+        div:has(> [role="menuitem"]),
+        div:has(> [role="checkbox"]),
+        div:has(> [role="radio"]),
+        div:has(> [role="switch"]) {
           align-self: initial !important;
           width: auto !important;
           max-width: none !important;
