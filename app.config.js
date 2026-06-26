@@ -8,9 +8,11 @@ module.exports = ({ config }) => ({
   ...config,
   web: {
     ...config.web,
-    // Single-page output: one index.html that client-side routes. The Pages
-    // deploy adds a /app/* -> /app/index.html fallback (see site/_redirects).
-    output: 'single',
+    // Static output: prerender each route to its own HTML file so deep links
+    // like /app/sign-in resolve to a real file. (Single-page output relied on
+    // an SPA fallback, but the Pages project's root catch-all intercepts
+    // unmatched /app/* paths and serves the marketing page instead.)
+    output: 'static',
   },
   experiments: {
     ...config.experiments,
