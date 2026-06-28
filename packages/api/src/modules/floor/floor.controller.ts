@@ -536,7 +536,7 @@ export class FloorController {
     // Find seats freed up by the released table so we can match a waitlist
     // entry whose party fits. Best-effort; fire-and-forget so the manager
     // action returns immediately.
-    const table = await this.prisma.floorTable.findUnique({ where: { id: tableId }, select: { seats: true } });
+    const table = await this.prisma.floorTable.findFirst({ where: { id: tableId, floorPlan: { venueId: scope.venueId } }, select: { seats: true } });
     if (table && table.seats > 0) {
       void this.notifier.notifyNextWaitlist(scope.venueId, table.seats);
     }
