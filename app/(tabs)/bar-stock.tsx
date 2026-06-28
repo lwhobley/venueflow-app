@@ -28,6 +28,7 @@ import {
   AgingCard,
   MovementTimeline,
 } from '../../components/bar-stock/InventoryCards';
+import { InlineMessage } from '../../components/InlineMessage';
 
 const categories = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
 type Category = (typeof categories)[number];
@@ -339,7 +340,7 @@ export default function BarStockScreen() {
             </View>
           </Card.Content>
         </Card>
-        {message ? <Text style={{ color: message.includes('Could') ? colors.danger : colors.muted }}>{message}</Text> : null}
+        <InlineMessage message={message} />
       </ScrollView>
     );
   }
@@ -503,7 +504,7 @@ export default function BarStockScreen() {
               <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void importItems()}>Import parsed items</Button>
             </View>
           ) : null}
-          {message ? <Text style={{ color: message.includes('Could') || message.includes('required') ? colors.danger : colors.muted }}>{message}</Text> : null}
+          <InlineMessage message={message} />
         </Card.Content>
       </Card>
 
