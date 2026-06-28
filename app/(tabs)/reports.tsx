@@ -9,6 +9,29 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
+import { ProviderDropdown } from '../../components/ProviderDropdown';
+
+// What we record as the export destination on /v1/payroll/record-export. The
+// server stores `provider` as a free-form string today, so this list is purely
+// the dropdown's choices — adding a vendor here is sufficient.
+const payrollProviderOptions = [
+  { value: 'gusto', label: 'Gusto' },
+  { value: 'square_payroll', label: 'Square Payroll' },
+  { value: 'toast_payroll', label: 'Toast Payroll' },
+  { value: 'adp', label: 'ADP' },
+  { value: 'paychex', label: 'Paychex' },
+  { value: 'rippling', label: 'Rippling' },
+  { value: 'paylocity', label: 'Paylocity' },
+  { value: 'justworks', label: 'Justworks' },
+  { value: 'onpay', label: 'OnPay' },
+  { value: 'quickbooks_payroll', label: 'QuickBooks Payroll' },
+  { value: 'wave_payroll', label: 'Wave Payroll' },
+  { value: 'patriot', label: 'Patriot Software' },
+  { value: 'homebase_payroll', label: 'Homebase Payroll' },
+  { value: 'deel', label: 'Deel' },
+  { value: 'csv', label: 'Other / generic CSV' },
+] as const;
+type PayrollProvider = (typeof payrollProviderOptions)[number]['value'];
 
 type Insight = {
   scheduledShifts: number;
@@ -28,6 +51,7 @@ export default function ReportsScreen() {
   const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
   const [showTimeCsv, setShowTimeCsv] = useState(false);
   const [showPayrollCsv, setShowPayrollCsv] = useState(false);
+  const [payrollProvider, setPayrollProvider] = useState<PayrollProvider>('gusto');
   const [showReservationCsv, setShowReservationCsv] = useState(false);
   const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
 
@@ -145,13 +169,19 @@ export default function ReportsScreen() {
               textColor={colors.primary}
               onPress={() => {
                 if (venue?.id && payroll) {
-                  void recordPayrollExport({ venueId: venue.id, provider: 'csv', periodStart: payroll.periodStart, periodEnd: payroll.periodEnd });
+                  void recordPayrollExport({ venueId: venue.id, provider: payrollProvider, periodStart: payroll.periodStart, periodEnd: payroll.periodEnd });
                 }
               }}
             >
               Record export
             </Button>
           </View>
+          <ProviderDropdown
+            label="Payroll provider"
+            value={payrollProvider}
+            options={payrollProviderOptions}
+            onChange={(next) => setPayrollProvider(next as PayrollProvider)}
+          />
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowPayrollCsv((value) => !value)}>
             {showPayrollCsv ? 'Hide payroll export' : 'Load payroll export'}
           </Button>

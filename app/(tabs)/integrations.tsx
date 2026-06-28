@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { accents, colors, spacing } from '../../lib/theme';
@@ -8,11 +8,30 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
+import { ProviderDropdown } from '../../components/ProviderDropdown';
 
-const providers = ['toast', 'square', 'clover', 'generic'] as const;
-type Provider = (typeof providers)[number];
-const reservationProviders = ['opentable', 'resy', 'sevenrooms', 'tock', 'google', 'generic'] as const;
-type ReservationProvider = (typeof reservationProviders)[number];
+// Must stay in sync with POS_PROVIDERS in packages/api/src/modules/pos/pos.controller.ts
+// and the PosProvider enum in prisma/schema.prisma.
+const posProviderOptions = [
+  { value: 'toast', label: 'Toast' },
+  { value: 'square', label: 'Square' },
+  { value: 'clover', label: 'Clover' },
+  { value: 'shopify_pos', label: 'Shopify POS' },
+  { value: 'lightspeed_restaurant', label: 'Lightspeed Restaurant' },
+  { value: 'spoton', label: 'SpotOn' },
+  { value: 'generic', label: 'Other (generic webhook)' },
+] as const;
+type Provider = (typeof posProviderOptions)[number]['value'];
+
+const reservationProviderOptions = [
+  { value: 'opentable', label: 'OpenTable' },
+  { value: 'resy', label: 'Resy' },
+  { value: 'sevenrooms', label: 'SevenRooms' },
+  { value: 'tock', label: 'Tock' },
+  { value: 'google', label: 'Google Reserve' },
+  { value: 'generic', label: 'Other (generic webhook)' },
+] as const;
+type ReservationProvider = (typeof reservationProviderOptions)[number]['value'];
 
 function money(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
@@ -164,28 +183,35 @@ function IntegrationsScreenInner() {
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>POS sync</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {providers.map((item) => (
-              <Chip key={item} selected={provider === item} onPress={() => setProvider(item)}>{item}</Chip>
-            ))}
-          </View>
+          <ProviderDropdown
+            label="POS provider"
+            value={provider}
+            options={posProviderOptions}
+            onChange={(next) => setProvider(next as Provider)}
+            disabled={pending !== null}
+          />
           <TextInput label="Provider location ID" value={locationId} onChangeText={setLocationId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
           {message ? <Text style={{ color: message.includes('Could') ? colors.danger : colors.muted }}>{message}</Text> : null}
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
             <Button mode="contained" buttonColor={colors.primary} loading={pending === 'pos'} disabled={pending !== null} onPress={() => void saveConnection()}>Save connection</Button>
           </View>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: POST /api/v1/pos/ingest/:venueId with the x-webhook-secret header (per-connection secret).</Text>
+          <Text style={{ color: colors.muted }}>
+            Webhook endpoint: POST /api/v1/pos/ingest/:venueId with the x-webhook-secret header (per-connection secret).
+            See docs/integrations/pos-webhook.md for the request body shape and per-provider quickstart.
+          </Text>
         </Card.Content>
       </Card>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservation integration</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {reservationProviders.map((item) => (
-              <Chip key={item} selected={reservationProvider === item} onPress={() => setReservationProvider(item)}>{item}</Chip>
-            ))}
-          </View>
+          <ProviderDropdown
+            label="Reservation provider"
+            value={reservationProvider}
+            options={reservationProviderOptions}
+            onChange={(next) => setReservationProvider(next as ReservationProvider)}
+            disabled={pending !== null}
+          />
           <TextInput label="Provider venue ID" value={externalVenueId} onChangeText={setExternalVenueId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
           <Button mode="contained" buttonColor={colors.primary} loading={pending === 'reservation'} disabled={pending !== null} onPress={() => void saveReservationConnection()}>
             Save reservation connection

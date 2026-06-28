@@ -91,6 +91,9 @@ enum PosProvider {
   toast
   square
   clover
+  shopify_pos
+  lightspeed_restaurant
+  spoton
   generic
 }
 
