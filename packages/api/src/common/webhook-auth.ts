@@ -1,4 +1,17 @@
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+
+export function hashWebhookSecret(secret: string): string {
+  return `sha256:${createHash('sha256').update(secret).digest('hex')}`;
+}
+
+export function generateWebhookSecret(): { secret: string; hashedSecret: string } {
+  const secret = cryptoRandomBytesHex(32);
+  return { secret, hashedSecret: hashWebhookSecret(secret) };
+}
+
+function cryptoRandomBytesHex(bytes: number): string {
+  return randomBytes(bytes).toString('hex');
+}
 
 /**
  * Constant-time secret comparison for webhook authentication. Tolerates missing

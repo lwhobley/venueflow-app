@@ -12,7 +12,6 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import * as crypto from 'crypto';
 import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
@@ -21,7 +20,7 @@ import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
-import { secretsMatch } from '../../common/webhook-auth';
+import { generateWebhookSecret, secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -386,8 +385,7 @@ export class GuestsController {
   @Post('rotate-webhook-secret')
   async rotateLeadsWebhookSecret(@VenueScope() scope: Scope) {
     this.requireManager(scope);
-    const secret = crypto.randomBytes(32).toString('hex');
-    const hashedSecret = 'sha256:' + crypto.createHash('sha256').update(secret).digest('hex');
+    const { secret, hashedSecret } = generateWebhookSecret();
     await this.prisma.venue.update({
       where: { id: scope.venueId },
       data: { leadsWebhookSecret: hashedSecret },

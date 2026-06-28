@@ -64,19 +64,38 @@ export function resolveMediaUrl(path: string): string {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = useAuthStore.getState().token;
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: options.method ?? 'GET',
-    headers: {
-      Accept: 'application/json',
-      ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+  const timeout = options.timeoutMs ?? 30_000;
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer =
+    controller && timeout > 0
+      ? setTimeout(() => controller.abort(), timeout)
+      : null;
+
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
+      method: options.method ?? 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new ApiError('Request timed out. Check your connection and try again.', 408);
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null);

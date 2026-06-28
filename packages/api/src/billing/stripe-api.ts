@@ -46,9 +46,9 @@ export async function stripeRequest<T = any>(
     body: method === 'POST' ? body : undefined,
     signal: AbortSignal.timeout(10000),
   });
-  const json: any = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(`Stripe ${path} failed: ${json?.error?.message ?? response.statusText}`);
+    throw new Error(`Stripe ${path} failed with status ${response.status}`);
   }
+  const json: any = await response.json().catch(() => null);
   return json as T;
 }

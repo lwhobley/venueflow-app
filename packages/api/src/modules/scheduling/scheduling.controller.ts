@@ -47,6 +47,7 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { SchedulingAssignmentService } from './scheduling-assignment.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -314,6 +315,7 @@ export class SchedulingController {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly email: EmailService,
+    private readonly assignments: SchedulingAssignmentService,
   ) {}
 
   @RequireSubscription()
@@ -591,27 +593,15 @@ export class SchedulingController {
   async createShift(@VenueScope() scope: Scope, @Body() body: ShiftDto) {
     this.requireManager(scope);
     ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
-    if (body.profileId) await this.assertVenueMember(scope!.venueId, body.profileId);
-    const shift = await withSerializableRetry(this.prisma, async (tx) => {
-      if (body.profileId) {
-        await this.lockAssignmentKeys(tx, [{ venueId: scope!.venueId, profileId: body.profileId, dayIndex: body.dayIndex }]);
-        await this.assertNoDoubleBookTx(tx, scope!.venueId, body.profileId, body.dayIndex, body.startMinutes, body.endMinutes);
-      }
-      const created = await tx.scheduleShift.create({
-        data: {
-          venueId: scope!.venueId,
-          profileId: body.profileId,
-          dayIndex: body.dayIndex,
-          startMinutes: body.startMinutes,
-          endMinutes: body.endMinutes,
-          jobTitle: body.jobTitle.trim() || 'Staff',
-          station: body.station.trim() || 'Floor',
-          notes: body.notes?.trim() || null,
-          status: body.profileId ? 'scheduled' : 'open',
-        },
-      });
-      await tx.venue.update({ where: { id: scope!.venueId }, data: { scheduleUpdatedAfterPublishAt: new Date() } });
-      return created;
+    const shift = await this.assignments.createShift({
+      venueId: scope!.venueId,
+      profileId: body.profileId,
+      dayIndex: body.dayIndex,
+      startMinutes: body.startMinutes,
+      endMinutes: body.endMinutes,
+      jobTitle: body.jobTitle,
+      station: body.station,
+      notes: body.notes,
     });
     if (body.profileId) {
       await this.notifications.notifyProfile({
@@ -619,7 +609,7 @@ export class SchedulingController {
         profileId: body.profileId,
         kind: 'shift_assigned',
         title: 'New shift assigned',
-        body: `${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(body.endMinutes)} · ${body.jobTitle}`,
+        body: `${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(body.endMinutes)} - ${body.jobTitle}`,
       });
       void this.sendScheduleUpdateEmail(body.profileId, 'Added', undefined, {
         dayIndex: body.dayIndex,
@@ -636,24 +626,15 @@ export class SchedulingController {
   async updateShift(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ShiftDto) {
     this.requireManager(scope);
     ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
-    const shift = await this.getVenueShift(scope!.venueId, id);
-    await withSerializableRetry(this.prisma, async (tx) => {
-      if (shift.profileId) {
-        await this.lockAssignmentKeys(tx, [{ venueId: scope!.venueId, profileId: shift.profileId, dayIndex: body.dayIndex }]);
-        await this.assertNoDoubleBookTx(tx, scope!.venueId, shift.profileId, body.dayIndex, body.startMinutes, body.endMinutes, shift.id);
-      }
-      await tx.scheduleShift.update({
-        where: { id: shift.id },
-        data: {
-          dayIndex: body.dayIndex,
-          startMinutes: body.startMinutes,
-          endMinutes: body.endMinutes,
-          jobTitle: body.jobTitle.trim() || 'Staff',
-          station: body.station.trim() || 'Floor',
-          notes: body.notes?.trim() || null,
-        },
-      });
-      await tx.venue.update({ where: { id: scope!.venueId }, data: { scheduleUpdatedAfterPublishAt: new Date() } });
+    const shift = await this.assignments.updateShift({
+      venueId: scope!.venueId,
+      shiftId: id,
+      dayIndex: body.dayIndex,
+      startMinutes: body.startMinutes,
+      endMinutes: body.endMinutes,
+      jobTitle: body.jobTitle,
+      station: body.station,
+      notes: body.notes,
     });
     if (shift.profileId) {
       void this.sendScheduleUpdateEmail(shift.profileId, 'Edited', {
@@ -675,36 +656,28 @@ export class SchedulingController {
   @Patch('shifts/:id/assign')
   async assignShift(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: AssignShiftDto) {
     this.requireManager(scope);
-    const shift = await this.getVenueShift(scope!.venueId, id);
-    if (!body.profileId) {
-      await this.prisma.scheduleShift.update({ where: { id: shift.id }, data: { profileId: null, status: 'open' } });
-      await this.markScheduleEdited(scope!.venueId);
-      if (shift.profileId) {
-        void this.sendScheduleUpdateEmail(shift.profileId, 'Removed', {
-          dayIndex: shift.dayIndex,
-          startMinutes: shift.startMinutes,
-          endMinutes: shift.endMinutes,
-          station: shift.station,
-        }, undefined);
-      }
-      return { ok: true };
+    const { shift, nextProfileId } = await this.assignments.assignShift({
+      venueId: scope!.venueId,
+      shiftId: id,
+      profileId: body.profileId,
+    });
+    if (nextProfileId) {
+      void this.sendScheduleUpdateEmail(nextProfileId, 'Added', undefined, {
+        dayIndex: shift.dayIndex,
+        startMinutes: shift.startMinutes,
+        endMinutes: shift.endMinutes,
+        station: shift.station,
+      });
     }
-    await this.assertVenueMember(scope!.venueId, body.profileId);
-    await withSerializableRetry(this.prisma, async (tx) => {
-      const current = await tx.scheduleShift.findFirst({ where: { id: shift.id, venueId: scope!.venueId } });
-      if (!current) throw new NotFoundException('Shift not found');
-      await this.lockAssignmentKeys(tx, [{ venueId: scope!.venueId, profileId: body.profileId!, dayIndex: current.dayIndex }]);
-      await this.assertNoDoubleBookTx(tx, scope!.venueId, body.profileId!, current.dayIndex, current.startMinutes, current.endMinutes, current.id);
-      await tx.scheduleShift.update({ where: { id: current.id }, data: { profileId: body.profileId, status: 'scheduled' } });
-      await tx.venue.update({ where: { id: scope!.venueId }, data: { scheduleUpdatedAfterPublishAt: new Date() } });
-    });
-    void this.sendScheduleUpdateEmail(body.profileId, 'Added', undefined, {
-      dayIndex: shift.dayIndex,
-      startMinutes: shift.startMinutes,
-      endMinutes: shift.endMinutes,
-      station: shift.station,
-    });
-    if (shift.profileId && shift.profileId !== body.profileId) {
+    if (!nextProfileId && shift.profileId) {
+      void this.sendScheduleUpdateEmail(shift.profileId, 'Removed', {
+        dayIndex: shift.dayIndex,
+        startMinutes: shift.startMinutes,
+        endMinutes: shift.endMinutes,
+        station: shift.station,
+      }, undefined);
+    }
+    if (nextProfileId && shift.profileId && shift.profileId !== nextProfileId) {
       void this.sendScheduleUpdateEmail(shift.profileId, 'Removed', {
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,
@@ -719,9 +692,10 @@ export class SchedulingController {
   @Delete('shifts/:id')
   async deleteShift(@VenueScope() scope: Scope, @Param('id') id: string) {
     this.requireManager(scope);
-    const shift = await this.getVenueShift(scope!.venueId, id);
-    await this.prisma.scheduleShift.delete({ where: { id: shift.id } });
-    await this.markScheduleEdited(scope!.venueId);
+    const shift = await this.assignments.deleteShift({
+      venueId: scope!.venueId,
+      shiftId: id,
+    });
     if (shift.profileId) {
       void this.sendScheduleUpdateEmail(shift.profileId, 'Removed', {
         dayIndex: shift.dayIndex,
@@ -788,17 +762,11 @@ export class SchedulingController {
   @Post('shifts/:id/claim')
   async claimOpenShift(@VenueScope() scope: Scope, @Param('id') id: string) {
     if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
-    const shift = await this.getVenueShift(scope.venueId, id);
-    if (shift.profileId || shift.status !== 'open') throw new BadRequestException('This shift is no longer open');
-    await this.assertNoDoubleBook(scope.venueId, scope.profileId, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
-    // Claim atomically: only the request that still sees the shift open+unassigned
-    // wins, so two staff tapping "claim" simultaneously can't both take it.
-    const claimed = await this.prisma.scheduleShift.updateMany({
-      where: { id: shift.id, venueId: scope.venueId, status: 'open', profileId: null },
-      data: { profileId: scope.profileId, status: 'covered' },
+    const shift = await this.assignments.claimOpenShift({
+      venueId: scope.venueId,
+      profileId: scope.profileId,
+      shiftId: id,
     });
-    if (claimed.count === 0) throw new BadRequestException('This shift is no longer open');
-    await this.markScheduleEdited(scope.venueId);
     await this.notifications.notifyManagers({
       venueId: scope.venueId,
       kind: 'shift_assigned',
@@ -851,9 +819,8 @@ export class SchedulingController {
       const [y, m, d] = dateStr.split('-');
       return `${m}/${d}/${y}`;
     };
-
-    const weekLabel = `${formatDateMD(sunday)} – ${formatDateMD(saturday)}`;
-    const periodLabel = `${formatDateMDY(sunday)} – ${formatDateMDY(saturday)}`;
+    const weekLabel = `${formatDateMD(sunday)} - ${formatDateMD(saturday)}`;
+    const periodLabel = `${formatDateMDY(sunday)} - ${formatDateMDY(saturday)}`;
 
     const totalShifts = shifts.length;
     const staffScheduled = new Set(shifts.map((s) => s.profileId).filter(Boolean)).size;
@@ -864,7 +831,7 @@ export class SchedulingController {
 
     // Email 1: Send to the publishing manager
     void this.email.sendToProfile(scope!.profileId, {
-      subject: `Schedule Published — Your Team's Shifts Are Live`,
+      subject: `Schedule Published - Your Team's Shifts Are Live`,
       text:
         `Hi ${scope!.fullName},\n\n` +
         `Your schedule for Week of ${weekLabel} has been successfully published. Your team has been notified and can view their shifts immediately in the Venue Wrangler app.\n\n` +
@@ -880,17 +847,17 @@ export class SchedulingController {
         `Open Shifts\t${openShifts}\n` +
         `Pending Approvals\t${pendingApprovals}\n\n` +
         `Making Updates After Publishing\n` +
-        `Edit a shift — Select the shift and tap Edit. Changes push to the employee instantly.\n` +
-        `Add a shift — Tap an open slot and assign a team member or post as an open shift.\n` +
-        `Remove a shift — Select the shift and tap Delete. The employee is notified automatically.\n` +
-        `Handle swap requests — Swap requests appear in your Requests & Approvals queue.\n\n` +
+        `Edit a shift - Select the shift and tap Edit. Changes push to the employee instantly.\n` +
+        `Add a shift - Tap an open slot and assign a team member or post as an open shift.\n` +
+        `Remove a shift - Select the shift and tap Delete. The employee is notified automatically.\n` +
+        `Handle swap requests - Swap requests appear in your Requests & Approvals queue.\n\n` +
         `Pro Tips\n` +
         `Publish schedules at least 72 hours in advance\n` +
         `Use open shifts to fill gaps without manual assignment\n` +
         `Check the Operations Dashboard for a real-time view of who's clocked in\n\n` +
         `Questions? support@venuewrangler.com\n\n` +
-        `Let's wrangle. 🤘\n\n` +
-        `— The Venue Wrangler Team`,
+        `Let's wrangle.\n\n` +
+        `- The Venue Wrangler Team`,
     });
 
     // Email 2: Send to all assigned staff members
@@ -924,16 +891,16 @@ export class SchedulingController {
           `${shiftRows}\n\n` +
           `Log in to the app to see your full schedule.\n\n` +
           `Need to Make a Change?\n` +
-          `Request time off — Submit a request and your manager is notified right away\n` +
-          `Swap a shift — Request a swap and it goes to your manager for approval\n` +
-          `Pick up an open shift — Check the Open Shifts board for extra hours\n\n` +
+          `Request time off - Submit a request and your manager is notified right away\n` +
+          `Swap a shift - Request a swap and it goes to your manager for approval\n` +
+          `Pick up an open shift - Check the Open Shifts board for extra hours\n\n` +
           `Reminders\n` +
           `Clock in using the app when your shift starts\n` +
           `You'll always be notified if your schedule changes\n` +
           `Reach out to your manager through the app for any conflicts\n\n` +
           `Questions? support@venuewrangler.com\n\n` +
-          `See you on the floor. 👊\n\n` +
-          `— The Venue Wrangler Team`,
+          `See you on the floor.\n\n` +
+          `- The Venue Wrangler Team`,
       });
     }
     return { notified: assigned };
@@ -999,26 +966,11 @@ export class SchedulingController {
     if (!template) throw new NotFoundException('Template not found');
     const slots = this.parseTemplateSlots(template.shifts);
     if (slots.length === 0) throw new BadRequestException('This template has no shifts to apply.');
-    const creates = slots.map((row) => {
-      return this.prisma.scheduleShift.create({
-        data: {
-          venueId: scope!.venueId,
-          dayIndex: row.dayIndex,
-          startMinutes: row.startMinutes,
-          endMinutes: row.endMinutes,
-          jobTitle: row.jobTitle,
-          station: row.station,
-          notes: row.notes?.trim() || null,
-          status: 'open',
-        },
-      });
+    return this.assignments.applyTemplate({
+      venueId: scope!.venueId,
+      replace: body.replace,
+      slots,
     });
-    await this.prisma.$transaction([
-      ...(body.replace ? [this.prisma.scheduleShift.deleteMany({ where: { venueId: scope!.venueId } })] : []),
-      ...creates,
-    ]);
-    await this.markScheduleEdited(scope!.venueId);
-    return { added: slots.length };
   }
 
   @RequireSubscription()
@@ -1035,88 +987,33 @@ export class SchedulingController {
   @Post('copy-day')
   async copyDayShifts(@VenueScope() scope: Scope, @Body() body: CopyDayDto) {
     this.requireManager(scope);
-    const source = await this.prisma.scheduleShift.findMany({
-      where: { venueId: scope!.venueId, dayIndex: body.fromDay },
+    return this.assignments.copyDayShifts({
+      venueId: scope!.venueId,
+      fromDay: body.fromDay,
+      toDays: body.toDays,
     });
-    const creates = body.toDays
-      .filter((day) => day !== body.fromDay)
-      .flatMap((day) =>
-        source.map((shift) =>
-          this.prisma.scheduleShift.create({
-            data: {
-              venueId: scope!.venueId,
-              dayIndex: day,
-              startMinutes: shift.startMinutes,
-              endMinutes: shift.endMinutes,
-              jobTitle: shift.jobTitle,
-              station: shift.station,
-              status: 'open',
-            },
-          }),
-        ),
-      );
-    await this.prisma.$transaction(creates);
-    await this.markScheduleEdited(scope!.venueId);
-    return { added: creates.length };
   }
 
   @RequireSubscription()
   @Post('clear-week')
   async clearWeek(@VenueScope() scope: Scope) {
     this.requireManager(scope);
-    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } });
-    const snapshots = shifts.map((shift) => ({
-      dayIndex: shift.dayIndex,
-      startMinutes: shift.startMinutes,
-      endMinutes: shift.endMinutes,
-      jobTitle: shift.jobTitle,
-      station: shift.station,
-      status: shift.status,
-      profileId: shift.profileId,
-      notes: shift.notes,
-    }));
-    await this.prisma.scheduleShift.deleteMany({ where: { venueId: scope!.venueId } });
-    await this.markScheduleEdited(scope!.venueId);
-    return { removed: shifts.length, shifts: snapshots };
+    return this.assignments.clearWeek({
+      venueId: scope!.venueId,
+    });
   }
 
   @RequireSubscription()
   @Post('restore-shifts')
   async restoreShifts(@VenueScope() scope: Scope, @Body() body: RestoreShiftsDto) {
     this.requireManager(scope);
-    // Validate all referenced members in one query instead of one per shift.
-    const referencedIds = Array.from(
-      new Set(body.shifts.map((shift) => shift.profileId).filter((id): id is string => Boolean(id))),
-    );
-    const members = referencedIds.length
-      ? await this.prisma.profile.findMany({
-          where: { id: { in: referencedIds }, venueId: scope!.venueId },
-          select: { id: true },
-        })
-      : [];
-    const memberIds = new Set(members.map((m) => m.id));
-    const creates = [];
     for (const shift of body.shifts) {
       ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
-      // Drop assignment to anyone who isn't a current member of this venue.
-      const profileId = shift.profileId && memberIds.has(shift.profileId) ? shift.profileId : undefined;
-      creates.push(this.prisma.scheduleShift.create({
-        data: {
-          venueId: scope!.venueId,
-          profileId,
-          dayIndex: shift.dayIndex,
-          startMinutes: shift.startMinutes,
-          endMinutes: shift.endMinutes,
-          jobTitle: shift.jobTitle,
-          station: shift.station,
-          status: profileId ? shift.status : 'open',
-          notes: shift.notes,
-        },
-      }));
     }
-    await this.prisma.$transaction(creates);
-    await this.markScheduleEdited(scope!.venueId);
-    return { restored: creates.length };
+    return this.assignments.restoreShifts({
+      venueId: scope!.venueId,
+      shifts: body.shifts,
+    });
   }
 
   @RequireSubscription()
@@ -1196,44 +1093,12 @@ export class SchedulingController {
       orderBy: [{ profileId: 'asc' }, { dayIndex: 'asc' }, { startMinutes: 'asc' }],
     });
     const availabilityByProfile = this.groupAvailabilityByProfile(availability);
-    let assigned = 0;
-    let skipped = 0;
-    const assignedShifts: Array<{ profileId: string; label: string; jobTitle: string; station: string }> = [];
-    for (const assignment of body.assignments) {
-      const shift = await this.getVenueShift(scope!.venueId, assignment.shiftId);
-      if (shift.profileId || shift.status !== 'open') {
-        skipped += 1;
-        continue;
-      }
-      await this.assertVenueMember(scope!.venueId, assignment.profileId);
-      if (!availabilityCovers(availabilityByProfile.get(assignment.profileId), shift)) {
-        skipped += 1;
-        continue;
-      }
-      try {
-        await withSerializableRetry(this.prisma, async (tx) => {
-          const current = await tx.scheduleShift.findFirst({ where: { id: shift.id, venueId: scope!.venueId } });
-          if (!current || current.profileId || current.status !== 'open') throw new BadRequestException('Shift is no longer open.');
-          await this.lockAssignmentKeys(tx, [{ venueId: scope!.venueId, profileId: assignment.profileId, dayIndex: current.dayIndex }]);
-          await this.assertNoDoubleBookTx(tx, scope!.venueId, assignment.profileId, current.dayIndex, current.startMinutes, current.endMinutes, current.id);
-          await tx.scheduleShift.update({
-            where: { id: current.id },
-            data: { profileId: assignment.profileId, status: 'scheduled' },
-          });
-        });
-      } catch {
-        skipped += 1;
-        continue;
-      }
-      assignedShifts.push({
-        profileId: assignment.profileId,
-        label: this.shiftLabel(shift),
-        jobTitle: shift.jobTitle,
-        station: shift.station,
-      });
-      assigned += 1;
-    }
-    if (assigned > 0) await this.markScheduleEdited(scope!.venueId);
+    const { assigned, skipped, assignedShifts } = await this.assignments.applyOpenAssignments({
+      venueId: scope!.venueId,
+      assignments: body.assignments,
+      canAssign: ({ shift, profileId }) =>
+        availabilityCovers(availabilityByProfile.get(profileId), shift),
+    });
     const assignedByProfile = new Map<string, typeof assignedShifts>();
     for (const assignedShift of assignedShifts) {
       const profileAssignments = assignedByProfile.get(assignedShift.profileId) ?? [];
@@ -1252,7 +1117,7 @@ export class SchedulingController {
         to: profile.email,
         subject: profileAssignments.length === 1 ? 'New shift assigned' : 'New shifts assigned',
         text: `You were assigned ${profileAssignments.length === 1 ? 'a new shift' : 'new shifts'}:\n\n${profileAssignments
-          .map((shift) => `${shift.label}\n${shift.jobTitle} at ${shift.station}`)
+          .map((shift) => `${this.shiftLabel(shift)}\n${shift.jobTitle} at ${shift.station}`)
           .join('\n\n')}`,
       });
     }
@@ -1263,35 +1128,24 @@ export class SchedulingController {
   @Post('swaps')
   async proposeShiftSwap(@VenueScope() scope: Scope, @Body() body: ProposeSwapDto) {
     if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
-    const myShift = await this.getVenueShift(scope.venueId, body.myShiftId);
-    if (myShift.profileId !== scope.profileId) throw new ForbiddenException('That is not your shift');
-    const target = await this.assertVenueMember(scope.venueId, body.targetProfileId);
-    if (target.id === scope.profileId) throw new BadRequestException('Choose a teammate');
-    if (body.targetShiftId) {
-      const targetShift = await this.getVenueShift(scope.venueId, body.targetShiftId);
-      if (targetShift.profileId !== target.id) throw new BadRequestException("That is not the teammate's shift");
-    }
-    const swap = await this.prisma.shiftSwap.create({
-      data: {
-        venueId: scope.venueId,
-        requesterProfileId: scope.profileId,
-        requesterShiftId: myShift.id,
-        targetProfileId: target.id,
-        targetShiftId: body.targetShiftId,
-        status: 'proposed',
-        note: body.note?.trim() || null,
-      },
+    const { swap, requesterShift, target } = await this.assignments.proposeSwap({
+      venueId: scope.venueId,
+      requesterProfileId: scope.profileId,
+      requesterShiftId: body.myShiftId,
+      targetProfileId: body.targetProfileId,
+      targetShiftId: body.targetShiftId,
+      note: body.note,
     });
     await this.notifications.notifyProfile({
       venueId: scope.venueId,
       profileId: target.id,
       kind: 'swap_proposed',
       title: 'Shift swap proposed',
-      body: `${scope.fullName} wants to swap ${this.shiftLabel(myShift)}.`,
+      body: `${scope.fullName} wants to swap ${this.shiftLabel(requesterShift)}.`,
     });
     void this.email.sendToProfile(target.id, {
       subject: 'Shift swap proposed',
-      text: `${scope.fullName} wants to swap ${this.shiftLabel(myShift)}.${body.note?.trim() ? `\n\nNote: ${body.note.trim()}` : ''}`,
+      text: `${scope.fullName} wants to swap ${this.shiftLabel(requesterShift)}.${body.note?.trim() ? `\n\nNote: ${body.note.trim()}` : ''}`,
     });
     return swap.id;
   }
@@ -1300,15 +1154,12 @@ export class SchedulingController {
   @Patch('swaps/:id/respond')
   async respondToShiftSwap(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: RespondSwapDto) {
     if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
-    const swap = await this.prisma.shiftSwap.findFirst({ where: { id, venueId: scope.venueId } });
-    if (!swap || swap.targetProfileId !== scope.profileId) throw new ForbiddenException('Not authorized');
-    if (swap.status !== 'proposed') throw new BadRequestException('This swap is no longer open');
-    // Atomic transition so a double-tap can't respond twice / re-fire notifications.
-    const responded = await this.prisma.shiftSwap.updateMany({
-      where: { id: swap.id, status: 'proposed' },
-      data: { status: body.accept ? 'accepted' : 'declined' },
+    const swap = await this.assignments.respondToSwap({
+      venueId: scope.venueId,
+      swapId: id,
+      profileId: scope.profileId,
+      accept: body.accept,
     });
-    if (responded.count === 0) throw new BadRequestException('This swap is no longer open');
     if (body.accept) {
       await this.notifications.notifyManagers({
         venueId: scope.venueId,
@@ -1325,51 +1176,11 @@ export class SchedulingController {
   @Patch('swaps/:id/review')
   async reviewShiftSwap(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ReviewSwapDto) {
     this.requireManager(scope);
-    const swap = await this.prisma.shiftSwap.findFirst({ where: { id, venueId: scope!.venueId } });
-    if (!swap) throw new NotFoundException('Swap not found');
-    if (!['accepted', 'proposed'].includes(swap.status)) throw new BadRequestException('Swap is not pending');
-    if (body.approve) {
-      await withSerializableRetry(this.prisma, async (tx) => {
-        const requesterShift = await tx.scheduleShift.findFirst({ where: { id: swap.requesterShiftId, venueId: scope!.venueId } });
-        const targetShift = swap.targetShiftId ? await tx.scheduleShift.findFirst({ where: { id: swap.targetShiftId, venueId: scope!.venueId } }) : null;
-        if (!requesterShift || (swap.targetShiftId && !targetShift)) throw new NotFoundException('Shift not found');
-        await this.lockAssignmentKeys(tx, [
-          { venueId: scope!.venueId, profileId: swap.targetProfileId, dayIndex: requesterShift.dayIndex },
-          ...(targetShift ? [{ venueId: scope!.venueId, profileId: swap.requesterProfileId, dayIndex: targetShift.dayIndex }] : []),
-        ]);
-        await this.assertNoDoubleBookTx(
-          tx,
-          scope!.venueId,
-          swap.targetProfileId,
-          requesterShift.dayIndex,
-          requesterShift.startMinutes,
-          requesterShift.endMinutes,
-          requesterShift.id,
-          targetShift?.id,
-        );
-        if (targetShift) {
-          await this.assertNoDoubleBookTx(
-            tx,
-            scope!.venueId,
-            swap.requesterProfileId,
-            targetShift.dayIndex,
-            targetShift.startMinutes,
-            targetShift.endMinutes,
-            targetShift.id,
-            requesterShift.id,
-          );
-        }
-        await tx.scheduleShift.update({ where: { id: requesterShift.id }, data: { profileId: swap.targetProfileId, status: 'scheduled' } });
-        if (targetShift) {
-          await tx.scheduleShift.update({ where: { id: targetShift.id }, data: { profileId: swap.requesterProfileId, status: 'scheduled' } });
-        }
-        const reviewed = await tx.shiftSwap.updateMany({ where: { id: swap.id, status: { in: ['accepted', 'proposed'] } }, data: { status: 'approved' } });
-        if (reviewed.count === 0) throw new BadRequestException('Swap is no longer pending');
-        await tx.venue.update({ where: { id: scope!.venueId }, data: { scheduleUpdatedAfterPublishAt: new Date() } });
-      });
-    } else {
-      await this.prisma.shiftSwap.update({ where: { id: swap.id }, data: { status: 'denied' } });
-    }
+    const swap = await this.assignments.reviewSwap({
+      venueId: scope!.venueId,
+      swapId: id,
+      approve: body.approve,
+    });
     await this.notifications.notifyProfile({
       venueId: scope!.venueId,
       profileId: swap.requesterProfileId,
@@ -1417,64 +1228,6 @@ export class SchedulingController {
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
     if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
-  }
-
-  private async assertVenueMember(venueId: string, profileId: string) {
-    const member = await this.prisma.profile.findFirst({ where: { id: profileId, venueId } });
-    if (!member) throw new BadRequestException('Staff member is not in this venue');
-    return member;
-  }
-
-  private async getVenueShift(venueId: string, shiftId: string) {
-    const shift = await this.prisma.scheduleShift.findFirst({ where: { id: shiftId, venueId } });
-    if (!shift) throw new NotFoundException('Shift not found');
-    return shift;
-  }
-
-  private async assertNoDoubleBook(venueId: string, profileId: string, dayIndex: number, startMinutes: number, endMinutes: number, ...excludeShiftIds: Array<string | undefined>) {
-    await this.assertNoDoubleBookTx(this.prisma, venueId, profileId, dayIndex, startMinutes, endMinutes, ...excludeShiftIds);
-  }
-
-  private async assertNoDoubleBookTx(
-    tx: Prisma.TransactionClient | PrismaService,
-    venueId: string,
-    profileId: string,
-    dayIndex: number,
-    startMinutes: number,
-    endMinutes: number,
-    ...excludeShiftIds: Array<string | undefined>
-  ) {
-    const excluded = excludeShiftIds.filter((id): id is string => Boolean(id));
-    const overlapping = await tx.scheduleShift.findFirst({
-      where: {
-        venueId,
-        profileId,
-        dayIndex,
-        ...(excluded.length > 0 ? { id: { notIn: excluded } } : {}),
-        startMinutes: { lt: endMinutes },
-        endMinutes: { gt: startMinutes },
-      },
-    });
-    if (overlapping) throw new BadRequestException('This assignment overlaps another shift.');
-  }
-
-  private async lockAssignmentKeys(
-    tx: Prisma.TransactionClient,
-    keys: Array<{ venueId: string; profileId: string; dayIndex: number }>,
-  ) {
-    const uniqueKeys = Array.from(
-      new Set(keys.map((key) => `schedule:${key.venueId}:${key.profileId}:${key.dayIndex}`)),
-    ).sort();
-    for (const key of uniqueKeys) {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
-    }
-  }
-
-  private markScheduleEdited(venueId: string) {
-    return this.prisma.venue.update({
-      where: { id: venueId },
-      data: { scheduleUpdatedAfterPublishAt: new Date() },
-    });
   }
 
   private resolveAvailabilityWeekStart(venueId: string, weekStartDate?: string) {
@@ -1596,17 +1349,15 @@ export class SchedulingController {
     };
 
     const formatTime = (minutes: number) => minutesToTime(minutes);
-
-    const beforeDate = before ? formatDateMDY(before.dayIndex) : '—';
-    const beforeTime = before ? `${formatTime(before.startMinutes)} – ${formatTime(before.endMinutes)}` : '—';
-    const beforeArea = before ? (before.station || 'Floor') : '—';
-
-    const afterDate = after ? formatDateMDY(after.dayIndex) : '—';
-    const afterTime = after ? `${formatTime(after.startMinutes)} – ${formatTime(after.endMinutes)}` : '—';
-    const afterArea = after ? (after.station || 'Floor') : '—';
+    const beforeDate = before ? formatDateMDY(before.dayIndex) : '-';
+    const beforeTime = before ? `${formatTime(before.startMinutes)} - ${formatTime(before.endMinutes)}` : '-';
+    const beforeArea = before ? (before.station || 'Floor') : '-';
+    const afterDate = after ? formatDateMDY(after.dayIndex) : '-';
+    const afterTime = after ? `${formatTime(after.startMinutes)} - ${formatTime(after.endMinutes)}` : '-';
+    const afterArea = after ? (after.station || 'Floor') : '-';
 
     void this.email.sendToProfile(profileId, {
-      subject: 'Schedule Update — A Change Has Been Made to Your Shift',
+      subject: 'Schedule Update - A Change Has Been Made to Your Shift',
       text:
         `Hi ${profile.fullName},\n\n` +
         `Your manager has made an update to your schedule. Please review the change below.\n\n` +
@@ -1615,13 +1366,13 @@ export class SchedulingController {
         `Date\t${beforeDate}\t${afterDate}\n` +
         `Shift Time\t${beforeTime}\t${afterTime}\n` +
         `Location/Section\t${beforeArea}\t${afterArea}\n` +
-        `Change Type\t—\t${changeType}\n\n` +
+        `Change Type\t-\t${changeType}\n\n` +
         `What to Do\n` +
         `No action required unless you have a conflict\n` +
         `Reach out to your manager through the app to discuss the change\n` +
         `Submit a swap or time-off request if needed\n\n` +
         `Questions? support@venuewrangler.com\n\n` +
-        `— The Venue Wrangler Team`,
+        `- The Venue Wrangler Team`,
     });
   }
 
@@ -1655,10 +1406,9 @@ export class SchedulingController {
     const formatTime = (minutes: number) => minutesToTime(minutes);
 
     const reqDate = formatDateMDY(reqShift.dayIndex);
-    const reqTime = `${formatTime(reqShift.startMinutes)} – ${formatTime(reqShift.endMinutes)}`;
-
-    const tarDate = tarShift ? formatDateMDY(tarShift.dayIndex) : '—';
-    const tarTime = tarShift ? `${formatTime(tarShift.startMinutes)} – ${formatTime(tarShift.endMinutes)}` : '—';
+    const reqTime = `${formatTime(reqShift.startMinutes)} - ${formatTime(reqShift.endMinutes)}`;
+    const tarDate = tarShift ? formatDateMDY(tarShift.dayIndex) : '-';
+    const tarTime = tarShift ? `${formatTime(tarShift.startMinutes)} - ${formatTime(tarShift.endMinutes)}` : '-';
 
     // Format submitted timestamp (createdAt)
     const submittedStr = swap.createdAt.toLocaleString('en-US', {
@@ -1682,7 +1432,7 @@ export class SchedulingController {
     for (const manager of managers) {
       void this.email.send({
         to: manager.email,
-        subject: 'Shift Swap Request — Action Required',
+        subject: 'Shift Swap Request - Action Required',
         text:
           `Hi ${manager.fullName},\n\n` +
           `${requester.fullName} has submitted a shift swap request. Please review and take action in the Venue Wrangler app.\n\n` +
@@ -1691,15 +1441,15 @@ export class SchedulingController {
           `Employee\t${requester.fullName}\t${target.fullName}\n` +
           `Date\t${reqDate}\t${tarDate}\n` +
           `Shift Time\t${reqTime}\t${tarTime}\n` +
-          `Submitted\t${submittedStr}\t—\n\n` +
+          `Submitted\t${submittedStr}\t-\n\n` +
           `How to Respond\n` +
           `1. Open the Venue Wrangler app\n` +
           `2. Go to Requests & Approvals\n` +
           `3. Select the swap request\n` +
-          `4. Tap Approve or Deny — both employees are notified instantly\n\n` +
+          `4. Tap Approve or Deny - both employees are notified instantly\n\n` +
           `Pending requests can also be managed from your Operations Dashboard.\n\n` +
           `Questions? support@venuewrangler.com\n\n` +
-          `— The Venue Wrangler Team`,
+          `- The Venue Wrangler Team`,
       });
     }
   }
@@ -1734,10 +1484,9 @@ export class SchedulingController {
     const formatTime = (minutes: number) => minutesToTime(minutes);
 
     const reqDate = formatDateMDY(reqShift.dayIndex);
-    const reqTime = `${formatTime(reqShift.startMinutes)} – ${formatTime(reqShift.endMinutes)}`;
-
-    const tarDate = tarShift ? formatDateMDY(tarShift.dayIndex) : '—';
-    const tarTime = tarShift ? `${formatTime(tarShift.startMinutes)} – ${formatTime(tarShift.endMinutes)}` : '—';
+    const reqTime = `${formatTime(reqShift.startMinutes)} - ${formatTime(reqShift.endMinutes)}`;
+    const tarDate = tarShift ? formatDateMDY(tarShift.dayIndex) : '-';
+    const tarTime = tarShift ? `${formatTime(tarShift.startMinutes)} - ${formatTime(tarShift.endMinutes)}` : '-';
 
     const statusText = approve ? 'Approved' : 'Denied';
 
@@ -1763,7 +1512,7 @@ export class SchedulingController {
               `Your original shift remains on your schedule\n` +
               `Reach out to your manager through the app if you have questions or need further assistance\n\n`) +
           `Questions? support@venuewrangler.com\n\n` +
-          `— The Venue Wrangler Team`,
+          `- The Venue Wrangler Team`,
       });
     };
 
