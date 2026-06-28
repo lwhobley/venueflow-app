@@ -9,6 +9,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
+import { InlineMessage } from '../../components/InlineMessage';
 
 // Must stay in sync with POS_PROVIDERS in packages/api/src/modules/pos/pos.controller.ts
 // and the PosProvider enum in prisma/schema.prisma.
@@ -191,7 +192,7 @@ function IntegrationsScreenInner() {
             disabled={pending !== null}
           />
           <TextInput label="Provider location ID" value={locationId} onChangeText={setLocationId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
-          {message ? <Text style={{ color: message.includes('Could') ? colors.danger : colors.muted }}>{message}</Text> : null}
+          <InlineMessage message={message} />
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
             <Button mode="contained" buttonColor={colors.primary} loading={pending === 'pos'} disabled={pending !== null} onPress={() => void saveConnection()}>Save connection</Button>
           </View>
