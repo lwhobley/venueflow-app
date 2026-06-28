@@ -13,6 +13,21 @@ import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
+import {
+  money,
+  type VelocityRow,
+  type ShrinkageData,
+  type PurchaseOrderData,
+  type CostHistoryEntry,
+  type AgingReport,
+} from '../../lib/bar-inventory-types';
+import {
+  VelocityCard,
+  ShrinkageCard,
+  PurchaseOrderCard,
+  AgingCard,
+  MovementTimeline,
+} from '../../components/bar-stock/InventoryCards';
 
 const categories = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
 type Category = (typeof categories)[number];
@@ -44,130 +59,6 @@ type ParsedItem = Omit<BarItem, '_id' | 'area' | 'unitCostCents' | 'supplier' | 
 };
 
 type MovementType = 'count' | 'received' | 'waste' | 'transfer';
-
-type VelocityRow = {
-  _id: string;
-  name: string;
-  category: string;
-  onHand: number;
-  parLevel: number;
-  unit: string;
-  usageLast4Weeks: number;
-  perWeek: number;
-  daysUntilEmpty: number | null;
-};
-
-type MovementRow = {
-  _id: string;
-  movementType: string;
-  quantity: number;
-  previousOnHand: number;
-  nextOnHand: number;
-  notes: string | null;
-  createdBy: string;
-  createdAt: number;
-};
-
-type ShrinkageRow = {
-  category: string;
-  receivedUnits: number;
-  wasteUnits: number;
-  compUnits: number;
-  totalShrinkageUnits: number;
-  shrinkagePct: number | null;
-  wasteCents: number;
-  compCents: number;
-  totalShrinkageCents: number;
-};
-
-type PurchaseOrderLine = {
-  _id: string;
-  name: string;
-  sku: string | null;
-  unit: string;
-  onHand: number;
-  parLevel: number;
-  qtyToOrder: number;
-  unitCostCents: number | null;
-  lineTotalCents: number | null;
-};
-
-type PurchaseOrderGroup = {
-  supplier: string;
-  lines: PurchaseOrderLine[];
-  groupTotalCents: number;
-};
-
-type CostHistoryEntry = {
-  _id: string;
-  oldCostCents: number;
-  newCostCents: number;
-  changedBy: string;
-  createdAt: number;
-};
-
-type AgingItem = { _id: string; name: string; category: string; lastCountedAt: number | null; daysSinceCount: number | null };
-type AgingReport = {
-  uncountedItems: AgingItem[];
-  noActivityItems: Array<{ _id: string; name: string; category: string; onHand: number }>;
-  staleCostItems: Array<{ _id: string; name: string; category: string; onHand: number }>;
-};
-
-function money(cents: number | null | undefined) {
-  return `$${((cents ?? 0) / 100).toFixed(2)}`;
-}
-
-const MOVEMENT_LABELS: Record<string, string> = {
-  count: 'Count',
-  received: 'Received',
-  waste: 'Waste',
-  comp: 'Comp',
-  transfer: 'Transfer',
-  correction: 'Correction',
-};
-
-const MOVEMENT_COLORS: Record<string, string> = {
-  count: colors.primary,
-  received: colors.success,
-  waste: colors.danger,
-  comp: colors.warning,
-  transfer: colors.muted,
-  correction: colors.muted,
-};
-
-function MovementTimeline({ itemId, venueId }: { itemId: string; venueId: string }) {
-  const data = useQuery(api.barInventory.getItemMovements, { itemId, limit: 30 }) as { itemName: string; movements: MovementRow[] } | null | undefined;
-  if (!data) return <Text style={{ color: colors.muted }}>Loading history...</Text>;
-  if (data.movements.length === 0) return <Text style={{ color: colors.muted }}>No movements recorded yet.</Text>;
-  return (
-    <View style={{ gap: 2 }}>
-      {data.movements.map((m) => {
-        const color = MOVEMENT_COLORS[m.movementType] ?? colors.muted;
-        const date = new Date(m.createdAt);
-        return (
-          <View key={m._id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, marginTop: 5 }} />
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontWeight: '700', color, fontSize: 13 }}>
-                  {MOVEMENT_LABELS[m.movementType] ?? m.movementType}
-                  {m.movementType !== 'count' ? ` ${m.quantity > 0 ? '+' : ''}${m.quantity}` : ` → ${m.nextOnHand}`}
-                </Text>
-                <Text style={{ color: colors.muted, fontSize: 11 }}>
-                  {m.previousOnHand} → {m.nextOnHand}
-                </Text>
-              </View>
-              <Text style={{ color: colors.muted, fontSize: 11 }}>
-                {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} · {m.createdBy}
-              </Text>
-              {m.notes ? <Text style={{ color: colors.charcoal, fontSize: 12 }}>{m.notes}</Text> : null}
-            </View>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
 
 export default function BarStockScreen() {
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -223,8 +114,8 @@ export default function BarStockScreen() {
 
   const stockCsv = useQuery(api.barInventory.exportStockCsv, isReady && canManage && showStockCsv ? {} : 'skip') as string | null | undefined;
   const movementCsv = useQuery(api.barInventory.exportMovementsCsv, isReady && canManage && showMovementCsv ? {} : 'skip') as string | null | undefined;
-  const shrinkageData = useQuery(api.barInventory.getShrinkageReport, isReady && canManage && showShrinkage ? {} : 'skip') as { rows: ShrinkageRow[]; totals: { receivedUnits: number; totalShrinkageUnits: number; totalShrinkageCents: number }; windowDays: number } | null | undefined;
-  const purchaseOrder = useQuery(api.barInventory.getPurchaseOrder, isReady && canManage && showPurchaseOrder ? {} : 'skip') as { groups: PurchaseOrderGroup[]; grandTotalCents: number; itemCount: number } | null | undefined;
+  const shrinkageData = useQuery(api.barInventory.getShrinkageReport, isReady && canManage && showShrinkage ? {} : 'skip') as ShrinkageData | null | undefined;
+  const purchaseOrder = useQuery(api.barInventory.getPurchaseOrder, isReady && canManage && showPurchaseOrder ? {} : 'skip') as PurchaseOrderData | null | undefined;
   const purchaseOrderCsv = useQuery(api.barInventory.exportPurchaseOrderCsv, isReady && canManage && showPurchaseOrderCsv ? {} : 'skip') as string | null | undefined;
   const costHistory = useQuery(api.barInventory.getCostHistory, isReady && canManage && costHistoryItemId ? { itemId: costHistoryItemId } : 'skip') as { itemName: string; currentCostCents: number | null; entries: CostHistoryEntry[] } | null | undefined;
   const agingReport = useQuery(api.barInventory.getAgingReport, isReady && canManage && showAgingReport ? {} : 'skip') as AgingReport | null | undefined;
@@ -541,177 +432,29 @@ export default function BarStockScreen() {
       {scanMsg && !showScanner && <Text style={{ color: colors.danger }}>{scanMsg}</Text>}
 
       {/* Shrinkage / variance report */}
-      {showShrinkage && (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shrinkage report (30 days)</Text>
-            {!shrinkageData ? (
-              <Text style={{ color: colors.muted }}>Loading...</Text>
-            ) : shrinkageData.rows.length === 0 ? (
-              <Text style={{ color: colors.muted }}>No waste or comp movements recorded in the past 30 days.</Text>
-            ) : (
-              <>
-                {shrinkageData.rows.map((row) => (
-                  <View key={row.category} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ fontWeight: '700', textTransform: 'capitalize' }}>{row.category}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                        <Text style={{ color: colors.danger, fontWeight: '700' }}>{money(row.totalShrinkageCents)}</Text>
-                        {row.shrinkagePct !== null && (
-                          <Chip compact style={{ backgroundColor: row.shrinkagePct > 15 ? `${colors.danger}22` : `${colors.warning}22` }}>
-                            <Text style={{ color: row.shrinkagePct > 15 ? colors.danger : colors.warning, fontSize: 11, fontWeight: '700' }}>{row.shrinkagePct}%</Text>
-                          </Chip>
-                        )}
-                      </View>
-                    </View>
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>
-                      Waste {row.wasteUnits} · Comp {row.compUnits} · vs. received {row.receivedUnits}
-                    </Text>
-                  </View>
-                ))}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: spacing.sm }}>
-                  <Text style={{ fontWeight: '700' }}>Total shrinkage cost</Text>
-                  <Text style={{ fontWeight: '700', color: colors.danger }}>{money(shrinkageData.totals.totalShrinkageCents)}</Text>
-                </View>
-              </>
-            )}
-          </Card.Content>
-        </Card>
-      )}
+      {showShrinkage && <ShrinkageCard data={shrinkageData} />}
 
       {/* Purchase order */}
       {showPurchaseOrder && (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Purchase order draft</Text>
-              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowPurchaseOrderCsv((v) => !v)}>
-                  {showPurchaseOrderCsv ? 'Hide CSV' : 'Export CSV'}
-                </Button>
-                <Button compact mode="contained" buttonColor={colors.primary} icon="email-send-outline" loading={busy} onPress={async () => {
-                  setBusy(true); setMessage(null);
-                  try {
-                    const r = await sendPoEmail({});
-                    setMessage(r.sent ? `PO emailed to managers — ${r.itemCount} items.` : r.reason ?? 'Not sent.');
-                  } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not send PO email.'); }
-                  finally { setBusy(false); }
-                }}>
-                  Email PO
-                </Button>
-              </View>
-            </View>
-            {!purchaseOrder ? (
-              <Text style={{ color: colors.muted }}>Loading...</Text>
-            ) : purchaseOrder.itemCount === 0 ? (
-              <Text style={{ color: colors.muted }}>All items are at or above par level.</Text>
-            ) : (
-              <>
-                <Text style={{ color: colors.muted }}>{purchaseOrder.itemCount} items below par across {purchaseOrder.groups.length} supplier{purchaseOrder.groups.length !== 1 ? 's' : ''}</Text>
-                {purchaseOrder.groups.map((group) => (
-                  <View key={group.supplier} style={{ gap: 4 }}>
-                    <Text style={{ fontWeight: '700', color: colors.primary, marginTop: spacing.sm }}>{group.supplier}</Text>
-                    {group.lines.map((line) => (
-                      <View key={line._id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontWeight: '600', fontSize: 13 }}>{line.name}</Text>
-                          <Text style={{ color: colors.muted, fontSize: 11 }}>
-                            {line.sku ? `SKU: ${line.sku} · ` : ''}{line.onHand} on hand / par {line.parLevel}
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={{ fontWeight: '700' }}>× {line.qtyToOrder} {line.unit}</Text>
-                          {line.lineTotalCents !== null && (
-                            <Text style={{ color: colors.muted, fontSize: 11 }}>{money(line.lineTotalCents)}</Text>
-                          )}
-                        </View>
-                      </View>
-                    ))}
-                    {group.groupTotalCents > 0 && (
-                      <Text style={{ color: colors.muted, textAlign: 'right', fontSize: 12 }}>Subtotal: {money(group.groupTotalCents)}</Text>
-                    )}
-                  </View>
-                ))}
-                {purchaseOrder.grandTotalCents > 0 && (
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border }}>
-                    <Text style={{ fontWeight: '700' }}>Est. total</Text>
-                    <Text style={{ fontWeight: '700', color: colors.primary }}>{money(purchaseOrder.grandTotalCents)}</Text>
-                  </View>
-                )}
-                {showPurchaseOrderCsv && (
-                  <Card style={{ backgroundColor: colors.background, borderRadius: 12, marginTop: spacing.sm }}>
-                    <Card.Content>
-                      <Text selectable style={{ fontFamily: 'monospace', fontSize: 11, color: colors.charcoal }}>
-                        {purchaseOrderCsv ?? 'Loading CSV...'}
-                      </Text>
-                    </Card.Content>
-                  </Card>
-                )}
-              </>
-            )}
-          </Card.Content>
-        </Card>
+        <PurchaseOrderCard
+          purchaseOrder={purchaseOrder}
+          csv={purchaseOrderCsv}
+          showCsv={showPurchaseOrderCsv}
+          busy={busy}
+          onToggleCsv={() => setShowPurchaseOrderCsv((v) => !v)}
+          onEmail={async () => {
+            setBusy(true); setMessage(null);
+            try {
+              const r = await sendPoEmail({});
+              setMessage(r.sent ? `PO emailed to managers — ${r.itemCount} items.` : r.reason ?? 'Not sent.');
+            } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not send PO email.'); }
+            finally { setBusy(false); }
+          }}
+        />
       )}
 
       {/* Aging report */}
-      {showAgingReport && (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Inventory aging</Text>
-            {!agingReport ? (
-              <Text style={{ color: colors.muted }}>Loading...</Text>
-            ) : (
-              <>
-                {/* Items not counted in 7+ days */}
-                <Text style={{ fontWeight: '700', color: agingReport.uncountedItems.length > 0 ? colors.warning : colors.muted }}>
-                  {agingReport.uncountedItems.length} item{agingReport.uncountedItems.length !== 1 ? 's' : ''} not counted in 7+ days
-                </Text>
-                {agingReport.uncountedItems.slice(0, 8).map((item) => (
-                  <View key={item._id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                    <Text style={{ fontSize: 13 }}>{item.name}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>
-                      {item.daysSinceCount !== null ? `${item.daysSinceCount}d ago` : 'never counted'}
-                    </Text>
-                  </View>
-                ))}
-                {agingReport.uncountedItems.length > 8 && (
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>+{agingReport.uncountedItems.length - 8} more</Text>
-                )}
-
-                {/* No movement in 30 days */}
-                {agingReport.noActivityItems.length > 0 && (
-                  <>
-                    <Text style={{ fontWeight: '700', color: colors.muted, marginTop: spacing.sm }}>
-                      {agingReport.noActivityItems.length} item{agingReport.noActivityItems.length !== 1 ? 's' : ''} with no movement in 30 days
-                    </Text>
-                    {agingReport.noActivityItems.slice(0, 6).map((item) => (
-                      <Text key={item._id} style={{ color: colors.charcoal, fontSize: 12 }}>
-                        {item.name} — {item.onHand} on hand
-                      </Text>
-                    ))}
-                  </>
-                )}
-
-                {/* Items missing unit cost */}
-                {agingReport.staleCostItems.length > 0 && (
-                  <>
-                    <Text style={{ fontWeight: '700', color: colors.muted, marginTop: spacing.sm }}>
-                      {agingReport.staleCostItems.length} item{agingReport.staleCostItems.length !== 1 ? 's' : ''} missing unit cost
-                    </Text>
-                    {agingReport.staleCostItems.slice(0, 6).map((item) => (
-                      <Text key={item._id} style={{ color: colors.charcoal, fontSize: 12 }}>{item.name}</Text>
-                    ))}
-                  </>
-                )}
-
-                {agingReport.uncountedItems.length === 0 && agingReport.noActivityItems.length === 0 && agingReport.staleCostItems.length === 0 && (
-                  <Text style={{ color: colors.muted }}>All items are up to date.</Text>
-                )}
-              </>
-            )}
-          </Card.Content>
-        </Card>
-      )}
+      {showAgingReport && <AgingCard report={agingReport} />}
 
       {showStockCsv && (
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
@@ -736,35 +479,7 @@ export default function BarStockScreen() {
       )}
 
       {/* Usage velocity */}
-      {velocity && velocity.length > 0 && velocity.some((v) => v.perWeek > 0) && (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Usage velocity</Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>4-week rolling consumption. Items with no recorded usage are hidden.</Text>
-            {velocity
-              .filter((v) => v.perWeek > 0)
-              .sort((a, b) => (a.daysUntilEmpty ?? Infinity) - (b.daysUntilEmpty ?? Infinity))
-              .slice(0, 12)
-              .map((v) => {
-                const urgent = v.daysUntilEmpty !== null && v.daysUntilEmpty <= 7;
-                const warning = v.daysUntilEmpty !== null && v.daysUntilEmpty <= 14;
-                return (
-                  <View key={v._id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: '600', fontSize: 13 }}>{v.name}</Text>
-                      <Text style={{ color: colors.muted, fontSize: 11 }}>{v.perWeek} {v.unit}/wk · {v.usageLast4Weeks} used in 4wk</Text>
-                    </View>
-                    <View style={{ backgroundColor: urgent ? `${colors.danger}22` : warning ? `${colors.warning}22` : `${colors.success}22`, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
-                      <Text style={{ color: urgent ? colors.danger : warning ? colors.warning : colors.success, fontWeight: '700', fontSize: 12 }}>
-                        {v.daysUntilEmpty !== null ? `${v.daysUntilEmpty}d left` : 'N/A'}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-          </Card.Content>
-        </Card>
-      )}
+      <VelocityCard velocity={velocity} />
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
@@ -882,7 +597,7 @@ export default function BarStockScreen() {
                 )}
                 {historyItemId === item._id && venue?.id && (
                   <View style={{ paddingLeft: spacing.sm, paddingTop: spacing.xs }}>
-                    <MovementTimeline itemId={item._id} venueId={venue.id} />
+                    <MovementTimeline itemId={item._id} />
                   </View>
                 )}
                 {costHistoryItemId === item._id && (
