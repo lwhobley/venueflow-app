@@ -247,6 +247,21 @@
       background: rgba(47,125,70,0.14);
       animation: pulse 3.5s ease-in-out infinite;
     }
+    .integrations-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+    .integration-group h3 { margin: 0 0 20px; font-size: 19px; font-weight: 800; color: var(--ink); }
+    .integration-list { display: flex; flex-wrap: wrap; gap: 12px; }
+    .integration-badge {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+      transition: all 160ms ease;
+    }
+    .integration-badge:hover { border-color: var(--green); background: var(--mint); }
     .price-signup { display: grid; grid-template-columns: 0.86fr 1.14fr; gap: 28px; align-items: start; }
     .price {
       background: var(--green);
@@ -334,6 +349,7 @@
       .motion-stage { min-height: 600px; }
       .feature-list { grid-template-columns: repeat(2, 1fr); }
       .flows { grid-template-columns: repeat(2, 1fr); }
+      .integrations-grid { grid-template-columns: 1fr; }
       .price { position: relative; top: auto; }
       .modal-card { grid-template-columns: 1fr; }
       .modal-media { min-height: 320px; }
@@ -383,7 +399,7 @@
       <div class="nav-links">
         <a href="#product">Product</a>
         <a href="#functions">Functions</a>
-        <a href="#screenshots">Screenshots</a>
+        <a href="#integrations">Integrations</a>
         <a href="#pricing">Pricing</a>
         <a href="faq/">FAQ</a>
       </div>
@@ -504,6 +520,41 @@
       </div>
     </section>
 
+    <section class="section" id="integrations">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Connects to your existing tools.</h2>
+          <p class="lead">Venue Wrangler integrates with the payroll and point-of-sale platforms your venue already uses, so data flows automatically instead of living in spreadsheets.</p>
+        </div>
+        <div class="integrations-grid">
+          <div class="integration-group">
+            <h3>Payroll platforms</h3>
+            <div class="integration-list">
+              <span class="integration-badge">Gusto</span>
+              <span class="integration-badge">Rippling</span>
+              <span class="integration-badge">Square Payroll</span>
+              <span class="integration-badge">Deel</span>
+              <span class="integration-badge">Paylocity</span>
+              <span class="integration-badge">ADP</span>
+              <span class="integration-badge">Paychex</span>
+            </div>
+          </div>
+          <div class="integration-group">
+            <h3>Point of sale</h3>
+            <div class="integration-list">
+              <span class="integration-badge">Square</span>
+              <span class="integration-badge">Toast</span>
+              <span class="integration-badge">Clover</span>
+              <span class="integration-badge">Shopify POS</span>
+              <span class="integration-badge">Lightspeed</span>
+              <span class="integration-badge">SpotOn</span>
+              <span class="integration-badge">Lavu</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="section" id="pricing">
       <div class="wrap price-signup">
         <aside class="price">
@@ -546,6 +597,7 @@
     <div class="wrap footer-inner">
       <div><strong>Venue Wrangler</strong><br />© 2026 Loungeability LLC. Built for restaurants, bars, and event venues.</div>
       <div>
+        <a href="#integrations">Integrations</a>
         <a href="support/">Support</a>
         <a href="privacy/">Privacy</a>
         <a href="terms/">Terms</a>
