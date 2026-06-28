@@ -242,6 +242,7 @@ export class AppBillingController {
         Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json',
       },
+      signal: AbortSignal.timeout(10000),
     });
     const json: any = await response.json().catch(() => null);
     if (!response.ok) {

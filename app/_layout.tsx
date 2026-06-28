@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -34,7 +34,18 @@ export default function RootLayout() {
   // squares). On native the icon font is bundled and renders fine, so never
   // gate there — a gate could leave a blank screen if loading misbehaves.
   const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
-  const queryClient = useMemo(() => new QueryClient(), []);
+  const queryClient = useMemo(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds
+            gcTime: 300000, // 5 minutes (standard cacheTime replacement in TanStack v5)
+          },
+        },
+      }),
+    [],
+  );
   const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
   const storeHydrated = useAuthStore((state: AuthState) => state.hydrated);
 
@@ -42,8 +53,10 @@ export default function RootLayout() {
   // a user who just created a workspace lands signed in. Runs after the store
   // rehydrates so persist can't race-overwrite the adopted token. Native skips.
   const [handoffChecked, setHandoffChecked] = useState(Platform.OS !== 'web');
+  const handoffStartedRef = useRef(false);
   useEffect(() => {
-    if (Platform.OS !== 'web' || handoffChecked || !storeHydrated) return;
+    if (Platform.OS !== 'web' || handoffChecked || !storeHydrated || handoffStartedRef.current) return;
+    handoffStartedRef.current = true;
     void consumeWebHandoff().finally(() => setHandoffChecked(true));
   }, [handoffChecked, storeHydrated]);
 

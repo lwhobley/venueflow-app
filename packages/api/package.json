@@ -13,6 +13,7 @@
     "start:prod": "node dist/main.js",
     "release": "prisma migrate deploy",
     "test": "vitest run",
+    "test:integration": "vitest run --config ../../vitest.integration.config.ts",
     "lint": "prisma generate && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
@@ -41,9 +42,11 @@
     "@nestjs/cli": "^11.0.10",
     "@nestjs/schematics": "^11.0.7",
     "@nestjs/testing": "^11.1.6",
+    "@testcontainers/postgresql": "^12.0.3",
     "@types/express": "^5.0.6",
     "@types/node": "^24.10.1",
     "prisma": "^6.19.0",
+    "testcontainers": "^12.0.3",
     "typescript": "~5.9.2"
   }
 }

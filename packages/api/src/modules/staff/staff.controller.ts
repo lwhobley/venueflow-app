@@ -102,20 +102,27 @@ export class StaffController {
       // changed to a non-owner/admin value (i.e. a demotion).
       const isDemoting = isOwnerOrAdminRole(member.role) && !isOwnerOrAdminRole(body.role);
       await this.assertCanManageTarget(scope, member, isDemoting);
-      const updated = await this.prisma.profile.update({
-        where: { id: member.id },
-        data: {
-          email: body.email,
-          fullName: body.fullName,
-          role: body.role as Role,
-          jobTitle: body.jobTitle,
-          venueId: scope.venueId,
-          phone: body.phone ?? member.phone,
-          altPhone: body.altPhone ?? member.altPhone,
-          address: body.address ?? member.address,
-          dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : member.dateOfBirth,
-          certifications: body.certifications ?? member.certifications,
-        },
+      const roleChanged = member.role !== body.role;
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const u = await tx.profile.update({
+          where: { id: member.id },
+          data: {
+            email: body.email,
+            fullName: body.fullName,
+            role: body.role as Role,
+            jobTitle: body.jobTitle,
+            venueId: scope.venueId,
+            phone: body.phone ?? member.phone,
+            altPhone: body.altPhone ?? member.altPhone,
+            address: body.address ?? member.address,
+            dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : member.dateOfBirth,
+            certifications: body.certifications ?? member.certifications,
+          },
+        });
+        if (roleChanged && member.userId) {
+          await tx.session.deleteMany({ where: { userId: member.userId } });
+        }
+        return u;
       });
       void this.email.send({
         to: updated.email,
@@ -189,6 +196,9 @@ export class StaffController {
         where: { id: staff.id },
         data: { venueId: null },
       });
+      if (staff.userId) {
+        await tx.session.deleteMany({ where: { userId: staff.userId } });
+      }
       await syncTeamMemberCount(tx, scope.venueId);
       return u;
     });

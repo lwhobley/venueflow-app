@@ -440,6 +440,7 @@ export class BarInventoryController {
           messages: [{ role: 'user', content: promptContent }],
           response_format: { type: 'json_object' },
         }),
+        signal: AbortSignal.timeout(30000),
       });
       const json: any = await response.json();
       if (!response.ok) {
@@ -510,6 +511,7 @@ export class BarInventoryController {
             },
           },
         }),
+        signal: AbortSignal.timeout(30000),
       });
 
       const json: any = await response.json();

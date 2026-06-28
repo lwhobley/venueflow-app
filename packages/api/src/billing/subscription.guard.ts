@@ -4,6 +4,7 @@ import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
 import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveVenueSubscriptionStatus } from './subscription-status';
+import { SubscriptionStatus } from '@prisma/client';
 
 /**
  * Guards routes behind active or paid subscription checks.
@@ -68,6 +69,25 @@ export class SubscriptionGuard implements CanActivate {
   private async resolveVenueScope(request: VenueScopedRequest) {
     const user = request.user;
     if (!user?.sub) return null;
+
+    if (user.profileId && user.venueId) {
+      const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
+        venueId: user.venueId,
+        venueStatus: (user.venueStatus as SubscriptionStatus) || null,
+        trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt) : null,
+      });
+      request.venueScope = {
+        profileId: user.profileId,
+        fullName: user.name ?? '',
+        venueId: user.venueId,
+        venueName: user.venueName ?? '',
+        role: user.role ?? 'staff',
+        allAccess: Boolean(user.allAccess),
+        subscriptionStatus,
+        trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt) : null,
+      };
+      return request.venueScope;
+    }
 
     const profile = await this.prisma.profile.findFirst({
       where: { userId: user.sub },
