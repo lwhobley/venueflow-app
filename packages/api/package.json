@@ -11,7 +11,7 @@
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
-    "release": "prisma migrate resolve --rolled-back 20260628130546_add_logical_fks && prisma migrate deploy",
+    "release": "prisma migrate deploy",
     "test": "vitest run",
     "test:integration": "vitest run --config ../../vitest.integration.config.ts",
     "lint": "prisma generate && tsc --noEmit",
