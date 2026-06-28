@@ -21,7 +21,17 @@ const num = (v: unknown) => (v == null ? 0 : Number(v));
 const MAX_INGEST_ROWS = 1000;
 const INGEST_RATE_LIMIT_MAX = 120;
 const INGEST_RATE_LIMIT_WINDOW_MS = 60_000;
-const POS_PROVIDERS = ['toast', 'square', 'clover', 'generic'] as const;
+// Source of truth for which POS providers can register a webhook connection.
+// Must stay in sync with the PosProvider enum in prisma/schema.prisma.
+const POS_PROVIDERS = [
+  'toast',
+  'square',
+  'clover',
+  'shopify_pos',
+  'lightspeed_restaurant',
+  'spoton',
+  'generic',
+] as const;
 const POS_CHECK_STATUSES = ['open', 'paid', 'void'] as const;
 
 class SalesWindowQueryDto {
@@ -51,7 +61,7 @@ class TopItemsQueryDto extends SalesWindowQueryDto {
 }
 
 class UpsertPosConnectionDto {
-  @IsIn(['toast', 'square', 'clover', 'generic'])
+  @IsIn([...POS_PROVIDERS])
   provider!: string;
 
   @IsOptional()
