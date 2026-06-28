@@ -325,7 +325,7 @@ model Venue {
   barInventoryMovements         BarInventoryMovement[]
   managerGoals                  ManagerGoal[]
   venueEvents                   VenueEvent[]
-  reservationSettings           ReservationSetting[]
+  reservationSetting            ReservationSetting?
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
   joinRequests                  WorkplaceJoinRequest[]
@@ -1324,15 +1324,13 @@ model VenueEvent {
 
 model ReservationSetting {
   id                   String   @id @default(cuid())
-  venueId              String
+  venueId              String   @unique
   defaultDiningMinutes Int
   defaultTurnMinutes   Int
   bookingWindowDays    Int
   minLeadHours         Int
   updatedAt            DateTime @updatedAt
   venue                Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-
-  @@index([venueId])
 }
 
 model TableStateHistory {
