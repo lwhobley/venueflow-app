@@ -346,44 +346,44 @@ const mutationRoutes: Record<string, Route> = {
   },
 };
 
-export function useQuery(ref: RailwayFunctionRef, args?: QueryArgs): any {
+export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T {
   const key = getKey(ref);
   const route = queryRoutes[key];
   const enabled = args !== 'skip';
   const query = useReactQuery({
     queryKey: [key, args],
     enabled,
-    queryFn: () => (route ? requestRoute(route, args) : Promise.resolve(defaultQueryResult(key))),
+    queryFn: () => (route ? requestRoute<T>(route, args) : Promise.resolve(defaultQueryResult(key) as T)),
   });
-  return query.data;
+  return query.data as T;
 }
 
-export function useMutation(ref: RailwayFunctionRef): any {
+export function useMutation<TArgs = any, TResult = any>(
+  ref: RailwayFunctionRef,
+): (args: TArgs) => Promise<TResult> {
   const key = getKey(ref);
   const route = mutationRoutes[key];
   const queryClient = useQueryClient();
   const mutation = useReactMutation({
-    mutationFn: async (args: any) => {
+    mutationFn: async (args: TArgs) => {
       if (!route) {
         throw new Error('This feature is still being moved to the Railway API.');
       }
-      return requestRoute(route, args);
+      return requestRoute<TResult>(route, args);
     },
     onSuccess: async () => {
       const invalidations = route?.invalidate ?? [[key]];
       await Promise.all(invalidations.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
     },
   });
-  // Return a STABLE callback. react-query's mutateAsync is referentially stable
-  // across renders, so this identity never changes — which makes it safe to use
-  // in useEffect dependency arrays. (A fresh function each render caused an
-  // infinite effect loop on the Chat tab's ensureChatSetup call.)
   const mutateAsync = mutation.mutateAsync;
-  return useCallback((args: any) => mutateAsync(args), [mutateAsync]);
+  return useCallback((args: TArgs) => mutateAsync(args), [mutateAsync]);
 }
 
-export function useAction(ref: RailwayFunctionRef): any {
-  return useMutation(ref);
+export function useAction<TArgs = any, TResult = any>(
+  ref: RailwayFunctionRef,
+): (args: TArgs) => Promise<TResult> {
+  return useMutation<TArgs, TResult>(ref);
 }
 
 export function useAuthActions() {

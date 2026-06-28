@@ -32,8 +32,20 @@ export default function RootLayout() {
   // squares). On native the icon font is bundled and renders fine, so never
   // gate there — a gate could leave a blank screen if loading misbehaves.
   const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
-  const queryClient = useMemo(() => new QueryClient(), []);
+  const queryClient = useMemo(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds
+            gcTime: 300000, // 5 minutes (standard cacheTime replacement in TanStack v5)
+          },
+        },
+      }),
+    [],
+  );
   const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
+
 
   // Initialize in-app purchases (RevenueCat) keyed to the venue so a purchase
   // ties to the tenant. No-op on web and when no key is configured.

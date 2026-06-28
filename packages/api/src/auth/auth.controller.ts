@@ -138,7 +138,9 @@ export class AuthController {
             where: { userId: user.id },
             data: { salt: upgraded.salt, passwordHash: upgraded.hash, iterations: PASSWORD_ITERATIONS },
           });
-        } catch {}
+        } catch (err: any) {
+          this.logger.warn(`Failed to upgrade password hash strength for user ${user.id}: ${err?.message ?? String(err)}`);
+        }
       }
       return this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
     }
@@ -474,6 +476,13 @@ export class AuthController {
       email,
       name: profile.fullName,
       sid: session.id,
+      profileId: profile.id,
+      venueId: profile.venueId,
+      venueName: profile.venue?.name ?? null,
+      role: profile.role,
+      allAccess: profile.allAccess,
+      trialEndsAt: profile.trialEndsAt?.toISOString() ?? null,
+      venueStatus: profile.venue?.subscriptionStatus ?? null,
     });
     await this.prisma.session.update({
       where: { id: session.id },
@@ -523,17 +532,6 @@ export class AuthController {
   }
 }
 
-async function hashPassword(password: string) {
-  const salt = randomBytes(16).toString('hex');
-  const derivedKey = await pbkdf2Async(password, salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST);
-  return { salt, hash: derivedKey.toString('hex') };
-}
-
-async function verifyPassword(password: string, salt: string, expectedHash: string, iterations: number) {
-  const actual = await pbkdf2Async(password, salt, iterations, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST);
-  const expected = Buffer.from(expectedHash, 'hex');
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
 
 function mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number }) {
   return {
@@ -586,10 +584,3 @@ function mapProfile(profile: {
   };
 }
 
-function makeOneTimeCode() {
-  return String(randomInt(100000, 1000000));
-}
-
-function hashOneTimeCode(code: string) {
-  return createHash('sha256').update(code.trim()).digest('hex');
-}

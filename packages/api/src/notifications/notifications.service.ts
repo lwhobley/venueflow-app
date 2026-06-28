@@ -85,6 +85,7 @@ export class NotificationsService {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(chunk),
+          signal: AbortSignal.timeout(10000),
         });
         if (!res.ok) {
           this.logger.warn(`Expo push failed (${res.status}) for ${chunk.length} tokens`);
