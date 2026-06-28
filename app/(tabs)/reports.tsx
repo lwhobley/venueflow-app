@@ -57,7 +57,6 @@ export default function ReportsScreen() {
 
   const insights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip') as Insight | null | undefined;
   const laborForecast = useQuery(api.scheduling.getLaborForecast, isReady && canManage ? {} : 'skip') as any;
-  const managerSchedule = useQuery(api.scheduling.getManagerSchedule, isReady && canManage ? {} : 'skip') as any;
   const timeCsv = useQuery(api.app.exportTimeEntriesCsv, isReady && canManage && showTimeCsv ? {} : 'skip') as string | null | undefined;
   const reservationCsv = useQuery(api.reservations.exportReservationsCsv, isReady && canManage && showReservationCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
   const payroll = useQuery(api.payroll.getPayrollSummary, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
@@ -143,7 +142,7 @@ export default function ReportsScreen() {
       {laborForecast ? (() => {
         const scheduled = laborForecast.totals?.scheduledHours ?? 0;
         const suggested = laborForecast.totals?.suggestedHours ?? 0;
-        const budgetHours = managerSchedule?.laborBudgetHours ?? null;
+        const budgetHours = laborForecast.laborBudgetHours ?? null;
         const otRisk = (laborForecast.otRisk ?? []) as Array<{ name: string; scheduledHours: number; overLimit: boolean }>;
         const alerts = (laborForecast.alerts ?? []) as Array<{ kind: string; severity: string; message: string }>;
         const understaffedDays = alerts.filter((a) => a.kind === 'understaffed').length;

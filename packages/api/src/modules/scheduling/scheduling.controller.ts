@@ -41,7 +41,7 @@ import {
   weekStartFor,
 } from '../../common/pay-period';
 import { withSerializableRetry } from '../../common/tx-retry';
-import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
+import { buildLaborForecast } from './labor-forecast';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -52,13 +52,6 @@ type Scope = VenueScopedRequest['venueScope'];
 
 const SHIFT_STATUSES = ['scheduled', 'open', 'covered'];
 const SWAP_STATUSES = ['proposed', 'accepted', 'declined', 'approved', 'denied', 'cancelled'];
-
-const DAYPARTS = [
-  { key: 'am', label: 'AM', startMin: 360, endMin: 660 },
-  { key: 'lunch', label: 'Lunch', startMin: 660, endMin: 840 },
-  { key: 'dinner', label: 'Dinner', startMin: 1020, endMin: 1320 },
-  { key: 'late', label: 'Late', startMin: 1320, endMin: 1560 },
-] as const;
 
 class AvailabilityBlockDto {
   @IsInt()
@@ -549,7 +542,7 @@ export class SchedulingController {
     this.requireManager(scope);
     const venue = await this.prisma.venue.findUnique({
       where: { id: scope!.venueId },
-      select: { timezone: true },
+      select: { timezone: true, weeklyLaborBudgetHours: true },
     });
     const tz = venue?.timezone ?? null;
     const now = new Date();
@@ -579,168 +572,18 @@ export class SchedulingController {
       }),
     ]);
 
-    const nameById = new Map(profiles.map((p) => [p.id, p.fullName]));
-
-    // ── Per-day aggregates ────────────────────────────────────────────────────
-    const scheduledByDay = new Map<number, { minutes: number; people: Set<string> }>();
-    const weeklyMinutes = new Map<string, number>();
-    // daypart people: dayIndex → daypartKey → Set<profileId>
-    const daypartStaff = new Map<number, Map<string, Set<string>>>();
-
-    for (const shift of shifts) {
-      const row = scheduledByDay.get(shift.dayIndex) ?? { minutes: 0, people: new Set<string>() };
-      row.minutes += Math.max(0, shift.endMinutes - shift.startMinutes);
-      if (shift.profileId) {
-        row.people.add(shift.profileId);
-        weeklyMinutes.set(shift.profileId, (weeklyMinutes.get(shift.profileId) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes));
-      }
-      scheduledByDay.set(shift.dayIndex, row);
-
-      const dpMap = daypartStaff.get(shift.dayIndex) ?? new Map<string, Set<string>>();
-      for (const dp of DAYPARTS) {
-        if (shift.startMinutes < dp.endMin && shift.endMinutes > dp.startMin) {
-          const s = dpMap.get(dp.key) ?? new Set<string>();
-          if (shift.profileId) s.add(shift.profileId);
-          dpMap.set(dp.key, s);
-        }
-      }
-      daypartStaff.set(shift.dayIndex, dpMap);
-    }
-
-    const demandByDay = new Map<number, { covers: number; privateEvents: number }>();
-    // daypart covers: dayIndex → daypartKey → cover count
-    const daypartCovers = new Map<number, Map<string, number>>();
-
-    for (const reservation of reservations) {
-      const ts = reservation.reservationTime.getTime();
-      const dayIndex = zonedDayOfWeek(tz, ts);
-      const row = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
-      row.covers += reservation.partySize;
-      if (reservation.isPrivateEvent) row.privateEvents += 1;
-      demandByDay.set(dayIndex, row);
-
-      const mod = zonedMinutesOfDay(tz, ts);
-      const dpMap = daypartCovers.get(dayIndex) ?? new Map<string, number>();
-      for (const dp of DAYPARTS) {
-        if (mod >= dp.startMin && mod < dp.endMin) {
-          dpMap.set(dp.key, (dpMap.get(dp.key) ?? 0) + reservation.partySize);
-          break;
-        }
-      }
-      daypartCovers.set(dayIndex, dpMap);
-    }
-    for (const event of venueEvents) {
-      const ts = event.startsAt.getTime();
-      const dayIndex = zonedDayOfWeek(tz, ts);
-      const row = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
-      row.covers += event.expectedGuests ?? 0;
-      row.privateEvents += 1;
-      demandByDay.set(dayIndex, row);
-
-      const mod = zonedMinutesOfDay(tz, ts);
-      const dpMap = daypartCovers.get(dayIndex) ?? new Map<string, number>();
-      for (const dp of DAYPARTS) {
-        if (mod >= dp.startMin && mod < dp.endMin) {
-          dpMap.set(dp.key, (dpMap.get(dp.key) ?? 0) + (event.expectedGuests ?? 0));
-          break;
-        }
-      }
-      daypartCovers.set(dayIndex, dpMap);
-    }
-
-    // ── OT risk ───────────────────────────────────────────────────────────────
-    const otRisk = Array.from(weeklyMinutes.entries())
-      .filter(([, mins]) => mins >= 32 * 60)
-      .map(([profileId, mins]) => ({
-        name: nameById.get(profileId) ?? 'Staff member',
-        scheduledHours: Math.round((mins / 60) * 10) / 10,
-        overLimit: mins > 40 * 60,
-      }))
-      .sort((a, b) => b.scheduledHours - a.scheduledHours);
-
-    // ── Days ─────────────────────────────────────────────────────────────────
-    const days = Array.from({ length: 7 }, (_, offset) => {
-      const date = new Date(now);
-      date.setDate(now.getDate() + offset);
-      const dayIndex = zonedDayOfWeek(tz, date.getTime());
-      const scheduled = scheduledByDay.get(dayIndex);
-      const demand = demandByDay.get(dayIndex) ?? { covers: 0, privateEvents: 0 };
-      const scheduledHours = Math.round(((scheduled?.minutes ?? 0) / 60) * 10) / 10;
-      const suggestedHours = Math.max(0, Math.round((demand.covers / 8 + demand.privateEvents * 6) * 10) / 10);
-      const gapHours = Math.round((suggestedHours - scheduledHours) * 10) / 10;
-
-      const dpCoverMap = daypartCovers.get(dayIndex) ?? new Map<string, number>();
-      const dpStaffMap = daypartStaff.get(dayIndex) ?? new Map<string, Set<string>>();
-      const dayparts = DAYPARTS
-        .map((dp) => ({
-          key: dp.key,
-          label: dp.label,
-          covers: dpCoverMap.get(dp.key) ?? 0,
-          scheduledPeople: dpStaffMap.get(dp.key)?.size ?? 0,
-        }))
-        .filter((dp) => dp.covers > 0 || dp.scheduledPeople > 0);
-
-      return {
-        dayIndex,
-        dayLabel: dayLabel(dayIndex),
-        covers: demand.covers,
-        privateEvents: demand.privateEvents,
-        scheduledPeople: scheduled?.people.size ?? 0,
-        scheduledHours,
-        suggestedHours,
-        gapHours,
-        status: gapHours > 4 ? 'under' : gapHours < -6 ? 'over' : 'balanced',
-        dayparts,
-      };
+    const forecast = buildLaborForecast({
+      tz,
+      now,
+      shifts: shifts.map((s) => ({ dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, profileId: s.profileId })),
+      reservations: reservations.map((r) => ({ ts: r.reservationTime.getTime(), partySize: r.partySize, isPrivateEvent: Boolean(r.isPrivateEvent) })),
+      events: venueEvents.map((e) => ({ ts: e.startsAt.getTime(), expectedGuests: e.expectedGuests })),
+      nameById: new Map(profiles.map((p) => [p.id, p.fullName])),
     });
 
-    // ── Alerts ────────────────────────────────────────────────────────────────
-    const alerts: Array<{ kind: string; severity: 'warning' | 'critical'; message: string; dayLabel?: string }> = [];
-    for (const day of days) {
-      if (day.status === 'under') {
-        const extra = Math.ceil(day.gapHours / 6);
-        alerts.push({
-          kind: 'understaffed',
-          severity: day.gapHours > 8 ? 'critical' : 'warning',
-          message: `${day.dayLabel}: ${day.gapHours}h understaffed — add ${extra} staff member${extra === 1 ? '' : 's'}`,
-          dayLabel: day.dayLabel,
-        });
-      } else if (day.status === 'over') {
-        const early = Math.floor(Math.abs(day.gapHours) / 6);
-        if (early > 0) {
-          alerts.push({
-            kind: 'overstaffed',
-            severity: 'warning',
-            message: `${day.dayLabel}: ${Math.abs(day.gapHours)}h overstaffed — consider releasing ${early} staff early`,
-            dayLabel: day.dayLabel,
-          });
-        }
-      }
-    }
-    for (const risk of otRisk) {
-      alerts.push({
-        kind: risk.overLimit ? 'ot_violation' : 'ot_risk',
-        severity: risk.overLimit ? 'critical' : 'warning',
-        message: risk.overLimit
-          ? `${risk.name} is over 40h (${risk.scheduledHours}h scheduled)`
-          : `${risk.name} approaching OT (${risk.scheduledHours}h scheduled)`,
-      });
-    }
-
-    const totalCovers = days.reduce((sum, day) => sum + day.covers, 0);
-    const totalScheduledHours = Math.round(days.reduce((sum, day) => sum + day.scheduledHours, 0) * 10) / 10;
-    const totalSuggestedHours = Math.round(days.reduce((sum, day) => sum + day.suggestedHours, 0) * 10) / 10;
-    return {
-      days,
-      totals: {
-        covers: totalCovers,
-        scheduledHours: totalScheduledHours,
-        suggestedHours: totalSuggestedHours,
-        gapHours: Math.round((totalSuggestedHours - totalScheduledHours) * 10) / 10,
-      },
-      alerts,
-      otRisk,
-    };
+    // Surface the venue's weekly labor budget here so callers (e.g. the Reports
+    // efficiency card) don't have to fetch the full manager schedule for it.
+    return { ...forecast, laborBudgetHours: venue?.weeklyLaborBudgetHours ?? null };
   }
 
   @RequireSubscription()
@@ -1241,14 +1084,22 @@ export class SchedulingController {
   @Post('restore-shifts')
   async restoreShifts(@VenueScope() scope: Scope, @Body() body: RestoreShiftsDto) {
     this.requireManager(scope);
+    // Validate all referenced members in one query instead of one per shift.
+    const referencedIds = Array.from(
+      new Set(body.shifts.map((shift) => shift.profileId).filter((id): id is string => Boolean(id))),
+    );
+    const members = referencedIds.length
+      ? await this.prisma.profile.findMany({
+          where: { id: { in: referencedIds }, venueId: scope!.venueId },
+          select: { id: true },
+        })
+      : [];
+    const memberIds = new Set(members.map((m) => m.id));
     const creates = [];
     for (const shift of body.shifts) {
       ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
-      let profileId = shift.profileId;
-      if (profileId) {
-        const member = await this.prisma.profile.findFirst({ where: { id: profileId, venueId: scope!.venueId } });
-        if (!member) profileId = undefined;
-      }
+      // Drop assignment to anyone who isn't a current member of this venue.
+      const profileId = shift.profileId && memberIds.has(shift.profileId) ? shift.profileId : undefined;
       creates.push(this.prisma.scheduleShift.create({
         data: {
           venueId: scope!.venueId,
