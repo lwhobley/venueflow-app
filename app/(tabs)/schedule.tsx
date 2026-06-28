@@ -7,6 +7,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
+import { useDesktopContentStyle } from '../../lib/responsive';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
@@ -14,6 +15,7 @@ import { ManagerCalendar } from '../../components/schedule/ManagerCalendar';
 import { MyShifts } from '../../components/schedule/MyShifts';
 import { AvailabilityEditor } from '../../components/schedule/AvailabilityEditor';
 import { BlackoutManager } from '../../components/schedule/BlackoutManager';
+import { LaborForecastPanel } from '../../components/schedule/LaborForecastPanel';
 
 type StaffRequest = {
   _id: string;
@@ -103,13 +105,14 @@ function ScheduleScreen() {
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
-  const [managerTab, setManagerTab] = useState<'calendar' | 'requests' | 'blackouts'>('calendar');
+  const [managerTab, setManagerTab] = useState<'calendar' | 'forecast' | 'requests' | 'blackouts'>('calendar');
   const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');
+  const contentContainerStyle = useDesktopContentStyle({ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl });
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+      contentContainerStyle={contentContainerStyle}
       showsVerticalScrollIndicator={false}
     >
       <View style={{ gap: 4 }}>
@@ -131,9 +134,10 @@ function ScheduleScreen() {
         <>
           <SegmentedButtons
             value={managerTab}
-            onValueChange={(v) => setManagerTab(v as 'calendar' | 'requests' | 'blackouts')}
+            onValueChange={(v) => setManagerTab(v as 'calendar' | 'forecast' | 'requests' | 'blackouts')}
             buttons={[
               { value: 'calendar', label: 'Calendar' },
+              { value: 'forecast', label: 'Forecast' },
               { value: 'requests', label: 'Requests' },
               { value: 'blackouts', label: 'Blackouts' },
             ]}
@@ -141,6 +145,8 @@ function ScheduleScreen() {
           <AnimatedTab tabKey={managerTab}>
             {managerTab === 'calendar' ? (
               <ManagerCalendar venueId={venue.id} />
+            ) : managerTab === 'forecast' ? (
+              <LaborForecastPanel />
             ) : managerTab === 'requests' ? (
               <RequestQueue venueId={venue.id} />
             ) : (
