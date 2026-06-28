@@ -11,7 +11,7 @@ export class HealthController {
   root() {
     return {
       message: 'Venue Wrangler API is running',
-      health: '/api/health',
+      health: '/health',
     };
   }
 
