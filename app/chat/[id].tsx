@@ -1,18 +1,49 @@
-import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View, Image } from 'react-native';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Button, HelperText, IconButton, Text, TextInput, Dialog, Portal, Card } from 'react-native-paper';
+import { Button, Dialog, HelperText, IconButton, Portal, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { resolveMediaUrl } from '../../lib/api-client';
 import type { Id } from '../../lib/ids';
-import { colors, spacing, accents } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+
+type ChatMessage = {
+  _id: string;
+  id: string;
+  text: string;
+  senderName: string;
+  createdAt: number;
+  mine: boolean;
+  shiftId?: string | null;
+  swapId?: string | null;
+  imageUrl?: string | null;
+  reactions?: Record<string, string[]>;
+};
+
+type RenderItem =
+  | { kind: 'day'; id: string; label: string }
+  | { kind: 'message'; id: string; message: ChatMessage; showSender: boolean; compact: boolean };
 
 function fmtTime(at: number) {
   return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+function fmtDay(at: number) {
+  const date = new Date(at);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function isSameDay(a: number, b: number) {
+  return new Date(a).toDateString() === new Date(b).toDateString();
 }
 
 function isValidId(id: string): id is Id<'conversations'> {
@@ -39,12 +70,118 @@ function parseSwapCard(text: string) {
   };
 }
 
+function groupMessages(messages: ChatMessage[]): RenderItem[] {
+  const items: RenderItem[] = [];
+  messages.forEach((message, index) => {
+    const previous = messages[index - 1];
+    if (!previous || !isSameDay(previous.createdAt, message.createdAt)) {
+      items.push({ kind: 'day', id: `day-${message.createdAt}`, label: fmtDay(message.createdAt) });
+    }
+    const sameSender = previous?.senderName === message.senderName && previous?.mine === message.mine;
+    const closeInTime = previous ? message.createdAt - previous.createdAt < 5 * 60 * 1000 : false;
+    items.push({
+      kind: 'message',
+      id: message.id,
+      message,
+      showSender: !message.mine && !(sameSender && closeInTime),
+      compact: Boolean(sameSender && closeInTime),
+    });
+  });
+  return items;
+}
+
+const ReactionPill = memo(function ReactionPill({
+  emoji,
+  count,
+  active,
+  onPress,
+}: {
+  emoji: string;
+  count: number;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: active ? colors.cream : colors.surface,
+        borderWidth: 1,
+        borderColor: active ? colors.primary : colors.border,
+        borderRadius: radius.pill,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 2,
+        gap: 3,
+      }}
+    >
+      <Text style={{ fontSize: 12, color: active ? colors.primary : colors.charcoal, fontWeight: '800' }}>{emoji}</Text>
+      <Text style={{ fontSize: 11, color: active ? colors.primary : colors.muted, fontWeight: '800' }}>{count}</Text>
+    </Pressable>
+  );
+});
+
+function ActionCard({
+  title,
+  subtitle,
+  tone,
+  primaryLabel,
+  secondaryLabel,
+  onPrimary,
+  onSecondary,
+}: {
+  title: string;
+  subtitle: string;
+  tone: 'shift' | 'swap';
+  primaryLabel: string;
+  secondaryLabel?: string;
+  onPrimary: () => void;
+  onSecondary?: () => void;
+}) {
+  const accent = tone === 'shift' ? accents[2] : accents[0];
+  return (
+    <View
+      style={{
+        width: 260,
+        maxWidth: '100%',
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: radius.md,
+        padding: spacing.md,
+        gap: spacing.sm,
+      }}
+    >
+      <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
+        <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: accent.bg, alignItems: 'center', justifyContent: 'center' }}>
+          <MaterialCommunityIcons name={tone === 'shift' ? 'calendar-clock' : 'swap-horizontal'} size={18} color={accent.fg} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: colors.charcoal, fontWeight: '900' }} numberOfLines={1}>{title}</Text>
+          <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={2}>{subtitle}</Text>
+        </View>
+      </View>
+      <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+        <Button mode="contained" compact buttonColor={colors.primary} style={{ flex: 1 }} onPress={onPrimary}>
+          {primaryLabel}
+        </Button>
+        {secondaryLabel && onSecondary ? (
+          <Button mode="outlined" compact textColor={colors.danger} style={{ flex: 1 }} onPress={onSecondary}>
+            {secondaryLabel}
+          </Button>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 export default function ConversationScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const { isReady } = useAuthenticatedSession();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
   const conversationId: Id<'conversations'> | null = rawId && isValidId(rawId) ? rawId as Id<'conversations'> : null;
-  
+
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const data = useQuery(api.chat.getMessages, isReady && conversationId ? { conversationId } : 'skip');
   const myScheduleData = useQuery(api.scheduling.getMySchedule, isReady ? {} : 'skip');
@@ -58,54 +195,70 @@ export default function ConversationScreen() {
   const respondToShiftSwap = useMutation(api.scheduling.respondToShiftSwap);
 
   const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  
-  // Dialog States
   const [reactMsgId, setReactMsgId] = useState<string | null>(null);
   const [showShareDialog, setShowShareDialog] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
-  const messagesRef = useRef<any[]>([]);
-  const messages = (data?.messages ?? []) as any[];
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const messages = (data?.messages ?? []) as ChatMessage[];
   messagesRef.current = messages;
-  const readReceipts = (data?.readReceipts ?? []) as any[];
-
+  const readReceipts = (data?.readReceipts ?? []) as Array<{ name: string; readAt: number }>;
   const mineShifts = myScheduleData?.mine ?? [];
   const openShifts = myScheduleData?.open ?? [];
+  const renderItems = useMemo(() => groupMessages(messages), [messages]);
 
   useEffect(() => {
-    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 70);
+    return () => clearTimeout(timer);
   }, [messages.length]);
 
-  // Auto-dismiss the toast 3s after it's set. Runs once per toast value rather
-  // than spawning a new timer on every render.
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setToast(null), 2800);
+    return () => clearTimeout(timer);
   }, [toast]);
 
   const onSend = async () => {
-    const t = text.trim();
-    if (!t || !conversationId) return;
+    const trimmed = text.trim();
+    if (!trimmed || !conversationId || sending) return;
     setText('');
-    await sendMessage({ conversationId, text: t });
+    setSending(true);
+    setError(null);
+    try {
+      await sendMessage({ conversationId, text: trimmed });
+    } catch (e) {
+      setText(trimmed);
+      setError(e instanceof Error ? e.message : 'Could not send message.');
+    } finally {
+      setSending(false);
+    }
   };
 
   const onReact = async (messageId: string, emoji: string) => {
-    await toggleReaction({ messageId, emoji });
+    setError(null);
+    try {
+      await toggleReaction({ messageId, emoji });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not add reaction.');
+    }
   };
 
   const onUpdateChecklist = async (messageId: string, newText: string) => {
-    await editMessage({ messageId, text: newText });
+    setError(null);
+    try {
+      await editMessage({ messageId, text: newText });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update checklist.');
+    }
   };
 
   const onClaimShift = async (shiftId: string) => {
     try {
       await claimOpenShift({ shiftId });
-      setToast('Shift claimed successfully!');
+      setToast('Shift claimed');
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Claim failed.');
     }
@@ -114,7 +267,7 @@ export default function ConversationScreen() {
   const onRespondSwap = async (swapId: string, accept: boolean) => {
     try {
       await respondToShiftSwap({ swapId, accept });
-      setToast(accept ? 'Swap accepted!' : 'Swap declined.');
+      setToast(accept ? 'Swap accepted' : 'Swap declined');
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Action failed.');
     }
@@ -127,11 +280,11 @@ export default function ConversationScreen() {
       quality: 0.5,
       base64: true,
     });
-
     const asset = result.canceled ? null : result.assets[0];
     if (!asset?.base64 || !conversationId) return;
 
     setError(null);
+    setSending(true);
     try {
       const { imageUrl } = await uploadImage({
         dataBase64: asset.base64,
@@ -140,14 +293,21 @@ export default function ConversationScreen() {
       await sendMessage({ conversationId, text: 'Shared a photo', imageUrl });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not upload photo.');
+    } finally {
+      setSending(false);
     }
   };
 
-  const shareShift = async (shift: any, isOpen: boolean) => {
+  const shareShift = async (shift: any) => {
     if (!conversationId) return;
     const formatted = `[Shift: ${shift.jobTitle} | ${shift.dayLabel} | ${shift.startTime} - ${shift.endTime} | ${shift._id}]`;
-    await sendMessage({ conversationId, text: formatted });
-    setShowShareDialog(false);
+    setError(null);
+    try {
+      await sendMessage({ conversationId, text: formatted });
+      setShowShareDialog(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not share shift.');
+    }
   };
 
   const onDeleteChat = async () => {
@@ -164,26 +324,24 @@ export default function ConversationScreen() {
   const renderChecklist = (messageId: string, msgText: string, mine: boolean) => {
     const lines = msgText.split('\n');
     return (
-      <View style={{ gap: 4, marginTop: 4 }}>
-        {lines.map((line, idx) => {
+      <View style={{ gap: spacing.xs }}>
+        {lines.map((line, index) => {
           const isUnchecked = line.startsWith('[ ]');
           const isChecked = line.startsWith('[x]');
           if (!isUnchecked && !isChecked) {
-            return <Text key={idx} style={{ color: mine ? '#fff' : colors.charcoal }}>{line}</Text>;
+            return <Text key={`${messageId}-${index}`} style={{ color: mine ? '#fff' : colors.charcoal }}>{line}</Text>;
           }
           const label = line.slice(3).trim();
           return (
             <Pressable
-              key={idx}
+              key={`${messageId}-${index}`}
               onPress={() => {
-                // Read the latest message text from the ref to avoid a stale
-                // closure when two items are tapped in quick succession.
-                const current = messagesRef.current.find((msg: any) => (msg.id ?? msg._id) === messageId);
+                const current = messagesRef.current.find((msg) => msg.id === messageId || msg._id === messageId);
                 const currentLines = (current?.text ?? msgText).split('\n');
-                currentLines[idx] = currentLines[idx]?.startsWith('[ ]') ? `[x] ${label}` : `[ ] ${label}`;
+                currentLines[index] = currentLines[index]?.startsWith('[ ]') ? `[x] ${label}` : `[ ] ${label}`;
                 void onUpdateChecklist(messageId, currentLines.join('\n'));
               }}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: 2 }}
             >
               <MaterialCommunityIcons
                 name={isChecked ? 'checkbox-marked-outline' : 'checkbox-blank-outline'}
@@ -200,200 +358,219 @@ export default function ConversationScreen() {
     );
   };
 
-  const renderReactions = (m: any) => {
-    const rx = m.reactions || {};
-    const emojis = Object.keys(rx);
-    if (emojis.length === 0) return null;
+  const renderReactions = (message: ChatMessage) => {
+    const reactions = message.reactions || {};
+    const emojis = Object.keys(reactions);
+    if (!emojis.length) return null;
     return (
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4, alignSelf: m.mine ? 'flex-end' : 'flex-start' }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: 4, alignSelf: message.mine ? 'flex-end' : 'flex-start' }}>
         {emojis.map((emoji) => {
-          const uids = rx[emoji] || [];
-          const count = uids.length;
-          if (count === 0) return null;
-          const didIReact = uids.includes(me?.profile?.id);
+          const users = reactions[emoji] || [];
+          if (!users.length) return null;
           return (
-            <Pressable
+            <ReactionPill
               key={emoji}
-              onPress={() => void onReact(m.id, emoji)}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: didIReact ? '#E1FBF3' : colors.surface,
-                borderWidth: 1,
-                borderColor: didIReact ? colors.success : colors.border,
-                borderRadius: 12,
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                gap: 2,
-              }}
-            >
-              <Text style={{ fontSize: 12 }}>{emoji}</Text>
-              <Text style={{ fontSize: 10, color: didIReact ? colors.success : colors.muted, fontWeight: '700' }}>{count}</Text>
-            </Pressable>
+              emoji={emoji}
+              count={users.length}
+              active={users.includes(me?.profile?.id)}
+              onPress={() => void onReact(message.id, emoji)}
+            />
           );
         })}
       </View>
     );
   };
 
+  const renderMessage = (item: Extract<RenderItem, { kind: 'message' }>) => {
+    const message = item.message;
+    const shift = parseShiftCard(message.text);
+    const swap = parseSwapCard(message.text);
+    const hasChecklist = message.text.includes('[ ]') || message.text.includes('[x]');
+    const bubbleColor = message.mine ? colors.primary : colors.surface;
+    const textColor = message.mine ? '#fff' : colors.charcoal;
+
+    return (
+      <View
+        key={item.id}
+        style={{
+          alignSelf: message.mine ? 'flex-end' : 'flex-start',
+          maxWidth: '84%',
+          marginTop: item.compact ? 2 : spacing.sm,
+        }}
+      >
+        {item.showSender ? <Text style={{ color: colors.muted, fontSize: 11, marginLeft: spacing.sm, marginBottom: 2 }}>{message.senderName}</Text> : null}
+        <Pressable onLongPress={() => setReactMsgId(message.id)}>
+          <View
+            style={{
+              backgroundColor: bubbleColor,
+              borderRadius: radius.lg,
+              borderBottomRightRadius: message.mine ? radius.sm : radius.lg,
+              borderBottomLeftRadius: message.mine ? radius.lg : radius.sm,
+              paddingVertical: spacing.sm,
+              paddingHorizontal: spacing.md,
+              borderWidth: message.mine ? 0 : 1,
+              borderColor: colors.border,
+              gap: spacing.xs,
+            }}
+          >
+            {message.imageUrl ? (
+              <Image source={{ uri: resolveMediaUrl(message.imageUrl) }} style={{ width: 230, height: 160, borderRadius: radius.md }} resizeMode="cover" />
+            ) : null}
+
+            {shift ? (
+              <ActionCard
+                title={shift.jobTitle}
+                subtitle={`${shift.dayLabel} - ${shift.timeRange}`}
+                tone="shift"
+                primaryLabel="Claim"
+                onPrimary={() => void onClaimShift(shift.shiftId)}
+              />
+            ) : swap ? (
+              <ActionCard
+                title="Shift swap"
+                subtitle={swap.description}
+                tone="swap"
+                primaryLabel="Accept"
+                secondaryLabel="Deny"
+                onPrimary={() => void onRespondSwap(swap.swapId, true)}
+                onSecondary={() => void onRespondSwap(swap.swapId, false)}
+              />
+            ) : hasChecklist ? (
+              renderChecklist(message.id, message.text, message.mine)
+            ) : (
+              <Text style={{ color: textColor, fontSize: 15, lineHeight: 20 }}>{message.text}</Text>
+            )}
+
+            <Text style={{ color: message.mine ? 'rgba(255,255,255,0.72)' : colors.muted, fontSize: 10, alignSelf: 'flex-end' }}>
+              {fmtTime(message.createdAt)}
+            </Text>
+          </View>
+        </Pressable>
+        {renderReactions(message)}
+      </View>
+    );
+  };
+
+  const latestReadNames = readReceipts
+    .slice(0, 3)
+    .map((receipt) => receipt.name.split(' ')[0])
+    .join(', ');
+
   return (
     <Portal.Host>
       <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.primary, paddingTop: 8, paddingBottom: 12, paddingHorizontal: 4 }}>
-          <IconButton icon="arrow-left" iconColor="#fff" onPress={() => router.back()} />
-          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', flex: 1 }}>{data?.title ?? 'Chat'}</Text>
-          <IconButton icon="delete-outline" iconColor="#fff" onPress={() => void onDeleteChat()} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.divider, backgroundColor: colors.surface }}>
+          <IconButton icon="arrow-left" iconColor={colors.charcoal} onPress={() => router.back()} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ color: colors.charcoal, fontSize: 18, fontWeight: '900' }} numberOfLines={1}>{data?.title ?? 'Chat'}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Team conversation</Text>
+          </View>
+          <IconButton icon="delete-outline" iconColor={colors.danger} onPress={() => void onDeleteChat()} />
         </View>
+
         {error ? <HelperText type="error" visible>{error}</HelperText> : null}
 
-        <ScrollView ref={scrollRef} contentContainerStyle={{ padding: spacing.md, gap: 12 }}>
+        <ScrollView
+          ref={scrollRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xl }}
+          showsVerticalScrollIndicator={false}
+        >
           {messages.length === 0 ? (
-            <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.xl }}>No messages yet. Say hello 👋</Text>
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, gap: spacing.sm }}>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.cream, alignItems: 'center', justifyContent: 'center' }}>
+                <MaterialCommunityIcons name="message-text-outline" size={28} color={colors.primary} />
+              </View>
+              <Text style={{ color: colors.charcoal, fontWeight: '900', fontSize: 16 }}>No messages yet</Text>
+              <Text style={{ color: colors.muted, textAlign: 'center' }}>Start the thread with a quick update.</Text>
+            </View>
           ) : (
-            messages.map((m) => {
-              const shift = parseShiftCard(m.text);
-              const swap = parseSwapCard(m.text);
-              const hasChecklist = m.text.includes('[ ]') || m.text.includes('[x]');
-
-              return (
-                <View key={m._id} style={{ alignSelf: m.mine ? 'flex-end' : 'flex-start', maxWidth: '82%', marginBottom: 4 }}>
-                  {!m.mine ? <Text style={{ color: colors.muted, fontSize: 11, marginLeft: 8, marginBottom: 1 }}>{m.senderName}</Text> : null}
-                  
-                  <Pressable onLongPress={() => setReactMsgId(m.id)}>
-                    <View
-                      style={{
-                        backgroundColor: m.mine ? colors.primary : colors.surface,
-                        borderRadius: 16,
-                        borderBottomRightRadius: m.mine ? 4 : 16,
-                        borderBottomLeftRadius: m.mine ? 16 : 4,
-                        paddingVertical: 8,
-                        paddingHorizontal: 12,
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                      }}
-                    >
-                      {/* Render Image Attachment */}
-                      {m.imageUrl ? (
-                        <Image source={{ uri: resolveMediaUrl(m.imageUrl) }} style={{ width: 220, height: 150, borderRadius: 12, marginBottom: 6 }} resizeMode="cover" />
-                      ) : null}
-
-                      {/* Render Content */}
-                      {shift ? (
-                        <Card style={{ backgroundColor: accents[4].bg, width: 220, marginVertical: 4 }}>
-                          <Card.Content style={{ padding: spacing.sm, gap: 4 }}>
-                            <Text style={{ color: accents[4].fg, fontWeight: '800', fontSize: 12 }}>OPEN SHIFT CARD</Text>
-                            <Text style={{ fontWeight: '700', fontSize: 13 }}>{shift.jobTitle}</Text>
-                            <Text style={{ fontSize: 11, color: colors.charcoal }}>{shift.dayLabel} · {shift.timeRange}</Text>
-                            <Button mode="contained" compact buttonColor={colors.primary} labelStyle={{ fontSize: 11 }} style={{ marginTop: 4 }} onPress={() => void onClaimShift(shift.shiftId)}>
-                              Claim Shift
-                            </Button>
-                          </Card.Content>
-                        </Card>
-                      ) : swap ? (
-                        <Card style={{ backgroundColor: accents[0].bg, width: 220, marginVertical: 4 }}>
-                          <Card.Content style={{ padding: spacing.sm, gap: 4 }}>
-                            <Text style={{ color: accents[0].fg, fontWeight: '800', fontSize: 12 }}>SWAP PROPOSAL</Text>
-                            <Text style={{ fontSize: 12 }}>{swap.description}</Text>
-                            <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                              <Button mode="contained" compact buttonColor={colors.primary} labelStyle={{ fontSize: 10 }} style={{ flex: 1 }} onPress={() => void onRespondSwap(swap.swapId, true)}>
-                                Accept
-                              </Button>
-                              <Button mode="outlined" compact textColor={colors.danger} labelStyle={{ fontSize: 10 }} style={{ flex: 1 }} onPress={() => void onRespondSwap(swap.swapId, false)}>
-                                Deny
-                              </Button>
-                            </View>
-                          </Card.Content>
-                        </Card>
-                      ) : hasChecklist ? (
-                        renderChecklist(m.id, m.text, m.mine)
-                      ) : (
-                        <Text style={{ color: m.mine ? '#fff' : colors.charcoal }}>{m.text}</Text>
-                      )}
-
-                      <Text style={{ color: m.mine ? 'rgba(255,255,255,0.7)' : colors.muted, fontSize: 10, alignSelf: 'flex-end', marginTop: 4 }}>{fmtTime(m.createdAt)}</Text>
-                    </View>
-                  </Pressable>
-                  
-                  {/* Reactions list */}
-                  {renderReactions(m)}
+            renderItems.map((item) => (
+              item.kind === 'day' ? (
+                <View key={item.id} style={{ alignItems: 'center', marginVertical: spacing.sm }}>
+                  <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '800', backgroundColor: colors.surfaceSoft, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.xs }}>
+                    {item.label}
+                  </Text>
                 </View>
-              );
-            })
+              ) : renderMessage(item)
+            ))
           )}
         </ScrollView>
 
-        {/* Read Receipts Display */}
-        {readReceipts.length > 0 ? (
-          <View style={{ paddingHorizontal: spacing.md, paddingVertical: 4, backgroundColor: colors.background }}>
-            <Text style={{ color: colors.muted, fontSize: 11, fontStyle: 'italic' }}>
-              ✓ Read by {readReceipts.map((r) => r.name.split(' ')[0]).join(', ')}
-            </Text>
+        {latestReadNames ? (
+          <View style={{ paddingHorizontal: spacing.md, paddingBottom: spacing.xs, backgroundColor: colors.background }}>
+            <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'right' }}>Read by {latestReadNames}</Text>
           </View>
         ) : null}
 
-        {/* Action input bar */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', padding: spacing.sm, gap: 6, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface }}>
-          <IconButton icon="calendar-plus" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => setShowShareDialog(true)} accessibilityLabel="Share Shift" />
-          <IconButton icon="camera" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => void pickImage()} accessibilityLabel="Add Photo" />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', padding: spacing.sm, gap: spacing.xs, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface }}>
+          <IconButton icon="calendar-plus" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => setShowShareDialog(true)} accessibilityLabel="Share shift" />
+          <IconButton icon="image-outline" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => void pickImage()} accessibilityLabel="Add photo" />
           <TextInput
             value={text}
             onChangeText={setText}
             placeholder="Message"
             mode="outlined"
             dense
-            style={{ flex: 1, backgroundColor: colors.surface }}
-            onSubmitEditing={() => void onSend()}
+            multiline
+            style={{ flex: 1, maxHeight: 110, backgroundColor: colors.surface }}
+            onSubmitEditing={() => {
+              if (Platform.OS !== 'web') return;
+              void onSend();
+            }}
             returnKeyType="send"
           />
-          <Pressable
+          <IconButton
+            icon={sending ? 'clock-outline' : 'send'}
+            mode="contained"
+            containerColor={text.trim() && !sending ? colors.primary : colors.border}
+            iconColor="#fff"
+            disabled={!text.trim() || sending}
+            style={{ margin: 0 }}
             onPress={() => void onSend()}
-            disabled={!text.trim()}
-            style={{ backgroundColor: text.trim() ? colors.primary : colors.border, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <IconButton icon="send" iconColor="#fff" size={18} style={{ margin: 0 }} />
-          </Pressable>
+            accessibilityLabel="Send message"
+          />
         </View>
 
-        {/* Portals & Dialogs */}
         <Portal>
-          {/* Reaction Dialog */}
           <Dialog visible={Boolean(reactMsgId)} onDismiss={() => setReactMsgId(null)} style={{ backgroundColor: colors.surface }}>
-            <Dialog.Title style={{ fontSize: 16 }}>React to Message</Dialog.Title>
-            <Dialog.Content style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12 }}>
-              {['👍', '❤️', '😮', '😂', '👏'].map((emoji) => (
-                <IconButton
+            <Dialog.Title style={{ fontSize: 16 }}>React</Dialog.Title>
+            <Dialog.Content style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: spacing.md }}>
+              {['+1', 'heart', 'wow', 'haha', 'clap'].map((emoji) => (
+                <Button
                   key={emoji}
-                  icon={() => <Text style={{ fontSize: 28 }}>{emoji}</Text>}
+                  mode="outlined"
+                  compact
                   onPress={() => {
                     if (reactMsgId) void onReact(reactMsgId, emoji);
                     setReactMsgId(null);
                   }}
-                />
+                >
+                  {emoji}
+                </Button>
               ))}
             </Dialog.Content>
           </Dialog>
 
-          {/* Share Shift Dialog */}
           <Dialog visible={showShareDialog} onDismiss={() => setShowShareDialog(false)} style={{ backgroundColor: colors.surface }}>
-            <Dialog.Title style={{ fontSize: 16 }}>Share Shift in Chat</Dialog.Title>
-            <Dialog.ScrollArea style={{ maxHeight: 300, paddingHorizontal: 0 }}>
-              <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.md }}>
-                <Text style={{ fontWeight: '700', marginVertical: 6 }}>My Scheduled Shifts</Text>
+            <Dialog.Title style={{ fontSize: 16 }}>Share Shift</Dialog.Title>
+            <Dialog.ScrollArea style={{ maxHeight: 340, paddingHorizontal: 0 }}>
+              <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: spacing.md }}>
+                <Text style={{ color: colors.charcoal, fontWeight: '900', marginVertical: spacing.sm }}>My shifts</Text>
                 {mineShifts.length === 0 ? (
-                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>No shifts scheduled.</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>No shifts scheduled.</Text>
                 ) : (
-                  mineShifts.map((s: any) => (
-                    <ListCard key={s._id} title={s.jobTitle} subtitle={`${s.dayLabel} · ${s.startTime} - ${s.endTime}`} onPress={() => shareShift(s, false)} />
+                  mineShifts.map((shift: any) => (
+                    <ShiftShareRow key={shift._id} title={shift.jobTitle} subtitle={`${shift.dayLabel} - ${shift.startTime} - ${shift.endTime}`} onPress={() => void shareShift(shift)} />
                   ))
                 )}
-                
-                <Text style={{ fontWeight: '700', marginVertical: 6, marginTop: 12 }}>Available Open Shifts</Text>
+
+                <Text style={{ color: colors.charcoal, fontWeight: '900', marginVertical: spacing.sm }}>Open shifts</Text>
                 {openShifts.length === 0 ? (
-                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>No open shifts.</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>No open shifts.</Text>
                 ) : (
-                  openShifts.map((s: any) => (
-                    <ListCard key={s._id} title={s.jobTitle} subtitle={`${s.dayLabel} · ${s.startTime} - ${s.endTime}`} onPress={() => shareShift(s, true)} />
+                  openShifts.map((shift: any) => (
+                    <ShiftShareRow key={shift._id} title={shift.jobTitle} subtitle={`${shift.dayLabel} - ${shift.startTime} - ${shift.endTime}`} onPress={() => void shareShift(shift)} />
                   ))
                 )}
               </ScrollView>
@@ -404,11 +581,10 @@ export default function ConversationScreen() {
           </Dialog>
         </Portal>
 
-        {/* Toast snackbar simulated message */}
         {toast ? (
           <Portal>
-            <View style={{ position: 'absolute', bottom: 70, left: 20, right: 20, backgroundColor: '#E1FBF3', borderColor: colors.success, borderWidth: 1, padding: 10, borderRadius: 8, zIndex: 9999 }}>
-              <Text style={{ color: colors.success, fontWeight: '700', textAlign: 'center' }}>{toast}</Text>
+            <View style={{ position: 'absolute', bottom: 76, left: 20, right: 20, backgroundColor: colors.surface, borderColor: colors.success, borderWidth: 1, padding: spacing.md, borderRadius: radius.md }}>
+              <Text style={{ color: colors.success, fontWeight: '900', textAlign: 'center' }}>{toast}</Text>
             </View>
           </Portal>
         ) : null}
@@ -417,14 +593,27 @@ export default function ConversationScreen() {
   );
 }
 
-function ListCard({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {
+function ShiftShareRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-      <View>
-        <Text style={{ fontWeight: '600' }}>{title}</Text>
-        <Text style={{ color: colors.muted, fontSize: 11 }}>{subtitle}</Text>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 52,
+        paddingVertical: spacing.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.divider,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: spacing.md,
+        opacity: pressed ? 0.75 : 1,
+      })}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ color: colors.charcoal, fontWeight: '800' }} numberOfLines={1}>{title}</Text>
+        <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>{subtitle}</Text>
       </View>
-      <MaterialCommunityIcons name="send" size={16} color={colors.primary} />
+      <MaterialCommunityIcons name="send" size={18} color={colors.primary} />
     </Pressable>
   );
 }
