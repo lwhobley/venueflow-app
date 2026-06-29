@@ -60,6 +60,7 @@ export default function RootLayout() {
     void consumeWebHandoff().finally(() => setHandoffChecked(true));
   }, [handoffChecked, storeHydrated]);
 
+
   // Initialize in-app purchases (RevenueCat) keyed to the venue so a purchase
   // ties to the tenant. No-op on web and when no key is configured.
   useEffect(() => {

@@ -27,6 +27,7 @@ import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { ReservationMutationService } from './reservation-mutation.service';
 import { ReservationNotifierService } from './reservation-notifier.service';
 
 type Scope = VenueScopedRequest['venueScope'];
@@ -147,6 +148,7 @@ export class ReservationsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifier: ReservationNotifierService,
+    private readonly mutations: ReservationMutationService,
   ) {}
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
@@ -333,68 +335,30 @@ export class ReservationsController {
   @Post()
   async saveReservation(@VenueScope() scope: Scope, @Body() body: SaveReservationDto) {
     this.requireManager(scope);
-    const guestName = body.guestName.trim();
-    if (!guestName) throw new BadRequestException('Guest name is required');
-    if (!body.reservationTime) throw new BadRequestException('Reservation time is required');
-    const reservationTime = new Date(body.reservationTime);
-    if (isNaN(reservationTime.getTime())) throw new BadRequestException('Invalid reservation time');
-
-    const data = {
+    const { reservation, previousStatus } = await this.mutations.saveReservation({
       venueId: scope.venueId,
-      guestName,
+      reservationId: body.reservationId,
+      guestName: body.guestName,
       partySize: body.partySize,
-      reservationTime,
-      status: (body.status ?? 'confirmed') as any,
-      source: (body.source ?? 'direct') as any,
-      tags: body.tags ?? [],
-      notes: body.notes?.trim() ?? null,
-      specialRequests: body.specialRequests?.trim() ?? null,
-      guestPhone: body.phone?.trim() ?? null,
-      guestEmail: body.email?.trim() ?? null,
-      durationMinutes: 90,
-    };
-
-    // Block bookings that overlap a manager-imposed hold.
-    const endTime = new Date(reservationTime.getTime() + 90 * 60 * 1000);
-    const hold = await this.prisma.reservationHold.findFirst({
-      where: {
-        venueId: scope.venueId,
-        startsAt: { lt: endTime },
-        endsAt: { gt: reservationTime },
-      },
-      select: { reason: true },
+      reservationTime: body.reservationTime,
+      status: body.status,
+      notes: body.notes,
+      source: body.source,
+      tags: body.tags,
+      specialRequests: body.specialRequests,
+      tableNumbers: body.tableNumbers,
+      phone: body.phone,
+      email: body.email,
     });
-    if (hold) {
-      throw new BadRequestException(`This time conflicts with a hold: ${hold.reason}`);
+    if (
+      reservation.guestEmail &&
+      reservation.status === 'confirmed' &&
+      (!body.reservationId || previousStatus !== 'confirmed') &&
+      !reservation.confirmationSentAt
+    ) {
+      void this.notifier.sendConfirmation(reservation.id);
     }
-
-    if (body.reservationId) {
-      const existing = await this.prisma.reservation.findFirst({
-        where: { id: body.reservationId, venueId: scope.venueId },
-      });
-      if (!existing) throw new BadRequestException('Reservation not found');
-      const updated = await this.prisma.reservation.update({
-        where: { id: existing.id },
-        data,
-      });
-      // Send confirmation if status just became confirmed and we have an email
-      // we haven't already confirmed against.
-      if (
-        updated.guestEmail &&
-        updated.status === 'confirmed' &&
-        existing.status !== 'confirmed' &&
-        !updated.confirmationSentAt
-      ) {
-        void this.notifier.sendConfirmation(updated.id);
-      }
-      return { id: updated.id };
-    }
-
-    const created = await this.prisma.reservation.create({ data });
-    if (created.guestEmail && created.status === 'confirmed') {
-      void this.notifier.sendConfirmation(created.id);
-    }
-    return { id: created.id };
+    return { id: reservation.id };
   }
 
   // ============================================================
@@ -534,16 +498,11 @@ export class ReservationsController {
   @Post('holds')
   async createHold(@VenueScope() scope: Scope, @Body() body: ReservationHoldDto) {
     this.requireManager(scope);
-    const startsAt = new Date(body.startsAt);
-    const endsAt = new Date(body.endsAt);
-    if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime())) {
-      throw new BadRequestException('Invalid date');
-    }
-    if (endsAt <= startsAt) throw new BadRequestException('endsAt must be after startsAt');
-    const reason = body.reason.trim();
-    if (!reason) throw new BadRequestException('reason is required');
-    const created = await this.prisma.reservationHold.create({
-      data: { venueId: scope.venueId, startsAt, endsAt, reason },
+    const created = await this.mutations.createHold({
+      venueId: scope.venueId,
+      startsAt: body.startsAt,
+      endsAt: body.endsAt,
+      reason: body.reason,
     });
     return { id: created.id };
   }
@@ -552,9 +511,7 @@ export class ReservationsController {
   @Delete('holds/:id')
   async deleteHold(@VenueScope() scope: Scope, @Param('id') id: string) {
     this.requireManager(scope);
-    const existing = await this.prisma.reservationHold.findFirst({ where: { id, venueId: scope.venueId } });
-    if (!existing) throw new BadRequestException('Hold not found');
-    await this.prisma.reservationHold.delete({ where: { id } });
+    await this.mutations.deleteHold({ venueId: scope.venueId, holdId: id });
     return { ok: true };
   }
 
@@ -562,14 +519,7 @@ export class ReservationsController {
   @Delete(':id')
   async removeReservation(@VenueScope() scope: Scope, @Param('id') id: string) {
     this.requireManager(scope);
-    const reservation = await this.prisma.reservation.findFirst({
-      where: { id, venueId: scope.venueId },
-    });
-    if (!reservation) throw new BadRequestException('Reservation not found');
-    await this.prisma.reservation.update({
-      where: { id: reservation.id },
-      data: { deletedAt: new Date() },
-    });
+    await this.mutations.removeReservation({ venueId: scope.venueId, reservationId: id });
     return { ok: true };
   }
 

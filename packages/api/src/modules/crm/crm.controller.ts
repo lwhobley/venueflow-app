@@ -28,6 +28,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { randomUUID } from 'crypto';
+import { CrmTemplateService } from './crm-template.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -243,7 +244,7 @@ function makeContractNumber(): string {
 }
 
 // Weighted probabilities used for the pipeline forecast. Tuned to industry
-// norms — early stages discount more, won is realized revenue.
+// norms - early stages discount more, won is realized revenue.
 const STAGE_PROBABILITY: Record<string, number> = {
   new: 0.05,
   contacted: 0.15,
@@ -298,10 +299,6 @@ class RenderTemplateDto {
   beoId?: string;
 }
 
-function substituteVariables(template: string, context: Record<string, string>): string {
-  // {{key}} → context[key]; unknown keys collapse to '' (don't leak braces).
-  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => context[key] ?? '');
-}
 
 function htmlEscape(value: string): string {
   return value
@@ -350,11 +347,11 @@ function renderBeoText(beo: BeoRenderInput, venueName: string, message?: string)
     ['F&B minimum', formatMoneyCents(beo.fbMinimumCents)],
     ['Deposit', formatMoneyCents(beo.depositCents)],
     ['Deposit due', beo.depositDueDate ? beo.depositDueDate.toLocaleDateString('en-US') : 'TBD'],
-    ['Appetizers', beo.menuAppetizers ?? '—'],
-    ['Entrées', beo.menuEntrees ?? '—'],
-    ['Desserts', beo.menuDesserts ?? '—'],
-    ['Bar', beo.menuBarPackage ?? '—'],
-    ['Special requirements', beo.specialRequirements ?? '—'],
+    ['Appetizers', beo.menuAppetizers ?? '-'],
+    ['Entrees', beo.menuEntrees ?? '-'],
+    ['Desserts', beo.menuDesserts ?? '-'],
+    ['Bar', beo.menuBarPackage ?? '-'],
+    ['Special requirements', beo.specialRequirements ?? '-'],
   ];
   const greeting = beo.lead?.fullName ? `Hi ${beo.lead.fullName.split(' ')[0]},\n\n` : '';
   const intro = message ? `${message}\n\n` : `Please review the event details below for ${venueName}.\n\n`;
@@ -373,11 +370,11 @@ function renderBeoHtml(beo: BeoRenderInput, venueName: string, message?: string)
     ['F&B minimum', formatMoneyCents(beo.fbMinimumCents)],
     ['Deposit', formatMoneyCents(beo.depositCents)],
     ['Deposit due', beo.depositDueDate ? beo.depositDueDate.toLocaleDateString('en-US') : 'TBD'],
-    ['Appetizers', beo.menuAppetizers ?? '—'],
-    ['Entrées', beo.menuEntrees ?? '—'],
-    ['Desserts', beo.menuDesserts ?? '—'],
-    ['Bar', beo.menuBarPackage ?? '—'],
-    ['Special requirements', beo.specialRequirements ?? '—'],
+    ['Appetizers', beo.menuAppetizers ?? '-'],
+    ['Entrees', beo.menuEntrees ?? '-'],
+    ['Desserts', beo.menuDesserts ?? '-'],
+    ['Bar', beo.menuBarPackage ?? '-'],
+    ['Special requirements', beo.specialRequirements ?? '-'],
   ];
   const tableRows = rows
     .map(([k, v]) => `<tr><td style="padding:6px 12px;color:#6F6A5F;border-bottom:1px solid #eee;font-weight:600;">${htmlEscape(k)}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;">${htmlEscape(v)}</td></tr>`)
@@ -385,7 +382,7 @@ function renderBeoHtml(beo: BeoRenderInput, venueName: string, message?: string)
   const greeting = beo.lead?.fullName ? `<p>Hi ${htmlEscape(beo.lead.fullName.split(' ')[0])},</p>` : '';
   const intro = message ? `<p>${htmlEscape(message)}</p>` : `<p>Please review the event details below for <strong>${htmlEscape(venueName)}</strong>.</p>`;
   return `<!doctype html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#23241F;max-width:600px;margin:0 auto;padding:24px;">
-<h2 style="color:#2F7D46;margin:0 0 16px;">${htmlEscape(venueName)} — Banquet Event Order</h2>
+<h2 style="color:#2F7D46;margin:0 0 16px;">${htmlEscape(venueName)} - Banquet Event Order</h2>
 ${greeting}
 ${intro}
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">${tableRows}</table>
@@ -398,6 +395,7 @@ export class CrmController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
+    private readonly templates: CrmTemplateService,
   ) {}
 
   @RequireSubscription('active')
@@ -534,10 +532,10 @@ export class CrmController {
       if (body.estimatedValueCents !== undefined) patch.estimatedValueCents = body.estimatedValueCents;
 
       await this.prisma.crmLead.update({ where: { id: body.leadId }, data: patch });
-      // Record status changes specifically — they're the most useful timeline
+      // Record status changes specifically - they're the most useful timeline
       // event. Generic field edits would just be noise.
       if (body.status !== undefined && body.status !== existing.status) {
-        await this.logActivity(scope.venueId, body.leadId, scope.profileId, 'status_changed', `${existing.status} → ${body.status}`);
+        await this.logActivity(scope.venueId, body.leadId, scope.profileId, 'status_changed', `${existing.status} -> ${body.status}`);
       }
       return { leadId: body.leadId };
     }
@@ -678,7 +676,7 @@ export class CrmController {
         return u;
       });
       if (existing.leadId && body.status !== undefined && body.status !== existing.status) {
-        await this.logActivity(scope.venueId, existing.leadId, scope.profileId, 'beo_status_changed', `${existing.status} → ${body.status}`);
+        await this.logActivity(scope.venueId, existing.leadId, scope.profileId, 'beo_status_changed', `${existing.status} -> ${body.status}`);
       }
       return { beoId: body.beoId };
     }
@@ -850,7 +848,7 @@ export class CrmController {
   }
 
   // ============================================================
-  // Pipeline forecast — weighted by stage probability.
+  // Pipeline forecast - weighted by stage probability.
   // ============================================================
   @RequireSubscription('active')
   @Get('forecast')
@@ -1015,12 +1013,12 @@ export class CrmController {
     ]);
     if (!beo) throw new NotFoundException('BEO not found');
     const venueName = venue?.name ?? 'Venue';
-    const subject = `${venueName} — Banquet Event Order: ${beo.eventName}`;
+    const subject = `${venueName} - Banquet Event Order: ${beo.eventName}`;
     const text = renderBeoText(beo, venueName, body.message);
     const html = renderBeoHtml(beo, venueName, body.message);
     await this.email.sendOrThrow({ to: body.toEmail, subject, text, html });
     if (beo.leadId) {
-      await this.logActivity(scope.venueId, beo.leadId, scope.profileId, 'beo_emailed', `→ ${body.toEmail}`);
+      await this.logActivity(scope.venueId, beo.leadId, scope.profileId, 'beo_emailed', `-> ${body.toEmail}`);
     }
     return { ok: true };
   }
@@ -1086,12 +1084,7 @@ export class CrmController {
     requireManager(scope);
     const template = await this.prisma.emailTemplate.findFirst({ where: { id, venueId: scope.venueId } });
     if (!template) throw new NotFoundException('Template not found');
-    const context = await this.buildTemplateContext(scope.venueId, body.leadId, body.beoId);
-    return {
-      subject: substituteVariables(template.subject, context),
-      body: substituteVariables(template.body, context),
-      context,
-    };
+    return this.templates.renderTemplate(template, scope.venueId, body.leadId, body.beoId);
   }
 
   // ============================================================
@@ -1121,7 +1114,7 @@ export class CrmController {
     if (!beo.eventDate) return;
 
     // Block BEO-to-reservation sync if the event window overlaps a
-    // manager-imposed hold — same guard that saveReservation uses.
+    // manager-imposed hold - same guard that saveReservation uses.
     const eventDurationMs = 240 * 60 * 1000; // 4 hours, same as durationMinutes below
     const eventEnd = new Date(beo.eventDate.getTime() + eventDurationMs);
     const hold = await db.reservationHold.findFirst({
@@ -1134,7 +1127,7 @@ export class CrmController {
     });
     if (hold) {
       throw new BadRequestException(
-        `Cannot sync BEO to reservation — time conflicts with a hold: ${hold.reason}`,
+        `Cannot sync BEO to reservation - time conflicts with a hold: ${hold.reason}`,
       );
     }
 
@@ -1175,36 +1168,6 @@ export class CrmController {
     }
   }
 
-  private async buildTemplateContext(venueId: string, leadId?: string, beoId?: string) {
-    // Fire all three independent queries in parallel to reduce latency from
-    // ~3× sequential round-trips to ~1× (the slowest query).
-    const [venue, lead, beo] = await Promise.all([
-      this.prisma.venue.findUnique({ where: { id: venueId }, select: { name: true } }),
-      leadId
-        ? this.prisma.crmLead.findFirst({ where: { id: leadId, venueId }, select: { fullName: true, email: true, phone: true, company: true, source: true } })
-        : null,
-      beoId
-        ? this.prisma.crmBeo.findFirst({ where: { id: beoId, venueId } })
-        : null,
-    ]);
-    const ctx: Record<string, string> = { 'venue.name': venue?.name ?? '' };
-    if (lead) {
-      ctx['lead.name'] = lead.fullName;
-      ctx['lead.firstName'] = lead.fullName.split(/\s+/)[0] ?? lead.fullName;
-      ctx['lead.email'] = lead.email ?? '';
-      ctx['lead.phone'] = lead.phone ?? '';
-      ctx['lead.company'] = lead.company ?? '';
-      ctx['lead.source'] = lead.source ?? '';
-    }
-    if (beo) {
-      ctx['event.name'] = beo.eventName;
-      ctx['event.date'] = beo.eventDate ? beo.eventDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
-      ctx['event.space'] = beo.venueSpace ?? '';
-      ctx['event.guestCount'] = String(beo.guestCount ?? '');
-      ctx['event.deposit'] = beo.depositCents ? `$${(beo.depositCents / 100).toFixed(2)}` : '';
-    }
-    return ctx;
-  }
 
   private mapBeo(b: {
     id: string;

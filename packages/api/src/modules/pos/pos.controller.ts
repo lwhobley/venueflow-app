@@ -1,7 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import * as crypto from 'crypto';
 import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
 import type { Request } from 'express';
 import { isAdminRole } from '../../auth/roles';
@@ -9,7 +8,7 @@ import { Public } from '../../auth/public.decorator';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { zonedDayBounds, zonedIsoDate } from '../../common/venue-time';
-import { secretsMatch } from '../../common/webhook-auth';
+import { generateWebhookSecret, secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -530,33 +529,33 @@ export class PosController {
     });
 
     if (existing) {
-      const freshSecret = existing.webhookSecret ? null : crypto.randomBytes(32).toString('hex');
+      const freshSecret = existing.webhookSecret ? null : generateWebhookSecret();
       const updated = await this.prisma.posConnection.update({
         where: { id: existing.id },
         data: {
           status: body.status as any,
           externalLocationId,
           updatedAt: now,
-          ...(freshSecret ? { webhookSecret: freshSecret } : {}),
+          ...(freshSecret ? { webhookSecret: freshSecret.hashedSecret } : {}),
         },
       });
-      return { ...this.mapConnection(updated), webhookSecret: freshSecret };
+      return { ...this.mapConnection(updated), webhookSecret: freshSecret?.secret ?? null };
     }
 
-    const secret = crypto.randomBytes(32).toString('hex');
+    const freshSecret = generateWebhookSecret();
     const created = await this.prisma.posConnection.create({
       data: {
         venueId,
         provider: body.provider as any,
         externalLocationId,
         status: body.status as any,
-        webhookSecret: secret,
+        webhookSecret: freshSecret.hashedSecret,
         createdAt: now,
         updatedAt: now,
       },
     });
 
-    return { ...this.mapConnection(created), webhookSecret: secret };
+    return { ...this.mapConnection(created), webhookSecret: freshSecret.secret };
   }
 
   private mapConnection(conn: {

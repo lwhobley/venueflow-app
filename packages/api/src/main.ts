@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { initSentry } from './observability/sentry';
 
 const DEFAULT_CORS_ORIGINS = [
   'https://www.venuewrangler.com',
@@ -14,6 +15,8 @@ const DEFAULT_CORS_ORIGINS = [
 ];
 
 async function bootstrap() {
+  // Error tracking — no-op unless SENTRY_DSN is set.
+  initSentry();
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.enableShutdownHooks();
   // Behind Railway's proxy: trust the first hop so req.ip and X-Forwarded-For

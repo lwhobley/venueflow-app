@@ -34,6 +34,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
+import { SchedulingAssignmentService } from './modules/scheduling/scheduling-assignment.service';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
     // Shared /v1/app profile + venue resolution (AppController, AppBilling,
     // AppStaff controllers all depend on it).
     ProfileService,
+    SchedulingAssignmentService,
   ],
 })
 export class AppModule {}

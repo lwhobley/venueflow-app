@@ -12,6 +12,7 @@ let containerCleanup: (() => Promise<void>) | null = null;
  */
 export async function setupTestDb(): Promise<{
   prisma: PrismaClient;
+  url: string;
   teardown: () => Promise<void>;
 }> {
   let url: string;
@@ -34,6 +35,7 @@ export async function setupTestDb(): Promise<{
 
   return {
     prisma,
+    url,
     teardown: async () => {
       await prisma.$disconnect();
       if (containerCleanup) await containerCleanup();

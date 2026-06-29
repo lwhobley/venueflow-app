@@ -22,13 +22,12 @@ import { csvCell } from '../../common/csv';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { EmailService } from '../../email/email.service';
+import { BarInventoryParserService } from './bar-inventory-parser.service';
+import { BarInventoryReportsService } from './bar-inventory-reports.service';
 
 const CATEGORIES = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
 const MOVEMENT_TYPES = ['count', 'received', 'waste', 'comp', 'transfer', 'correction'] as const;
 const MAX_IMPORT_ITEMS = 100;
-const MAX_PARSE_TEXT_CHARS = 20_000;
-const MAX_IMAGE_BASE64_CHARS = 6_000_000;
-const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 
 type BarStockCategory = (typeof CATEGORIES)[number];
 type BarStockMovementType = (typeof MOVEMENT_TYPES)[number];
@@ -161,18 +160,6 @@ function cleanText(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function parseAiInventoryJson(rawText: string) {
-  try {
-    const parsed = JSON.parse(rawText);
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) {
-      throw new Error('Invalid inventory parse shape');
-    }
-    return parsed;
-  } catch {
-    throw new BadRequestException('AI inventory parser returned invalid JSON. Try again with a clearer image or text input.');
-  }
-}
-
 function toMs(date: Date | null | undefined): number | null {
   return date ? date.getTime() : null;
 }
@@ -220,6 +207,8 @@ export class BarInventoryController {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly email: EmailService,
+    private readonly parser: BarInventoryParserService,
+    private readonly reports: BarInventoryReportsService,
   ) {}
 
   @RequireSubscription('active')
@@ -388,159 +377,7 @@ export class BarInventoryController {
     @Body() body: ParseBarInventoryInputDto,
   ) {
     await this.requireManagerProfile(user);
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new BadRequestException('AI parsing requires OPENAI_API_KEY configuration');
-    const inputText = body.text?.trim() ?? '';
-    if (!inputText && !body.imageBase64) {
-      throw new BadRequestException('Add pasted text, a CSV/list upload, or a photo to parse');
-    }
-    if (inputText.length > MAX_PARSE_TEXT_CHARS) {
-      throw new BadRequestException(
-        `Text imports are limited to ${MAX_PARSE_TEXT_CHARS.toLocaleString()} characters`,
-      );
-    }
-    if (body.imageBase64 && body.imageBase64.length > MAX_IMAGE_BASE64_CHARS) {
-      throw new BadRequestException('Photo imports are limited to about 4.5MB');
-    }
-    const imageMimeType = body.imageMimeType ?? 'image/jpeg';
-    if (body.imageBase64 && !ALLOWED_IMAGE_MIME_TYPES.has(imageMimeType)) {
-      throw new BadRequestException('Photo imports must be JPEG, PNG, WebP, HEIC, or HEIF');
-    }
-
-    let parsed: any;
-    if (apiKey.startsWith('sk-or-')) {
-      const model = process.env.OPENAI_INVENTORY_MODEL ?? 'meta-llama/llama-3.2-11b-vision-instruct:free';
-      const promptContent: any[] = [
-        {
-          type: 'text',
-          text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present. Return STRICT JSON matching schema: {"notes": "string", "items": [{"name": "string", "category": "spirit|wine|beer|mixer|garnish|supply|other", "area": "string", "unit": "string", "parLevel": number, "onHand": number, "unitCostCents": number, "supplier": "string", "sku": "string", "notes": "string"}]}`,
-        },
-      ];
-      if (inputText) {
-        promptContent.push({ type: 'text', text: inputText });
-      }
-      if (body.imageBase64) {
-        promptContent.push({
-          type: 'image_url',
-          image_url: {
-            url: `data:${imageMimeType};base64,${body.imageBase64}`,
-          },
-        });
-      }
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://venue-wrangler.pages.dev',
-          'X-Title': 'Venue Wrangler',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: promptContent }],
-          response_format: { type: 'json_object' },
-        }),
-        signal: AbortSignal.timeout(30000),
-      });
-      const json: any = await response.json();
-      if (!response.ok) {
-        throw new BadRequestException(json?.error?.message ?? 'OpenRouter inventory parse failed');
-      }
-      const rawText = json?.choices?.[0]?.message?.content ?? '{"notes":"","items":[]}';
-      parsed = parseAiInventoryJson(rawText);
-    } else {
-      const content: Array<Record<string, unknown>> = [
-        {
-          type: 'input_text',
-          text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present.\n\n${inputText}`,
-        },
-      ];
-      if (body.imageBase64) {
-        content.push({
-          type: 'input_image',
-          image_url: `data:${imageMimeType};base64,${body.imageBase64}`,
-          detail: 'high',
-        });
-      }
-
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_INVENTORY_MODEL ?? 'gpt-4.1-mini',
-          input: [{ role: 'user', content }],
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'bar_inventory_import',
-              strict: true,
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  notes: { type: 'string' },
-                  items: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      additionalProperties: false,
-                      properties: {
-                        name: { type: 'string' },
-                        category: {
-                          type: 'string',
-                          enum: ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'],
-                        },
-                        area: { type: 'string' },
-                        unit: { type: 'string' },
-                        parLevel: { type: 'number' },
-                        onHand: { type: 'number' },
-                        unitCostCents: { type: 'number' },
-                        supplier: { type: 'string' },
-                        sku: { type: 'string' },
-                        notes: { type: 'string' },
-                      },
-                      required: ['name', 'category', 'unit'],
-                    },
-                  },
-                },
-                required: ['notes', 'items'],
-              },
-            },
-          },
-        }),
-        signal: AbortSignal.timeout(30000),
-      });
-
-      const json: any = await response.json();
-      if (!response.ok) {
-        throw new BadRequestException(json?.error?.message ?? 'OpenAI inventory parse failed');
-      }
-      const outputText =
-        json.output_text ??
-        json.output
-          ?.flatMap((part: any) => part.content ?? [])
-          .find((part: any) => part.type === 'output_text')?.text;
-      parsed = parseAiInventoryJson(outputText ?? '{"notes":"No output","items":[]}');
-    }
-    const parsedItems = Array.isArray(parsed.items) ? parsed.items : [];
-    return {
-      notes: typeof parsed.notes === 'string' ? parsed.notes : '',
-      items: parsedItems.slice(0, MAX_IMPORT_ITEMS).map((item: any) => ({
-        name: String(item.name ?? ''),
-        category: CATEGORIES.includes(item.category) ? item.category : 'other',
-        area: cleanText(item.area),
-        unit: String(item.unit || 'unit'),
-        parLevel: Number(item.parLevel || 0),
-        onHand: Number(item.onHand || 0),
-        unitCostCents: Number(item.unitCostCents || 0),
-        supplier: cleanText(item.supplier),
-        sku: cleanText(item.sku),
-        notes: cleanText(item.notes),
-      })),
-    };
+    return this.parser.parse(body);
   }
 
   // ── Usage velocity ───────────────────────────────────────────────────
@@ -671,65 +508,7 @@ export class BarInventoryController {
   @Get('shrinkage')
   async getShrinkageReport(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const [movements, items] = await Promise.all([
-      this.prisma.barInventoryMovement.findMany({
-        where: { venueId, createdAt: { gte: thirtyDaysAgo } },
-        select: { itemId: true, movementType: true, quantity: true, createdAt: true },
-      }),
-      this.prisma.barInventoryItem.findMany({
-        where: { venueId },
-        select: { id: true, category: true, name: true, unitCostCents: true },
-      }),
-    ]);
-    const itemMap = new Map(items.map((i) => [i.id, i]));
-
-    // Aggregate by category
-    const byCategory = new Map<string, { received: number; waste: number; comp: number; wasteCents: number; compCents: number }>();
-    const initCat = () => ({ received: 0, waste: 0, comp: 0, wasteCents: 0, compCents: 0 });
-
-    for (const m of movements) {
-      const item = itemMap.get(m.itemId);
-      if (!item) continue;
-      const cat = item.category;
-      const entry = byCategory.get(cat) ?? initCat();
-      const costCents = item.unitCostCents ?? 0;
-      if (m.movementType === 'received') {
-        entry.received += Math.abs(m.quantity);
-      } else if (m.movementType === 'waste') {
-        entry.waste += Math.abs(m.quantity);
-        entry.wasteCents += Math.abs(m.quantity) * costCents;
-      } else if (m.movementType === 'comp') {
-        entry.comp += Math.abs(m.quantity);
-        entry.compCents += Math.abs(m.quantity) * costCents;
-      }
-      byCategory.set(cat, entry);
-    }
-
-    const rows = Array.from(byCategory.entries()).map(([category, data]) => {
-      const totalShrinkage = data.waste + data.comp;
-      const shrinkagePct = data.received > 0 ? Math.round((totalShrinkage / data.received) * 1000) / 10 : null;
-      return {
-        category,
-        receivedUnits: Math.round(data.received * 10) / 10,
-        wasteUnits: Math.round(data.waste * 10) / 10,
-        compUnits: Math.round(data.comp * 10) / 10,
-        totalShrinkageUnits: Math.round(totalShrinkage * 10) / 10,
-        shrinkagePct,
-        wasteCents: Math.round(data.wasteCents),
-        compCents: Math.round(data.compCents),
-        totalShrinkageCents: Math.round(data.wasteCents + data.compCents),
-      };
-    }).sort((a, b) => (b.totalShrinkageCents) - (a.totalShrinkageCents));
-
-    const totals = rows.reduce((acc, r) => ({
-      receivedUnits: acc.receivedUnits + r.receivedUnits,
-      totalShrinkageUnits: acc.totalShrinkageUnits + r.totalShrinkageUnits,
-      totalShrinkageCents: acc.totalShrinkageCents + r.totalShrinkageCents,
-    }), { receivedUnits: 0, totalShrinkageUnits: 0, totalShrinkageCents: 0 });
-
-    return { rows, totals, windowDays: 30 };
+    return this.reports.shrinkageReport(profile.venueId!);
   }
 
   // ── Purchase order draft ─────────────────────────────────────────────
@@ -737,43 +516,7 @@ export class BarInventoryController {
   @Get('purchase-order')
   async getPurchaseOrder(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
-    const items = await this.prisma.barInventoryItem.findMany({
-      where: { venueId },
-      orderBy: [{ supplier: 'asc' }, { name: 'asc' }],
-      take: 500,
-    });
-    const belowPar = items.filter((i) => i.onHand < i.parLevel);
-
-    const bySupplier = new Map<string, typeof belowPar>();
-    for (const item of belowPar) {
-      const supplier = item.supplier?.trim() || 'Unspecified';
-      const group = bySupplier.get(supplier) ?? [];
-      group.push(item);
-      bySupplier.set(supplier, group);
-    }
-
-    const groups = Array.from(bySupplier.entries()).map(([supplier, groupItems]) => {
-      const lines = groupItems.map((item) => {
-        const qtyToOrder = Math.ceil(item.parLevel - item.onHand);
-        return {
-          _id: item.id,
-          name: item.name,
-          sku: item.sku,
-          unit: item.unit,
-          onHand: item.onHand,
-          parLevel: item.parLevel,
-          qtyToOrder,
-          unitCostCents: item.unitCostCents,
-          lineTotalCents: item.unitCostCents != null ? Math.round(qtyToOrder * item.unitCostCents) : null,
-        };
-      });
-      const groupTotalCents = lines.reduce((sum, l) => sum + (l.lineTotalCents ?? 0), 0);
-      return { supplier, lines, groupTotalCents };
-    });
-
-    const grandTotalCents = groups.reduce((sum, g) => sum + g.groupTotalCents, 0);
-    return { groups, grandTotalCents, itemCount: belowPar.length };
+    return this.reports.purchaseOrder(profile.venueId!);
   }
 
   // ── Purchase order CSV ───────────────────────────────────────────────
@@ -781,32 +524,7 @@ export class BarInventoryController {
   @Get('purchase-order/export-csv')
   async exportPurchaseOrderCsv(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
-    const items = await this.prisma.barInventoryItem.findMany({
-      where: { venueId },
-      orderBy: [{ supplier: 'asc' }, { name: 'asc' }],
-      take: 200,
-    });
-    const belowPar = items.filter((i) => i.onHand < i.parLevel);
-    const headers = ['Supplier', 'Item', 'SKU', 'Unit', 'On Hand', 'Par', 'Order Qty', 'Unit Cost ($)', 'Line Total ($)'];
-    const rows = [headers.map(csvCell).join(',')];
-    for (const item of belowPar) {
-      const qty = Math.ceil(item.parLevel - item.onHand);
-      const unitCost = item.unitCostCents != null ? (item.unitCostCents / 100).toFixed(2) : '';
-      const lineTotal = item.unitCostCents != null ? (qty * item.unitCostCents / 100).toFixed(2) : '';
-      rows.push([
-        csvCell(item.supplier ?? 'Unspecified'),
-        csvCell(item.name),
-        csvCell(item.sku),
-        csvCell(item.unit),
-        csvCell(item.onHand),
-        csvCell(item.parLevel),
-        csvCell(qty),
-        csvCell(unitCost),
-        csvCell(lineTotal),
-      ].join(','));
-    }
-    return rows.join('\n');
+    return this.reports.purchaseOrderCsv(profile.venueId!);
   }
 
   // ── SKU lookup for barcode scanning ──────────────────────────────────
@@ -899,48 +617,7 @@ export class BarInventoryController {
   @Get('aging')
   async getAgingReport(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
-    const venueId = profile.venueId!;
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-    const [items, recentMovements] = await Promise.all([
-      this.prisma.barInventoryItem.findMany({ where: { venueId }, take: 500 }),
-      this.prisma.barInventoryMovement.findMany({
-        where: { venueId, createdAt: { gte: thirtyDaysAgo } },
-        select: { itemId: true, movementType: true, createdAt: true },
-      }),
-    ]);
-
-    // Build last-movement-date index per item
-    const lastMovedAt = new Map<string, Date>();
-    const lastReceivedAt = new Map<string, Date>();
-    for (const m of recentMovements) {
-      const prev = lastMovedAt.get(m.itemId);
-      if (!prev || m.createdAt > prev) lastMovedAt.set(m.itemId, m.createdAt);
-      if (m.movementType === 'received') {
-        const prevR = lastReceivedAt.get(m.itemId);
-        if (!prevR || m.createdAt > prevR) lastReceivedAt.set(m.itemId, m.createdAt);
-      }
-    }
-
-    const uncounted = items.filter((i) => !i.lastCountedAt || i.lastCountedAt < sevenDaysAgo);
-    const noActivity = items.filter((i) => {
-      const last = lastMovedAt.get(i.id);
-      return !last; // no movement in 30 days
-    });
-    const staleCost = items.filter((i) => i.unitCostCents == null && i.onHand > 0);
-
-    return {
-      uncountedItems: uncounted.map((i) => ({
-        _id: i.id,
-        name: i.name,
-        category: i.category,
-        lastCountedAt: i.lastCountedAt?.getTime() ?? null,
-        daysSinceCount: i.lastCountedAt ? Math.floor((Date.now() - i.lastCountedAt.getTime()) / 86400000) : null,
-      })),
-      noActivityItems: noActivity.map((i) => ({ _id: i.id, name: i.name, category: i.category, onHand: i.onHand })),
-      staleCostItems: staleCost.map((i) => ({ _id: i.id, name: i.name, category: i.category, onHand: i.onHand })),
-    };
+    return this.reports.agingReport(profile.venueId!);
   }
 
   // ── Send purchase order email ─────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { createHmac } from 'crypto';
 import { describe, expect, it } from 'vitest';
-import { secretsMatch, verifyStripeSignature } from './webhook-auth';
+import { generateWebhookSecret, hashWebhookSecret, secretsMatch, verifyStripeSignature } from './webhook-auth';
 
 function stripeSig(rawBody: string, secret: string, t = Math.floor(Date.now() / 1000)): string {
   const v1 = createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex');
@@ -24,6 +24,21 @@ describe('secretsMatch', () => {
     expect(secretsMatch(undefined, 'x')).toBe(false);
     expect(secretsMatch('x', null)).toBe(false);
     expect(secretsMatch('', 'x')).toBe(false);
+  });
+
+  it('matches hashed webhook secrets', () => {
+    const hashed = hashWebhookSecret('plain-secret');
+    expect(hashed).toMatch(/^sha256:/);
+    expect(secretsMatch('plain-secret', hashed)).toBe(true);
+    expect(secretsMatch('wrong-secret', hashed)).toBe(false);
+  });
+
+  it('generates one-time secrets with hashed storage values', () => {
+    const generated = generateWebhookSecret();
+    expect(generated.secret).toHaveLength(64);
+    expect(generated.hashedSecret).toMatch(/^sha256:/);
+    expect(generated.hashedSecret).not.toContain(generated.secret);
+    expect(secretsMatch(generated.secret, generated.hashedSecret)).toBe(true);
   });
 });
 

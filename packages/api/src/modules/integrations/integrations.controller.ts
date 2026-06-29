@@ -3,6 +3,7 @@ import { IsIn, IsOptional, IsString } from 'class-validator';
 import { IntegrationStatus, ReservationSource } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { generateWebhookSecret } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -57,24 +58,31 @@ export class IntegrationsController {
     }
     const existing = await this.prisma.reservationConnection.findFirst({
       where: { venueId: scope.venueId, provider: body.provider },
-      select: { id: true },
+      select: { id: true, webhookSecret: true },
     });
     const mapConnection = ({ id, webhookSecret: _, ...rest }: any) => ({ _id: id, ...rest });
     if (existing) {
+      const freshSecret = existing.webhookSecret ? null : generateWebhookSecret();
       const row = await this.prisma.reservationConnection.update({
         where: { id: existing.id },
-        data: { externalVenueId: body.externalVenueId ?? null, status: body.status },
+        data: {
+          externalVenueId: body.externalVenueId ?? null,
+          status: body.status,
+          ...(freshSecret ? { webhookSecret: freshSecret.hashedSecret } : {}),
+        },
       });
-      return mapConnection(row);
+      return { ...mapConnection(row), webhookSecret: freshSecret?.secret ?? null };
     }
+    const freshSecret = generateWebhookSecret();
     const row = await this.prisma.reservationConnection.create({
       data: {
         venueId: scope.venueId,
         provider: body.provider,
         externalVenueId: body.externalVenueId ?? null,
         status: body.status,
+        webhookSecret: freshSecret.hashedSecret,
       },
     });
-    return mapConnection(row);
+    return { ...mapConnection(row), webhookSecret: freshSecret.secret };
   }
 }
