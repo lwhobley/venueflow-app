@@ -91,6 +91,9 @@ enum PosProvider {
   toast
   square
   clover
+  shopify_pos
+  lightspeed_restaurant
+  spoton
   generic
 }
 
@@ -322,7 +325,7 @@ model Venue {
   barInventoryMovements         BarInventoryMovement[]
   managerGoals                  ManagerGoal[]
   venueEvents                   VenueEvent[]
-  reservationSettings           ReservationSetting[]
+  reservationSetting            ReservationSetting?
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
   joinRequests                  WorkplaceJoinRequest[]
@@ -358,6 +361,8 @@ model Profile {
   staffRequests    StaffRequest[]
   sentMessages     Message[]
   crmNotes         CrmNote[]
+  servedTables     TableState[]           @relation("ServerTables")
+  assignedLeads    CrmLead[]              @relation("AssignedLeads")
 
   @@index([venueId])
   @@index([email])
@@ -696,6 +701,7 @@ model Reservation {
   guest               Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
   venueEvents         VenueEvent[]
   syncEvents          ReservationSyncEvent[]
+  tableAssignments    TableAssignment[]
 
   @@index([venueId, reservationTime])
   @@index([venueId, status])
@@ -779,6 +785,7 @@ model FloorTable {
   minSpend       Int
   isReservable   Boolean
   floorPlan      FloorPlan    @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
+  tableStates    TableState[]
 
   @@index([floorPlanId])
   @@index([floorPlanId, section])
@@ -811,6 +818,8 @@ model TableState {
   notes          String?
   mergeGroupId   String?
   venue          Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  table          FloorTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  server         Profile?    @relation("ServerTables", fields: [serverId], references: [id], onDelete: SetNull)
 
   @@index([tableId])
   @@index([status])
@@ -832,6 +841,7 @@ model TableAssignment {
   releasedAt     DateTime?
   releasedReason String?
   venue          Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  reservation    Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
 
   @@index([tableId, startsAt])
   @@index([reservationId])
@@ -938,6 +948,7 @@ model CrmLead {
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
   venue               Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  assignedTo          Profile?      @relation("AssignedLeads", fields: [assignedToId], references: [id], onDelete: SetNull)
   notes               CrmNote[]
   beos                CrmBeo[]
   contracts           CrmContract[]
@@ -1249,6 +1260,7 @@ model BarInventoryItem {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   venue         Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  movements     BarInventoryMovement[]
 
   @@index([venueId])
   @@index([venueId, category])
@@ -1267,6 +1279,7 @@ model BarInventoryMovement {
   createdBy      String
   createdAt      DateTime             @default(now())
   venue          Venue                @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  item           BarInventoryItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@index([venueId, createdAt])
   @@index([itemId, createdAt])
@@ -1311,15 +1324,13 @@ model VenueEvent {
 
 model ReservationSetting {
   id                   String   @id @default(cuid())
-  venueId              String
+  venueId              String   @unique
   defaultDiningMinutes Int
   defaultTurnMinutes   Int
   bookingWindowDays    Int
   minLeadHours         Int
   updatedAt            DateTime @updatedAt
   venue                Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-
-  @@index([venueId])
 }
 
 model TableStateHistory {

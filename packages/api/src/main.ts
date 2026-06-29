@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import helmet from 'helmet';
-import type { Request } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { json, urlencoded } from 'express';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -30,22 +30,21 @@ async function bootstrap() {
 
   app.use(helmet());
   const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
-  app.use(
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const url = req.originalUrl ?? req.url ?? '';
+    const path = url.split('?')[0].replace(/\/+$/, '');
+    const limit = path === '/api/v1/chat/images' ? config.get<string>('JSON_BODY_LIMIT', '8mb') : '1mb';
     json({
-      // Chat images are uploaded as base64 inside a JSON body (up to 5MB raw,
-      // ~6.7MB once base64-encoded), so the default must exceed that.
-      limit: config.get<string>('JSON_BODY_LIMIT', '8mb'),
+      limit,
       verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
-        const url = req.originalUrl ?? req.url ?? '';
-        // Match path without query string; trailing slashes are not produced by
-        // Stripe, but accept them defensively.
-        const path = url.split('?')[0].replace(/\/+$/, '');
-        if (path === STRIPE_WEBHOOK_PATH) {
+        const urlInner = req.originalUrl ?? req.url ?? '';
+        const pathInner = urlInner.split('?')[0].replace(/\/+$/, '');
+        if (pathInner === STRIPE_WEBHOOK_PATH) {
           req.rawBody = buf;
         }
       },
-    }),
-  );
+    })(req, res, next);
+  });
   app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
   // Fail closed: only origins explicitly listed in CORS_ORIGINS are allowed.
   // Native mobile clients don't send an Origin header, so this does not affect

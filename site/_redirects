@@ -1,0 +1,4 @@
+# Single-page web app lives at /app. Serve its index.html for any deep link
+# under /app/* so client-side routes (e.g. /app/schedule) resolve on reload.
+# The marketing site at / and its static subpaths are served directly.
+/app/*  /app/index.html  200

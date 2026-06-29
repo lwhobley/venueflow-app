@@ -47,6 +47,15 @@ const queryRoutes: Record<string, Route> = {
   'payroll.getPayrollSummary': { path: (args) => `/v1/payroll/summary${args.startDate ? `?startDate=${args.startDate}&endDate=${args.endDate ?? ''}` : ''}` },
   'payroll.exportPayrollCsv': { path: (args) => `/v1/payroll/export-csv${args.startDate ? `?startDate=${args.startDate}&endDate=${args.endDate ?? ''}` : ''}` },
   'barInventory.getBarStock': { path: '/v1/bar-inventory' },
+  'barInventory.getUsageVelocity': { path: '/v1/bar-inventory/velocity' },
+  'barInventory.getItemMovements': { path: (args) => `/v1/bar-inventory/${args.itemId}/movements?limit=${args.limit ?? 50}` },
+  'barInventory.exportStockCsv': { path: '/v1/bar-inventory/export-csv' },
+  'barInventory.exportMovementsCsv': { path: '/v1/bar-inventory/movements/export-csv' },
+  'barInventory.getShrinkageReport': { path: '/v1/bar-inventory/shrinkage' },
+  'barInventory.getPurchaseOrder': { path: '/v1/bar-inventory/purchase-order' },
+  'barInventory.exportPurchaseOrderCsv': { path: '/v1/bar-inventory/purchase-order/export-csv' },
+  'barInventory.getCostHistory': { path: (args) => `/v1/bar-inventory/cost-history/${args.itemId}` },
+  'barInventory.getAgingReport': { path: '/v1/bar-inventory/aging' },
   'cosmicInsights.getLatestInsights': { path: '/v1/insights' },
   'floor.getActiveFloorPlan': { path: '/v1/floor/active' },
   'floor.getFloorStats': { path: '/v1/floor/stats' },
@@ -261,6 +270,10 @@ const mutationRoutes: Record<string, Route> = {
   'barInventory.recordBarStockMovement': { path: (args) => `/v1/bar-inventory/${args.itemId}/movement`, method: 'POST', body: ({ movementType, quantity, notes }) => ({ movementType, quantity, notes }), invalidate: [['barInventory', 'stock']] },
   'barInventory.importParsedBarItems': { path: '/v1/bar-inventory/import', method: 'POST', body: ({ items }) => ({ items }), invalidate: [['barInventory', 'stock']] },
   'barInventory.parseBarInventoryInput': { path: '/v1/bar-inventory/parse', method: 'POST', body: ({ text, imageBase64, imageMimeType }) => ({ text, imageBase64, imageMimeType }) },
+  'barInventory.updateItemCost': { path: (args) => `/v1/bar-inventory/${args.itemId}/cost`, method: 'PATCH', body: ({ unitCostCents }) => ({ unitCostCents }), invalidate: [['barInventory', 'stock']] },
+  'barInventory.lookupBySku': { path: (args) => `/v1/bar-inventory/sku/${encodeURIComponent(args.sku)}`, method: 'GET' },
+  'barInventory.sendPurchaseOrderEmail': { path: '/v1/bar-inventory/purchase-order/send-email', method: 'POST', body: () => ({}) },
+  'barInventory.sendInventoryDigest': { path: '/v1/bar-inventory/send-digest', method: 'POST', body: () => ({}) },
   'chat.ensureChatSetup': { path: '/v1/chat/setup', method: 'POST', body: () => ({}), invalidate: [['chat', 'conversations']] },
   'chat.openDm': { path: '/v1/chat/dm', method: 'POST', body: ({ targetProfileId }) => ({ targetProfileId }), invalidate: [['chat', 'conversations']] },
   'chat.createGroup': { path: '/v1/chat/group', method: 'POST', body: ({ name, memberIds }) => ({ name, memberIds }), invalidate: [['chat', 'conversations']] },
@@ -333,44 +346,44 @@ const mutationRoutes: Record<string, Route> = {
   },
 };
 
-export function useQuery(ref: RailwayFunctionRef, args?: QueryArgs): any {
+export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T {
   const key = getKey(ref);
   const route = queryRoutes[key];
   const enabled = args !== 'skip';
   const query = useReactQuery({
     queryKey: [key, args],
     enabled,
-    queryFn: () => (route ? requestRoute(route, args) : Promise.resolve(defaultQueryResult(key))),
+    queryFn: () => (route ? requestRoute<T>(route, args) : Promise.resolve(defaultQueryResult(key) as T)),
   });
-  return query.data;
+  return query.data as T;
 }
 
-export function useMutation(ref: RailwayFunctionRef): any {
+export function useMutation<TArgs = any, TResult = any>(
+  ref: RailwayFunctionRef,
+): (args: TArgs) => Promise<TResult> {
   const key = getKey(ref);
   const route = mutationRoutes[key];
   const queryClient = useQueryClient();
   const mutation = useReactMutation({
-    mutationFn: async (args: any) => {
+    mutationFn: async (args: TArgs) => {
       if (!route) {
         throw new Error('This feature is still being moved to the Railway API.');
       }
-      return requestRoute(route, args);
+      return requestRoute<TResult>(route, args);
     },
     onSuccess: async () => {
       const invalidations = route?.invalidate ?? [[key]];
       await Promise.all(invalidations.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
     },
   });
-  // Return a STABLE callback. react-query's mutateAsync is referentially stable
-  // across renders, so this identity never changes — which makes it safe to use
-  // in useEffect dependency arrays. (A fresh function each render caused an
-  // infinite effect loop on the Chat tab's ensureChatSetup call.)
   const mutateAsync = mutation.mutateAsync;
-  return useCallback((args: any) => mutateAsync(args), [mutateAsync]);
+  return useCallback((args: TArgs) => mutateAsync(args), [mutateAsync]);
 }
 
-export function useAction(ref: RailwayFunctionRef): any {
-  return useMutation(ref);
+export function useAction<TArgs = any, TResult = any>(
+  ref: RailwayFunctionRef,
+): (args: TArgs) => Promise<TResult> {
+  return useMutation<TArgs, TResult>(ref);
 }
 
 export function useAuthActions() {

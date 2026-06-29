@@ -83,6 +83,13 @@ export function MyShifts() {
     });
 
   const teammates = useMemo(() => (directory ?? []) as { _id: Id<'profiles'>; fullName: string; jobTitle: string }[], [directory]);
+  const coworkersPerDay = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const day of (data?.roster ?? []) as RosterDay[]) {
+      map.set(day.dayIndex, day.coworkers.length);
+    }
+    return map;
+  }, [data?.roster]);
   const mySwaps = useMemo(() => (swaps ?? []) as Array<{ _id: Id<'shiftSwaps'>; status: string; requesterName: string; targetName: string; requesterShift: string; targetShift: string | null; direction: string }>, [swaps]);
   const incomingSwaps = mySwaps.filter((s) => s.direction === 'incoming' && s.status === 'proposed');
   const otherSwaps = mySwaps.filter((s) => !(s.direction === 'incoming' && s.status === 'proposed'));
@@ -182,7 +189,17 @@ export function MyShifts() {
                     <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
                     <Text style={{ color: colors.muted, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
                   </View>
-                  {s.conflict ? <Text style={{ color: colors.danger, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {s.conflict ? <Text style={{ color: colors.danger, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
+                    {(() => {
+                      const coworkers = coworkersPerDay.get(s.dayIndex) ?? 0;
+                      const label = coworkers >= 6 ? '🔥 High volume' : coworkers >= 3 ? 'Moderate' : coworkers > 0 ? 'Light day' : null;
+                      const bg = coworkers >= 6 ? accents[3].bg : coworkers >= 3 ? accents[1].bg : accents[2].bg;
+                      const fg = coworkers >= 6 ? accents[3].fg : coworkers >= 3 ? accents[1].fg : accents[2].fg;
+                      if (!label) return null;
+                      return <View style={{ backgroundColor: bg, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}><Text style={{ color: fg, fontSize: 11 }}>{label}</Text></View>;
+                    })()}
+                  </View>
                 </View>
                 <Text style={{ color: colors.charcoal }}>{s.jobTitle} · {s.station}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>

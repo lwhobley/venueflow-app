@@ -10,6 +10,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard';
 import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { Role, SubscriptionStatus } from '@prisma/client';
 
 export type VenueScopedRequest = AuthenticatedRequest & {
   venueScope?: {
@@ -55,6 +56,25 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
     const user = request.user;
     if (!user?.sub) {
+      return next.handle();
+    }
+
+    if (user.profileId && user.venueId) {
+      const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
+        venueId: user.venueId,
+        venueStatus: (user.venueStatus as SubscriptionStatus) || null,
+        trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt) : null,
+      });
+      request.venueScope = {
+        profileId: user.profileId,
+        fullName: user.name ?? '',
+        venueId: user.venueId,
+        venueName: user.venueName ?? '',
+        role: user.role ?? 'staff',
+        allAccess: Boolean(user.allAccess),
+        subscriptionStatus,
+        trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt) : null,
+      };
       return next.handle();
     }
 

@@ -44,6 +44,7 @@ export async function stripeRequest<T = any>(
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: method === 'POST' ? body : undefined,
+    signal: AbortSignal.timeout(10000),
   });
   const json: any = await response.json().catch(() => null);
   if (!response.ok) {

@@ -98,14 +98,24 @@ export class AppStaffController {
       dateOfBirth: body.dateOfBirth ? parseDateOfBirth(body.dateOfBirth) : null,
       certifications: body.certifications ?? [],
     };
-    const row = existing
-      ? await this.prisma.profile.update({
+    let row;
+    if (existing) {
+      const roleChanged = existing.role !== body.role || existing.venueId !== body.venueId;
+      row = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.profile.update({
           where: { id: existing.id },
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
-        })
-      : await this.prisma.profile.create({
-          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         });
+        if (roleChanged && existing.userId) {
+          await tx.session.deleteMany({ where: { userId: existing.userId } });
+        }
+        return updated;
+      });
+    } else {
+      row = await this.prisma.profile.create({
+        data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
+      });
+    }
     const venueName = viewer.venue?.name ?? 'your venue';
     void this.email.send({
       to: row.email,
@@ -140,7 +150,13 @@ export class AppStaffController {
     const staff = await this.prisma.profile.findFirst({ where: { id: staffId, venueId: viewer.venueId! } });
     if (!staff) throw new NotFoundException('Staff member not found');
     await this.assertCanManageLegacyStaffTarget(viewer, staff, true);
-    const updated = await this.prisma.profile.update({ where: { id: staff.id }, data: { venueId: null } });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.profile.update({ where: { id: staff.id }, data: { venueId: null } });
+      if (staff.userId) {
+        await tx.session.deleteMany({ where: { userId: staff.userId } });
+      }
+      return u;
+    });
     return mapProfile(updated);
   }
 

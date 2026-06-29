@@ -10,9 +10,13 @@ export type AuthUser = {
   email?: string;
   name?: string;
   role?: string;
-  // Session id (present on tokens issued after revocable sessions shipped). When
-  // set, the matching Session row must still exist and be unexpired.
   sid?: string;
+  profileId?: string;
+  venueId?: string | null;
+  venueName?: string | null;
+  allAccess?: boolean;
+  trialEndsAt?: string | null;
+  venueStatus?: string | null;
 };
 
 export type AuthenticatedRequest = Request & {

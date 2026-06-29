@@ -62,6 +62,7 @@ export class EmailService {
         html: args.html ?? this.textToHtml(args.text),
         ...(args.replyTo ? { reply_to: args.replyTo } : {}),
       }),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {

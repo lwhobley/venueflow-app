@@ -28,14 +28,29 @@ const secureStorage = {
   removeItem: async (key: string) => SecureStore.deleteItemAsync(key),
 };
 
+// On web the session must survive a page reload (a desktop user expects to
+// stay signed in across refreshes), so persist to localStorage. Fall back to an
+// in-memory Map when localStorage is unavailable (SSR, private-mode throws).
 const memoryStorage = new Map<string, string>();
+const hasLocalStorage = (() => {
+  try {
+    return typeof window !== 'undefined' && !!window.localStorage;
+  } catch {
+    return false;
+  }
+})();
 const webStorage = {
-  getItem: async (key: string) => memoryStorage.get(key) ?? null,
+  getItem: async (key: string) => {
+    if (hasLocalStorage) return window.localStorage.getItem(key);
+    return memoryStorage.get(key) ?? null;
+  },
   setItem: async (key: string, value: string) => {
-    memoryStorage.set(key, value);
+    if (hasLocalStorage) window.localStorage.setItem(key, value);
+    else memoryStorage.set(key, value);
   },
   removeItem: async (key: string) => {
-    memoryStorage.delete(key);
+    if (hasLocalStorage) window.localStorage.removeItem(key);
+    else memoryStorage.delete(key);
   },
 };
 
