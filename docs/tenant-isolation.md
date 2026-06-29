@@ -39,12 +39,22 @@ nothing in production on its own.
 - **Inert by default.** No tenant context ⇒ no-op. Auth flows, webhooks, and
   system/background tasks (which legitimately cross venues) are unaffected.
 
-### Enablement (reviewed cutover — NOT enabled here)
+### Enablement (shipped, flag-gated)
 
-1. **Apply the extension** in `prisma.service.ts` (expose the `$extends` client, or
-   adopt it as the injected Prisma provider — see the Prisma + NestJS extension guide).
-2. **Bind the context per request** in `auth.guard.ts`, right after `request.user`
-   is set: `if (payload.venueId) enterTenant(payload.venueId);`
+The cutover is wired but **off by default**. Setting `TENANT_ISOLATION_ENFORCED=true`
+in the environment activates both pieces; unsetting rolls back instantly.
 
-Recommended rollout: enable in staging, run the integration suite against a
-seeded DB, then enable per-module rather than all at once.
+1. **`prisma.service.ts`** — when the flag is set, the service applies the
+   extension via `this.$extends(tenantIsolationExtension())` and wraps itself in
+   a `Proxy` that delegates Prisma calls to the extended client while keeping
+   Nest lifecycle hooks on the wrapper. This preserves the `PrismaService`
+   injection token across the codebase. `$transaction`'s `tx` callback is also
+   extension-aware, so transactional writes are scoped.
+2. **`auth.guard.ts`** — when the flag is set and the token carries a `venueId`,
+   `enterTenant(venueId)` binds the AsyncLocalStorage tenant context for the
+   rest of the request. Tokens without a venueId (auth flows, system tasks)
+   stay unscoped, which is correct.
+
+Rollout: deploy with the flag **off** (zero behaviour change). Validate in a
+staging environment with `TENANT_ISOLATION_ENFORCED=true`, run the integration
+suite, then flip the flag in production. Unset to roll back instantly.
