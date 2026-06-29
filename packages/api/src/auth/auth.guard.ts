@@ -4,6 +4,9 @@ import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { enterTenant } from '../prisma/tenant-context';
+
+const TENANT_ISOLATION_ENFORCED = process.env['TENANT_ISOLATION_ENFORCED'] === 'true';
 
 export type AuthUser = {
   sub: string;
@@ -79,6 +82,14 @@ export class AuthGuard implements CanActivate {
     }
 
     request.user = payload;
+
+    // Bind tenant context for the rest of the request. Inert unless the env
+    // flag is on AND the token carries a venueId (auth flows, webhooks, and
+    // venueless system tasks legitimately have none and remain unscoped).
+    if (TENANT_ISOLATION_ENFORCED && payload.venueId) {
+      enterTenant(payload.venueId);
+    }
+
     return true;
   }
 
