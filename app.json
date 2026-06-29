@@ -2,7 +2,8 @@
   "expo": {
     "name": "Venue Wrangler",
     "slug": "venue-wrangler",
-    "version": "1.0.1",
+    "owner": "loungeabilityllc",
+    "version": "1.0.10",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "light",
@@ -35,7 +36,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -47,7 +49,7 @@
       "EXPO_PUBLIC_API_URL": "https://venue-wranglerapi-production.up.railway.app/api",
       "router": {},
       "eas": {
-        "projectId": "5c2ebadb-d603-409f-bcfb-ec43df5e9697"
+        "projectId": "eb8d41ff-6e88-48cf-a75a-d4399e442c28"
       }
     },
     "plugins": [
