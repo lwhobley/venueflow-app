@@ -25,6 +25,19 @@ function makeGuard(tier: string | undefined) {
   return new SubscriptionGuard(reflector, prisma);
 }
 
+function makeDbGuard(tier: string | undefined, profile: any) {
+  const reflector = { getAllAndOverride: vi.fn().mockReturnValue(tier) } as any;
+  const prisma = {
+    profile: {
+      findFirst: vi.fn().mockResolvedValue(profile),
+    },
+    subscription: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+  } as any;
+  return { guard: new SubscriptionGuard(reflector, prisma), prisma };
+}
+
 const scope = (subscriptionStatus: string | null, allAccess = false) => ({
   profileId: 'p1', fullName: 'A', venueId: 'v1', venueName: 'V', role: 'manager',
   allAccess, subscriptionStatus, trialEndsAt: null,
@@ -70,5 +83,49 @@ describe('SubscriptionGuard', () => {
     // venueScope undefined + no authenticated user → resolveVenueScope returns null
     // without querying Prisma.
     await expect(guard.canActivate(makeContext(undefined, undefined))).rejects.toBeInstanceOf(HttpException);
+  });
+
+  it('resolves protected route scope from the database instead of stale token claims', async () => {
+    const { guard, prisma } = makeDbGuard('active', {
+      id: 'fresh-profile',
+      fullName: 'Fresh User',
+      role: 'staff',
+      allAccess: false,
+      membershipStatus: 'active',
+      trialEndsAt: null,
+      venueId: 'fresh-venue',
+      venue: { id: 'fresh-venue', name: 'Fresh Venue', subscriptionStatus: 'active' },
+    });
+    const context = makeContext(undefined, {
+      sub: 'user-1',
+      profileId: 'stale-profile',
+      venueId: 'stale-venue',
+      role: 'owner',
+      allAccess: true,
+    });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'user-1' } }));
+    expect(context.switchToHttp().getRequest().venueScope).toMatchObject({
+      profileId: 'fresh-profile',
+      venueId: 'fresh-venue',
+      role: 'staff',
+      allAccess: false,
+    });
+  });
+
+  it.each(['pending', 'rejected', 'revoked'])('denies %s memberships even when the venue is subscribed', async (membershipStatus) => {
+    const { guard } = makeDbGuard('active', {
+      id: 'p1',
+      fullName: 'Inactive User',
+      role: 'owner',
+      allAccess: true,
+      membershipStatus,
+      trialEndsAt: null,
+      venueId: 'v1',
+      venue: { id: 'v1', name: 'Venue', subscriptionStatus: 'active' },
+    });
+
+    await expect(guard.canActivate(makeContext(undefined, { sub: 'user-1' }))).rejects.toBeInstanceOf(HttpException);
   });
 });

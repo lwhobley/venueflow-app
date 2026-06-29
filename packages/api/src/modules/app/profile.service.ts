@@ -36,6 +36,9 @@ export class ProfileService {
   async requireVenueProfile(user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile?.venue) throw new ForbiddenException('Profile is not initialized');
+    if (!isActiveMembership(profile.membershipStatus)) {
+      throw new ForbiddenException('Profile is not active for this venue');
+    }
     return profile;
   }
 
@@ -71,4 +74,8 @@ export class ProfileService {
     });
     return Boolean(account?.emailVerifiedAt);
   }
+}
+
+function isActiveMembership(status: string | null): boolean {
+  return status === null || status === 'active';
 }
