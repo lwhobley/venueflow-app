@@ -815,6 +815,9 @@ export class BarInventoryController {
   private async requireManagerProfile(user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
+    if (profile.membershipStatus !== null && profile.membershipStatus !== 'active') {
+      throw new ForbiddenException('Profile is not active for this venue');
+    }
     if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
     return profile;
   }
