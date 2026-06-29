@@ -54,16 +54,23 @@ describe('tenant isolation extension (integration)', () => {
     await teardown();
   });
 
+  // Prisma queries are lazy (PrismaPromise executes on await), so the await MUST
+  // happen inside the tenant context — otherwise run() has already exited by the
+  // time the query runs and the extension sees no venueId. Mirrors the real
+  // enablement path (AuthGuard -> enterTenant), which persists for the request.
+  const asTenant = <T>(venueId: string, fn: () => Promise<T>): Promise<T> =>
+    runWithTenant(venueId, async () => await fn());
+
   it('findMany returns only the bound tenant rows', async () => {
     if (!db) return;
-    const rows = await runWithTenant(venueA, () => db!.barInventoryItem.findMany());
+    const rows = await asTenant(venueA, () => db!.barInventoryItem.findMany());
     expect(rows.map((r) => r.name)).toEqual(['A-Gin']);
   });
 
   it('a hostile where cannot reach another tenant', async () => {
     if (!db) return;
     // Ask (as Venue A) for Venue B's rows — the AND-ed predicate yields nothing.
-    const rows = await runWithTenant(venueA, () => db!.barInventoryItem.findMany({ where: { venueId: venueB } }));
+    const rows = await asTenant(venueA, () => db!.barInventoryItem.findMany({ where: { venueId: venueB } }));
     expect(rows).toHaveLength(0);
   });
 
@@ -75,7 +82,7 @@ describe('tenant isolation extension (integration)', () => {
 
   it('create forces the bound venueId regardless of supplied data', async () => {
     if (!db) return;
-    const created = await runWithTenant(venueA, () =>
+    const created = await asTenant(venueA, () =>
       db!.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Vodka', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     );
     expect(created.venueId).toBe(venueA);
