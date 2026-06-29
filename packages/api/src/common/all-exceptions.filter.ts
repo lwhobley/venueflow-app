@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { Request, Response } from 'express';
+import { captureException } from '../observability/sentry';
 
 /**
  * Global exception filter: logs every error with request context and returns a
@@ -38,6 +39,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         `[${requestId}] ${request.method} ${request.url} -> ${status}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      // Report 5xx to Sentry (no-op unless SENTRY_DSN is configured).
+      captureException(exception, { requestId, method: request.method, url: request.url });
     } else {
       this.logger.warn(`[${requestId}] ${request.method} ${request.url} -> ${status}`);
     }
