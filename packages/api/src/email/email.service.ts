@@ -72,40 +72,46 @@ export class EmailService {
   }
 
   async sendToProfile(profileId: string, message: EmailMessage) {
+    let profile: { email: string } | null;
     try {
-      const profile = await this.prisma.profile.findUnique({
+      profile = await this.prisma.profile.findUnique({
         where: { id: profileId },
         select: { email: true },
       });
-      if (!profile) return;
-      return this.send({ to: profile.email, ...message });
     } catch (error: any) {
-      this.logger.warn(`Email lookup failed for profile ${profileId}: ${error?.message ?? String(error)}`);
+      this.logger.error(`Email recipient lookup failed for profile ${profileId}: ${error?.message ?? String(error)}`);
+      return;
     }
+    if (!profile) return;
+    return this.send({ to: profile.email, ...message });
   }
 
   async sendToVenueManagers(venueId: string, message: EmailMessage) {
+    let managers: ProfileEmailTarget[];
     try {
-      const managers = await this.prisma.profile.findMany({
+      managers = await this.prisma.profile.findMany({
         where: { venueId, role: { in: MANAGER_ROLES }, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, email: true, fullName: true },
       });
-      return this.sendToProfiles(managers, message);
     } catch (error: any) {
-      this.logger.warn(`Email lookup failed for venue managers ${venueId}: ${error?.message ?? String(error)}`);
+      this.logger.error(`Email recipient lookup failed for venue managers ${venueId}: ${error?.message ?? String(error)}`);
+      return;
     }
+    return this.sendToProfiles(managers, message);
   }
 
   async sendToVenueStaff(venueId: string, message: EmailMessage) {
+    let staff: ProfileEmailTarget[];
     try {
-      const staff = await this.prisma.profile.findMany({
+      staff = await this.prisma.profile.findMany({
         where: { venueId, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, email: true, fullName: true },
       });
-      return this.sendToProfiles(staff, message);
     } catch (error: any) {
-      this.logger.warn(`Email lookup failed for venue staff ${venueId}: ${error?.message ?? String(error)}`);
+      this.logger.error(`Email recipient lookup failed for venue staff ${venueId}: ${error?.message ?? String(error)}`);
+      return;
     }
+    return this.sendToProfiles(staff, message);
   }
 
   async sendToProfiles(profiles: ProfileEmailTarget[], message: EmailMessage) {

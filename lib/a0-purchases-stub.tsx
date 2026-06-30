@@ -79,7 +79,8 @@ export function A0PurchaseProvider({ children, config }: A0PurchaseProviderProps
       const [active, packages] = await Promise.all([isPremiumActive(), getOfferingPackages()]);
       setIsPremium(active);
       setOfferings(mapOfferings(packages));
-    } catch {
+    } catch (e) {
+      console.warn('[purchases] refresh failed:', e instanceof Error ? e.message : String(e));
       setIsPremium(false);
       setOfferings({ current: null });
     } finally {

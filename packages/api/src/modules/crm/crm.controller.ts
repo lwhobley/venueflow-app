@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Post,
@@ -392,6 +393,8 @@ ${intro}
 
 @Controller('v1/crm')
 export class CrmController {
+  private readonly logger = new Logger(CrmController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
@@ -1095,8 +1098,9 @@ export class CrmController {
       await this.prisma.crmActivityLog.create({
         data: { venueId, leadId, actorId, kind, detail: detail ?? null },
       });
-    } catch {
+    } catch (error: any) {
       // Activity log is best-effort; never block the calling mutation.
+      this.logger.warn(`CRM activity log failed for lead ${leadId}: ${error?.message ?? String(error)}`);
     }
   }
 

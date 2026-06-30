@@ -49,6 +49,11 @@ export async function stripeRequest<T = any>(
   if (!response.ok) {
     throw new Error(`Stripe ${path} failed with status ${response.status}`);
   }
-  const json: any = await response.json().catch(() => null);
+  let json: any;
+  try {
+    json = await response.json();
+  } catch (parseError) {
+    throw new Error(`Stripe ${path} returned invalid JSON (status ${response.status})`);
+  }
   return json as T;
 }

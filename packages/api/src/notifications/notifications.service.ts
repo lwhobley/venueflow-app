@@ -97,7 +97,10 @@ export class NotificationsService {
         await this.disableUnregistered(json, chunk.map((m) => m.to));
       }
     } catch (error) {
-      this.logger.warn(`Push delivery error: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(
+        `Push delivery error for venue ${args.venueId}: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
     }
   }
 
