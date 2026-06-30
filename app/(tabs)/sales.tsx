@@ -7,32 +7,14 @@ import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { formatMoney, formatPct, formatDuration } from '../../lib/format';
 import { ScheduleSkeleton } from '../../components/schedule/ScheduleSkeleton';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
+import { ManagerGate } from '../../components/ManagerGate';
 import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 
-function dollars(cents: number) {
-  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
-function pct(part: number, whole: number) {
-  if (!whole) return '—';
-  return `${Math.round((part / whole) * 100)}%`;
-}
-
-function mins(m: number | null) {
-  if (m == null) return '—';
-  return m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)}h ${Math.round(m % 60)}m`;
-}
-
-function minsToHours(m: number) {
-  const h = Math.floor(m / 60);
-  const rem = Math.round(m % 60);
-  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
-}
 
 // A simple bar chart rendered as relative-width View bands.
 function MiniBar({ value, max, color }: { value: number; max: number; color: string }) {
@@ -81,12 +63,12 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
     <View style={{ gap: spacing.md }}>
       {/* KPI grid */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <KpiTile label="Gross sales" value={dollars(summary.salesCents)} accent={accents[0]} />
-        <KpiTile label="Net sales" value={dollars(netSales)} sub={`after ${dollars(summary.discountCents + summary.compCents + summary.promoCents)} off`} accent={accents[2]} />
-        <KpiTile label="Tips collected" value={dollars(summary.tipCents)} sub={pct(summary.tipCents, summary.salesCents) + ' of sales'} accent={accents[1]} />
-        <KpiTile label="Tax" value={dollars(summary.taxCents)} accent={accents[4]} />
-        <KpiTile label="Checks" value={String(summary.checkCount)} sub={`avg ${dollars(summary.avgCheckCents)}`} accent={accents[3]} />
-        <KpiTile label="Covers" value={String(summary.coverCount)} sub={summary.coverCount ? `avg ${dollars(Math.round(summary.salesCents / summary.coverCount))}/cover` : undefined} accent={accents[0]} />
+        <KpiTile label="Gross sales" value={formatMoney(summary.salesCents)} accent={accents[0]} />
+        <KpiTile label="Net sales" value={formatMoney(netSales)} sub={`after ${formatMoney(summary.discountCents + summary.compCents + summary.promoCents)} off`} accent={accents[2]} />
+        <KpiTile label="Tips collected" value={formatMoney(summary.tipCents)} sub={formatPct(summary.tipCents, summary.salesCents) + ' of sales'} accent={accents[1]} />
+        <KpiTile label="Tax" value={formatMoney(summary.taxCents)} accent={accents[4]} />
+        <KpiTile label="Checks" value={String(summary.checkCount)} sub={`avg ${formatMoney(summary.avgCheckCents)}`} accent={accents[3]} />
+        <KpiTile label="Covers" value={String(summary.coverCount)} sub={summary.coverCount ? `avg ${formatMoney(Math.round(summary.salesCents / summary.coverCount))}/cover` : undefined} accent={accents[0]} />
       </View>
 
       {/* Discounts / comps / promos */}
@@ -101,12 +83,12 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
             ].filter((r) => r.value > 0).map((r) => (
               <View key={r.label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ color: colors.muted }}>{r.label}</Text>
-                <Text style={{ color: colors.danger, fontWeight: '700' }}>-{dollars(r.value)}</Text>
+                <Text style={{ color: colors.danger, fontWeight: '700' }}>-{formatMoney(r.value)}</Text>
               </View>
             ))}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.xs }}>
               <Text style={{ fontWeight: '700' }}>Total off</Text>
-              <Text style={{ color: colors.danger, fontWeight: '800' }}>-{dollars(summary.discountCents + summary.compCents + summary.promoCents)}</Text>
+              <Text style={{ color: colors.danger, fontWeight: '800' }}>-{formatMoney(summary.discountCents + summary.compCents + summary.promoCents)}</Text>
             </View>
           </Card.Content>
         </Card>
@@ -121,7 +103,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
               <View key={d.date} style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{d.date}</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700' }}>{dollars(d.salesCents)}</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700' }}>{formatMoney(d.salesCents)}</Text>
                 </View>
                 <MiniBar value={d.salesCents} max={maxDay} color={colors.primary} />
               </View>
@@ -139,7 +121,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
               <View key={t.tenderType} style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.charcoal }}>{t.tenderType}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{dollars(t.salesCents)} · {pct(t.salesCents, summary.salesCents)}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{formatMoney(t.salesCents)} · {formatPct(t.salesCents, summary.salesCents)}</Text>
                 </View>
                 <MiniBar value={t.salesCents} max={summary.salesCents} color={accents[i % accents.length].fg} />
               </View>
@@ -157,7 +139,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
               <View key={r.revenueCenter} style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.charcoal }}>{r.revenueCenter}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{dollars(r.salesCents)} · {r.checkCount} checks</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{formatMoney(r.salesCents)} · {r.checkCount} checks</Text>
                 </View>
                 <MiniBar value={r.salesCents} max={summary.salesCents} color={accents[i % accents.length].fg} />
               </View>
@@ -171,7 +153,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Avg table turn</Text>
-            <Text style={{ fontSize: 28, fontWeight: '800', color: colors.primary, marginTop: 4 }}>{mins(summary.avgCheckTimeMins)}</Text>
+            <Text style={{ fontSize: 28, fontWeight: '800', color: colors.primary, marginTop: 4 }}>{formatDuration(summary.avgCheckTimeMins)}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>From check open to close on paid checks</Text>
           </Card.Content>
         </Card>
@@ -202,7 +184,7 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
           <View key={r.serverName} style={{ gap: 6, paddingBottom: spacing.sm, borderBottomWidth: i < data.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ fontWeight: '700', flex: 1 }} numberOfLines={1}>{r.serverName}</Text>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: colors.primary }}>{dollars(r.salesCents)}</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: colors.primary }}>{formatMoney(r.salesCents)}</Text>
             </View>
             <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].fg} />
             <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
@@ -213,16 +195,16 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
                 <Text style={{ fontSize: 11, color: accents[2].fg }}>{r.coverCount} covers</Text>
               </Chip>
               <Chip compact style={{ backgroundColor: accents[1].bg }}>
-                <Text style={{ fontSize: 11, color: accents[1].fg }}>avg {dollars(r.avgCheckCents)}</Text>
+                <Text style={{ fontSize: 11, color: accents[1].fg }}>avg {formatMoney(r.avgCheckCents)}</Text>
               </Chip>
               {r.tipCents > 0 ? (
                 <Chip compact style={{ backgroundColor: accents[3].bg }}>
-                  <Text style={{ fontSize: 11, color: accents[3].fg }}>{dollars(r.tipCents)} tips</Text>
+                  <Text style={{ fontSize: 11, color: accents[3].fg }}>{formatMoney(r.tipCents)} tips</Text>
                 </Chip>
               ) : null}
               {r.compCents + r.discountCents > 0 ? (
                 <Chip compact style={{ backgroundColor: '#FDE7E9' }}>
-                  <Text style={{ fontSize: 11, color: colors.danger }}>-{dollars(r.compCents + r.discountCents)} off</Text>
+                  <Text style={{ fontSize: 11, color: colors.danger }}>-{formatMoney(r.compCents + r.discountCents)} off</Text>
                 </Chip>
               ) : null}
             </View>
@@ -273,10 +255,10 @@ function ItemRow({ r, i, maxSales }: { r: { name: string; category: string | nul
     <View style={{ gap: 4 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={{ flex: 1, color: colors.charcoal }} numberOfLines={1}>{r.name}</Text>
-        <Text style={{ fontSize: 13, fontWeight: '700' }}>{dollars(r.salesCents)}</Text>
+        <Text style={{ fontSize: 13, fontWeight: '700' }}>{formatMoney(r.salesCents)}</Text>
       </View>
       <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].fg} />
-      <Text style={{ color: colors.muted, fontSize: 11 }}>Qty {r.quantity} · avg {dollars(Math.round(r.salesCents / r.quantity))}</Text>
+      <Text style={{ color: colors.muted, fontSize: 11 }}>Qty {r.quantity} · avg {formatMoney(Math.round(r.salesCents / r.quantity))}</Text>
     </View>
   );
 }
@@ -296,10 +278,10 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   return (
     <View style={{ gap: spacing.md }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <KpiTile label="Regular hours" value={minsToHours(data.totalRegularMins)} accent={accents[0]} />
-        <KpiTile label="Overtime hours" value={minsToHours(data.totalOvertimeMins)} sub={data.totalOvertimeMins > 0 ? 'review scheduling' : undefined} accent={data.totalOvertimeMins > 0 ? accents[5] : accents[4]} />
-        <KpiTile label="Total pay" value={dollars(data.totalPayCents)} accent={accents[2]} />
-        <KpiTile label="Tips paid out" value={dollars(data.totalTipsCents)} accent={accents[1]} />
+        <KpiTile label="Regular hours" value={formatDuration(data.totalRegularMins)} accent={accents[0]} />
+        <KpiTile label="Overtime hours" value={formatDuration(data.totalOvertimeMins)} sub={data.totalOvertimeMins > 0 ? 'review scheduling' : undefined} accent={data.totalOvertimeMins > 0 ? accents[5] : accents[4]} />
+        <KpiTile label="Total pay" value={formatMoney(data.totalPayCents)} accent={accents[2]} />
+        <KpiTile label="Tips paid out" value={formatMoney(data.totalTipsCents)} accent={accents[1]} />
       </View>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
@@ -312,20 +294,20 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
                   <Text style={{ fontWeight: '700' }} numberOfLines={1}>{emp.employeeName}</Text>
                   {emp.jobTitle ? <Text style={{ color: colors.muted, fontSize: 12 }}>{emp.jobTitle}</Text> : null}
                 </View>
-                <Text style={{ fontWeight: '800', color: colors.primary }}>{dollars(emp.payCents)}</Text>
+                <Text style={{ fontWeight: '800', color: colors.primary }}>{formatMoney(emp.payCents)}</Text>
               </View>
               <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                 <Chip compact style={{ backgroundColor: accents[0].bg }}>
-                  <Text style={{ fontSize: 11, color: accents[0].fg }}>{minsToHours(emp.regularMins)} reg</Text>
+                  <Text style={{ fontSize: 11, color: accents[0].fg }}>{formatDuration(emp.regularMins)} reg</Text>
                 </Chip>
                 {emp.overtimeMins > 0 ? (
                   <Chip compact style={{ backgroundColor: '#FDE7E9' }}>
-                    <Text style={{ fontSize: 11, color: colors.danger }}>{minsToHours(emp.overtimeMins)} OT</Text>
+                    <Text style={{ fontSize: 11, color: colors.danger }}>{formatDuration(emp.overtimeMins)} OT</Text>
                   </Chip>
                 ) : null}
                 {emp.tipsCents > 0 ? (
                   <Chip compact style={{ backgroundColor: accents[1].bg }}>
-                    <Text style={{ fontSize: 11, color: accents[1].fg }}>{dollars(emp.tipsCents)} tips</Text>
+                    <Text style={{ fontSize: 11, color: accents[1].fg }}>{formatMoney(emp.tipsCents)} tips</Text>
                   </Chip>
                 ) : null}
               </View>
@@ -342,43 +324,27 @@ export default function SalesScreenWrapper() {
 }
 
 function SalesScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const profileLoading = isReady && me === undefined;
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
 
   const [tab, setTab] = useState<'summary' | 'servers' | 'items' | 'labor'>('summary');
   const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
 
-  if (profileLoading) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Loading…</Text>
-      </ScrollView>
-    );
-  }
-  if (!canManage) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Sales analytics are available to managers and admins.</Text>
-      </ScrollView>
-    );
-  }
-
   if (!venue?.id) {
     return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content>
-            <Text style={{ color: colors.muted }}>No venue assigned to your account yet.</Text>
-          </Card.Content>
-        </Card>
-      </ScrollView>
+      <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Sales analytics">
+        <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card.Content>
+              <Text style={{ color: colors.muted }}>No venue assigned to your account yet.</Text>
+            </Card.Content>
+          </Card>
+        </ScrollView>
+      </ManagerGate>
     );
   }
 
   return (
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Sales analytics">
     <PremiumFeatureGate feature="pos_analytics">
       <ScrollView
         style={{ flex: 1, backgroundColor: colors.background }}
@@ -418,5 +384,6 @@ function SalesScreen() {
         </AnimatedTab>
       </ScrollView>
     </PremiumFeatureGate>
+    </ManagerGate>
   );
 }

@@ -5,11 +5,10 @@ import { router } from 'expo-router';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
 import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
+import { ManagerGate } from '../../components/ManagerGate';
 
 // What we record as the export destination on /v1/payroll/record-export. The
 // server stores `provider` as a free-form string today, so this list is purely
@@ -44,11 +43,7 @@ type Insight = {
 };
 
 export default function ReportsScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const profileLoading = isReady && me === undefined;
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
   const [showTimeCsv, setShowTimeCsv] = useState(false);
   const [showPayrollCsv, setShowPayrollCsv] = useState(false);
   const [payrollProvider, setPayrollProvider] = useState<PayrollProvider>('gusto');
@@ -63,20 +58,7 @@ export default function ReportsScreen() {
   const payrollCsv = useQuery(api.payroll.exportPayrollCsv, isReady && canManage && showPayrollCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
   const recordPayrollExport = useMutation(api.payroll.recordPayrollExport);
 
-  if (profileLoading) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Loading…</Text>
-      </ScrollView>
-    );
-  }
-  if (!canManage) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Reports are available to managers and admins.</Text>
-      </ScrollView>
-    );
-  }
+
 
   const metrics = [
     { label: 'Scheduled shifts', value: insights?.scheduledShifts ?? 0, accent: accents[0] },
@@ -93,6 +75,7 @@ export default function ReportsScreen() {
     : null;
 
   return (
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Reports">
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
@@ -287,5 +270,6 @@ export default function ReportsScreen() {
         </Card.Content>
       </Card>
     </ScrollView>
+    </ManagerGate>
   );
 }

@@ -6,6 +6,7 @@ import { api } from '../lib/railway-api';
 import type { Id } from '../lib/ids';
 import { accents, colors, spacing } from '../lib/theme';
 import { useIsDesktop } from '../lib/responsive';
+import { formatMoneyWhole, formatShortDate, dollarsToCents, splitTags as baseSplitTags, errorMessage } from '../lib/format';
 import { AnimatedTab } from './AppCard';
 
 type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal_sent' | 'negotiating' | 'won' | 'lost' | 'unqualified' | 'on_hold';
@@ -91,30 +92,13 @@ const statusColumns: Array<{ status: LeadStatus; label: string; accent: (typeof 
 
 const lostStatuses: LeadStatus[] = ['lost', 'unqualified', 'on_hold'];
 
-function money(cents?: number) {
-  return `$${((cents ?? 0) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-}
-
-function dateText(value?: number) {
-  return value ? new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'TBD';
-}
-
 function dateInputValue(value: string) {
   const time = Date.parse(`${value}T12:00:00`);
   return Number.isFinite(time) ? time : undefined;
 }
 
 function splitTags(value: string) {
-  return Array.from(new Set(value.split(',').map((tag) => tag.trim()).filter(Boolean))).slice(0, 12);
-}
-
-function parseDollars(value: string) {
-  const amount = Number(value.replace(/[^0-9.]/g, ''));
-  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : undefined;
-}
-
-function errMsg(err: unknown) {
-  return err instanceof Error ? err.message : 'Unknown error';
+  return Array.from(new Set(baseSplitTags(value))).slice(0, 12);
 }
 
 export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> | undefined; enabled: boolean }) {
@@ -198,7 +182,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         source: leadSource.trim() || undefined,
         status: 'new',
         tags: splitTags(leadTags),
-        estimatedValueCents: parseDollars(leadValue),
+        estimatedValueCents: dollarsToCents(leadValue),
         marketingOptIn: true,
       });
       setSelectedLeadId(leadId);
@@ -211,7 +195,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setLeadTags('');
       setMessage('Lead created.');
     } catch (err) {
-      setMessage(`Failed to create lead: ${errMsg(err)}`);
+      setMessage(`Failed to create lead: ${errorMessage(err)}`);
     }
   };
 
@@ -223,7 +207,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       await saveLead({ venueId, leadId, fullName: target.fullName, status });
       setMessage(`Moved to ${status.replace('_', ' ')}.`);
     } catch (err) {
-      setMessage(`Failed to update lead: ${errMsg(err)}`);
+      setMessage(`Failed to update lead: ${errorMessage(err)}`);
     }
   };
 
@@ -242,8 +226,8 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         guestCount: Number(eventGuests) || undefined,
         venueSpace: eventSpace.trim() || undefined,
         setupStyle: eventSetup.trim() || undefined,
-        fbMinimumCents: parseDollars(eventMinimum),
-        depositCents: parseDollars(eventDeposit),
+        fbMinimumCents: dollarsToCents(eventMinimum),
+        depositCents: dollarsToCents(eventDeposit),
         menuAppetizers: eventApps.trim() || undefined,
         menuEntrees: eventEntrees.trim() || undefined,
         menuDesserts: eventDesserts.trim() || undefined,
@@ -269,13 +253,13 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setMessage('BEO draft created.');
       return beoId;
     } catch (err) {
-      setMessage(`Failed to create BEO: ${errMsg(err)}`);
+      setMessage(`Failed to create BEO: ${errorMessage(err)}`);
     }
   };
 
   const createContractFromLead = async () => {
     if (!venueId || !selectedLead) return;
-    const depositCents = parseDollars(eventDeposit);
+    const depositCents = dollarsToCents(eventDeposit);
     try {
       await saveContract({
         venueId,
@@ -284,7 +268,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         eventDate: dateInputValue(eventDate),
         guestCount: Number(eventGuests) || undefined,
         venueSpace: eventSpace.trim() || undefined,
-        fbMinimumCents: parseDollars(eventMinimum) ?? selectedLead.estimatedValueCents,
+        fbMinimumCents: dollarsToCents(eventMinimum) ?? selectedLead.estimatedValueCents,
         paymentSchedule: depositCents ? [{ amountCents: depositCents, dueDate: Date.now(), type: 'deposit' as const }] : undefined,
         cancellationPolicy: 'Deposit is non-refundable after the booking deadline. Final balance is due before event start.',
         forceMajeure: true,
@@ -299,7 +283,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setEventDeposit('');
       setMessage('Contract draft created.');
     } catch (err) {
-      setMessage(`Failed to create contract: ${errMsg(err)}`);
+      setMessage(`Failed to create contract: ${errorMessage(err)}`);
     }
   };
 
@@ -310,7 +294,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setNoteText('');
       setMessage('Note added.');
     } catch (err) {
-      setMessage(`Failed to save note: ${errMsg(err)}`);
+      setMessage(`Failed to save note: ${errorMessage(err)}`);
     }
   };
 
@@ -431,7 +415,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
                 await convertBeoToContract({ venueId, beoId });
                 setMessage('Converted BEO to contract.');
               } catch (err) {
-                setMessage(`Failed to convert: ${errMsg(err)}`);
+                setMessage(`Failed to convert: ${errorMessage(err)}`);
               }
             }} />
           ) : null}
@@ -457,7 +441,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
                   await saveTemplate({ venueId, ...tpl });
                   setMessage(tpl.templateId ? 'Template updated.' : 'Template saved.');
                 } catch (err) {
-                  setMessage(`Failed to save: ${errMsg(err)}`);
+                  setMessage(`Failed to save: ${errorMessage(err)}`);
                 }
               }}
               onDelete={async (templateId) => {
@@ -465,7 +449,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
                   await deleteTemplate({ venueId, templateId });
                   setMessage('Template deleted.');
                 } catch (err) {
-                  setMessage(`Failed to delete: ${errMsg(err)}`);
+                  setMessage(`Failed to delete: ${errorMessage(err)}`);
                 }
               }}
             />
@@ -484,7 +468,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
               await emailBeo({ venueId, beoId, toEmail, message });
               setMessage(`BEO emailed to ${toEmail}.`);
             } catch (err) {
-              setMessage(`Failed to send: ${errMsg(err)}`);
+              setMessage(`Failed to send: ${errorMessage(err)}`);
             }
           }}
           noteText={noteText}
@@ -516,10 +500,10 @@ function DashboardView({
   return (
     <View style={{ gap: spacing.md }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <StatTile label="Pipeline" value={money(stats.pipelineCents)} accent={accents[0]} />
+        <StatTile label="Pipeline" value={formatMoneyWhole(stats.pipelineCents)} accent={accents[0]} />
         <StatTile label="Open deals" value={String(stats.openCount)} accent={accents[2]} />
         <StatTile label="Proposals" value={String(stats.proposalCount)} accent={accents[1]} />
-        <StatTile label="Won revenue" value={money(stats.wonCents)} accent={accents[4]} />
+        <StatTile label="Won revenue" value={formatMoneyWhole(stats.wonCents)} accent={accents[4]} />
         <StatTile label="BEOs" value={String(stats.eventCount)} accent={accents[3]} />
         <StatTile label="Contracts" value={String(stats.contractCount)} accent={accents[5]} />
       </View>
@@ -530,7 +514,7 @@ function DashboardView({
         </View>
         <View style={{ flexGrow: 1, flexBasis: 320, gap: spacing.sm }}>
           <SectionHeader title="Recent documents" action="Docs" onPress={() => onView('events')} />
-          {(beos ?? []).slice(0, 3).map((beo) => <DocRow key={beo._id} title={beo.eventName} subtitle={`${beo.leadName ?? 'Unlinked'} - ${dateText(beo.eventDate)}`} status={beo.status} />)}
+          {(beos ?? []).slice(0, 3).map((beo) => <DocRow key={beo._id} title={beo.eventName} subtitle={`${beo.leadName ?? 'Unlinked'} - ${formatShortDate(beo.eventDate, 'TBD')}`} status={beo.status} />)}
           {(contracts ?? []).slice(0, 3).map((contract) => <DocRow key={contract._id} title={contract.eventName ?? contract.contractNumber} subtitle={`${contract.leadName ?? 'Unlinked'} - ${contract.contractNumber}`} status={contract.status} />)}
           {!(beos?.length || contracts?.length) ? <EmptyLine text="No BEOs or contracts yet." /> : null}
         </View>
@@ -563,7 +547,7 @@ function PipelineView({
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.xs }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: column.accent.fg, fontWeight: '800' }}>{column.label}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{rows.length} deals - {money(total)}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{rows.length} deals - {formatMoneyWhole(total)}</Text>
                 </View>
                 {canMoveSelectedHere ? (
                   <Button compact mode="text" textColor={colors.primary} onPress={() => onMove(selectedLead._id, column.status)}>Move here</Button>
@@ -572,7 +556,7 @@ function PipelineView({
               {rows.length === 0 ? <Text style={{ color: colors.muted, fontSize: 12 }}>No deals in this stage.</Text> : rows.map((lead) => (
                 <View key={lead._id} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: colors.surface, borderWidth: selectedLeadId === lead._id ? 1 : 0, borderColor: column.accent.fg }}>
                   <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{lead.company ?? lead.source ?? 'No company'} - {money(lead.estimatedValueCents)}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{lead.company ?? lead.source ?? 'No company'} - {formatMoneyWhole(lead.estimatedValueCents)}</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', marginTop: spacing.xs }}>
                     <Button compact mode="text" textColor={colors.primary} onPress={() => onSelectLead(lead._id)}>{selectedLeadId === lead._id ? 'Selected' : 'Select'}</Button>
                   </View>
@@ -605,11 +589,11 @@ function EventsView({ beos, onConvert }: { beos: BeoRow[] | undefined; onConvert
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontWeight: '800', color: colors.charcoal }}>{beo.eventName}</Text>
-              <Text style={{ color: colors.muted }}>{beo.leadName ?? 'Unlinked'} - {dateText(beo.eventDate)} - {beo.guestCount ?? 'TBD'} guests</Text>
+              <Text style={{ color: colors.muted }}>{beo.leadName ?? 'Unlinked'} - {formatShortDate(beo.eventDate, 'TBD')} - {beo.guestCount ?? 'TBD'} guests</Text>
             </View>
             <Chip compact>{beo.status}</Chip>
           </View>
-          <Text style={{ color: colors.muted }}>Space {beo.venueSpace ?? 'TBD'} - Minimum {money(beo.fbMinimumCents)} - Deposit {money(beo.depositCents)}</Text>
+          <Text style={{ color: colors.muted }}>Space {beo.venueSpace ?? 'TBD'} - Minimum {formatMoneyWhole(beo.fbMinimumCents)} - Deposit {formatMoneyWhole(beo.depositCents)}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {beo.eventType ? <Chip compact>{beo.eventType}</Chip> : null}
             {beo.setupStyle ? <Chip compact>{beo.setupStyle}</Chip> : null}
@@ -640,7 +624,7 @@ function ContractsView({ contracts }: { contracts: ContractRow[] | undefined }) 
         <DocRow
           key={contract._id}
           title={contract.eventName ?? contract.contractNumber}
-          subtitle={`${contract.leadName ?? 'Unlinked'} - ${dateText(contract.eventDate)} - ${contract.guestCount ?? 'TBD'} guests - ${money(contract.fbMinimumCents)}`}
+          subtitle={`${contract.leadName ?? 'Unlinked'} - ${formatShortDate(contract.eventDate, 'TBD')} - ${contract.guestCount ?? 'TBD'} guests - ${formatMoneyWhole(contract.fbMinimumCents)}`}
           status={contract.status}
         />
       ))}
@@ -678,7 +662,7 @@ function LeadDetailPanel({
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: spacing.sm }}>
         <View style={{ flex: 1, minWidth: 220 }}>
           <Text variant="titleLarge" style={{ color: colors.primary, fontWeight: '800' }}>{lead.fullName}</Text>
-          <Text style={{ color: colors.muted }}>{lead.company ?? 'No company'} - {lead.email ?? lead.phone ?? 'No contact'} - {money(lead.estimatedValueCents)}</Text>
+          <Text style={{ color: colors.muted }}>{lead.company ?? 'No company'} - {lead.email ?? lead.phone ?? 'No contact'} - {formatMoneyWhole(lead.estimatedValueCents)}</Text>
         </View>
         <Chip>{lead.status.replace('_', ' ').toUpperCase()}</Chip>
       </View>
@@ -701,7 +685,7 @@ function LeadDetailPanel({
           {(detail?.notes ?? []).slice(0, 4).map((note) => (
             <View key={note._id} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: colors.background }}>
               <Text style={{ color: colors.charcoal }}>{note.text}</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>{note.authorName} - {dateText(note.createdAt)}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>{note.authorName} - {formatShortDate(note.createdAt)}</Text>
             </View>
           ))}
         </View>
@@ -712,7 +696,7 @@ function LeadDetailPanel({
             <View key={item.id} style={{ paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border }}>
               <Text style={{ fontWeight: '700', color: colors.charcoal, fontSize: 13 }}>{item.kind.replace(/_/g, ' ')}</Text>
               <Text style={{ color: colors.muted, fontSize: 12 }}>
-                {item.actorName ? `${item.actorName} · ` : ''}{dateText(item.createdAt)}{item.detail ? ` · ${item.detail}` : ''}
+                {item.actorName ? `${item.actorName} · ` : ''}{formatShortDate(item.createdAt)}{item.detail ? ` · ${item.detail}` : ''}
               </Text>
             </View>
           ))}
@@ -781,7 +765,7 @@ function LeadListRow({ lead, onPress }: { lead: LeadRow; onPress: () => void }) 
           <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
           <Text style={{ color: colors.muted }}>{lead.company ?? lead.source ?? 'No company'} - {lead.email ?? lead.phone ?? 'No contact'}</Text>
         </View>
-        <Text style={{ color: colors.primary, fontWeight: '800' }}>{money(lead.estimatedValueCents)}</Text>
+        <Text style={{ color: colors.primary, fontWeight: '800' }}>{formatMoneyWhole(lead.estimatedValueCents)}</Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, flex: 1 }}>
@@ -837,9 +821,9 @@ function InsightsView({
         ) : (
           <>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-              <StatTile label="Weighted pipeline" value={money(forecast.totals.weightedValueCents)} accent={accents[0]} />
-              <StatTile label="Raw pipeline" value={money(forecast.totals.rawValueCents)} accent={accents[1]} />
-              <StatTile label="Closed-won" value={money(forecast.totals.wonValueCents)} accent={accents[2]} />
+              <StatTile label="Weighted pipeline" value={formatMoneyWhole(forecast.totals.weightedValueCents)} accent={accents[0]} />
+              <StatTile label="Raw pipeline" value={formatMoneyWhole(forecast.totals.rawValueCents)} accent={accents[1]} />
+              <StatTile label="Closed-won" value={formatMoneyWhole(forecast.totals.wonValueCents)} accent={accents[2]} />
               <StatTile label="Won deals" value={String(forecast.totals.wonCount)} accent={accents[3]} />
             </View>
             <View style={{ gap: 4 }}>
@@ -850,8 +834,8 @@ function InsightsView({
                     <Text style={{ color: colors.muted, fontSize: 12 }}>{row.count} deals · {Math.round(row.probability * 100)}% probability</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ color: colors.primary, fontWeight: '800' }}>{money(row.weightedValueCents)}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>raw {money(row.rawValueCents)}</Text>
+                    <Text style={{ color: colors.primary, fontWeight: '800' }}>{formatMoneyWhole(row.weightedValueCents)}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>raw {formatMoneyWhole(row.rawValueCents)}</Text>
                   </View>
                 </View>
               ))}
@@ -877,7 +861,7 @@ function InsightsView({
                 <Chip compact>{Math.round(row.winRate * 100)}% win</Chip>
               </View>
               <Text style={{ color: colors.muted, fontSize: 12 }}>
-                {row.leadCount} leads · {row.wonCount} won · {row.lostCount} lost · {money(row.wonValueCents)} closed · {money(row.pipelineValueCents)} pipeline
+                {row.leadCount} leads · {row.wonCount} won · {row.lostCount} lost · {formatMoneyWhole(row.wonValueCents)} closed · {formatMoneyWhole(row.pipelineValueCents)} pipeline
               </Text>
             </View>
           ))
@@ -902,7 +886,7 @@ function InsightsView({
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>
-                    {lead.status.replace(/_/g, ' ')} · {lead.daysSinceActivity}d idle · {money(lead.estimatedValueCents)}
+                    {lead.status.replace(/_/g, ' ')} · {lead.daysSinceActivity}d idle · {formatMoneyWhole(lead.estimatedValueCents)}
                   </Text>
                 </View>
                 <Button compact mode="text" textColor={colors.primary} onPress={() => onSelectLead(lead.id as Id<'crmLeads'>)}>Open</Button>

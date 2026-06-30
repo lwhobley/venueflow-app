@@ -10,6 +10,7 @@ import { resolveMediaUrl } from '../../lib/api-client';
 import type { Id } from '../../lib/ids';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { formatTime, errorMessage } from '../../lib/format';
 
 type ChatMessage = {
   _id: string;
@@ -28,9 +29,6 @@ type RenderItem =
   | { kind: 'day'; id: string; label: string }
   | { kind: 'message'; id: string; message: ChatMessage; showSender: boolean; compact: boolean };
 
-function fmtTime(at: number) {
-  return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-}
 
 function fmtDay(at: number) {
   const date = new Date(at);
@@ -231,7 +229,7 @@ export default function ConversationScreen() {
       await sendMessage({ conversationId, text: trimmed });
     } catch (e) {
       setText(trimmed);
-      setError(e instanceof Error ? e.message : 'Could not send message.');
+      setError(errorMessage(e, 'Could not send message.'));
     } finally {
       setSending(false);
     }
@@ -242,7 +240,7 @@ export default function ConversationScreen() {
     try {
       await toggleReaction({ messageId, emoji });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not add reaction.');
+      setError(errorMessage(e, 'Could not add reaction.'));
     }
   };
 
@@ -251,7 +249,7 @@ export default function ConversationScreen() {
     try {
       await editMessage({ messageId, text: newText });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update checklist.');
+      setError(errorMessage(e, 'Could not update checklist.'));
     }
   };
 
@@ -260,7 +258,7 @@ export default function ConversationScreen() {
       await claimOpenShift({ shiftId });
       setToast('Shift claimed');
     } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Claim failed.');
+      setToast(errorMessage(e, 'Claim failed.'));
     }
   };
 
@@ -269,7 +267,7 @@ export default function ConversationScreen() {
       await respondToShiftSwap({ swapId, accept });
       setToast(accept ? 'Swap accepted' : 'Swap declined');
     } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Action failed.');
+      setToast(errorMessage(e, 'Action failed.'));
     }
   };
 
@@ -292,7 +290,7 @@ export default function ConversationScreen() {
       });
       await sendMessage({ conversationId, text: 'Shared a photo', imageUrl });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not upload photo.');
+      setError(errorMessage(e, 'Could not upload photo.'));
     } finally {
       setSending(false);
     }
@@ -306,7 +304,7 @@ export default function ConversationScreen() {
       await sendMessage({ conversationId, text: formatted });
       setShowShareDialog(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not share shift.');
+      setError(errorMessage(e, 'Could not share shift.'));
     }
   };
 
@@ -317,7 +315,7 @@ export default function ConversationScreen() {
       await deleteConversation({ conversationId });
       router.back();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete chat.');
+      setError(errorMessage(e, 'Could not delete chat.'));
     }
   };
 
@@ -442,7 +440,7 @@ export default function ConversationScreen() {
             )}
 
             <Text style={{ color: message.mine ? 'rgba(255,255,255,0.72)' : colors.muted, fontSize: 10, alignSelf: 'flex-end' }}>
-              {fmtTime(message.createdAt)}
+              {formatTime(message.createdAt)}
             </Text>
           </View>
         </Pressable>
