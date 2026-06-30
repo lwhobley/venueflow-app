@@ -4,12 +4,12 @@ import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { formatMoney, formatShortDateTime, errorMessage } from '../../lib/format';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
 import { InlineMessage } from '../../components/InlineMessage';
+import { ManagerGate } from '../../components/ManagerGate';
 
 // Must stay in sync with POS_PROVIDERS in packages/api/src/modules/pos/pos.controller.ts
 // and the PosProvider enum in prisma/schema.prisma.
@@ -34,13 +34,7 @@ const reservationProviderOptions = [
 ] as const;
 type ReservationProvider = (typeof reservationProviderOptions)[number]['value'];
 
-function money(cents: number) {
-  return `$${(cents / 100).toFixed(2)}`;
-}
 
-function dateTime(value: number | null | undefined) {
-  return value ? new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Never';
-}
 
 export default function IntegrationsScreen() {
   return (
@@ -51,11 +45,7 @@ export default function IntegrationsScreen() {
 }
 
 function IntegrationsScreenInner() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const user = useAuthStore((state: AuthState) => state.user);
-  const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+  const { venue, isReady, canManage, profileLoading } = useVenueAuth();
   const overview = useQuery(api.pos.getPosOverview, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const reservationOverview = useQuery(
     api.reservationIntegrations.getReservationIntegrationOverview,
@@ -90,7 +80,7 @@ function IntegrationsScreenInner() {
       if (r?.webhookSecret) setNewSecret(r.webhookSecret);
       setMessage('POS connection saved.');
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not save POS connection.');
+      setMessage(errorMessage(e, 'Could not save POS connection.'));
     } finally {
       setPending(null);
     }
@@ -110,7 +100,7 @@ function IntegrationsScreenInner() {
       if (r?.webhookSecret) setNewSecret(r.webhookSecret);
       setMessage('Reservation connection saved.');
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not save reservation connection.');
+      setMessage(errorMessage(e, 'Could not save reservation connection.'));
     } finally {
       setPending(null);
     }
@@ -125,21 +115,14 @@ function IntegrationsScreenInner() {
       if (r?.webhookSecret) setNewSecret(r.webhookSecret);
       setMessage('Lead webhook secret generated.');
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not generate lead webhook secret.');
+      setMessage(errorMessage(e, 'Could not generate lead webhook secret.'));
     } finally {
       setPending(null);
     }
   };
 
-  if (!canManage) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Integrations are available to managers and admins.</Text>
-      </ScrollView>
-    );
-  }
-
   return (
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Integrations">
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
@@ -167,10 +150,10 @@ function IntegrationsScreenInner() {
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {[
-          { label: 'Today sales', value: money(overview?.todaySalesCents ?? 0), a: accents[0] },
-          { label: 'Today tips', value: money(overview?.todayTipsCents ?? 0), a: accents[2] },
+          { label: 'Today sales', value: formatMoney(overview?.todaySalesCents ?? 0), a: accents[0] },
+          { label: 'Today tips', value: formatMoney(overview?.todayTipsCents ?? 0), a: accents[2] },
           { label: 'Open checks', value: String(overview?.openChecks ?? 0), a: accents[3] },
-          { label: 'Last sync', value: dateTime(overview?.lastSyncAt), a: accents[4] },
+          { label: 'Last sync', value: overview?.lastSyncAt ? formatShortDateTime(overview.lastSyncAt) : 'Never', a: accents[4] },
         ].map((metric) => (
           <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: 16 }}>
             <Card.Content>
@@ -243,7 +226,7 @@ function IntegrationsScreenInner() {
               <View key={connection._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
                 <Text style={{ fontWeight: '700' }}>{connection.provider}</Text>
                 <Text style={{ color: colors.muted }}>Status: {connection.status} · Location: {connection.externalLocationId ?? 'not set'}</Text>
-                <Text style={{ color: colors.muted }}>Last sync: {dateTime(connection.lastSyncAt)}</Text>
+                <Text style={{ color: colors.muted }}>Last sync: {connection.lastSyncAt ? formatShortDateTime(connection.lastSyncAt) : 'Never'}</Text>
               </View>
             ))
           )}
@@ -260,7 +243,7 @@ function IntegrationsScreenInner() {
               <View key={connection._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
                 <Text style={{ fontWeight: '700' }}>{connection.provider}</Text>
                 <Text style={{ color: colors.muted }}>Status: {connection.status} · Venue ID: {connection.externalVenueId ?? 'not set'}</Text>
-                <Text style={{ color: colors.muted }}>Last sync: {dateTime(connection.lastSyncAt)}</Text>
+                <Text style={{ color: colors.muted }}>Last sync: {connection.lastSyncAt ? formatShortDateTime(connection.lastSyncAt) : 'Never'}</Text>
               </View>
             ))
           )}
@@ -269,7 +252,7 @@ function IntegrationsScreenInner() {
               <Text style={{ fontWeight: '700' }}>Recent reservation sync events</Text>
               {reservationOverview.recentEvents.slice(0, 5).map((event: any) => (
                 <Text key={event._id} style={{ color: colors.muted }}>
-                  {event.provider} · {event.eventType} · {dateTime(event.processedAt)}
+                  {event.provider} · {event.eventType} · {formatShortDateTime(event.processedAt)}
                 </Text>
               ))}
             </View>
@@ -285,14 +268,15 @@ function IntegrationsScreenInner() {
           ) : (
             overview.recentChecks.map((check: any) => (
               <View key={check._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
-                <Text style={{ fontWeight: '700' }}>{check.provider} · {money(check.totalCents)}</Text>
+                <Text style={{ fontWeight: '700' }}>{check.provider} · {formatMoney(check.totalCents)}</Text>
                 <Text style={{ color: colors.muted }}>{check.status} · Table {check.tableLabel ?? '-'} · {check.guestName ?? 'Guest'}</Text>
-                <Text style={{ color: colors.muted }}>{dateTime(check.openedAt)}</Text>
+                <Text style={{ color: colors.muted }}>{formatShortDateTime(check.openedAt)}</Text>
               </View>
             ))
           )}
         </Card.Content>
       </Card>
     </ScrollView>
+    </ManagerGate>
   );
 }
