@@ -4,11 +4,6 @@ import { Button, Text } from 'react-native-paper';
 import { router } from 'expo-router';
 import { colors, spacing, radius } from '../lib/theme';
 
-// TEMPORARY: surface the underlying error/stack on every build (including
-// production) to diagnose the iOS release startup crash. Revert to a
-// __DEV__-gated check once the root cause is confirmed fixed.
-const EXPOSE_ERROR_DETAILS = true;
-
 type Props = { children: ReactNode };
 type State = { error: Error | null; componentStack: string | null };
 
@@ -58,7 +53,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <Text style={{ color: colors.muted }}>
             This screen hit an error and couldn’t load. Your data is safe — try again or head back home.
           </Text>
-          {EXPOSE_ERROR_DETAILS || (typeof __DEV__ !== 'undefined' && __DEV__) ? (
+          {typeof __DEV__ !== 'undefined' && __DEV__ ? (
             <View style={{ gap: 4 }}>
               <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '700' }}>
                 {error.name}: {error.message}
