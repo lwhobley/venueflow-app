@@ -159,6 +159,7 @@ export class AppBillingController {
       return price.id;
     } catch (error) {
       // A concurrent request may have claimed the lookup_key first; re-fetch it.
+      this.logger.warn(`Stripe price creation failed, attempting re-fetch: ${error instanceof Error ? error.message : String(error)}`);
       const retry = await stripeRequest<{ data?: { id: string }[] }>(secret, 'GET', '/prices', {
         lookup_keys: [STRIPE_PRICE_LOOKUP_KEY],
         active: true,
