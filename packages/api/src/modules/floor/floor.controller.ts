@@ -12,6 +12,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import {
   IsArray,
   IsIn,
@@ -35,7 +36,8 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 type Scope = VenueScopedRequest['venueScope'];
 
 const TABLE_SHAPES = ['round', 'square', 'rect', 'booth'] as const;
-const TABLE_STATUSES = ['available', 'seated', 'dirty', 'reserved'] as const;
+const TABLE_STATUSES = ['available', 'seated', 'dirty', 'reserved', 'held', 'out_of_service'] as const;
+const HOLD_TYPES = ['reserved', 'held', 'seated'] as const;
 
 class TableChairDto {
   @IsNumber()
@@ -134,6 +136,39 @@ class AssignReservationDto {
   tableIds!: string[];
 }
 
+class AssignWaitlistDto {
+  @IsString()
+  waitlistId!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  tableIds!: string[];
+
+  @IsString()
+  @IsIn(HOLD_TYPES)
+  @IsOptional()
+  holdType?: string;
+
+  @IsNumber()
+  @IsOptional()
+  startsAt?: number;
+
+  @IsNumber()
+  @IsOptional()
+  endsAt?: number;
+}
+
+class MergeTablesDto {
+  @IsArray()
+  @IsString({ each: true })
+  tableIds!: string[];
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  partySize?: number;
+}
+
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
   if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
 }
@@ -162,6 +197,46 @@ export class FloorController {
       where: { venueId: scope.venueId, tableId: { in: plan.tables.map((t) => t.id) } },
     });
     const stateByTableId = new Map(tableStates.map((s) => [s.tableId, s]));
+    const tableIds = plan.tables.map((t) => t.id);
+    const now = new Date();
+    const assignments = tableIds.length
+      ? await this.prisma.tableAssignment.findMany({
+          where: {
+            venueId: scope.venueId,
+            tableId: { in: tableIds },
+            releasedAt: null,
+            endsAt: { gt: now },
+          },
+          include: {
+            reservation: {
+              select: {
+                id: true,
+                guestName: true,
+                partySize: true,
+                source: true,
+                tags: true,
+                specialRequests: true,
+                status: true,
+              },
+            },
+          },
+          orderBy: { startsAt: 'asc' },
+        })
+      : [];
+    const waitlistIds = assignments.map((a) => a.waitlistId).filter((id): id is string => Boolean(id));
+    const waitlistRows = waitlistIds.length
+      ? await this.prisma.waitlist.findMany({
+          where: { venueId: scope.venueId, id: { in: waitlistIds } },
+          select: { id: true, guestName: true, partySize: true, source: true, notes: true, status: true },
+        })
+      : [];
+    const waitlistById = new Map(waitlistRows.map((row) => [row.id, row]));
+    const assignmentsByTableId = new Map<string, typeof assignments>();
+    for (const assignment of assignments) {
+      const rows = assignmentsByTableId.get(assignment.tableId) ?? [];
+      rows.push(assignment);
+      assignmentsByTableId.set(assignment.tableId, rows);
+    }
 
     return {
       floorPlan: {
@@ -207,8 +282,15 @@ export class FloorController {
                 seatedAt: state.seatedAt?.getTime() ?? null,
                 lastActivityAt: state.lastActivityAt.getTime(),
                 notes: state.notes ?? null,
+                mergeGroupId: state.mergeGroupId ?? null,
               }
             : null,
+          activeAssignments: (assignmentsByTableId.get(table.id) ?? [])
+            .filter((assignment) => assignment.startsAt <= now && assignment.endsAt > now)
+            .map((assignment) => this.mapAssignment(assignment, waitlistById)),
+          nextAssignment: (assignmentsByTableId.get(table.id) ?? [])
+            .filter((assignment) => assignment.startsAt > now)
+            .map((assignment) => this.mapAssignment(assignment, waitlistById))[0] ?? null,
         };
       }),
       chairs: plan.chairs.map((c) => ({
@@ -225,23 +307,43 @@ export class FloorController {
   @RequireSubscription('active')
   @Get('stats')
   async getFloorStats(@VenueScope() scope: Scope) {
-    if (!scope) return { totalTables: 0, occupiedTables: 0, availableTables: 0, dirtyCleaning: 0 };
+    if (!scope) return this.emptyStats();
     const plan = await this.prisma.floorPlan.findFirst({
       where: { venueId: scope.venueId, isActive: true },
       include: { tables: { select: { id: true } } },
     });
-    if (!plan) return { totalTables: 0, occupiedTables: 0, availableTables: 0, dirtyCleaning: 0 };
+    if (!plan) return this.emptyStats();
 
     const tableIds = plan.tables.map((t) => t.id);
-    const states = await this.prisma.tableState.findMany({
-      where: { venueId: scope.venueId, tableId: { in: tableIds } },
-    });
+    const [states, waitlistSize] = await Promise.all([
+      this.prisma.tableState.findMany({
+        where: { venueId: scope.venueId, tableId: { in: tableIds } },
+      }),
+      this.prisma.waitlist.count({ where: { venueId: scope.venueId, status: 'waiting' } }),
+    ]);
+    const occupiedStates = states.filter((s) => s.status === 'seated');
+    const occupiedTables = occupiedStates.length;
+    const availableTables = states.filter((s) => s.status === 'available').length;
+    const dirtyCleaning = states.filter((s) => s.status === 'dirty').length;
+    const seatedDurations = occupiedStates
+      .map((s) => (s.seatedAt ? Math.max(0, Math.round((Date.now() - s.seatedAt.getTime()) / 60_000)) : 0))
+      .filter((minutes) => minutes > 0);
+    const avgTurnTimeMinutes = seatedDurations.length
+      ? Math.round(seatedDurations.reduce((sum, minutes) => sum + minutes, 0) / seatedDurations.length)
+      : 0;
+    const longestSeatedDurationMinutes = seatedDurations.length ? Math.max(...seatedDurations) : 0;
 
     return {
       totalTables: tableIds.length,
-      occupiedTables: states.filter((s) => s.status === 'seated').length,
-      availableTables: states.filter((s) => s.status === 'available').length,
-      dirtyCleaning: states.filter((s) => s.status === 'dirty').length,
+      occupiedTables,
+      availableTables,
+      dirtyCleaning,
+      occupiedCount: occupiedTables,
+      availableCount: availableTables,
+      dirtyCount: dirtyCleaning,
+      waitlistSize,
+      avgTurnTimeMinutes,
+      longestSeatedDurationMinutes,
     };
   }
 
@@ -465,6 +567,48 @@ export class FloorController {
   }
 
   @RequireSubscription('active')
+  @Post('tables/merge')
+  async mergeTablesForParty(@VenueScope() scope: Scope, @Body() body: MergeTablesDto) {
+    requireManager(scope);
+    const tableIds = Array.from(new Set(body.tableIds));
+    if (tableIds.length < 2) throw new BadRequestException('Select at least two tables to merge');
+
+    const validTableIds = await this.getActivePlanTableIds(scope.venueId);
+    const unknown = tableIds.filter((id) => !validTableIds.has(id));
+    if (unknown.length) throw new BadRequestException('One or more tables are not on this venue\'s floor plan');
+
+    const states = await this.prisma.tableState.findMany({
+      where: { venueId: scope.venueId, tableId: { in: tableIds } },
+    });
+    if (states.length !== tableIds.length) throw new BadRequestException('One or more tables are missing live state');
+    const blocked = states.find((state) => state.status !== 'available' && state.status !== 'dirty');
+    if (blocked) throw new ConflictException(`Table ${blocked.tableId} is not available to merge`);
+
+    const mergeGroupId = randomUUID();
+    await this.prisma.tableState.updateMany({
+      where: { venueId: scope.venueId, tableId: { in: tableIds } },
+      data: {
+        mergeGroupId,
+        partySize: body.partySize ?? null,
+        lastActivityAt: new Date(),
+      },
+    });
+    return { ok: true, mergeGroupId };
+  }
+
+  @RequireSubscription('active')
+  @Post('tables/merge-groups/:id/split')
+  async splitMergedTables(@VenueScope() scope: Scope, @Param('id') mergeGroupId: string) {
+    requireManager(scope);
+    const result = await this.prisma.tableState.updateMany({
+      where: { venueId: scope.venueId, mergeGroupId },
+      data: { mergeGroupId: null, partySize: null, lastActivityAt: new Date() },
+    });
+    if (result.count === 0) throw new NotFoundException('Merged table group not found');
+    return { ok: true, splitTables: result.count };
+  }
+
+  @RequireSubscription('active')
   @Post('assign-reservation')
   async assignReservationToTables(@VenueScope() scope: Scope, @Body() body: AssignReservationDto) {
     requireManager(scope);
@@ -526,20 +670,163 @@ export class FloorController {
   }
 
   @RequireSubscription('active')
-  @Delete('assignments/:tableId')
-  async releaseAssignment(@VenueScope() scope: Scope, @Param('tableId') tableId: string) {
+  @Post('assign-waitlist')
+  async assignWaitlistToTables(@VenueScope() scope: Scope, @Body() body: AssignWaitlistDto) {
     requireManager(scope);
-    await this.prisma.tableAssignment.updateMany({
-      where: { venueId: scope.venueId, tableId, releasedAt: null },
-      data: { releasedAt: new Date(), releasedReason: 'manual' },
+    if (!body.tableIds.length) throw new BadRequestException('No tables specified');
+
+    const waitlist = await this.prisma.waitlist.findFirst({
+      where: { id: body.waitlistId, venueId: scope.venueId, status: { in: ['waiting', 'assigned'] } },
+    });
+    if (!waitlist) throw new NotFoundException('Waitlist entry not found');
+
+    const validTableIds = await this.getActivePlanTableIds(scope.venueId);
+    const unknown = body.tableIds.filter((id) => !validTableIds.has(id));
+    if (unknown.length) throw new BadRequestException('One or more tables are not on this venue\'s floor plan');
+
+    const startsAt = body.startsAt ? new Date(body.startsAt) : new Date();
+    const endsAt = body.endsAt ? new Date(body.endsAt) : new Date(startsAt.getTime() + 120 * 60 * 1000);
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+      throw new BadRequestException('Invalid seating window');
+    }
+
+    await withSerializableRetry(this.prisma, async (tx) => {
+      const conflict = await tx.tableAssignment.findFirst({
+        where: {
+          venueId: scope.venueId,
+          tableId: { in: body.tableIds },
+          releasedAt: null,
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+          NOT: { waitlistId: body.waitlistId },
+        },
+        select: { tableId: true },
+      });
+      if (conflict) {
+        throw new ConflictException(`Table ${conflict.tableId} is already booked for this time window`);
+      }
+      await tx.tableAssignment.updateMany({
+        where: { venueId: scope.venueId, waitlistId: body.waitlistId, releasedAt: null },
+        data: { releasedAt: new Date(), releasedReason: 'reassigned' },
+      });
+      for (const tableId of body.tableIds) {
+        await tx.tableAssignment.create({
+          data: {
+            venueId: scope.venueId,
+            waitlistId: body.waitlistId,
+            tableId,
+            holdType: (body.holdType ?? 'seated') as any,
+            startsAt,
+            endsAt,
+          },
+        });
+      }
+      await tx.waitlist.update({
+        where: { id: waitlist.id },
+        data: { status: body.holdType === 'held' ? 'assigned' : 'seated', readyAt: new Date() },
+      });
+      await tx.tableState.updateMany({
+        where: { venueId: scope.venueId, tableId: { in: body.tableIds } },
+        data: {
+          status: body.holdType === 'held' ? 'held' : 'seated',
+          partySize: waitlist.partySize,
+          seatedAt: startsAt,
+          lastActivityAt: new Date(),
+        },
+      });
+    });
+    return { ok: true };
+  }
+
+  @RequireSubscription('active')
+  @Delete('assignments/:id')
+  async releaseAssignment(@VenueScope() scope: Scope, @Param('id') id: string) {
+    requireManager(scope);
+    const assignment = await this.prisma.tableAssignment.findFirst({
+      where: { venueId: scope.venueId, id, releasedAt: null },
+      select: { id: true, tableId: true },
+    });
+    const tableIds = assignment ? [assignment.tableId] : [id];
+    const released = assignment
+      ? await this.prisma.tableAssignment.updateMany({
+          where: { venueId: scope.venueId, id: assignment.id, releasedAt: null },
+          data: { releasedAt: new Date(), releasedReason: 'manual' },
+        })
+      : await this.prisma.tableAssignment.updateMany({
+          where: { venueId: scope.venueId, tableId: id, releasedAt: null },
+          data: { releasedAt: new Date(), releasedReason: 'manual' },
+        });
+    if (released.count === 0) throw new NotFoundException('Assignment not found');
+    await this.prisma.tableState.updateMany({
+      where: { venueId: scope.venueId, tableId: { in: tableIds } },
+      data: { status: 'available', partySize: null, seatedAt: null, lastActivityAt: new Date() },
     });
     // Find seats freed up by the released table so we can match a waitlist
     // entry whose party fits. Best-effort; fire-and-forget so the manager
     // action returns immediately.
-    const table = await this.prisma.floorTable.findFirst({ where: { id: tableId, floorPlan: { venueId: scope.venueId } }, select: { seats: true } });
+    const table = await this.prisma.floorTable.findFirst({ where: { id: tableIds[0], floorPlan: { venueId: scope.venueId } }, select: { seats: true } });
     if (table && table.seats > 0) {
       void this.notifier.notifyNextWaitlist(scope.venueId, table.seats);
     }
     return { ok: true };
+  }
+
+  private emptyStats() {
+    return {
+      totalTables: 0,
+      occupiedTables: 0,
+      availableTables: 0,
+      dirtyCleaning: 0,
+      occupiedCount: 0,
+      availableCount: 0,
+      dirtyCount: 0,
+      waitlistSize: 0,
+      avgTurnTimeMinutes: 0,
+      longestSeatedDurationMinutes: 0,
+    };
+  }
+
+  private async getActivePlanTableIds(venueId: string) {
+    const plan = await this.prisma.floorPlan.findFirst({
+      where: { venueId, isActive: true },
+      include: { tables: { select: { id: true } } },
+    });
+    return new Set((plan?.tables ?? []).map((table) => table.id));
+  }
+
+  private mapAssignment(
+    assignment: {
+      id: string;
+      waitlistId: string | null;
+      reservationId: string | null;
+      holdType: string;
+      startsAt: Date;
+      endsAt: Date;
+      reservation?: {
+        guestName: string;
+        partySize: number;
+        source: string;
+        tags: string[];
+        specialRequests: string | null;
+        status: string;
+      } | null;
+    },
+    waitlistById: Map<string, { guestName: string; partySize: number; source: string; notes: string | null; status: string }>,
+  ) {
+    const waitlist = assignment.waitlistId ? waitlistById.get(assignment.waitlistId) : null;
+    const reservation = assignment.reservation ?? null;
+    return {
+      assignmentId: assignment.id,
+      holdType: assignment.holdType,
+      sourceType: assignment.reservationId ? 'reservation' : 'waitlist',
+      guestName: reservation?.guestName ?? waitlist?.guestName ?? 'Guest',
+      partySize: reservation?.partySize ?? waitlist?.partySize ?? 0,
+      source: reservation?.source ?? waitlist?.source ?? 'walk_in',
+      tags: reservation?.tags ?? [],
+      notes: reservation?.specialRequests ?? waitlist?.notes ?? null,
+      status: reservation?.status ?? waitlist?.status ?? 'assigned',
+      startsAt: assignment.startsAt.getTime(),
+      endsAt: assignment.endsAt.getTime(),
+    };
   }
 }
