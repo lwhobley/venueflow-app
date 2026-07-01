@@ -6,9 +6,8 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { formatTime, errorMessage } from '../../lib/format';
 import { router } from 'expo-router';
 
 const sectionFilters = ['all', 'main', 'patio', 'bar', 'vip'] as const;
@@ -128,24 +127,13 @@ type WaitlistItem = {
 
 type StatCard = { label: string; value: number | string };
 
-function formatTime(value: number) {
-  return new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-function formatMinutes(minutes: number) {
-  const hours = Math.floor(minutes / 60);
-  const remaining = minutes % 60;
-  return hours > 0 ? `${hours}h ${remaining}m` : `${remaining}m`;
-}
 
 export default function FloorScreenWrapper() {
   return <ScreenErrorBoundary><FloorScreen /></ScreenErrorBoundary>;
 }
 
 function FloorScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const user = useAuthStore((state: AuthState) => state.user);
-  const { isReady } = useAuthenticatedSession();
+  const { venue, isReady, user, canManage: canEdit } = useVenueAuth();
   const [section, setSection] = useState<(typeof sectionFilters)[number]>('all');
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
@@ -165,8 +153,7 @@ function FloorScreen() {
   const [mergeParty, setMergeParty] = useState(6);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canEdit = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+
   const activeFloor = floor ?? null;
   const reservationQueue = unassignedReservations ?? [];
   const waitlistQueue = openWaitlist ?? [];
@@ -196,7 +183,7 @@ function FloorScreen() {
       setMergeSel([]);
       setMergeOpen(false);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not merge tables.');
+      setActionError(errorMessage(e, 'Could not merge tables.'));
     }
   };
 
@@ -222,7 +209,7 @@ function FloorScreen() {
         actorRole: user?.role ?? 'staff',
       });
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not release assignment.');
+      setActionError(errorMessage(e, 'Could not release assignment.'));
     }
   };
 
@@ -231,7 +218,7 @@ function FloorScreen() {
     try {
       await markDirty({ tableId });
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not mark table dirty.');
+      setActionError(errorMessage(e, 'Could not mark table dirty.'));
     }
   };
 
@@ -240,7 +227,7 @@ function FloorScreen() {
     try {
       await markClean({ tableId });
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not mark table clean.');
+      setActionError(errorMessage(e, 'Could not mark table clean.'));
     }
   };
 
@@ -250,7 +237,7 @@ function FloorScreen() {
     try {
       await splitMergedTables({ venueId: venue.id, mergeGroupId });
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not split merged tables.');
+      setActionError(errorMessage(e, 'Could not split merged tables.'));
     }
   };
 

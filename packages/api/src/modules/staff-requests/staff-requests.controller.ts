@@ -323,7 +323,9 @@ export class StaffRequestsController {
                 profileId: request.profileId,
                 venueId: request.venueId,
                 clockInAt: correctedClockIn,
-                clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : new Date(correction.clockInAt + 8 * 60 * 60 * 1000),
+                clockOutAt: correction.clockOutAt
+                  ? new Date(correction.clockOutAt)
+                  : new Date(correctedClockIn.getTime() + 8 * 60 * 60 * 1000),
                 clockInLat: 0,
                 clockInLng: 0,
                 clockInAccuracyM: 0,

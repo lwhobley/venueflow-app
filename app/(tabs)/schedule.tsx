@@ -8,9 +8,8 @@ import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
 import { useDesktopContentStyle } from '../../lib/responsive';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { errorMessage } from '../../lib/format';
 import { ManagerCalendar } from '../../components/schedule/ManagerCalendar';
 import { MyShifts } from '../../components/schedule/MyShifts';
 import { AvailabilityEditor } from '../../components/schedule/AvailabilityEditor';
@@ -41,7 +40,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
       await action();
       if (ok) setToast(ok);
     } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Action failed.');
+      setToast(errorMessage(e, 'Action failed.'));
     }
   };
 
@@ -100,10 +99,7 @@ export default function ScheduleScreenWrapper() {
 }
 
 function ScheduleScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+  const { venue, canManage } = useVenueAuth();
 
   const [managerTab, setManagerTab] = useState<'calendar' | 'forecast' | 'requests' | 'blackouts'>('calendar');
   const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');

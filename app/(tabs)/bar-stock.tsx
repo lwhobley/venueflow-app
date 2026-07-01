@@ -10,9 +10,9 @@ import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { errorMessage } from '../../lib/format';
+import { ManagerGate } from '../../components/ManagerGate';
 import {
   money,
   type VelocityRow,
@@ -62,10 +62,7 @@ type ParsedItem = Omit<BarItem, '_id' | 'area' | 'unitCostCents' | 'supplier' | 
 type MovementType = 'count' | 'received' | 'waste' | 'transfer';
 
 export default function BarStockScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+  const { venue, isReady, canManage, profileLoading } = useVenueAuth();
   const stock = useQuery(api.barInventory.getBarStock, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
   const velocity = useQuery(api.barInventory.getUsageVelocity, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as VelocityRow[] | null | undefined;
   const upsertBarItem = useMutation(api.barInventory.upsertBarItem);
@@ -149,7 +146,7 @@ export default function BarStockScreen() {
       setName(''); setParLevel('0'); setOnHand('0'); setUnitCost(''); setSupplier(''); setNotes('');
       setMessage('Bar stock item saved.');
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not save item.');
+      setMessage(errorMessage(e, 'Could not save item.'));
     } finally { setBusy(false); }
   };
 
@@ -161,7 +158,7 @@ export default function BarStockScreen() {
       setParsedItems(result.items as ParsedItem[]);
       setParseNotes(result.notes || null);
       setMessage(`Parsed ${result.items.length} item${result.items.length === 1 ? '' : 's'}.`);
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not parse inventory input.'); }
+    } catch (e) { setMessage(errorMessage(e, 'Could not parse inventory input.')); }
     finally { setBusy(false); }
   };
 
@@ -173,7 +170,7 @@ export default function BarStockScreen() {
       const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
       setParseText(text);
       setMessage(`Loaded ${doc.assets[0].name ?? 'upload'} for parsing.`);
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not load CSV.'); }
+    } catch (e) { setMessage(errorMessage(e, 'Could not load CSV.')); }
     finally { setBusy(false); }
   };
 
@@ -185,7 +182,7 @@ export default function BarStockScreen() {
       const image = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, base64: true, quality: 0.8 });
       if (image.canceled || !image.assets[0]?.base64) return;
       await parseWithAi({ base64: image.assets[0].base64, mimeType: image.assets[0].mimeType });
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not load photo.'); }
+    } catch (e) { setMessage(errorMessage(e, 'Could not load photo.')); }
     finally { setBusy(false); }
   };
 
@@ -196,7 +193,7 @@ export default function BarStockScreen() {
       const result = await importParsed({ venueId: venue.id, items: parsedItems });
       setParsedItems([]); setParseText('');
       setMessage(`Imported ${result.imported} bar stock item${result.imported === 1 ? '' : 's'}.`);
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not import parsed items.'); }
+    } catch (e) { setMessage(errorMessage(e, 'Could not import parsed items.')); }
     finally { setBusy(false); }
   };
 
@@ -204,7 +201,7 @@ export default function BarStockScreen() {
     if (!venue?.id) { setMessage('No venue assigned to your account yet.'); return; }
     setMessage(null);
     try { await recordMovement({ venueId: venue.id, itemId, movementType, quantity }); }
-    catch (e) { setMessage(e instanceof Error ? e.message : 'Could not update stock count.'); }
+    catch (e) { setMessage(errorMessage(e, 'Could not update stock count.')); }
   };
 
   const submitCount = useCallback(async () => {
@@ -222,7 +219,7 @@ export default function BarStockScreen() {
         setCountIndex(0);
         setMessage(`Count complete — ${countItems.length} items counted.`);
       }
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not record count.'); }
+    } catch (e) { setMessage(errorMessage(e, 'Could not record count.')); }
   }, [venue?.id, countIndex, countItems, countValue, recordMovement]);
 
   const openScanner = async () => {
@@ -255,16 +252,8 @@ export default function BarStockScreen() {
       await updateCost({ itemId, unitCostCents: cents });
       setEditCostItemId(null); setEditCostValue('');
       setMessage('Cost updated.');
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not update cost.'); }
+    } catch (e) { setMessage(errorMessage(e, 'Could not update cost.')); }
   };
-
-  if (!canManage) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Bar Stock is available to managers and admins.</Text>
-      </ScrollView>
-    );
-  }
 
   // Barcode scanner overlay
   if (showScanner && Platform.OS !== 'web') {
@@ -346,6 +335,7 @@ export default function BarStockScreen() {
   }
 
   return (
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Bar Stock">
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
@@ -405,7 +395,7 @@ export default function BarStockScreen() {
           try {
             const r = await sendDigest({});
             setMessage(r.sent ? `Digest emailed — ${r.belowParCount} below par, $${(r.shrinkageCents / 100).toFixed(2)} shrinkage.` : 'Digest not sent.');
-          } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not send digest.'); }
+          } catch (e) { setMessage(errorMessage(e, 'Could not send digest.')); }
           finally { setBusy(false); }
         }}>
           Email digest
@@ -448,7 +438,7 @@ export default function BarStockScreen() {
             try {
               const r = await sendPoEmail({});
               setMessage(r.sent ? `PO emailed to managers — ${r.itemCount} items.` : r.reason ?? 'Not sent.');
-            } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not send PO email.'); }
+            } catch (e) { setMessage(errorMessage(e, 'Could not send PO email.')); }
             finally { setBusy(false); }
           }}
         />
@@ -630,5 +620,6 @@ export default function BarStockScreen() {
         </Card.Content>
       </Card>
     </ScrollView>
+    </ManagerGate>
   );
 }

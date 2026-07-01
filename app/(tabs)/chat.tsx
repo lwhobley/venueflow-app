@@ -7,9 +7,8 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, radius, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { formatRelativeTime, errorMessage } from '../../lib/format';
 
 type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 type FilterKey = 'all' | 'direct' | 'groups' | 'shifts';
@@ -40,14 +39,7 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-function formatRelativeTime(value?: number | null) {
-  if (!value) return '';
-  const date = new Date(value);
-  const today = new Date();
-  const sameDay = date.toDateString() === today.toDateString();
-  if (sameDay) return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
+
 
 function colorFor(index: number) {
   return accents[index % accents.length].fg;
@@ -126,9 +118,7 @@ function Section({ title, children, action }: { title: string; children: ReactNo
 }
 
 export default function ChatScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const { venue, isReady, me, canManage } = useVenueAuth();
   const ensureSetup = useMutation(api.chat.ensureChatSetup);
   const openDm = useMutation(api.chat.openDm);
   const createGroup = useMutation(api.chat.createGroup);
@@ -146,7 +136,7 @@ export default function ChatScreen() {
     if (!isReady || !venue?.id) return;
     setError(null);
     void ensureSetup({ venueId: venue.id }).catch((e: unknown) => {
-      setError(e instanceof Error ? e.message : 'Could not prepare chat.');
+      setError(errorMessage(e, 'Could not prepare chat.'));
     });
   }, [ensureSetup, isReady, venue?.id]);
 
@@ -154,7 +144,7 @@ export default function ChatScreen() {
   const dms = (conversations?.dms ?? []) as ConversationRow[];
   const roles = (conversations?.roles ?? []) as ConversationRow[];
   const shifts = (conversations?.shifts ?? []) as ConversationRow[];
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+
   const unreadCount = [...groups, ...dms, ...roles, ...shifts].filter((row) => row.unread).length;
 
   const dmByName = useMemo(() => new Map(dms.map((dm) => [dm.title, dm])), [dms]);
@@ -176,7 +166,7 @@ export default function ChatScreen() {
       const result = await openDm({ venueId: venue.id, targetProfileId: otherId as Id<'profiles'> });
       router.push(`/chat/${result?.conversationId ?? result}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not open direct message.');
+      setError(errorMessage(e, 'Could not open direct message.'));
     }
   };
 
@@ -190,7 +180,7 @@ export default function ChatScreen() {
       setShowNewGroup(false);
       router.push(`/chat/${result?.conversationId ?? result}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create group.');
+      setError(errorMessage(e, 'Could not create group.'));
     } finally {
       setCreating(false);
     }
@@ -201,7 +191,7 @@ export default function ChatScreen() {
     try {
       await deleteConversation({ conversationId: conversationId as Id<'conversations'> });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete chat.');
+      setError(errorMessage(e, 'Could not delete chat.'));
     }
   };
 

@@ -46,7 +46,7 @@ export function usePushNotifications() {
     }
 
     void register().catch((error) => {
-      if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('Unable to register push notifications', error);
+      console.warn('[push] Unable to register push notifications:', error instanceof Error ? error.message : String(error));
     });
 
     return () => {

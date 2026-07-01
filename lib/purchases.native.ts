@@ -51,7 +51,7 @@ export async function configurePurchases(appUserId?: string): Promise<void> {
       await Purchases.logIn(appUserId);
     }
   } catch (e) {
-    if (isDev) console.error('[purchases] configure failed:', e);
+    console.error('[purchases] configure failed:', e);
   }
 }
 
@@ -60,7 +60,8 @@ export async function isPremiumActive(): Promise<boolean> {
   try {
     const info = await Purchases.getCustomerInfo();
     return Boolean(info.entitlements.active[ENTITLEMENT]);
-  } catch {
+  } catch (e) {
+    console.warn('[purchases] isPremiumActive check failed:', e instanceof Error ? e.message : String(e));
     return false;
   }
 }

@@ -114,12 +114,15 @@ export class ReservationNotifierService {
         await this.email.sendOrThrow({ to: reservation.guestEmail, subject, text });
         sent += 1;
       } catch (err) {
-        // Revert the claim if email sending fails so it can be retried later.
-        await this.prisma.reservation.update({
-          where: { id: reservation.id },
-          data: { reminderSentAt: null },
-        });
         this.logger.warn(`Reservation reminder failed for ${reservation.id}: ${(err as Error).message}`);
+        try {
+          await this.prisma.reservation.update({
+            where: { id: reservation.id },
+            data: { reminderSentAt: null },
+          });
+        } catch (revertErr) {
+          this.logger.error(`Failed to revert reminder claim for ${reservation.id}: ${(revertErr as Error).message}`);
+        }
       }
     }
     if (sent > 0) this.logger.log(`Sent ${sent} reservation reminders`);
@@ -170,12 +173,15 @@ export class ReservationNotifierService {
           `— The Team at ${venueName}`,
       });
     } catch (err) {
-      // Revert the claim if email sending fails.
-      await this.prisma.waitlist.update({
-        where: { id: entry.id },
-        data: { notifiedAt: null, readyAt: null },
-      });
       this.logger.warn(`Waitlist notify failed for ${entry.id}: ${(err as Error).message}`);
+      try {
+        await this.prisma.waitlist.update({
+          where: { id: entry.id },
+          data: { notifiedAt: null, readyAt: null },
+        });
+      } catch (revertErr) {
+        this.logger.error(`Failed to revert waitlist claim for ${entry.id}: ${(revertErr as Error).message}`);
+      }
     }
   }
 }

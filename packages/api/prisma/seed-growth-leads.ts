@@ -105,6 +105,7 @@ async function main() {
 
   } catch (error) {
     console.error('Error seeding growth leads:', error);
+    process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }

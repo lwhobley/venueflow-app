@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, ShiftStatus } from '@prisma/client';
@@ -9,6 +10,8 @@ import { withSerializableRetry } from '../../common/tx-retry';
 
 @Injectable()
 export class SchedulingAssignmentService {
+  private readonly logger = new Logger(SchedulingAssignmentService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async createShift(args: {
@@ -583,7 +586,8 @@ export class SchedulingAssignmentService {
             data: { profileId: assignment.profileId, status: 'scheduled' },
           });
         });
-      } catch {
+      } catch (error: any) {
+        this.logger.warn(`Auto-assign skipped shift ${shift.id}: ${error?.message ?? String(error)}`);
         skipped += 1;
         continue;
       }

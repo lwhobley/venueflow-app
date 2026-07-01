@@ -6,9 +6,8 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { formatMoney, formatShortDate, formatShortDateTime, formatFullDateTime, splitTags, errorMessage } from '../../lib/format';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 import { CrmSalesWorkspace } from '../../components/CrmSalesWorkspace';
 
@@ -101,21 +100,7 @@ const lifecycleOptions: Array<{ value: LifecycleStage; label: string }> = [
   { value: 'lapsed', label: 'Lapsed' },
 ];
 
-function money(cents: number) {
-  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
-function dateText(value: number | null) {
-  return value ? new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'None';
-}
-
-function dateTimeText(value: number) {
-  return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
-function fullDateTimeText(value: number) {
-  return new Date(value).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
 
 function scoreGuest(guest: GuestRow) {
   const spendScore = Math.min(45, Math.floor(guest.totalSpendCents / 5000));
@@ -125,9 +110,7 @@ function scoreGuest(guest: GuestRow) {
   return Math.min(100, spendScore + visitScore + futureScore + profileScore);
 }
 
-function splitTags(value: string) {
-  return value.split(',').map((tag) => tag.trim()).filter(Boolean);
-}
+
 
 function latestEventReservation(profile: GuestProfile | null | undefined) {
   return [...(profile?.reservations ?? [])]
@@ -148,7 +131,7 @@ function generateBeo(guest: GuestRow, profile: GuestProfile | null | undefined) 
     `Company / Group: ${guest.company ?? event?.eventName ?? 'TBD'}`,
     `Contact: ${guest.phone ?? 'No phone'} · ${guest.email ?? 'No email'}`,
     `Event: ${event?.eventName ?? 'Private event'}`,
-    `Date / Time: ${event ? fullDateTimeText(event.reservationTime) : 'TBD'}`,
+    `Date / Time: ${event ? formatFullDateTime(event.reservationTime) : 'TBD'}`,
     `Guest Count: ${event?.partySize ?? 'TBD'}`,
     `Room / Space: ${event?.eventSpace ?? 'TBD'}`,
     `Setup: ${event?.setupStyle ?? 'TBD'}`,
@@ -167,10 +150,10 @@ function generateContract(guest: GuestRow, profile: GuestProfile | null | undefi
     `Client: ${guest.fullName}`,
     `Contact: ${guest.phone ?? 'No phone'} · ${guest.email ?? 'No email'}`,
     `Event: ${event?.eventName ?? 'Private event'} at ${event?.eventSpace ?? 'TBD'}`,
-    `Date / Time: ${event ? fullDateTimeText(event.reservationTime) : 'TBD'}`,
+    `Date / Time: ${event ? formatFullDateTime(event.reservationTime) : 'TBD'}`,
     `Guest Count: ${event?.partySize ?? 'TBD'}`,
-    `Estimated Event Value: ${event?.estimatedValueCents ? money(event.estimatedValueCents) : 'TBD'}`,
-    `Deposit Due: ${event?.depositDueCents ? money(event.depositDueCents) : 'TBD'}`,
+    `Estimated Event Value: ${event?.estimatedValueCents ? formatMoney(event.estimatedValueCents) : 'TBD'}`,
+    `Deposit Due: ${event?.depositDueCents ? formatMoney(event.depositDueCents) : 'TBD'}`,
     'Included Services: Food, beverage, staffing, and room setup as described in the attached BEO.',
     'Payment Terms: Deposit due at signing. Final balance due per venue policy.',
     'Cancellation Terms: Subject to venue cancellation policy and signed agreement.',
@@ -244,10 +227,7 @@ function GuestsScreen() {
 }
 
 function GuestsScreenInner() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+  const { venue, isReady, canManage } = useVenueAuth();
   const guestList = useQuery(api.guests.listGuests, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as GuestListResponse | undefined;
   const guests = guestList?.guests;
   const upsertGuest = useMutation(api.guests.upsertGuest);
@@ -381,7 +361,7 @@ function GuestsScreenInner() {
       setShowForm(false);
       resetForm();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save guest.');
+      setError(errorMessage(e, 'Could not save guest.'));
     }
   };
 
@@ -392,7 +372,7 @@ function GuestsScreenInner() {
       await removeGuest({ venueId: venue.id, guestId });
       if (selectedGuestId === guestId) setSelectedGuestId(null);
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'Could not delete guest.');
+      setDeleteError(errorMessage(e, 'Could not delete guest.'));
     }
   };
 
@@ -412,7 +392,7 @@ function GuestsScreenInner() {
       setLeadMessage(`Imported ${result.created} new lead${result.created === 1 ? '' : 's'} and updated ${result.updated}. ${result.skipped ? `${result.skipped} skipped.` : ''}`);
       if (result.guestIds[0]) setSelectedGuestId(result.guestIds[0]);
     } catch (e) {
-      setLeadMessage(e instanceof Error ? e.message : 'Could not import leads.');
+      setLeadMessage(errorMessage(e, 'Could not import leads.'));
     } finally {
       setLeadBusy(false);
     }
@@ -460,7 +440,7 @@ function GuestsScreenInner() {
               { label: 'Leads', value: String(crmStats.leads), accent: accents[5] },
               { label: 'VIPs', value: String(crmStats.vipGuests), accent: accents[1] },
               { label: 'Upcoming', value: String(crmStats.upcomingGuests), accent: accents[2] },
-              { label: 'Revenue', value: money(crmStats.totalSpend), accent: accents[3] },
+              { label: 'Revenue', value: formatMoney(crmStats.totalSpend), accent: accents[3] },
               { label: 'Opted in', value: String(crmStats.optedIn), accent: accents[4] },
               { label: 'Follow-up', value: String(crmStats.needsFollowUp), accent: accents[5] },
             ].map((metric) => (
@@ -621,9 +601,9 @@ const GuestListItem = memo(function GuestListItem({ guest, isSelected, onOpen, o
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
           <Text style={{ color: colors.muted }}>{guest.visitCount} visits</Text>
-          <Text style={{ color: colors.muted }}>{money(guest.totalSpendCents)}</Text>
-          <Text style={{ color: colors.muted }}>Last {dateText(guest.lastVisitAt)}</Text>
-          <Text style={{ color: colors.muted }}>Next {dateText(guest.upcomingReservationAt)}</Text>
+          <Text style={{ color: colors.muted }}>{formatMoney(guest.totalSpendCents)}</Text>
+          <Text style={{ color: colors.muted }}>Last {formatShortDate(guest.lastVisitAt)}</Text>
+          <Text style={{ color: colors.muted }}>Next {formatShortDate(guest.upcomingReservationAt)}</Text>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => onOpen(guest._id)}>Open profile</Button>
@@ -647,7 +627,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
     const checks = (profile?.checks ?? []).map((check) => ({
       id: check._id,
       at: check.closedAt ?? check.openedAt,
-      title: `${money(check.totalCents)} ${check.status} check`,
+      title: `${formatMoney(check.totalCents)} ${check.status} check`,
       body: `${check.revenueCenter ?? check.provider}${check.guestCount ? ` · ${check.guestCount} guests` : ''}${check.tenderType ? ` · ${check.tenderType}` : ''}`,
       tags: check.menuItems.slice(0, 3).map((item) => `${item.quantity}× ${item.name}`),
     }));
@@ -681,8 +661,8 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
             <Metric label="Relationship score" value={String(scoreGuest(guest))} />
-            <Metric label="Lifetime spend" value={money(guest.totalSpendCents)} />
-            <Metric label="Avg check" value={money(guest.averageSpendCents)} />
+            <Metric label="Lifetime spend" value={formatMoney(guest.totalSpendCents)} />
+            <Metric label="Avg check" value={formatMoney(guest.averageSpendCents)} />
             <Metric label="Visits" value={String(guest.visitCount)} />
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -724,7 +704,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest intelligence</Text>
-          <Text style={{ color: colors.muted }}>Last visit: {dateText(guest.lastVisitAt)} · Next reservation: {dateText(guest.upcomingReservationAt)}</Text>
+          <Text style={{ color: colors.muted }}>Last visit: {formatShortDate(guest.lastVisitAt)} · Next reservation: {formatShortDate(guest.upcomingReservationAt)}</Text>
           {guest.daysSinceLastVisit == null ? (
             <Text style={{ color: colors.muted }}>New guest — capture preferences after their first visit.</Text>
           ) : guest.daysSinceLastVisit >= 30 && !guest.upcomingReservationAt ? (
@@ -736,7 +716,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
             <View style={{ gap: 4 }}>
               <Text style={{ fontWeight: '700' }}>Favorite items</Text>
               {topItems.map((item) => (
-                <Text key={item.name} style={{ color: colors.muted }}>{item.name} · {item.quantity} ordered · {money(item.spendCents)}</Text>
+                <Text key={item.name} style={{ color: colors.muted }}>{item.name} · {item.quantity} ordered · {formatMoney(item.spendCents)}</Text>
               ))}
             </View>
           ) : null}
@@ -753,7 +733,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
           ) : timeline.map((item) => (
             <View key={String(item.id)} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
               <Text style={{ fontWeight: '700' }}>{item.title}</Text>
-              <Text style={{ color: colors.muted }}>{dateTimeText(item.at)} · {item.body}</Text>
+              <Text style={{ color: colors.muted }}>{formatShortDateTime(item.at)} · {item.body}</Text>
               {item.tags.length > 0 ? (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
                   {item.tags.map((tag) => <Chip compact key={tag}>{tag}</Chip>)}

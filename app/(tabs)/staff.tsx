@@ -8,9 +8,8 @@ import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useDesktopContentStyle } from '../../lib/responsive';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { errorMessage } from '../../lib/format';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
@@ -111,11 +110,7 @@ export default function StaffScreenWrapper() {
 }
 
 function StaffScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const profileLoading = isReady && me === undefined;
-  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -171,7 +166,7 @@ function StaffScreen() {
       await Share.share({ message: `Join ${venue.name} on Venue Wrangler: ${inviteUrl}` });
       setInviteLinkMsg('Invite link generated and ready to share. It expires in 7 days.');
     } catch (e) {
-      setInviteLinkErr(e instanceof Error ? e.message : 'Could not generate link.');
+      setInviteLinkErr(errorMessage(e, 'Could not generate link.'));
     } finally {
       setGeneratingLink(false);
     }
@@ -235,7 +230,7 @@ function StaffScreen() {
       });
       clearForm();
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save staff');
+      Alert.alert('Error', errorMessage(e, 'Failed to save staff'));
     }
   };
 
@@ -248,7 +243,7 @@ function StaffScreen() {
           await deactivateStaff({ staffId: member._id as Id<'profiles'> });
           if (selectedStaffId === member._id) clearForm();
         } catch (e) {
-          Alert.alert('Error', e instanceof Error ? e.message : 'Action failed');
+          Alert.alert('Error', errorMessage(e, 'Action failed'));
         }
       }}
     ]);

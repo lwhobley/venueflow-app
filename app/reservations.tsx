@@ -10,6 +10,7 @@ import { accents, colors, spacing } from '../lib/theme';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { canManageVenue } from '../lib/permissions';
+import { formatTime, formatShortDate, formatWeekdayDate, pad2, dollarsToCents, splitTags, errorMessage } from '../lib/format';
 import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
 
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
@@ -70,19 +71,7 @@ const statusColor: Record<string, { bg: string; fg: string }> = {
   cancelled: { bg: '#FDE7E9', fg: colors.danger },
 };
 
-function fmtResTime(at: number) {
-  return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-}
-function fmtDay(at: number) {
-  return new Date(at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-}
-function pad(n: number) {
-  return n.toString().padStart(2, '0');
-}
-function dollarsToCents(value: string) {
-  const amount = Number(value.replace(/[$,]/g, '').trim());
-  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : undefined;
-}
+
 
 export default function ReservationsScreenWrapper() {
   return <ScreenErrorBoundary><ReservationsScreen /></ScreenErrorBoundary>;
@@ -139,7 +128,7 @@ function ReservationsScreen() {
       await assignWaitlist({ venueId: venue.id, waitlistId: entryId as Id<'waitlist'>, tableIds: [tableId as Id<'tables'>], holdType: 'seated', startsAt, endsAt: startsAt + 120 * 60 * 1000 });
       setSeatingWaitlistId(null);
     } catch (e) {
-      setWaitlistError(e instanceof Error ? e.message : 'Failed to seat guest');
+      setWaitlistError(errorMessage(e, 'Failed to seat guest'));
     }
   };
 
@@ -149,7 +138,7 @@ function ReservationsScreen() {
     try {
       await markWaitlistReady({ venueId: venue.id, waitlistId: waitlistId as Id<'waitlist'> });
     } catch (e) {
-      setWaitlistError(e instanceof Error ? e.message : 'Failed to mark ready');
+      setWaitlistError(errorMessage(e, 'Failed to mark ready'));
     }
   };
 
@@ -159,7 +148,7 @@ function ReservationsScreen() {
     try {
       await removeFromWaitlist({ venueId: venue.id, waitlistId: waitlistId as Id<'waitlist'> });
     } catch (e) {
-      setWaitlistError(e instanceof Error ? e.message : 'Failed to remove');
+      setWaitlistError(errorMessage(e, 'Failed to remove'));
     }
   };
 
@@ -183,7 +172,7 @@ function ReservationsScreen() {
   const [guestEmail, setGuestEmail] = useState('');
   const [guestCompany, setGuestCompany] = useState('');
   const [partySize, setPartySize] = useState(2);
-  const [date, setDate] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+  const [date, setDate] = useState(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`);
   const [time, setTime] = useState('18:00');
   const [selectedMeal, setSelectedMeal] = useState('dinner');
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
@@ -243,7 +232,7 @@ function ReservationsScreen() {
       setHoldReason('');
       setHoldError(null);
     } catch (err) {
-      setHoldError(err instanceof Error ? err.message : 'Failed to create hold.');
+      setHoldError(errorMessage(err, 'Failed to create hold.'));
     }
   };
 
@@ -256,13 +245,13 @@ function ReservationsScreen() {
       .sort((a, b) => a.reservationTime - b.reservationTime);
   }, [reservations, listDateRange]);
 
-  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   const dateOptions = useMemo(() => {
     const today = new Date();
     return Array.from({ length: 14 }, (_, i) => {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
-      const value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
       const label = i === 0 ? `Today · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : i === 1 ? `Tomorrow · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       return { value, label, dayOfWeek: d.getDay() };
     });
@@ -298,7 +287,7 @@ function ReservationsScreen() {
         durationMinutes: showPrivateEventForm ? 240 : (MEAL_TIMES[selectedMeal]?.duration ?? 120),
         source,
         status: 'confirmed',
-        tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        tags: splitTags(tags),
         occasion: occasion.trim() || undefined,
         specialRequests: notes.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -338,7 +327,7 @@ function ReservationsScreen() {
       setShowForm(false);
       setShowPrivateEventForm(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create reservation.');
+      setError(errorMessage(e, 'Could not create reservation.'));
     }
   };
 
@@ -363,7 +352,7 @@ function ReservationsScreen() {
     try {
       await removeReservation({ venueId: venue.id, reservationId: res.id as Id<'reservations'> });
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'Could not delete reservation.');
+      setDeleteError(errorMessage(e, 'Could not delete reservation.'));
     }
   };
 
@@ -707,8 +696,8 @@ function ReservationsScreen() {
             <View style={{ paddingVertical: 10, paddingHorizontal: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6, backgroundColor: colors.surface }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View>
-                  <Text style={{ fontWeight: '800' }}>{fmtDay(res.reservationTime)}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 13 }}>{fmtResTime(res.reservationTime)}</Text>
+                  <Text style={{ fontWeight: '800' }}>{formatWeekdayDate(res.reservationTime)}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 13 }}>{formatTime(res.reservationTime)}</Text>
                 </View>
                 <Chip compact style={{ backgroundColor: sc.bg }} textStyle={{ color: sc.fg }}>{res.status.replace('_', ' ')}</Chip>
               </View>

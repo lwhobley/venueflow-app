@@ -7,6 +7,7 @@ import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
+import { formatTime, errorMessage } from '../../lib/format';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 import { appApi, useApiMutation, useApiQuery } from '../../lib/api-client';
 
@@ -44,9 +45,6 @@ function fmtClock(d: Date) {
 }
 function fmtDate(d: Date) {
   return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-}
-function fmtTime(at: number) {
-  return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 export default function ClockScreen() {
@@ -107,7 +105,7 @@ export default function ClockScreen() {
     getPreciseLocation()
       .then((next) => !cancelled && setLocation(next))
       .catch((error) => {
-        if (!cancelled) Alert.alert('Location needed', error instanceof Error ? error.message : 'Unable to get your location.');
+        if (!cancelled) Alert.alert('Location needed', errorMessage(error, 'Unable to get your location.'));
       })
       .finally(() => !cancelled && setLoadingLocation(false));
     return () => {
@@ -126,7 +124,7 @@ export default function ClockScreen() {
       else await clockIn.mutateAsync(args);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('Punch failed', error instanceof Error ? error.message : 'Unable to record punch.');
+      Alert.alert('Punch failed', errorMessage(error, 'Unable to record punch.'));
     } finally {
       setBusy(false);
     }
@@ -139,7 +137,7 @@ export default function ClockScreen() {
       await breakStart.mutateAsync({ type });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('Break failed', error instanceof Error ? error.message : 'Unable to start break.');
+      Alert.alert('Break failed', errorMessage(error, 'Unable to start break.'));
     } finally {
       setBusy(false);
     }
@@ -152,7 +150,7 @@ export default function ClockScreen() {
       await breakEnd.mutateAsync({});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('End break failed', error instanceof Error ? error.message : 'Unable to end break.');
+      Alert.alert('End break failed', errorMessage(error, 'Unable to end break.'));
     } finally {
       setBusy(false);
     }
@@ -201,7 +199,7 @@ export default function ClockScreen() {
       setCorrectionOutTime('');
       setCorrectionReason('');
     } catch (error) {
-      Alert.alert('Submission failed', error instanceof Error ? error.message : 'Unable to submit request.');
+      Alert.alert('Submission failed', errorMessage(error, 'Unable to submit request.'));
     } finally {
       setBusy(false);
     }
@@ -316,7 +314,7 @@ export default function ClockScreen() {
             </Text>
           ) : (
             <Text style={{ color: accents[2].fg, textAlign: 'center', marginTop: -4 }}>
-              ✓ You're inside the geofence{timeClock?.openSince ? ` · in since ${fmtTime(timeClock.openSince)}` : ''}{isOnBreak ? ` · (On ${breakType === 'paid' ? 'Paid' : 'Unpaid'} Break)` : ''}
+              ✓ You're inside the geofence{timeClock?.openSince ? ` · in since ${formatTime(timeClock.openSince)}` : ''}{isOnBreak ? ` · (On ${breakType === 'paid' ? 'Paid' : 'Unpaid'} Break)` : ''}
             </Text>
           )}
 
@@ -362,7 +360,7 @@ export default function ClockScreen() {
                       <MaterialCommunityIcons name={p.type === 'in' ? 'login' : 'logout'} size={18} color={p.type === 'in' ? accents[2].fg : colors.danger} />
                       <Text>{p.type === 'in' ? 'Clock In' : 'Clock Out'}</Text>
                     </View>
-                    <Text style={{ color: colors.primary, fontWeight: '700' }}>{fmtTime(p.at)}</Text>
+                    <Text style={{ color: colors.primary, fontWeight: '700' }}>{formatTime(p.at)}</Text>
                   </View>
                 ))
               )}
@@ -511,7 +509,7 @@ export default function ClockScreen() {
                         <Text style={{ fontWeight: '600' }}>{e.memberName}</Text>
                         <Text style={{ color: colors.muted }}>{e.jobTitle}</Text>
                       </View>
-                      <Text style={{ color: colors.muted }}>in {fmtTime(e.clockInAt)}</Text>
+                      <Text style={{ color: colors.muted }}>in {formatTime(e.clockInAt)}</Text>
                     </View>
                     {e.clockInLat !== undefined && e.clockInLat !== 0 && (
                       <Pressable
