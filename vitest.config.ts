@@ -10,10 +10,10 @@ export default defineConfig({
       // not the whole repo. Thresholds sit below current coverage with headroom
       // so normal fluctuation doesn't red CI; ratchet up as coverage grows.
       thresholds: {
-        statements: 70,
-        branches: 55,
-        functions: 70,
-        lines: 70,
+        statements: 75,
+        branches: 65,
+        functions: 78,
+        lines: 75,
       },
     },
   },
