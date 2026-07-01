@@ -22,12 +22,28 @@ export async function bootstrapE2eApp(): Promise<{
   teardown: () => Promise<void>;
 }> {
   let dbTeardown: () => Promise<void> = async () => {};
+  // Snapshot every env var we mutate so teardown can restore the exact prior
+  // state (including "was unset"). Without this, this bootstrap leaks
+  // DATABASE_URL et al. onto the shared process.env — safe today only because
+  // vitest's default fork pool isolates files, but a fragile implicit
+  // dependency on that pool config.
+  const ENV_KEYS = ['DATABASE_URL', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'] as const;
+  const envSnapshot: Record<string, string | undefined> = {};
+  for (const key of ENV_KEYS) envSnapshot[key] = process.env[key];
+  const restoreEnv = () => {
+    for (const key of ENV_KEYS) {
+      if (envSnapshot[key] === undefined) delete process.env[key];
+      else process.env[key] = envSnapshot[key];
+    }
+  };
+
   try {
     const db = await setupTestDb();
     dbTeardown = db.teardown;
     process.env.DATABASE_URL = db.url;
   } catch (err) {
     console.warn('Skipping e2e tests — no test DB available:', (err as Error).message);
+    restoreEnv();
     return { app: null, prisma: null, jwt: null, teardown: dbTeardown };
   }
 
@@ -60,6 +76,7 @@ export async function bootstrapE2eApp(): Promise<{
     teardown: async () => {
       await app.close();
       await dbTeardown();
+      restoreEnv();
     },
   };
 }

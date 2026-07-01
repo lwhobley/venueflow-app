@@ -9,11 +9,12 @@ name: Branch API Parity Check
 # later. It only reports; it does not gate merges on either branch.
 
 on:
-  push:
-    branches: [main, desktop-web]
+  # NOT triggered on push: the normal flow is merge to main -> then port to
+  # desktop-web, so a push-triggered run would fail by design in that window
+  # every single merge, training people to ignore it. Run on a schedule (a
+  # standing divergence past the daily check is a genuine "you forgot to port"
+  # signal) plus on-demand.
   schedule:
-    # Catch-all in case a merge lands without a push event reaching both
-    # branches' history in the expected order.
     - cron: '0 13 * * *'
   workflow_dispatch: {}
 

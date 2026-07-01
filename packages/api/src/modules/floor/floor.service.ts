@@ -429,11 +429,7 @@ export class FloorService {
 
     // Validate every table belongs to this venue's active floor plan so a
     // caller can't attach a reservation to another venue's (or a stale) table.
-    const plan = await this.prisma.floorPlan.findFirst({
-      where: { venueId, isActive: true },
-      include: { tables: { select: { id: true } } },
-    });
-    const validTableIds = new Set((plan?.tables ?? []).map((t) => t.id));
+    const validTableIds = await this.getActivePlanTableIds(venueId);
     const unknown = tableIds.filter((id) => !validTableIds.has(id));
     if (unknown.length) throw new BadRequestException('One or more tables are not on this venue\'s floor plan');
 
