@@ -29,7 +29,7 @@ function makeDbGuard(tier: string | undefined, profile: any) {
   const reflector = { getAllAndOverride: vi.fn().mockReturnValue(tier) } as any;
   const prisma = {
     profile: {
-      findFirst: vi.fn().mockResolvedValue(profile),
+      findUnique: vi.fn().mockResolvedValue(profile),
     },
     subscription: {
       findFirst: vi.fn().mockResolvedValue(null),
@@ -105,7 +105,7 @@ describe('SubscriptionGuard', () => {
     });
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
-    expect(prisma.profile.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'user-1' } }));
+    expect(prisma.profile.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'user-1' } }));
     expect(context.switchToHttp().getRequest().venueScope).toMatchObject({
       profileId: 'fresh-profile',
       venueId: 'fresh-venue',

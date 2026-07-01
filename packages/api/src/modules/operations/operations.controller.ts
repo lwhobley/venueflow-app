@@ -405,7 +405,7 @@ export class OperationsController {
   }
 
   private async getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({ where: { userId: user.sub }, include: { venue: true } });
+    return this.prisma.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
   }
 
   private async requireManagerProfile(user: AuthUser) {

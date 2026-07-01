@@ -14,7 +14,7 @@ export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
   getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({
+    return this.prisma.profile.findUnique({
       where: { userId: user.sub },
       include: { venue: true },
     });

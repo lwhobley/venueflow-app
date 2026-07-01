@@ -59,7 +59,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const profile = await this.prisma.profile.findFirst({
+    const profile = await this.prisma.profile.findUnique({
       where: { userId: user.sub },
       include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
     });

@@ -69,7 +69,7 @@ export class SubscriptionGuard implements CanActivate {
     const user = request.user;
     if (!user?.sub) return null;
 
-    const profile = await this.prisma.profile.findFirst({
+    const profile = await this.prisma.profile.findUnique({
       where: { userId: user.sub },
       include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
     });

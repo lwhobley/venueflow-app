@@ -243,7 +243,7 @@ export class AppController {
     const result = await this.prisma.$transaction(async (tx) => {
       // Re-check inside the transaction so a double-submit doesn't create a
       // second venue + subscription for an owner who already has one.
-      const current = await tx.profile.findFirst({ where: { userId: user.sub }, include: { venue: true } });
+      const current = await tx.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
       if (current?.venue) {
         return { profile: current, venue: current.venue };
       }
