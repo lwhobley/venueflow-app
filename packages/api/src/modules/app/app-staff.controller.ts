@@ -97,7 +97,7 @@ export class AppStaffController {
       orderBy: { fullName: 'asc' },
       take: profileId ? 1 : 200,
     });
-    await Promise.all(profiles.map((profile) => this.ensureOnboardingTasks(venueId, profile.id)));
+    await this.ensureOnboardingTasksForProfiles(venueId, profiles.map((profile) => profile.id));
     const tasks = await this.prisma.staffOnboardingTask.findMany({
       where: { venueId, ...(profileId ? { profileId } : {}) },
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
@@ -135,24 +135,30 @@ export class AppStaffController {
     if (!task) throw new NotFoundException('Onboarding task not found');
     const target = await this.prisma.profile.findFirst({ where: { id: task.profileId, venueId } });
     const now = new Date();
-    const updated = await this.prisma.staffOnboardingTask.update({
-      where: { id: task.id },
-      data: {
-        status: body.status,
-        completedBy: body.status === 'done' ? viewer.id : null,
-        completedAt: body.status === 'done' ? now : null,
-        updatedAt: now,
-      },
-    });
-    await this.writeAuditLog({
-      venueId,
-      actor: viewer,
-      target,
-      entityType: 'onboarding_task',
-      entityId: task.id,
-      action: body.status === 'done' ? 'onboarding_task_completed' : 'onboarding_task_updated',
-      summary: `${viewer.fullName} marked "${task.title}" ${body.status}${target ? ` for ${target.fullName}` : ''}.`,
-      metadata: { taskTitle: task.title, previousStatus: task.status, nextStatus: body.status },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedTask = await tx.staffOnboardingTask.update({
+        where: { id: task.id },
+        data: {
+          status: body.status,
+          completedBy: body.status === 'done' ? viewer.id : null,
+          completedAt: body.status === 'done' ? now : null,
+          updatedAt: now,
+        },
+      });
+      await this.writeAuditLog(
+        {
+          venueId,
+          actor: viewer,
+          target,
+          entityType: 'onboarding_task',
+          entityId: task.id,
+          action: body.status === 'done' ? 'onboarding_task_completed' : 'onboarding_task_updated',
+          summary: `${viewer.fullName} marked "${task.title}" ${body.status}${target ? ` for ${target.fullName}` : ''}.`,
+          metadata: { taskTitle: task.title, previousStatus: task.status, nextStatus: body.status },
+        },
+        tx,
+      );
+      return updatedTask;
     });
     return mapOnboardingTask(updated);
   }
@@ -196,40 +202,41 @@ export class AppStaffController {
       dateOfBirth: body.dateOfBirth ? parseDateOfBirth(body.dateOfBirth) : null,
       certifications: body.certifications ?? [],
     };
-    let row;
-    if (existing) {
-      const roleChanged = existing.role !== body.role || existing.venueId !== body.venueId;
-      row = await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.profile.update({
+    const row = await this.prisma.$transaction(async (tx) => {
+      let created;
+      if (existing) {
+        const roleChanged = existing.role !== body.role || existing.venueId !== body.venueId;
+        created = await tx.profile.update({
           where: { id: existing.id },
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         });
         if (roleChanged && existing.userId) {
           await tx.session.deleteMany({ where: { userId: existing.userId } });
         }
-        return updated;
-      });
-    } else {
-      row = await this.prisma.profile.create({
-        data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
-      });
-    }
-    if (!existing) {
-      await this.ensureOnboardingTasks(body.venueId, row.id);
-    }
-    await this.writeAuditLog({
-      venueId: body.venueId,
-      actor: viewer,
-      target: row,
-      entityType: 'profile',
-      entityId: row.id,
-      action: existing ? 'staff_updated' : 'staff_created',
-      summary: existing
-        ? `${viewer.fullName} updated ${row.fullName}${existing.role !== row.role ? ` from ${existing.role} to ${row.role}` : ''}.`
-        : `${viewer.fullName} added ${row.fullName} as ${row.role}.`,
-      metadata: existing
-        ? { previousRole: existing.role, nextRole: row.role, previousJobTitle: existing.jobTitle, nextJobTitle: row.jobTitle }
-        : { role: row.role, jobTitle: row.jobTitle },
+      } else {
+        created = await tx.profile.create({
+          data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
+        });
+        await this.ensureOnboardingTasks(body.venueId, created.id, tx);
+      }
+      await this.writeAuditLog(
+        {
+          venueId: body.venueId,
+          actor: viewer,
+          target: created,
+          entityType: 'profile',
+          entityId: created.id,
+          action: existing ? 'staff_updated' : 'staff_created',
+          summary: existing
+            ? `${viewer.fullName} updated ${created.fullName}${existing.role !== created.role ? ` from ${existing.role} to ${created.role}` : ''}.`
+            : `${viewer.fullName} added ${created.fullName} as ${created.role}.`,
+          metadata: existing
+            ? { previousRole: existing.role, nextRole: created.role, previousJobTitle: existing.jobTitle, nextJobTitle: created.jobTitle }
+            : { role: created.role, jobTitle: created.jobTitle },
+        },
+        tx,
+      );
+      return created;
     });
     const venueName = viewer.venue?.name ?? 'your venue';
     void this.email.send({
@@ -270,17 +277,20 @@ export class AppStaffController {
       if (staff.userId) {
         await tx.session.deleteMany({ where: { userId: staff.userId } });
       }
+      await this.writeAuditLog(
+        {
+          venueId: viewer.venueId!,
+          actor: viewer,
+          target: staff,
+          entityType: 'profile',
+          entityId: staff.id,
+          action: 'staff_deactivated',
+          summary: `${viewer.fullName} deactivated ${staff.fullName}.`,
+          metadata: { role: staff.role, jobTitle: staff.jobTitle },
+        },
+        tx,
+      );
       return u;
-    });
-    await this.writeAuditLog({
-      venueId: viewer.venueId!,
-      actor: viewer,
-      target: staff,
-      entityType: 'profile',
-      entityId: staff.id,
-      action: 'staff_deactivated',
-      summary: `${viewer.fullName} deactivated ${staff.fullName}.`,
-      metadata: { role: staff.role, jobTitle: staff.jobTitle },
     });
     return mapProfile(updated);
   }
@@ -308,9 +318,43 @@ export class AppStaffController {
     }
   }
 
-  private async ensureOnboardingTasks(venueId: string, profileId: string) {
+  /**
+   * Seeds onboarding tasks for whichever of the given profiles don't already
+   * have any, in a single existence check + single batched insert — instead of
+   * one createMany round-trip per profile, which made every GET
+   * /staff/onboarding load do up to 200 DB writes even when nothing changed.
+   */
+  private async ensureOnboardingTasksForProfiles(venueId: string, profileIds: string[]) {
+    if (profileIds.length === 0) return;
+    const existing = await this.prisma.staffOnboardingTask.findMany({
+      where: { venueId, profileId: { in: profileIds } },
+      select: { profileId: true },
+      distinct: ['profileId'],
+    });
+    const seeded = new Set(existing.map((row) => row.profileId));
+    const missing = profileIds.filter((id) => !seeded.has(id));
+    if (missing.length === 0) return;
     const now = new Date();
     await this.prisma.staffOnboardingTask.createMany({
+      data: missing.flatMap((profileId) =>
+        DEFAULT_ONBOARDING_TASKS.map((task) => ({
+          venueId,
+          profileId,
+          title: task.title,
+          details: task.details,
+          category: task.category,
+          status: 'open',
+          createdAt: now,
+          updatedAt: now,
+        })),
+      ),
+      skipDuplicates: true,
+    });
+  }
+
+  private async ensureOnboardingTasks(venueId: string, profileId: string, tx: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const now = new Date();
+    await tx.staffOnboardingTask.createMany({
       data: DEFAULT_ONBOARDING_TASKS.map((task) => ({
         venueId,
         profileId,
@@ -325,17 +369,20 @@ export class AppStaffController {
     });
   }
 
-  private async writeAuditLog(args: {
-    venueId: string;
-    actor: { id: string; fullName: string; role: Role };
-    target: { id: string; fullName: string; role: Role } | null;
-    entityType: string;
-    entityId?: string | null;
-    action: string;
-    summary: string;
-    metadata?: Prisma.InputJsonObject;
-  }) {
-    await this.prisma.auditLog.create({
+  private async writeAuditLog(
+    args: {
+      venueId: string;
+      actor: { id: string; fullName: string; role: Role };
+      target: { id: string; fullName: string; role: Role } | null;
+      entityType: string;
+      entityId?: string | null;
+      action: string;
+      summary: string;
+      metadata?: Prisma.InputJsonObject;
+    },
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    await tx.auditLog.create({
       data: {
         venueId: args.venueId,
         actorProfileId: args.actor.id,

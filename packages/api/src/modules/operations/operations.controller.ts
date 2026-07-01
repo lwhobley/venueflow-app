@@ -15,6 +15,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { buildDailyBriefAlerts } from './daily-brief-alerts';
 
 const GOAL_PERIODS = ['day', 'week'] as const;
 const GOAL_STATUSES = ['open', 'done', 'cancelled'] as const;
@@ -314,12 +315,12 @@ export class OperationsController {
     const prepOpenCount = prepItems.filter((item) => item.kind === 'prep').length;
     const eightySixCount = prepItems.filter((item) => item.kind === 'eighty_six').length;
 
-    const alerts = [
-      openShiftCount > 0 ? `${openShiftCount} open shift${openShiftCount === 1 ? '' : 's'} today` : null,
-      pendingRequests.length > 0 ? `${pendingRequests.length} staff request${pendingRequests.length === 1 ? '' : 's'} pending` : null,
-      lowStockItems.length > 0 ? `${lowStockItems.length} low-stock bar item${lowStockItems.length === 1 ? '' : 's'}` : null,
-      eightySixCount > 0 ? `${eightySixCount} item${eightySixCount === 1 ? '' : 's'} on the 86 list` : null,
-    ].filter((value): value is string => Boolean(value));
+    const alerts = buildDailyBriefAlerts({
+      openShiftCount,
+      pendingRequestCount: pendingRequests.length,
+      lowStockCount: lowStockItems.length,
+      eightySixCount,
+    });
 
     return {
       date: today,
