@@ -52,6 +52,7 @@ export default function HomeScreen() {
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
   const canManage = Boolean(dashboard && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const dailyBrief = useQuery(api.operations.getDailyBrief, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const managerInsights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip');
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -202,6 +203,69 @@ export default function HomeScreen() {
         <CommandSurface palette={palette} strong style={{ gap: spacing.sm, borderColor: palette.warning }}>
           <StatusPill palette={palette} tone="warn">{t('dashboard.coverageAlert')}</StatusPill>
           <CommandText palette={palette} variant="body">{t('dashboard.openShiftNotice', { count: openShifts })}</CommandText>
+        </CommandSurface>
+      ) : null}
+
+      {canManage && dailyBrief ? (
+        <CommandSurface palette={palette} style={{ gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
+            <View style={{ flex: 1, minWidth: 220 }}>
+              <CommandText palette={palette} variant="title">Manager daily brief</CommandText>
+              <CommandText palette={palette} variant="caption">
+                {dailyBrief.date} service snapshot for {venueName}
+              </CommandText>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'flex-end' }}>
+              <StatusPill palette={palette}>{formatNumber(dailyBrief.covers ?? 0)} covers</StatusPill>
+              <StatusPill palette={palette} tone={(dailyBrief.openShiftCount ?? 0) > 0 ? 'warn' : 'good'}>
+                {formatNumber(dailyBrief.scheduledCount ?? 0)} scheduled
+              </StatusPill>
+              <StatusPill palette={palette} tone={(dailyBrief.eightySixCount ?? 0) > 0 ? 'warn' : 'neutral'}>
+                {formatNumber(dailyBrief.eightySixCount ?? 0)} 86
+              </StatusPill>
+            </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            {[
+              { label: 'POS sales', value: formatCurrency(dailyBrief.salesCents ?? 0) },
+              { label: 'Clocked in', value: formatNumber(dailyBrief.clockedInCount ?? 0) },
+              { label: 'Prep open', value: formatNumber(dailyBrief.prepOpenCount ?? 0) },
+              { label: 'Low stock', value: formatNumber(dailyBrief.lowStockCount ?? 0) },
+            ].map((item) => (
+              <View key={item.label} style={{ flexGrow: 1, flexBasis: 120, gap: 2, padding: spacing.sm, borderWidth: 1, borderColor: palette.divider, borderRadius: 8 }}>
+                <CommandText palette={palette} variant="metric">{item.value}</CommandText>
+                <CommandText palette={palette} variant="caption">{item.label}</CommandText>
+              </View>
+            ))}
+          </View>
+
+          {(dailyBrief.alerts ?? []).length > 0 ? (
+            <View style={{ gap: spacing.xs }}>
+              {(dailyBrief.alerts ?? []).slice(0, 4).map((alert: string) => (
+                <View key={alert} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                  <MaterialCommunityIcons name="alert-circle-outline" size={16} color={palette.warning} />
+                  <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>{alert}</CommandText>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <CommandText palette={palette} variant="caption">No urgent coverage, stock, or prep alerts yet.</CommandText>
+          )}
+
+          {(dailyBrief.reservations ?? []).length > 0 ? (
+            <View style={{ gap: spacing.xs }}>
+              <CommandText palette={palette} variant="label">Next arrivals</CommandText>
+              {(dailyBrief.reservations ?? []).slice(0, 3).map((reservation: any) => (
+                <View key={reservation._id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, borderTopWidth: 1, borderTopColor: palette.divider, paddingTop: spacing.xs }}>
+                  <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>
+                    {formatDate(reservation.reservationTime, { hour: 'numeric', minute: '2-digit' })} - {reservation.guestName}
+                  </CommandText>
+                  <StatusPill palette={palette}>{formatNumber(reservation.partySize)} top</StatusPill>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </CommandSurface>
       ) : null}
 

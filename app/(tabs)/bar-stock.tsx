@@ -60,11 +60,33 @@ type ParsedItem = Omit<BarItem, '_id' | 'area' | 'unitCostCents' | 'supplier' | 
 };
 
 type MovementType = 'count' | 'received' | 'waste' | 'transfer';
+type PrepBoardKind = 'prep' | 'eighty_six';
+type PrepBoardStatus = 'open' | 'done' | 'cancelled';
+
+type PrepBoardItem = {
+  _id: string;
+  kind: PrepBoardKind;
+  title: string;
+  quantity: number | null;
+  unit: string | null;
+  station: string | null;
+  notes: string | null;
+  dueDate: string | null;
+  status: PrepBoardStatus;
+};
+
+type PrepBoard = {
+  items: PrepBoardItem[];
+  openCount: number;
+  eightySixCount: number;
+  prepCount: number;
+};
 
 export default function BarStockScreen() {
   const { venue, isReady, canManage, profileLoading } = useVenueAuth();
   const stock = useQuery(api.barInventory.getBarStock, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
   const velocity = useQuery(api.barInventory.getUsageVelocity, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as VelocityRow[] | null | undefined;
+  const prepBoard = useQuery(api.barInventory.listPrepBoard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as PrepBoard | null | undefined;
   const upsertBarItem = useMutation(api.barInventory.upsertBarItem);
   const recordMovement = useMutation(api.barInventory.recordBarStockMovement);
   const importParsed = useMutation(api.barInventory.importParsedBarItems);
@@ -73,6 +95,8 @@ export default function BarStockScreen() {
   const lookupSku = useAction(api.barInventory.lookupBySku);
   const sendPoEmail = useMutation(api.barInventory.sendPurchaseOrderEmail);
   const sendDigest = useMutation(api.barInventory.sendInventoryDigest);
+  const upsertPrepBoardItem = useMutation(api.barInventory.upsertPrepBoardItem);
+  const updatePrepBoardItemStatus = useMutation(api.barInventory.updatePrepBoardItemStatus);
   const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm };
   const addItemWideField = { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 136, backgroundColor: colors.surface };
   const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidth: 112, backgroundColor: colors.surface };
@@ -109,6 +133,13 @@ export default function BarStockScreen() {
   const [editCostValue, setEditCostValue] = useState('');
   const [showAgingReport, setShowAgingReport] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [prepKind, setPrepKind] = useState<PrepBoardKind>('prep');
+  const [prepTitle, setPrepTitle] = useState('');
+  const [prepQuantity, setPrepQuantity] = useState('');
+  const [prepUnit, setPrepUnit] = useState('');
+  const [prepStation, setPrepStation] = useState('');
+  const [prepNotes, setPrepNotes] = useState('');
+  const [prepDueDate, setPrepDueDate] = useState('');
 
   const stockCsv = useQuery(api.barInventory.exportStockCsv, isReady && canManage && showStockCsv ? {} : 'skip') as string | null | undefined;
   const movementCsv = useQuery(api.barInventory.exportMovementsCsv, isReady && canManage && showMovementCsv ? {} : 'skip') as string | null | undefined;
@@ -120,6 +151,9 @@ export default function BarStockScreen() {
 
   const items = useMemo(() => (stock?.items ?? []) as BarItem[], [stock]);
   const lowItems = items.filter((item) => item.onHand <= item.parLevel);
+  const prepItems = useMemo(() => prepBoard?.items ?? [], [prepBoard]);
+  const activePrepItems = prepItems.filter((item) => item.status === 'open' && item.kind === 'prep');
+  const activeEightySixItems = prepItems.filter((item) => item.status === 'open' && item.kind === 'eighty_six');
 
   // Group items by area for count workflow
   const countItems = useMemo(() => {
@@ -253,6 +287,47 @@ export default function BarStockScreen() {
       setEditCostItemId(null); setEditCostValue('');
       setMessage('Cost updated.');
     } catch (e) { setMessage(errorMessage(e, 'Could not update cost.')); }
+  };
+
+  const savePrepBoardItem = async () => {
+    if (!venue?.id || !prepTitle.trim()) return;
+    setMessage(null);
+    try {
+      const quantity = prepQuantity.trim() ? Number(prepQuantity) : undefined;
+      if (quantity !== undefined && (Number.isNaN(quantity) || quantity < 0)) {
+        setMessage('Enter a valid prep quantity.');
+        return;
+      }
+      await upsertPrepBoardItem({
+        venueId: venue.id,
+        kind: prepKind,
+        title: prepTitle.trim(),
+        quantity,
+        unit: prepUnit.trim() || undefined,
+        station: prepStation.trim() || undefined,
+        notes: prepNotes.trim() || undefined,
+        dueDate: prepDueDate.trim() || undefined,
+        status: 'open',
+      });
+      setPrepTitle('');
+      setPrepQuantity('');
+      setPrepUnit('');
+      setPrepStation('');
+      setPrepNotes('');
+      setPrepDueDate('');
+      setMessage(prepKind === 'prep' ? 'Prep item added.' : '86 item added.');
+    } catch (e) {
+      setMessage(errorMessage(e, 'Could not save prep board item.'));
+    }
+  };
+
+  const setPrepBoardStatus = async (itemId: string, status: PrepBoardStatus) => {
+    setMessage(null);
+    try {
+      await updatePrepBoardItemStatus({ itemId, status });
+    } catch (e) {
+      setMessage(errorMessage(e, 'Could not update prep board.'));
+    }
   };
 
   // Barcode scanner overlay
@@ -401,6 +476,90 @@ export default function BarStockScreen() {
           Email digest
         </Button>
       </View>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
+            <View style={{ flex: 1, minWidth: 220 }}>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Prep / 86 board</Text>
+              <Text style={{ color: colors.muted }}>
+                Track service prep, unavailable items, and station notes for the current shift.
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              <Chip compact>{prepBoard?.prepCount ?? 0} prep</Chip>
+              <Chip compact style={{ backgroundColor: (prepBoard?.eightySixCount ?? 0) > 0 ? accents[4].bg : accents[2].bg }}>
+                {prepBoard?.eightySixCount ?? 0} 86
+              </Chip>
+            </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            <Chip selected={prepKind === 'prep'} onPress={() => setPrepKind('prep')}>Prep</Chip>
+            <Chip selected={prepKind === 'eighty_six'} onPress={() => setPrepKind('eighty_six')}>86</Chip>
+          </View>
+
+          <TextInput
+            label={prepKind === 'prep' ? 'Prep item' : '86 item'}
+            value={prepTitle}
+            onChangeText={setPrepTitle}
+            mode="outlined"
+            style={{ backgroundColor: colors.surface }}
+          />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            <TextInput label="Qty" value={prepQuantity} onChangeText={setPrepQuantity} keyboardType="numeric" mode="outlined" style={{ flexGrow: 1, flexBasis: 90, backgroundColor: colors.surface }} />
+            <TextInput label="Unit" value={prepUnit} onChangeText={setPrepUnit} mode="outlined" style={{ flexGrow: 1, flexBasis: 110, backgroundColor: colors.surface }} />
+            <TextInput label="Station" value={prepStation} onChangeText={setPrepStation} mode="outlined" style={{ flexGrow: 1, flexBasis: 130, backgroundColor: colors.surface }} />
+            <TextInput label="Due date" placeholder="YYYY-MM-DD" value={prepDueDate} onChangeText={setPrepDueDate} mode="outlined" style={{ flexGrow: 1, flexBasis: 140, backgroundColor: colors.surface }} />
+          </View>
+          <TextInput label="Notes" value={prepNotes} onChangeText={setPrepNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <Button mode="contained" buttonColor={colors.primary} icon={prepKind === 'prep' ? 'clipboard-plus-outline' : 'minus-circle-outline'} onPress={() => void savePrepBoardItem()} style={{ alignSelf: 'flex-start' }}>
+            Add to board
+          </Button>
+
+          {activeEightySixItems.length > 0 ? (
+            <View style={{ gap: spacing.xs }}>
+              <Text style={{ color: colors.danger, fontWeight: '800' }}>86 list</Text>
+              {activeEightySixItems.map((item) => (
+                <View key={item._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700' }}>{item.title}</Text>
+                      <Text style={{ color: colors.muted }}>
+                        {[item.station, item.quantity != null ? `${item.quantity} ${item.unit ?? ''}`.trim() : null, item.dueDate].filter(Boolean).join(' - ') || 'No station assigned'}
+                      </Text>
+                      {item.notes ? <Text style={{ color: colors.muted, fontSize: 12 }}>{item.notes}</Text> : null}
+                    </View>
+                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void setPrepBoardStatus(item._id, 'done')}>Done</Button>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          <View style={{ gap: spacing.xs }}>
+            <Text style={{ fontWeight: '800' }}>Prep list</Text>
+            {activePrepItems.length === 0 ? (
+              <Text style={{ color: colors.muted }}>No open prep items.</Text>
+            ) : (
+              activePrepItems.map((item) => (
+                <View key={item._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700' }}>{item.title}</Text>
+                      <Text style={{ color: colors.muted }}>
+                        {[item.station, item.quantity != null ? `${item.quantity} ${item.unit ?? ''}`.trim() : null, item.dueDate].filter(Boolean).join(' - ') || 'No station assigned'}
+                      </Text>
+                      {item.notes ? <Text style={{ color: colors.muted, fontSize: 12 }}>{item.notes}</Text> : null}
+                    </View>
+                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void setPrepBoardStatus(item._id, 'done')}>Done</Button>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        </Card.Content>
+      </Card>
 
       {/* Scanned item result */}
       {scannedItem && (

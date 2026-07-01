@@ -105,6 +105,37 @@ type StaffMember = {
   venueId: string | null;
 };
 
+type OnboardingTask = {
+  _id: string;
+  profileId: string;
+  title: string;
+  details: string | null;
+  category: string;
+  status: 'open' | 'done' | 'cancelled';
+  completedAt: number | null;
+};
+
+type OnboardingStaff = {
+  _id: string;
+  fullName: string;
+  completedCount: number;
+  totalCount: number;
+  tasks: OnboardingTask[];
+};
+
+type OnboardingResponse = { staff: OnboardingStaff[] };
+
+type AuditEntry = {
+  _id: string;
+  actorName: string | null;
+  actorRole: string | null;
+  targetName: string | null;
+  targetRole: string | null;
+  action: string;
+  summary: string;
+  createdAt: number;
+};
+
 export default function StaffScreenWrapper() {
   return <ScreenErrorBoundary><StaffScreen /></ScreenErrorBoundary>;
 }
@@ -124,8 +155,11 @@ function StaffScreen() {
 
   const staffQuery = useQuery(api.app.listVenueStaff, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
   const staff = useMemo(() => (staffQuery ?? []) as StaffMember[], [staffQuery]);
+  const onboardingQuery = useQuery(api.app.listStaffOnboarding, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip') as OnboardingResponse | null | undefined;
+  const auditLogQuery = useQuery(api.app.listStaffAuditLog, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip') as { entries: AuditEntry[] } | null | undefined;
   const upsertStaff = useMutation(api.app.upsertVenueStaff);
   const deactivateStaff = useMutation(api.app.deactivateVenueStaff);
+  const updateOnboardingTask = useMutation(api.app.updateStaffOnboardingTask);
 
   // Custom roles + PIN invite
   const rolesQuery = useQuery(api.staffAuth.listVenueRoles, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
@@ -185,6 +219,14 @@ function StaffScreen() {
   };
 
   const selectedStaff = staff.find((member: StaffMember) => member._id === selectedStaffId) ?? null;
+  const onboardingRows = onboardingQuery?.staff ?? [];
+  const selectedOnboarding = selectedStaffId
+    ? onboardingRows.find((row) => row._id === selectedStaffId) ?? null
+    : null;
+  const auditEntries = auditLogQuery?.entries ?? [];
+  const onboardingProgress = selectedOnboarding && selectedOnboarding.totalCount > 0
+    ? Math.round((selectedOnboarding.completedCount / selectedOnboarding.totalCount) * 100)
+    : 0;
 
   const fillFromStaff = (member: StaffMember) => {
     setSelectedStaffId(member._id);
@@ -247,6 +289,14 @@ function StaffScreen() {
         }
       }}
     ]);
+  };
+
+  const setOnboardingStatus = async (task: OnboardingTask, status: 'open' | 'done') => {
+    try {
+      await updateOnboardingTask({ taskId: task._id, status });
+    } catch (e) {
+      Alert.alert('Error', errorMessage(e, 'Could not update onboarding task'));
+    }
   };
 
   const listContentStyle = useDesktopContentStyle({ flexGrow: 1, padding: spacing.lg, gap: spacing.md });
@@ -421,6 +471,80 @@ function StaffScreen() {
           </Card.Content>
         </Card>
       ) : null}
+
+      <Card style={{ backgroundColor: colors.surface }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
+            <View style={{ flex: 1, minWidth: 220 }}>
+              <Text variant="titleMedium">New staff onboarding</Text>
+              <Text style={{ color: colors.muted }}>
+                Select a staff member to review required setup, training, and first-shift readiness tasks.
+              </Text>
+            </View>
+            {selectedOnboarding ? (
+              <Chip compact style={{ backgroundColor: onboardingProgress === 100 ? accents[2].bg : accents[1].bg }}>
+                {selectedOnboarding.completedCount}/{selectedOnboarding.totalCount} complete
+              </Chip>
+            ) : null}
+          </View>
+
+          {!selectedStaff ? (
+            <Text style={{ color: colors.muted }}>Choose Edit on a staff member below to open their onboarding checklist.</Text>
+          ) : !selectedOnboarding ? (
+            <Text style={{ color: colors.muted }}>Loading onboarding checklist...</Text>
+          ) : (
+            <View style={{ gap: spacing.sm }}>
+              <Text style={{ fontWeight: '700' }}>{selectedOnboarding.fullName}</Text>
+              <View style={{ height: 6, backgroundColor: colors.border, borderRadius: 999, overflow: 'hidden' }}>
+                <View style={{ height: 6, width: `${onboardingProgress}%`, backgroundColor: onboardingProgress === 100 ? accents[2].fg : colors.primary }} />
+              </View>
+              {selectedOnboarding.tasks.filter((task) => task.status !== 'cancelled').map((task) => (
+                <View key={task._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700', textDecorationLine: task.status === 'done' ? 'line-through' : 'none' }}>{task.title}</Text>
+                      {task.details ? <Text style={{ color: colors.muted, fontSize: 12 }}>{task.details}</Text> : null}
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>{task.category}{task.completedAt ? ` - completed ${new Date(task.completedAt).toLocaleDateString()}` : ''}</Text>
+                    </View>
+                    <Button
+                      compact
+                      mode={task.status === 'done' ? 'outlined' : 'contained'}
+                      buttonColor={task.status === 'done' ? undefined : colors.primary}
+                      textColor={task.status === 'done' ? colors.primary : undefined}
+                      onPress={() => void setOnboardingStatus(task, task.status === 'done' ? 'open' : 'done')}
+                    >
+                      {task.status === 'done' ? 'Reopen' : 'Done'}
+                    </Button>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium">Role-based audit log</Text>
+          <Text style={{ color: colors.muted }}>
+            Recent roster, role, deactivation, and onboarding changes with actor and target roles.
+          </Text>
+          {auditEntries.length === 0 ? (
+            <Text style={{ color: colors.muted }}>No staff audit entries yet.</Text>
+          ) : (
+            auditEntries.slice(0, 8).map((entry) => (
+              <View key={entry._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
+                <Text style={{ fontWeight: '700' }}>{entry.summary}</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  {new Date(entry.createdAt).toLocaleString()} - {entry.actorName ?? 'System'} ({entry.actorRole ?? 'unknown'})
+                  {entry.targetName ? ` -> ${entry.targetName} (${entry.targetRole ?? 'unknown'})` : ''}
+                </Text>
+                <Chip compact style={{ alignSelf: 'flex-start' }}>{entry.action.replace(/_/g, ' ')}</Chip>
+              </View>
+            ))
+          )}
+        </Card.Content>
+      </Card>
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
