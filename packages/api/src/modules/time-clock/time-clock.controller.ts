@@ -131,7 +131,7 @@ export class TimeClockController {
 
   @Get('me')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
-    const profile = await this.prisma.profile.findFirst({ 
+    const profile = await this.prisma.profile.findUnique({
       where: { userId: user.sub },
       include: { venue: { select: { timezone: true } } },
     });
