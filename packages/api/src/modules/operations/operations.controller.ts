@@ -57,6 +57,12 @@ function dateKey(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function dayBounds(date = new Date()) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+}
+
 function mapGoal(goal: {
   id: string;
   venueId: string;
@@ -220,6 +226,145 @@ export class OperationsController {
       vipOrLargeReservations,
       goals: filteredGoals,
       events: eventRows,
+    };
+  }
+
+  @RequireSubscription('active')
+  @Get('daily-brief')
+  async getDailyBrief(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const now = new Date();
+    const today = dateKey(now);
+    const { start: todayStart, end: todayEnd } = dayBounds(now);
+    const tomorrowEnd = new Date(todayEnd.getTime() + 24 * 60 * 60 * 1000);
+
+    const [
+      reservations,
+      shifts,
+      openTimeEntries,
+      pendingRequests,
+      barItems,
+      prepItems,
+      goals,
+      events,
+      posChecks,
+    ] = await Promise.all([
+      this.prisma.reservation.findMany({
+        where: {
+          venueId,
+          reservationTime: { gte: todayStart, lt: todayEnd },
+          status: { notIn: ['cancelled', 'no_show'] },
+        },
+        orderBy: { reservationTime: 'asc' },
+        take: 100,
+      }),
+      this.prisma.scheduleShift.findMany({
+        where: { venueId, dayIndex: todayStart.getDay() },
+        orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }],
+        take: 100,
+      }),
+      this.prisma.timeEntry.findMany({
+        where: { venueId, isOpen: true },
+        select: { id: true },
+        take: 200,
+      }),
+      this.prisma.staffRequest.findMany({
+        where: { venueId, status: 'pending' },
+        select: { id: true },
+        take: 100,
+      }),
+      this.prisma.barInventoryItem.findMany({
+        where: { venueId },
+        orderBy: { name: 'asc' },
+        take: 300,
+      }),
+      this.prisma.prepBoardItem.findMany({
+        where: {
+          venueId,
+          status: 'open',
+          OR: [{ dueDate: null }, { dueDate: { lte: today } }],
+        },
+        orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
+        take: 50,
+      }),
+      this.prisma.managerGoal.findMany({
+        where: { venueId, status: 'open', targetDate: today },
+        orderBy: { createdAt: 'asc' },
+        take: 8,
+      }),
+      this.prisma.venueEvent.findMany({
+        where: { venueId, startsAt: { gte: todayStart, lt: tomorrowEnd } },
+        orderBy: { startsAt: 'asc' },
+        take: 8,
+      }),
+      this.prisma.posCheck.findMany({
+        where: { venueId, openedAt: { gte: todayStart, lt: todayEnd }, status: { not: 'void' } },
+        select: { totalCents: true, guestCount: true },
+        take: 1000,
+      }),
+    ]);
+
+    const lowStockItems = barItems.filter((item) => item.onHand <= item.parLevel).slice(0, 8);
+    const covers = reservations.reduce((sum, row) => sum + row.partySize, 0);
+    const posCovers = posChecks.reduce((sum, row) => sum + (row.guestCount ?? 0), 0);
+    const salesCents = posChecks.reduce((sum, row) => sum + row.totalCents, 0);
+    const scheduledCount = shifts.filter((shift) => shift.status === 'scheduled').length;
+    const openShiftCount = shifts.filter((shift) => shift.status === 'open').length;
+    const prepOpenCount = prepItems.filter((item) => item.kind === 'prep').length;
+    const eightySixCount = prepItems.filter((item) => item.kind === 'eighty_six').length;
+
+    const alerts = [
+      openShiftCount > 0 ? `${openShiftCount} open shift${openShiftCount === 1 ? '' : 's'} today` : null,
+      pendingRequests.length > 0 ? `${pendingRequests.length} staff request${pendingRequests.length === 1 ? '' : 's'} pending` : null,
+      lowStockItems.length > 0 ? `${lowStockItems.length} low-stock bar item${lowStockItems.length === 1 ? '' : 's'}` : null,
+      eightySixCount > 0 ? `${eightySixCount} item${eightySixCount === 1 ? '' : 's'} on the 86 list` : null,
+    ].filter((value): value is string => Boolean(value));
+
+    return {
+      date: today,
+      covers,
+      posCovers,
+      salesCents,
+      scheduledCount,
+      openShiftCount,
+      clockedInCount: openTimeEntries.length,
+      pendingRequestCount: pendingRequests.length,
+      lowStockCount: lowStockItems.length,
+      prepOpenCount,
+      eightySixCount,
+      alerts,
+      reservations: reservations.slice(0, 6).map((reservation) => ({
+        _id: reservation.id,
+        guestName: reservation.guestName,
+        partySize: reservation.partySize,
+        reservationTime: reservation.reservationTime.getTime(),
+        tags: reservation.tags,
+        notes: reservation.notes ?? reservation.specialRequests ?? null,
+      })),
+      prepItems: prepItems.slice(0, 8).map((item) => ({
+        _id: item.id,
+        kind: item.kind,
+        title: item.title,
+        quantity: item.quantity,
+        unit: item.unit,
+        station: item.station,
+        dueDate: item.dueDate,
+      })),
+      lowStockItems: lowStockItems.map((item) => ({
+        _id: item.id,
+        name: item.name,
+        onHand: item.onHand,
+        parLevel: item.parLevel,
+        unit: item.unit,
+      })),
+      goals: goals.map(mapGoal),
+      events: events.map((event) => ({
+        _id: event.id,
+        title: event.title,
+        startsAt: event.startsAt.getTime(),
+        expectedGuests: event.expectedGuests,
+      })),
     };
   }
 

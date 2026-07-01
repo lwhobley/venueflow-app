@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
@@ -52,6 +52,21 @@ class StaffDto {
   certifications?: string[];
 }
 
+const ONBOARDING_TASK_STATUSES = ['open', 'done', 'cancelled'] as const;
+
+class UpdateOnboardingTaskDto {
+  @IsIn(ONBOARDING_TASK_STATUSES)
+  status!: (typeof ONBOARDING_TASK_STATUSES)[number];
+}
+
+const DEFAULT_ONBOARDING_TASKS = [
+  { title: 'Confirm profile details', category: 'profile', details: 'Verify name, phone, emergency contact, and job title.' },
+  { title: 'Collect required certifications', category: 'compliance', details: 'Add food handler, alcohol server, safety, or local permits.' },
+  { title: 'Review handbook and policies', category: 'training', details: 'Confirm workplace expectations, scheduling rules, and conduct policies.' },
+  { title: 'Train on clock-in and scheduling', category: 'training', details: 'Show the staff member how to clock in, set availability, and request changes.' },
+  { title: 'First shift readiness check', category: 'service', details: 'Confirm uniform, station assignment, POS access, and opening checklist.' },
+] as const;
+
 // Venue-staff roster CRUD for /v1/app/staff*. Split out of AppController;
 // routes, role checks, and response shapes are unchanged.
 @Controller('v1/app')
@@ -69,6 +84,89 @@ export class AppStaffController {
     return this.prisma.profile
       .findMany({ where: { venueId: profile.venueId! }, orderBy: { fullName: 'asc' } })
       .then((rows) => rows.map((row) => mapProfile(row)));
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('staff/onboarding')
+  async listOnboardingTasks(@CurrentUser() user: AuthUser, @Query('profileId') profileId?: string) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    const venueId = viewer.venueId!;
+    const profiles = await this.prisma.profile.findMany({
+      where: { venueId, ...(profileId ? { id: profileId } : {}) },
+      select: { id: true, fullName: true, email: true, role: true, jobTitle: true },
+      orderBy: { fullName: 'asc' },
+      take: profileId ? 1 : 200,
+    });
+    await Promise.all(profiles.map((profile) => this.ensureOnboardingTasks(venueId, profile.id)));
+    const tasks = await this.prisma.staffOnboardingTask.findMany({
+      where: { venueId, ...(profileId ? { profileId } : {}) },
+      orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+      take: 1000,
+    });
+    const tasksByProfile = new Map<string, typeof tasks>();
+    for (const task of tasks) {
+      const list = tasksByProfile.get(task.profileId) ?? [];
+      list.push(task);
+      tasksByProfile.set(task.profileId, list);
+    }
+    return {
+      staff: profiles.map((profile) => {
+        const profileTasks = tasksByProfile.get(profile.id) ?? [];
+        return {
+          _id: profile.id,
+          fullName: profile.fullName,
+          email: profile.email,
+          role: profile.role,
+          jobTitle: profile.jobTitle,
+          completedCount: profileTasks.filter((task) => task.status === 'done').length,
+          totalCount: profileTasks.filter((task) => task.status !== 'cancelled').length,
+          tasks: profileTasks.map(mapOnboardingTask),
+        };
+      }),
+    };
+  }
+
+  @UseGuards(AuthGuard)
+  @Patch('staff/onboarding/:id')
+  async updateOnboardingTask(@CurrentUser() user: AuthUser, @Param('id') taskId: string, @Body() body: UpdateOnboardingTaskDto) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    const venueId = viewer.venueId!;
+    const task = await this.prisma.staffOnboardingTask.findFirst({ where: { id: taskId, venueId } });
+    if (!task) throw new NotFoundException('Onboarding task not found');
+    const target = await this.prisma.profile.findFirst({ where: { id: task.profileId, venueId } });
+    const now = new Date();
+    const updated = await this.prisma.staffOnboardingTask.update({
+      where: { id: task.id },
+      data: {
+        status: body.status,
+        completedBy: body.status === 'done' ? viewer.id : null,
+        completedAt: body.status === 'done' ? now : null,
+        updatedAt: now,
+      },
+    });
+    await this.writeAuditLog({
+      venueId,
+      actor: viewer,
+      target,
+      entityType: 'onboarding_task',
+      entityId: task.id,
+      action: body.status === 'done' ? 'onboarding_task_completed' : 'onboarding_task_updated',
+      summary: `${viewer.fullName} marked "${task.title}" ${body.status}${target ? ` for ${target.fullName}` : ''}.`,
+      metadata: { taskTitle: task.title, previousStatus: task.status, nextStatus: body.status },
+    });
+    return mapOnboardingTask(updated);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('staff/audit-log')
+  async listAuditLog(@CurrentUser() user: AuthUser) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    const rows = await this.prisma.auditLog.findMany({
+      where: { venueId: viewer.venueId! },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return { entries: rows.map(mapAuditLog) };
   }
 
   @UseGuards(AuthGuard)
@@ -116,6 +214,23 @@ export class AppStaffController {
         data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
       });
     }
+    if (!existing) {
+      await this.ensureOnboardingTasks(body.venueId, row.id);
+    }
+    await this.writeAuditLog({
+      venueId: body.venueId,
+      actor: viewer,
+      target: row,
+      entityType: 'profile',
+      entityId: row.id,
+      action: existing ? 'staff_updated' : 'staff_created',
+      summary: existing
+        ? `${viewer.fullName} updated ${row.fullName}${existing.role !== row.role ? ` from ${existing.role} to ${row.role}` : ''}.`
+        : `${viewer.fullName} added ${row.fullName} as ${row.role}.`,
+      metadata: existing
+        ? { previousRole: existing.role, nextRole: row.role, previousJobTitle: existing.jobTitle, nextJobTitle: row.jobTitle }
+        : { role: row.role, jobTitle: row.jobTitle },
+    });
     const venueName = viewer.venue?.name ?? 'your venue';
     void this.email.send({
       to: row.email,
@@ -157,6 +272,16 @@ export class AppStaffController {
       }
       return u;
     });
+    await this.writeAuditLog({
+      venueId: viewer.venueId!,
+      actor: viewer,
+      target: staff,
+      entityType: 'profile',
+      entityId: staff.id,
+      action: 'staff_deactivated',
+      summary: `${viewer.fullName} deactivated ${staff.fullName}.`,
+      metadata: { role: staff.role, jobTitle: staff.jobTitle },
+    });
     return mapProfile(updated);
   }
 
@@ -182,6 +307,51 @@ export class AppStaffController {
       }
     }
   }
+
+  private async ensureOnboardingTasks(venueId: string, profileId: string) {
+    const now = new Date();
+    await this.prisma.staffOnboardingTask.createMany({
+      data: DEFAULT_ONBOARDING_TASKS.map((task) => ({
+        venueId,
+        profileId,
+        title: task.title,
+        details: task.details,
+        category: task.category,
+        status: 'open',
+        createdAt: now,
+        updatedAt: now,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  private async writeAuditLog(args: {
+    venueId: string;
+    actor: { id: string; fullName: string; role: Role };
+    target: { id: string; fullName: string; role: Role } | null;
+    entityType: string;
+    entityId?: string | null;
+    action: string;
+    summary: string;
+    metadata?: Prisma.InputJsonObject;
+  }) {
+    await this.prisma.auditLog.create({
+      data: {
+        venueId: args.venueId,
+        actorProfileId: args.actor.id,
+        actorName: args.actor.fullName,
+        actorRole: args.actor.role,
+        targetProfileId: args.target?.id ?? null,
+        targetName: args.target?.fullName ?? null,
+        targetRole: args.target?.role ?? null,
+        entityType: args.entityType,
+        entityId: args.entityId ?? null,
+        action: args.action,
+        summary: args.summary,
+        metadata: args.metadata ?? undefined,
+      },
+    });
+  }
 }
 
 /** Accept only YYYY-MM-DD and store as noon UTC to avoid timezone day-shift. */
@@ -194,4 +364,56 @@ function parseDateOfBirth(value: string): Date {
     throw new BadRequestException('dateOfBirth is not a valid date.');
   }
   return date;
+}
+
+function mapOnboardingTask(task: {
+  id: string;
+  profileId: string;
+  title: string;
+  details: string | null;
+  category: string;
+  dueDate: string | null;
+  status: string;
+  completedBy: string | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    _id: task.id,
+    profileId: task.profileId,
+    title: task.title,
+    details: task.details,
+    category: task.category,
+    dueDate: task.dueDate,
+    status: task.status,
+    completedBy: task.completedBy,
+    completedAt: task.completedAt?.getTime() ?? null,
+    createdAt: task.createdAt.getTime(),
+    updatedAt: task.updatedAt.getTime(),
+  };
+}
+
+function mapAuditLog(entry: {
+  id: string;
+  actorName: string | null;
+  actorRole: string | null;
+  targetName: string | null;
+  targetRole: string | null;
+  entityType: string;
+  action: string;
+  summary: string;
+  createdAt: Date;
+}) {
+  return {
+    _id: entry.id,
+    actorName: entry.actorName,
+    actorRole: entry.actorRole,
+    targetName: entry.targetName,
+    targetRole: entry.targetRole,
+    entityType: entry.entityType,
+    action: entry.action,
+    summary: entry.summary,
+    createdAt: entry.createdAt.getTime(),
+  };
 }

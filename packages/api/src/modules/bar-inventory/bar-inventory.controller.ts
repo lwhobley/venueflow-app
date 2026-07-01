@@ -27,10 +27,14 @@ import { BarInventoryReportsService } from './bar-inventory-reports.service';
 
 const CATEGORIES = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
 const MOVEMENT_TYPES = ['count', 'received', 'waste', 'comp', 'transfer', 'correction'] as const;
+const PREP_ITEM_KINDS = ['prep', 'eighty_six'] as const;
+const PREP_ITEM_STATUSES = ['open', 'done', 'cancelled'] as const;
 const MAX_IMPORT_ITEMS = 100;
 
 type BarStockCategory = (typeof CATEGORIES)[number];
 type BarStockMovementType = (typeof MOVEMENT_TYPES)[number];
+type PrepItemKind = (typeof PREP_ITEM_KINDS)[number];
+type PrepItemStatus = (typeof PREP_ITEM_STATUSES)[number];
 
 class UpsertBarItemDto {
   @IsString()
@@ -155,6 +159,48 @@ class ParseBarInventoryInputDto {
   imageMimeType?: string;
 }
 
+class UpsertPrepBoardItemDto {
+  @IsString()
+  @IsOptional()
+  itemId?: string;
+
+  @IsIn(PREP_ITEM_KINDS)
+  kind!: PrepItemKind;
+
+  @IsString()
+  title!: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  quantity?: number;
+
+  @IsString()
+  @IsOptional()
+  unit?: string;
+
+  @IsString()
+  @IsOptional()
+  station?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
+  @IsString()
+  @IsOptional()
+  dueDate?: string;
+
+  @IsIn(PREP_ITEM_STATUSES)
+  @IsOptional()
+  status?: PrepItemStatus;
+}
+
+class UpdatePrepBoardItemStatusDto {
+  @IsIn(PREP_ITEM_STATUSES)
+  status!: PrepItemStatus;
+}
+
 function cleanText(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -195,6 +241,42 @@ function mapItem(item: {
     sku: item.sku ?? null,
     notes: item.notes ?? null,
     lastCountedAt: toMs(item.lastCountedAt),
+    createdAt: item.createdAt.getTime(),
+    updatedAt: item.updatedAt.getTime(),
+  };
+}
+
+function mapPrepBoardItem(item: {
+  id: string;
+  venueId: string;
+  kind: string;
+  title: string;
+  quantity: number | null;
+  unit: string | null;
+  station: string | null;
+  notes: string | null;
+  dueDate: string | null;
+  status: string;
+  createdBy: string;
+  completedBy: string | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    _id: item.id,
+    venueId: item.venueId,
+    kind: item.kind,
+    title: item.title,
+    quantity: item.quantity,
+    unit: item.unit,
+    station: item.station,
+    notes: item.notes,
+    dueDate: item.dueDate,
+    status: item.status,
+    createdBy: item.createdBy,
+    completedBy: item.completedBy,
+    completedAt: toMs(item.completedAt),
     createdAt: item.createdAt.getTime(),
     updatedAt: item.updatedAt.getTime(),
   };
@@ -621,6 +703,85 @@ export class BarInventoryController {
   }
 
   // ── Send purchase order email ─────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('prep-board')
+  async listPrepBoard(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const items = await this.prisma.prepBoardItem.findMany({
+      where: { venueId: profile.venueId!, status: { not: 'cancelled' } },
+      orderBy: [{ status: 'asc' }, { kind: 'asc' }, { createdAt: 'desc' }],
+      take: 100,
+    });
+    return {
+      items: items.map(mapPrepBoardItem),
+      openCount: items.filter((item) => item.status === 'open').length,
+      eightySixCount: items.filter((item) => item.status === 'open' && item.kind === 'eighty_six').length,
+      prepCount: items.filter((item) => item.status === 'open' && item.kind === 'prep').length,
+    };
+  }
+
+  @RequireSubscription('active')
+  @Post('prep-board')
+  async upsertPrepBoardItem(@CurrentUser() user: AuthUser, @Body() body: UpsertPrepBoardItemDto) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const title = body.title.trim();
+    if (!title) throw new BadRequestException('Prep item title is required');
+    const now = new Date();
+    const status = body.status ?? 'open';
+    const payload = {
+      venueId,
+      kind: body.kind,
+      title,
+      quantity: body.quantity == null ? null : Math.max(0, body.quantity),
+      unit: cleanText(body.unit) ?? null,
+      station: cleanText(body.station) ?? null,
+      notes: cleanText(body.notes) ?? null,
+      dueDate: cleanText(body.dueDate) ?? null,
+      status,
+      completedBy: status === 'done' ? profile.id : null,
+      completedAt: status === 'done' ? now : null,
+      updatedAt: now,
+    };
+    if (body.itemId) {
+      const existing = await this.prisma.prepBoardItem.findFirst({ where: { id: body.itemId, venueId } });
+      if (!existing) throw new NotFoundException('Prep item not found');
+      const updated = await this.prisma.prepBoardItem.update({
+        where: { id: existing.id },
+        data: payload,
+      });
+      return mapPrepBoardItem(updated);
+    }
+    const created = await this.prisma.prepBoardItem.create({
+      data: { ...payload, createdBy: profile.id, createdAt: now },
+    });
+    return mapPrepBoardItem(created);
+  }
+
+  @RequireSubscription('active')
+  @Patch('prep-board/:id/status')
+  async updatePrepBoardItemStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('id') itemId: string,
+    @Body() body: UpdatePrepBoardItemStatusDto,
+  ) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const existing = await this.prisma.prepBoardItem.findFirst({ where: { id: itemId, venueId } });
+    if (!existing) throw new NotFoundException('Prep item not found');
+    const now = new Date();
+    const updated = await this.prisma.prepBoardItem.update({
+      where: { id: existing.id },
+      data: {
+        status: body.status,
+        completedBy: body.status === 'done' ? profile.id : null,
+        completedAt: body.status === 'done' ? now : null,
+        updatedAt: now,
+      },
+    });
+    return mapPrepBoardItem(updated);
+  }
+
   @RequireSubscription('active')
   @Post('purchase-order/send-email')
   async sendPurchaseOrderEmail(@CurrentUser() user: AuthUser) {

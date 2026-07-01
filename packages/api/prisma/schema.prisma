@@ -323,6 +323,9 @@ model Venue {
   reservationSyncEvents         ReservationSyncEvent[]
   barInventoryItems             BarInventoryItem[]
   barInventoryMovements         BarInventoryMovement[]
+  prepBoardItems                PrepBoardItem[]
+  staffOnboardingTasks          StaffOnboardingTask[]
+  auditLogs                     AuditLog[]
   managerGoals                  ManagerGoal[]
   venueEvents                   VenueEvent[]
   reservationSetting            ReservationSetting?
@@ -1283,6 +1286,71 @@ model BarInventoryMovement {
 
   @@index([venueId, createdAt])
   @@index([itemId, createdAt])
+}
+
+model PrepBoardItem {
+  id            String    @id @default(cuid())
+  venueId       String
+  kind          String
+  title         String
+  quantity      Float?
+  unit          String?
+  station       String?
+  notes         String?
+  dueDate       String?
+  status        String
+  createdBy     String
+  completedBy   String?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  venue         Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, status])
+  @@index([venueId, kind])
+  @@index([venueId, dueDate])
+}
+
+model StaffOnboardingTask {
+  id              String    @id @default(cuid())
+  venueId         String
+  profileId       String
+  title           String
+  details         String?
+  category        String
+  dueDate         String?
+  status          String
+  completedBy     String?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, title])
+  @@index([venueId, profileId])
+  @@index([venueId, status])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  venueId        String
+  actorProfileId String?
+  actorName      String?
+  actorRole      String?
+  targetProfileId String?
+  targetName     String?
+  targetRole     String?
+  entityType     String
+  entityId       String?
+  action         String
+  summary        String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  venue          Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, createdAt])
+  @@index([venueId, action])
+  @@index([targetProfileId])
 }
 
 model ManagerGoal {
