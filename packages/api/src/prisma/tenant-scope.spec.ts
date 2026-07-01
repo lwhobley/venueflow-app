@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isVenueScoped, scopeArgs, shouldScopeOperation, VENUE_SCOPED_MODELS } from './tenant-scope';
 
@@ -10,6 +12,15 @@ describe('isVenueScoped', () => {
     expect(isVenueScoped('Profile')).toBe(true);
   });
 
+  it('recognises the models added for the ops (daily-brief/staff-readiness) feature', () => {
+    // Regression check: these three shipped after the isolation extension was
+    // built and were never added to VENUE_SCOPED_MODELS — meaning the DB-layer
+    // backstop was inert for them despite the flag being enabled in production.
+    expect(isVenueScoped('AuditLog')).toBe(true);
+    expect(isVenueScoped('PrepBoardItem')).toBe(true);
+    expect(isVenueScoped('StaffOnboardingTask')).toBe(true);
+  });
+
   it('excludes global models and the tenant root', () => {
     expect(isVenueScoped('User')).toBe(false);
     expect(isVenueScoped('Session')).toBe(false);
@@ -20,6 +31,31 @@ describe('isVenueScoped', () => {
 
   it('covers a representative slice of the scoped set', () => {
     expect(VENUE_SCOPED_MODELS.size).toBeGreaterThan(40);
+  });
+});
+
+describe('VENUE_SCOPED_MODELS drift guard', () => {
+  it('exactly matches every model in schema.prisma that carries a direct venueId column', () => {
+    // Prevents the exact bug this test was written after: a new venue-scoped
+    // model (AuditLog, PrepBoardItem, StaffOnboardingTask) shipped without
+    // being added here, silently leaving the DB-layer isolation backstop
+    // inert for it even while the extension was active in production. Fails
+    // loudly the next time this happens instead of relying on someone
+    // remembering to update the hardcoded set.
+    const schemaPath = join(__dirname, '..', '..', 'prisma', 'schema.prisma');
+    const schema = readFileSync(schemaPath, 'utf8');
+    const modelBlockPattern = /^model (\w+) \{([\s\S]*?)^\}/gm;
+    const actualVenueScopedModels = new Set<string>();
+    let match: RegExpExecArray | null;
+    while ((match = modelBlockPattern.exec(schema))) {
+      const [, modelName, body] = match;
+      if (/^\s*venueId\s+String\b/m.test(body)) {
+        actualVenueScopedModels.add(modelName);
+      }
+    }
+
+    expect(actualVenueScopedModels.size).toBeGreaterThan(40); // sanity: the parser actually found models
+    expect([...VENUE_SCOPED_MODELS].sort()).toEqual([...actualVenueScopedModels].sort());
   });
 });
 
