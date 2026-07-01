@@ -10,14 +10,14 @@
  * root (Venue) are intentionally absent — they are never auto-scoped.
  */
 export const VENUE_SCOPED_MODELS: ReadonlySet<string> = new Set([
-  'Availability', 'BarInventoryItem', 'BarInventoryMovement', 'BlackoutDate',
+  'AuditLog', 'Availability', 'BarInventoryItem', 'BarInventoryMovement', 'BlackoutDate',
   'ChatImage', 'Conversation', 'ConversationRead', 'CrmActivityLog', 'CrmBeo',
   'CrmContract', 'CrmLead', 'CrmNote', 'EmailTemplate', 'FloorChair', 'FloorPlan',
   'Guest', 'Invite', 'Invoice', 'ManagerGoal', 'Message', 'NotificationEvent',
   'NotificationRead', 'PaymentMethod', 'PayrollExport', 'PosCheck', 'PosConnection',
-  'PosLaborPunch', 'Profile', 'PushToken', 'Reservation', 'ReservationConnection',
+  'PosLaborPunch', 'PrepBoardItem', 'Profile', 'PushToken', 'Reservation', 'ReservationConnection',
   'ReservationHold', 'ReservationSetting', 'ReservationSyncEvent', 'ScheduleEmailEvent',
-  'ScheduleShift', 'ScheduleTemplate', 'ShiftSwap', 'StaffRequest', 'Subscription',
+  'ScheduleShift', 'ScheduleTemplate', 'ShiftSwap', 'StaffOnboardingTask', 'StaffRequest', 'Subscription',
   'SubscriptionEvent', 'TableAssignment', 'TableState', 'TableStateHistory', 'Team',
   'TimeEntry', 'VenueEvent', 'VenueRole', 'Waitlist', 'WorkplaceJoinRequest',
 ]);
