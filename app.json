@@ -67,6 +67,13 @@
           "photosPermission": "Venue Wrangler lets managers upload bar inventory photos from the photo library."
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Venue Wrangler scans barcodes and QR codes to look up bar inventory items.",
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-notifications",
       "expo-font"
     ],
