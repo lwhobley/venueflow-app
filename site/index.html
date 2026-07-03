@@ -262,6 +262,76 @@
       transition: all 160ms ease;
     }
     .integration-badge:hover { border-color: var(--green); background: var(--mint); }
+
+    /* Why Venue Wrangler */
+    .reasons-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .reason-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 28px;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      transition: all 180ms ease;
+    }
+    .reason-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 18px 38px rgba(23,32,24,0.08);
+      border-color: #b9d2bd;
+    }
+    .reason-icon { font-size: 40px; margin-bottom: 14px; }
+    .reason-card h3 { margin: 0 0 12px; font-size: 20px; color: var(--ink); }
+    .reason-card p { margin: 0; color: var(--muted); flex-grow: 1; }
+
+    /* Built for */
+    .venue-types {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+    .venue-type {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 26px;
+      min-height: 200px;
+    }
+    .venue-type h3 { margin: 0 0 12px; font-size: 18px; color: var(--green); font-weight: 800; }
+    .venue-type p { margin: 0; color: #3d463c; font-size: 15px; line-height: 1.6; }
+
+    /* Use case */
+    .use-case-example {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .use-case-column {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--soft);
+      padding: 28px;
+    }
+    .use-case-column h3 { margin: 0 0 20px; font-size: 18px; color: var(--ink); font-weight: 800; }
+    .use-case-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+    .use-case-list li {
+      font-size: 15px;
+      color: #3d463c;
+      padding-left: 24px;
+      position: relative;
+      line-height: 1.5;
+    }
+    .use-case-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: var(--green);
+      font-weight: 900;
+    }
     .price-signup { display: grid; grid-template-columns: 0.86fr 1.14fr; gap: 28px; align-items: start; }
     .price {
       background: var(--green);
@@ -350,6 +420,9 @@
       .feature-list { grid-template-columns: repeat(2, 1fr); }
       .flows { grid-template-columns: repeat(2, 1fr); }
       .integrations-grid { grid-template-columns: 1fr; }
+      .reasons-grid { grid-template-columns: repeat(2, 1fr); }
+      .venue-types { grid-template-columns: repeat(2, 1fr); }
+      .use-case-example { grid-template-columns: 1fr; }
       .price { position: relative; top: auto; }
       .modal-card { grid-template-columns: 1fr; }
       .modal-media { min-height: 320px; }
@@ -362,11 +435,16 @@
       .motion-stage { min-height: 500px; height: 60vh; border-radius: 24px; }
       .motion-track { width: 132%; left: -14%; grid-template-columns: repeat(3, 1fr); gap: 12px; }
       .motion-caption { left: 16px; right: 16px; bottom: 16px; }
-      .section { padding: 68px 0; }
+      .section { padding: 40px 0; }
       .gallery-main { grid-template-columns: 1fr; min-height: 0; }
       .gallery-main .phone:nth-child(2) { display: none; }
       .feature-list, .flows, .form-grid { grid-template-columns: 1fr; }
       .video-strip img { width: 210px; }
+      .reasons-grid { grid-template-columns: 1fr; }
+      .reason-card { min-height: auto; }
+      .venue-types { grid-template-columns: 1fr; }
+      .use-case-example { grid-template-columns: 1fr; }
+      .use-case-column { padding: 20px; }
       .footer-inner { display: block; }
       .footer a { display: inline-block; margin: 12px 18px 0 0; }
     }
@@ -400,6 +478,7 @@
         <a href="#product">Product</a>
         <a href="#functions">Functions</a>
         <a href="#integrations">Integrations</a>
+        <a href="#why-venue-wrangler">Why Venue Wrangler</a>
         <a href="#pricing">Pricing</a>
         <a href="faq/">FAQ</a>
       </div>
@@ -415,7 +494,7 @@
       <div class="wrap hero-grid">
         <div>
           <h1>Venue Wrangler</h1>
-          <p class="hero-copy">The operating system for restaurants, bars, lounges, event spaces, and hospitality teams that need scheduling, reservations, floor control, CRM, inventory, reports, payroll exports, and staff communication in one shared workspace.</p>
+          <p class="hero-copy">The operating system for restaurants, bars, lounges, event venues, and hotels. Schedule staff, manage reservations, track floors in real time, monitor inventory, record hours with a geofenced time clock, run CRM for events, generate reports, and keep your team connected — all in one mobile app and web workspace.</p>
           <div class="actions">
             <a class="btn" href="#pricing">Start workspace</a>
             <button class="btn secondary" type="button" data-open-demo>Watch intro</button>
@@ -550,6 +629,115 @@
               <span class="integration-badge">SpotOn</span>
               <span class="integration-badge">Lavu</span>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="why-venue-wrangler">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Why Venue Wrangler stands apart.</h2>
+          <p class="lead">Most hospitality software solves one problem at a time. Venue Wrangler connects every piece of the operation so managers and staff work from a single source of truth.</p>
+        </div>
+        <div class="reasons-grid">
+          <div class="reason-card">
+            <div class="reason-icon">📱</div>
+            <h3>Mobile-first design for service</h3>
+            <p>Built for fast-paced hospitality environments. Large, legible interfaces. Staff can do their jobs from their phones, not just view data.</p>
+          </div>
+          <div class="reason-card">
+            <div class="reason-icon">💰</div>
+            <h3>Flat pricing, no per-seat fees</h3>
+            <p>$99.99/month for the entire workspace — up to 50 staff. No per-employee charges that grow with seasonal hiring. One bill, all features.</p>
+          </div>
+          <div class="reason-card">
+            <div class="reason-icon">🔗</div>
+            <h3>Everything connected</h3>
+            <p>Scheduling informed by reservation demand. Staffing decisions see floor plans and event details. Revenue and labor costs roll together into reporting.</p>
+          </div>
+          <div class="reason-card">
+            <div class="reason-icon">🌐</div>
+            <h3>Integrated platforms</h3>
+            <p>Connects to Gusto, Rippling, Square Payroll, Toast, Square, Clover, Shopify POS, Lightspeed, and SpotOn so hours and revenue flow automatically.</p>
+          </div>
+          <div class="reason-card">
+            <div class="reason-icon">⏱️</div>
+            <h3>Geofenced time clock</h3>
+            <p>Location-verified clock-in at the venue prevents buddy punching. Accurate labor records flow straight to payroll exports with no manual entry.</p>
+          </div>
+          <div class="reason-card">
+            <div class="reason-icon">👥</div>
+            <h3>Consolidation saves time</h3>
+            <p>Replaces separate apps for scheduling, reservations, floor plans, inventory, payroll, and chat. One workspace means one login, one interface, one source of truth.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="built-for">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Built for hospitality venues.</h2>
+          <p class="lead">Whether you're a full-service restaurant, a cocktail bar, a boutique event space, or a hotel with multiple outlets, Venue Wrangler is purpose-built for how you actually run the operation.</p>
+        </div>
+        <div class="venue-types">
+          <div class="venue-type">
+            <h3>Restaurants</h3>
+            <p>Full-service, casual, and fast-casual dining. Coordinate servers, kitchen staff, and bussers. Manage covers, reservations, inventory, and labor costs in one app.</p>
+          </div>
+          <div class="venue-type">
+            <h3>Bars & Lounges</h3>
+            <p>Cocktail bars, nightclubs, and lounges. Track bartenders and servers, manage bar stock, handle reservations for VIP tables, and monitor labor during peak hours.</p>
+          </div>
+          <div class="venue-type">
+            <h3>Event Venues</h3>
+            <p>Banquet halls, wedding venues, and event spaces. Manage private events with CRM, BEOs, and contract tracking. Schedule staff for private dining and coordinate with catering.</p>
+          </div>
+          <div class="venue-type">
+            <h3>Hotels</h3>
+            <p>Restaurant, bar, and room service operations. Consolidate scheduling and reservations across multiple outlets. Sync POS and payroll data across departments.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="use-case">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>A typical Friday night.</h2>
+          <p class="lead">How Venue Wrangler brings everything together in real time.</p>
+        </div>
+        <div class="use-case-example">
+          <div class="use-case-column">
+            <h3>The setup</h3>
+            <ul class="use-case-list">
+              <li>200 covers booked in reservations</li>
+              <li>Private event in the back room (20 guests, 2 hours)</li>
+              <li>Live floor plan: 8 sections with current occupancy</li>
+              <li>Manager sees expected $4,200 revenue</li>
+              <li>Scheduled labor cost: $1,100</li>
+            </ul>
+          </div>
+          <div class="use-case-column">
+            <h3>The execution</h3>
+            <ul class="use-case-list">
+              <li>12 servers, 4 bartenders, 2 bussers scheduled</li>
+              <li>One server calls out sick</li>
+              <li>Manager posts open shift → someone claims it in 2 minutes</li>
+              <li>Floor plan updates as tables seat and turn</li>
+              <li>Inventory alerts when premium bottles run low</li>
+            </ul>
+          </div>
+          <div class="use-case-column">
+            <h3>The closeout</h3>
+            <ul class="use-case-list">
+              <li>All staff clocked accurate hours at venue</li>
+              <li>No manual time entry, no spreadsheet</li>
+              <li>Payroll export ready for Gusto with one click</li>
+              <li>Revenue vs. labor analysis in reports</li>
+              <li>Event details stored in CRM for follow-up</li>
+            </ul>
           </div>
         </div>
       </div>
