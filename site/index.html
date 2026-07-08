@@ -315,10 +315,8 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
     }
-    .modal-media { background: var(--ink); min-height: 520px; position: relative; overflow: hidden; }
-    .modal-media img { position: absolute; width: 52%; border-radius: 22px; box-shadow: 0 22px 48px rgba(0,0,0,0.35); }
-    .modal-media img:nth-child(1) { left: 10%; top: 8%; }
-    .modal-media img:nth-child(2) { right: 8%; bottom: 8%; }
+    .modal-media { background: var(--ink); min-height: 520px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; padding: 36px; }
+    .modal-media video { max-width: 88%; max-height: 88%; border-radius: 22px; box-shadow: 0 22px 48px rgba(0,0,0,0.35); }
     .modal-copy { padding: 34px; display: flex; flex-direction: column; justify-content: center; }
     .modal-copy h2 { margin: 0 0 10px; color: var(--green); font-size: 40px; line-height: 1; }
     .close { position: absolute; top: 18px; right: 18px; z-index: 2; border: 0; border-radius: 50%; width: 42px; height: 42px; background: white; cursor: pointer; font-size: 22px; }
@@ -557,8 +555,7 @@
     <button class="close" type="button" data-close-demo aria-label="Close">×</button>
     <div class="modal-card">
       <div class="modal-media">
-        <img src="assets/screen-command.png" alt="" />
-        <img src="assets/screen-reports.png" alt="" />
+        <video src="assets/venue-wrangler-ad.mp4" autoplay muted loop playsinline controls></video>
       </div>
       <div class="modal-copy">
         <h2>Service moves fast. The app should keep up.</h2>
