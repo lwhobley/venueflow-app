@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
@@ -257,6 +259,23 @@ function StaffScreen() {
   };
 
   const removeImportRow = (index: number) => setImportRows((prev) => prev.filter((_, i) => i !== index));
+
+  const pickImportCsv = async () => {
+    setImportErr(null);
+    setImportMsg(null);
+    setImportBusy(true);
+    try {
+      const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
+      if (doc.canceled || !doc.assets[0]?.uri) return;
+      const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
+      setImportText(text);
+      setImportMsg(`Loaded ${doc.assets[0].name ?? 'upload'}. Tap Parse roster to continue.`);
+    } catch (e) {
+      setImportErr(errorMessage(e, 'Could not load that file.'));
+    } finally {
+      setImportBusy(false);
+    }
+  };
 
   const [newRole, setNewRole] = useState('');
 
@@ -519,15 +538,20 @@ function StaffScreen() {
             numberOfLines={5}
             style={{ backgroundColor: colors.surface, minHeight: 110 }}
           />
-          <Button
-            mode="contained"
-            buttonColor={colors.primary}
-            loading={importBusy}
-            disabled={importBusy || !importText.trim()}
-            onPress={() => void onParseStaffImport()}
-          >
-            Parse roster
-          </Button>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            <Button
+              mode="contained"
+              buttonColor={colors.primary}
+              loading={importBusy}
+              disabled={importBusy || !importText.trim()}
+              onPress={() => void onParseStaffImport()}
+            >
+              Parse roster
+            </Button>
+            <Button mode="outlined" textColor={colors.primary} disabled={importBusy} onPress={() => void pickImportCsv()}>
+              Upload CSV
+            </Button>
+          </View>
           {importRows.length > 0 ? (
             <View style={{ gap: spacing.sm }}>
               <Text style={{ fontWeight: '700' }}>Review before importing ({importRows.length})</Text>
