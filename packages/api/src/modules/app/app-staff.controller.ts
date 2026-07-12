@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { Prisma, Role } from '@prisma/client';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -9,6 +10,9 @@ import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mapProfile } from './app-mappers';
 import { ProfileService } from './profile.service';
+import { StaffImportParserService } from './staff-import-parser.service';
+
+const MAX_STAFF_IMPORT_ROWS = 100;
 
 class StaffDto {
   @IsString()
@@ -52,6 +56,40 @@ class StaffDto {
   certifications?: string[];
 }
 
+class ParseStaffImportDto {
+  @IsString()
+  text!: string;
+}
+
+class StaffImportRowDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  fullName!: string;
+
+  @IsIn(['manager', 'staff'])
+  role!: 'manager' | 'staff';
+
+  @IsString()
+  jobTitle!: string;
+
+  @IsString()
+  @IsOptional()
+  phone?: string;
+}
+
+class CommitStaffImportDto {
+  @IsString()
+  venueId!: string;
+
+  @IsArray()
+  @ArrayMaxSize(MAX_STAFF_IMPORT_ROWS)
+  @ValidateNested({ each: true })
+  @Type(() => StaffImportRowDto)
+  items!: StaffImportRowDto[];
+}
+
 const ONBOARDING_TASK_STATUSES = ['open', 'done', 'cancelled'] as const;
 
 class UpdateOnboardingTaskDto {
@@ -75,6 +113,7 @@ export class AppStaffController {
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly profiles: ProfileService,
+    private readonly staffImportParser: StaffImportParserService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -180,6 +219,52 @@ export class AppStaffController {
   async upsertVenueStaff(@CurrentUser() user: AuthUser, @Body() body: StaffDto) {
     const viewer = await this.profiles.requireManagerProfile(user);
     if (viewer.venueId !== body.venueId) throw new ForbiddenException('Not authorized');
+    const row = await this.upsertOneStaffMember(viewer, body);
+    return mapProfile(row);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('staff/import/parse')
+  async parseStaffImport(@CurrentUser() user: AuthUser, @Body() body: ParseStaffImportDto) {
+    await this.profiles.requireManagerProfile(user);
+    return this.staffImportParser.parse(body.text);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('staff/import/commit')
+  async commitStaffImport(@CurrentUser() user: AuthUser, @Body() body: CommitStaffImportDto) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    if (viewer.venueId !== body.venueId) throw new ForbiddenException('Not authorized');
+    const created: string[] = [];
+    const updated: string[] = [];
+    const failed: Array<{ email: string; error: string }> = [];
+    for (const item of body.items) {
+      try {
+        const existingBefore = await this.prisma.profile.findFirst({
+          where: { venueId: body.venueId, email: item.email.toLowerCase() },
+          select: { id: true },
+        });
+        const row = await this.upsertOneStaffMember(viewer, {
+          venueId: body.venueId,
+          email: item.email,
+          fullName: item.fullName,
+          role: item.role,
+          jobTitle: item.jobTitle,
+          phone: item.phone,
+        });
+        (existingBefore ? updated : created).push(row.email);
+      } catch (error) {
+        failed.push({ email: item.email, error: error instanceof Error ? error.message : 'Import failed' });
+      }
+    }
+    return { created: created.length, updated: updated.length, failed };
+  }
+
+  /** Core create-or-update logic for a single roster row, shared by the single-staff endpoint and bulk import. */
+  private async upsertOneStaffMember(
+    viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null; fullName: string; venue?: { name: string } | null },
+    body: Pick<StaffDto, 'venueId' | 'staffId' | 'email' | 'fullName' | 'role' | 'jobTitle' | 'phone' | 'altPhone' | 'address' | 'dateOfBirth' | 'certifications'>,
+  ) {
     const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess;
     if (!viewerIsOwnerOrAdmin && ['admin', 'owner', 'manager'].includes(body.role)) {
       throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
@@ -262,7 +347,7 @@ export class AppStaffController {
           `Questions? support@venuewrangler.com\n\n` +
           `— The Venue Wrangler Team`,
     });
-    return mapProfile(row);
+    return row;
   }
 
   @UseGuards(AuthGuard)

@@ -3,7 +3,7 @@ import { Alert, FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
-import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
@@ -13,6 +13,7 @@ import { errorMessage } from '../../lib/format';
 import type { Role } from '../../lib/types';
 
 type VenueRole = { _id: string; name: string };
+type ParsedStaffImportRow = { fullName: string; email: string; phone?: string; jobTitle: string; role: 'manager' | 'staff' };
 // Access level = the permission tier an admin/manager assigns when adding a
 // teammate. Roles are never self-selected — they are set here on the roster.
 type AccessRole = 'manager' | 'staff';
@@ -205,6 +206,58 @@ function StaffScreen() {
       setGeneratingLink(false);
     }
   };
+
+  // Roster migration: paste an export from any scheduling platform, let the AI
+  // normalize it, review the parsed rows, then commit them as staff invites.
+  const parseStaffImport = useAction(api.app.parseStaffImport);
+  const commitStaffImport = useMutation(api.app.commitStaffImport);
+  const [importText, setImportText] = useState('');
+  const [importRows, setImportRows] = useState<ParsedStaffImportRow[]>([]);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importErr, setImportErr] = useState<string | null>(null);
+
+  const onParseStaffImport = async () => {
+    if (!importText.trim()) return;
+    setImportErr(null);
+    setImportMsg(null);
+    setImportBusy(true);
+    try {
+      const result = await parseStaffImport({ text: importText });
+      const items = (result.items ?? []) as ParsedStaffImportRow[];
+      setImportRows(items);
+      setImportMsg(items.length > 0
+        ? `Parsed ${items.length} ${items.length === 1 ? 'person' : 'people'}. Review below, then import.`
+        : 'No staff rows found in that text. Try pasting the full export.');
+    } catch (e) {
+      setImportErr(errorMessage(e, 'Could not parse the staff list.'));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const onCommitStaffImport = async () => {
+    if (!venue?.id || importRows.length === 0) return;
+    setImportErr(null);
+    setImportMsg(null);
+    setImportBusy(true);
+    try {
+      const result = await commitStaffImport({ venueId: venue.id, items: importRows });
+      const total = result.created + result.updated;
+      setImportMsg(
+        `Added ${result.created} and updated ${result.updated} staff member${total === 1 ? '' : 's'}.` +
+          (result.failed.length > 0 ? ` ${result.failed.length} row${result.failed.length === 1 ? '' : 's'} failed.` : ''),
+      );
+      setImportRows([]);
+      setImportText('');
+    } catch (e) {
+      setImportErr(errorMessage(e, 'Could not import staff.'));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const removeImportRow = (index: number) => setImportRows((prev) => prev.filter((_, i) => i !== index));
 
   const [newRole, setNewRole] = useState('');
 
@@ -451,6 +504,57 @@ function StaffScreen() {
               Clear selection
             </Button>
           ) : null}
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium">Migrate staff from another platform</Text>
+          <Text style={{ color: colors.muted }}>
+            Paste your roster export from Homebase, When I Work, 7shifts, Deputy, Sling, or any spreadsheet — Venue Wrangler reads whatever format it's in.
+          </Text>
+          <PaperTextInput
+            placeholder="Paste your staff list or CSV export here"
+            value={importText}
+            onChangeText={setImportText}
+            mode="outlined"
+            multiline
+            numberOfLines={5}
+            style={{ backgroundColor: colors.surface, minHeight: 110 }}
+          />
+          <Button
+            mode="contained"
+            buttonColor={colors.primary}
+            loading={importBusy}
+            disabled={importBusy || !importText.trim()}
+            onPress={() => void onParseStaffImport()}
+          >
+            Parse roster
+          </Button>
+          {importRows.length > 0 ? (
+            <View style={{ gap: spacing.sm }}>
+              <Text style={{ fontWeight: '700' }}>Review before importing ({importRows.length})</Text>
+              {importRows.map((row, index) => (
+                <View
+                  key={`${row.email}-${index}`}
+                  style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: '700' }}>{row.fullName}</Text>
+                    <Text style={{ color: colors.muted }}>{row.email} · {row.jobTitle} · {row.role}</Text>
+                  </View>
+                  <Button mode="text" textColor={colors.muted} compact onPress={() => removeImportRow(index)}>
+                    Remove
+                  </Button>
+                </View>
+              ))}
+              <Button mode="contained" buttonColor={colors.primary} loading={importBusy} onPress={() => void onCommitStaffImport()}>
+                Add {importRows.length} staff member{importRows.length === 1 ? '' : 's'}
+              </Button>
+            </View>
+          ) : null}
+          {importErr ? <Text style={{ color: colors.danger }}>{importErr}</Text> : null}
+          {importMsg ? <Text style={{ color: accents[2].fg }}>{importMsg}</Text> : null}
         </Card.Content>
       </Card>
 
