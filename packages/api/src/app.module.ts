@@ -18,6 +18,7 @@ import { AppController } from './modules/app/app.controller';
 import { AppBillingController } from './modules/app/app-billing.controller';
 import { AppStaffController } from './modules/app/app-staff.controller';
 import { ProfileService } from './modules/app/profile.service';
+import { StaffImportParserService } from './modules/app/staff-import-parser.service';
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
@@ -88,6 +89,7 @@ import { SchedulingAssignmentService } from './modules/scheduling/scheduling-ass
     // Shared /v1/app profile + venue resolution (AppController, AppBilling,
     // AppStaff controllers all depend on it).
     ProfileService,
+    StaffImportParserService,
     SchedulingAssignmentService,
   ],
 })

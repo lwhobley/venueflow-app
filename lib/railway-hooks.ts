@@ -145,6 +145,17 @@ const mutationRoutes: Record<string, Route> = {
     method: 'POST',
     body: ({ role, jobTitle }) => ({ role, jobTitle }),
   },
+  'app.parseStaffImport': {
+    path: '/v1/app/staff/import/parse',
+    method: 'POST',
+    body: ({ text }) => ({ text }),
+  },
+  'app.commitStaffImport': {
+    path: '/v1/app/staff/import/commit',
+    method: 'POST',
+    body: ({ venueId, items }) => ({ venueId, items }),
+    invalidate: [['app', 'listVenueStaff'], ['app', 'listStaffOnboarding'], ['app', 'listStaffAuditLog'], ['app', 'getDashboard']],
+  },
   'app.createStaffRequest': {
     path: '/v1/staff-requests',
     method: 'POST',
