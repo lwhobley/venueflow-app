@@ -82,6 +82,10 @@ export default function ProfileScreen() {
         </Button>
       ) : null}
 
+      <Button mode="outlined" textColor={colors.primary} icon="help-circle-outline" onPress={() => router.push('/help')} style={{ marginBottom: spacing.sm }}>
+        Help & feature guide
+      </Button>
+
       <Button mode="outlined" textColor={colors.primary} onPress={onLogout} style={{ marginBottom: spacing.sm }}>
         Sign out
       </Button>
