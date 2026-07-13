@@ -401,6 +401,7 @@ export class OperationsController {
     ]);
 
     const lowStockItems = barItems.filter((item) => item.onHand <= item.parLevel).slice(0, 8);
+    const reservationsById = new Map(reservations.map((reservation) => [reservation.id, reservation]));
     const covers = reservations.reduce((sum, row) => sum + row.partySize, 0);
     const posCovers = posChecks.reduce((sum, row) => sum + (row.guestCount ?? 0), 0);
     const salesCents = posChecks.reduce((sum, row) => sum + row.totalCents, 0);
