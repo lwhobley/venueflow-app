@@ -48,6 +48,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { SchedulingAssignmentService } from './scheduling-assignment.service';
+import { AiSchedulerService } from './ai-scheduler.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -222,6 +223,40 @@ class ApplyAutoScheduleDto {
   assignments!: AutoScheduleAssignmentDto[];
 }
 
+class AiProposedShiftDto {
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  dayIndex!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  startMinutes!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  endMinutes!: number;
+
+  @IsString()
+  jobTitle!: string;
+
+  @IsString()
+  station!: string;
+
+  @IsString()
+  @IsOptional()
+  profileId?: string;
+}
+
+class CommitAiScheduleDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AiProposedShiftDto)
+  shifts!: AiProposedShiftDto[];
+}
+
 class ProposeSwapDto {
   @IsString()
   myShiftId!: string;
@@ -316,6 +351,7 @@ export class SchedulingController {
     private readonly notifications: NotificationsService,
     private readonly email: EmailService,
     private readonly assignments: SchedulingAssignmentService,
+    private readonly aiScheduler: AiSchedulerService,
   ) {}
 
   @RequireSubscription()
@@ -1122,6 +1158,97 @@ export class SchedulingController {
       });
     }
     return { assigned, skipped };
+  }
+
+  // AI schedule builder: generates NEW shift proposals from demand (covers,
+  // private events) and the labor budget, distinct from auto-schedule/*
+  // above which only assigns staff to shifts that already exist.
+  @RequireSubscription()
+  @Get('ai-schedule/preview')
+  async previewAiSchedule(@VenueScope() scope: Scope, @Query('weekStartDate') weekStartDate?: string) {
+    this.requireManager(scope);
+    const venueId = scope!.venueId;
+    const availabilityWeekStart = await this.resolveAvailabilityWeekStart(venueId, weekStartDate);
+    const weekStartDayUtc = new Date(`${availabilityWeekStart}T00:00:00.000Z`);
+    const weekEndDayUtc = new Date(weekStartDayUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const [venue, shifts, staff, availability, reservations, venueEvents] = await Promise.all([
+      this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true, weeklyLaborBudgetHours: true } }),
+      this.prisma.scheduleShift.findMany({ where: { venueId } }),
+      this.prisma.profile.findMany({ where: { venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.availability.findMany({ where: { venueId, weekStart: availabilityWeekStart } }),
+      this.prisma.reservation.findMany({
+        where: {
+          venueId,
+          deletedAt: null,
+          reservationTime: { gte: weekStartDayUtc, lt: weekEndDayUtc },
+          status: { notIn: ['cancelled', 'no_show'] },
+        },
+        select: { reservationTime: true, partySize: true, isPrivateEvent: true },
+      }),
+      this.prisma.venueEvent.findMany({
+        where: { venueId, startsAt: { gte: weekStartDayUtc, lt: weekEndDayUtc } },
+        select: { startsAt: true, expectedGuests: true },
+      }),
+    ]);
+
+    const laborForecast = buildLaborForecast({
+      tz: venue?.timezone ?? null,
+      now: weekStartDayUtc,
+      shifts: shifts.map((s) => ({ dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, profileId: s.profileId })),
+      reservations: reservations.map((r) => ({ ts: r.reservationTime.getTime(), partySize: r.partySize, isPrivateEvent: Boolean(r.isPrivateEvent) })),
+      events: venueEvents.map((e) => ({ ts: e.startsAt.getTime(), expectedGuests: e.expectedGuests })),
+      nameById: new Map(staff.map((p) => [p.id, p.fullName])),
+    });
+
+    const draft = await this.aiScheduler.generateDraft({
+      weekStart: availabilityWeekStart,
+      laborForecast,
+      laborBudgetHours: venue?.weeklyLaborBudgetHours ?? null,
+      staff: staff.map((p) => ({ id: p.id, fullName: p.fullName, jobTitle: p.jobTitle, role: p.role })),
+      availabilityByProfile: this.groupAvailabilityByProfile(availability),
+      existingShifts: shifts.map((s) => ({ dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, jobTitle: s.jobTitle, profileId: s.profileId })),
+    });
+
+    const nameById = new Map(staff.map((p) => [p.id, p.fullName]));
+    return {
+      weekStart: availabilityWeekStart,
+      shifts: draft.shifts.map((shift) => ({
+        ...shift,
+        dayLabel: dayLabel(shift.dayIndex),
+        startTime: minutesToTime(shift.startMinutes),
+        endTime: minutesToTime(shift.endMinutes),
+        memberName: shift.profileId ? nameById.get(shift.profileId) ?? null : null,
+      })),
+    };
+  }
+
+  @RequireSubscription()
+  @Post('ai-schedule/commit')
+  async commitAiSchedule(@VenueScope() scope: Scope, @Body() body: CommitAiScheduleDto) {
+    this.requireManager(scope);
+    const venueId = scope!.venueId;
+    let created = 0;
+    const failed: Array<{ shift: string; error: string }> = [];
+    for (const shift of body.shifts) {
+      try {
+        ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
+        await this.assignments.createShift({
+          venueId,
+          profileId: shift.profileId,
+          dayIndex: shift.dayIndex,
+          startMinutes: shift.startMinutes,
+          endMinutes: shift.endMinutes,
+          jobTitle: shift.jobTitle,
+          station: shift.station,
+          notes: 'Created by AI schedule builder',
+        });
+        created += 1;
+      } catch (error) {
+        failed.push({ shift: this.shiftLabel(shift), error: error instanceof Error ? error.message : 'Could not create shift' });
+      }
+    }
+    return { created, failed };
   }
 
   @RequireSubscription()

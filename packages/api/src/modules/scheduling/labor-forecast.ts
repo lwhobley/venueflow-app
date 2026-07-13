@@ -79,6 +79,8 @@ const UNDERSTAFFED_GAP = 4; // gap (suggested − scheduled) above this = unders
 const OVERSTAFFED_GAP = -6; // gap below this = overstaffed
 const OT_WATCH_MINUTES = 32 * 60; // surface staff at/above this weekly
 const OT_LIMIT_MINUTES = 40 * 60; // past this = overtime violation
+const BREAK_REQUIRED_MINUTES = 6 * 60; // many states require a paid/unpaid meal break past a 6h shift
+const REST_BETWEEN_SHIFTS_MINUTES = 10 * 60; // "clopening" risk: close-then-open with under 10h off
 
 /**
  * Pure labor-forecast aggregation. Deterministic given `now`; all time-zone math
@@ -139,6 +141,56 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
   }
   for (const event of events) {
     addDemand(event.ts, event.expectedGuests ?? 0, true);
+  }
+
+  // Predictive compliance checks — flagged before the shift happens, not after,
+  // so a manager can fix the schedule instead of discovering a violation later.
+  const complianceAlerts: ForecastAlert[] = [];
+
+  for (const shift of shifts) {
+    const durationMinutes = shift.endMinutes - shift.startMinutes;
+    if (durationMinutes >= BREAK_REQUIRED_MINUTES) {
+      const name = shift.profileId ? nameById.get(shift.profileId) ?? 'Staff member' : 'This shift';
+      complianceAlerts.push({
+        kind: 'break_reminder',
+        severity: 'warning',
+        message: `${name} is scheduled ${round1(durationMinutes / 60)}h on ${dayLabel(shift.dayIndex)} — make sure a break is logged.`,
+        dayLabel: dayLabel(shift.dayIndex),
+      });
+    }
+  }
+
+  const shiftsByProfile = new Map<string, ForecastShift[]>();
+  for (const shift of shifts) {
+    if (!shift.profileId) continue;
+    const rows = shiftsByProfile.get(shift.profileId) ?? [];
+    rows.push(shift);
+    shiftsByProfile.set(shift.profileId, rows);
+  }
+  for (const [profileId, profileShifts] of shiftsByProfile) {
+    const byDay = new Map<number, ForecastShift[]>();
+    for (const shift of profileShifts) {
+      const rows = byDay.get(shift.dayIndex) ?? [];
+      rows.push(shift);
+      byDay.set(shift.dayIndex, rows);
+    }
+    for (const [dayIndex, todayShifts] of byDay) {
+      const nextDayIndex = (dayIndex + 1) % 7;
+      const nextDayShifts = byDay.get(nextDayIndex);
+      if (!nextDayShifts) continue;
+      const latestEnd = Math.max(...todayShifts.map((s) => s.endMinutes));
+      const earliestStart = Math.min(...nextDayShifts.map((s) => s.startMinutes));
+      const restMinutes = (1440 - latestEnd) + earliestStart;
+      if (restMinutes < REST_BETWEEN_SHIFTS_MINUTES) {
+        const name = nameById.get(profileId) ?? 'Staff member';
+        complianceAlerts.push({
+          kind: 'clopening_risk',
+          severity: 'critical',
+          message: `${name} closes ${dayLabel(dayIndex)} and opens ${dayLabel(nextDayIndex)} with only ${round1(restMinutes / 60)}h off — under the ${REST_BETWEEN_SHIFTS_MINUTES / 60}h rest guideline.`,
+          dayLabel: dayLabel(nextDayIndex),
+        });
+      }
+    }
   }
 
   const otRisk: ForecastOtRisk[] = Array.from(weeklyMinutes.entries())
@@ -214,6 +266,7 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
         : `${risk.name} approaching OT (${risk.scheduledHours}h scheduled)`,
     });
   }
+  alerts.push(...complianceAlerts);
 
   const totalCovers = days.reduce((sum, day) => sum + day.covers, 0);
   const totalScheduledHours = round1(days.reduce((sum, day) => sum + day.scheduledHours, 0));

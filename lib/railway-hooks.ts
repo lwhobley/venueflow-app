@@ -45,6 +45,10 @@ const queryRoutes: Record<string, Route> = {
   'pos.getLaborSummary': { path: (args) => `/v1/pos/labor?windowDays=${args.windowDays ?? 7}${args.startTs ? `&startTs=${args.startTs}` : ''}${args.endTs ? `&endTs=${args.endTs}` : ''}` },
   'operations.getManagerDashboard': { path: '/v1/operations/manager-dashboard' },
   'operations.getDailyBrief': { path: '/v1/operations/daily-brief' },
+  'operations.listLogbook': { path: (args) => `/v1/operations/logbook${args?.limit ? `?limit=${args.limit}` : ''}` },
+  'operations.getChecklist': {
+    path: (args) => `/v1/operations/checklist?kind=${encodeURIComponent(args.kind)}${args?.date ? `&date=${encodeURIComponent(args.date)}` : ''}`,
+  },
   'reservations.getReservationsPage': { path: '/v1/reservations' },
   'reservations.exportReservationsCsv': { path: '/v1/reservations/export-csv' },
   'payroll.getPayrollSummary': { path: (args) => `/v1/payroll/summary${args.startDate ? `?startDate=${args.startDate}&endDate=${args.endDate ?? ''}` : ''}` },
@@ -155,6 +159,44 @@ const mutationRoutes: Record<string, Route> = {
     method: 'POST',
     body: ({ venueId, items }) => ({ venueId, items }),
     invalidate: [['app', 'listVenueStaff'], ['app', 'listStaffOnboarding'], ['app', 'listStaffAuditLog'], ['app', 'getDashboard']],
+  },
+  'scheduling.previewAiSchedule': {
+    path: (args) => `/v1/scheduling/ai-schedule/preview?weekStartDate=${encodeURIComponent(args?.weekStartDate ?? '')}`,
+    method: 'GET',
+  },
+  'scheduling.commitAiSchedule': {
+    path: '/v1/scheduling/ai-schedule/commit',
+    method: 'POST',
+    body: ({ shifts }) => ({ shifts }),
+    invalidate: [['scheduling', 'getManagerSchedule'], ['scheduling', 'getLaborForecast']],
+  },
+  'operations.addLogbookEntry': {
+    path: '/v1/operations/logbook',
+    method: 'POST',
+    body: ({ category, body, pinned }) => ({ category, body, pinned }),
+    invalidate: [['operations', 'listLogbook']],
+  },
+  'operations.deleteLogbookEntry': {
+    path: (args) => `/v1/operations/logbook/${args.id ?? args}`,
+    method: 'DELETE',
+    invalidate: [['operations', 'listLogbook']],
+  },
+  'operations.addChecklistItem': {
+    path: '/v1/operations/checklist/items',
+    method: 'POST',
+    body: ({ kind, title, requiresPhoto }) => ({ kind, title, requiresPhoto }),
+    invalidate: [['operations', 'getChecklist']],
+  },
+  'operations.removeChecklistItem': {
+    path: (args) => `/v1/operations/checklist/items/${args.id ?? args}`,
+    method: 'DELETE',
+    invalidate: [['operations', 'getChecklist']],
+  },
+  'operations.completeChecklistItem': {
+    path: (args) => `/v1/operations/checklist/complete/${args.completionId}`,
+    method: 'POST',
+    body: ({ photoBase64, photoMimeType }) => ({ photoBase64, photoMimeType }),
+    invalidate: [['operations', 'getChecklist']],
   },
   'app.createStaffRequest': {
     path: '/v1/staff-requests',

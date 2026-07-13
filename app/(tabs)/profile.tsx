@@ -82,6 +82,14 @@ export default function ProfileScreen() {
         </Button>
       ) : null}
 
+      <Button mode="outlined" textColor={colors.primary} icon="notebook-outline" onPress={() => router.push('/logbook')} style={{ marginBottom: spacing.sm }}>
+        Shift logbook
+      </Button>
+
+      <Button mode="outlined" textColor={colors.primary} icon="clipboard-check-outline" onPress={() => router.push('/checklist')} style={{ marginBottom: spacing.sm }}>
+        Opening/closing checklist
+      </Button>
+
       <Button mode="outlined" textColor={colors.primary} icon="help-circle-outline" onPress={() => router.push('/help')} style={{ marginBottom: spacing.sm }}>
         Help & feature guide
       </Button>
