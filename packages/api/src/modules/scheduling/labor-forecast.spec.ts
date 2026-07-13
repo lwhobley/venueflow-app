@@ -168,6 +168,37 @@ describe('buildLaborForecast — predictive compliance alerts', () => {
     expect(breakAlerts[0].message).toContain('Alex');
   });
 
+  it('collapses multiple long shifts for the same person into a single alert instead of one per shift', () => {
+    const result = buildLaborForecast(
+      baseInput({
+        shifts: [
+          { dayIndex: 0, startMinutes: 600, endMinutes: 600 + 7 * 60, profileId: 'p1' },
+          { dayIndex: 1, startMinutes: 600, endMinutes: 600 + 7 * 60, profileId: 'p1' },
+          { dayIndex: 2, startMinutes: 600, endMinutes: 600 + 7 * 60, profileId: 'p1' },
+        ],
+        nameById: new Map([['p1', 'Alex']]),
+      }),
+    );
+    const breakAlerts = result.alerts.filter((a) => a.kind === 'break_reminder');
+    expect(breakAlerts).toHaveLength(1);
+    expect(breakAlerts[0].message).toContain('3 shifts');
+  });
+
+  it('aggregates unassigned long shifts into one alert distinct from named staff', () => {
+    const result = buildLaborForecast(
+      baseInput({
+        shifts: [
+          { dayIndex: 0, startMinutes: 600, endMinutes: 600 + 7 * 60, profileId: null },
+          { dayIndex: 1, startMinutes: 600, endMinutes: 600 + 7 * 60, profileId: null },
+        ],
+        nameById: new Map(),
+      }),
+    );
+    const breakAlerts = result.alerts.filter((a) => a.kind === 'break_reminder');
+    expect(breakAlerts).toHaveLength(1);
+    expect(breakAlerts[0].message).toContain('2 open shifts');
+  });
+
   it('flags a clopening pair (close one day, open the next) under the rest threshold', () => {
     const result = buildLaborForecast(
       baseInput({

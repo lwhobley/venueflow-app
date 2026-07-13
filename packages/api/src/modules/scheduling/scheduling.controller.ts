@@ -40,6 +40,7 @@ import {
   weeksToCover,
   weekStartFor,
 } from '../../common/pay-period';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { buildLaborForecast } from './labor-forecast';
 import { EmailService } from '../../email/email.service';
@@ -54,6 +55,8 @@ type Scope = VenueScopedRequest['venueScope'];
 
 const SHIFT_STATUSES = ['scheduled', 'open', 'covered'];
 const SWAP_STATUSES = ['proposed', 'accepted', 'declined', 'approved', 'denied', 'cancelled'];
+const AI_SCHEDULE_RATE_LIMIT_MAX = 20;
+const AI_SCHEDULE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 class AvailabilityBlockDto {
   @IsInt()
@@ -251,6 +254,10 @@ class AiProposedShiftDto {
 }
 
 class CommitAiScheduleDto {
+  @IsString()
+  @IsOptional()
+  weekStartDate?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AiProposedShiftDto)
@@ -1168,6 +1175,13 @@ export class SchedulingController {
   async previewAiSchedule(@VenueScope() scope: Scope, @Query('weekStartDate') weekStartDate?: string) {
     this.requireManager(scope);
     const venueId = scope!.venueId;
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `ai-parse:ai-schedule:${venueId}`,
+      AI_SCHEDULE_RATE_LIMIT_MAX,
+      AI_SCHEDULE_RATE_LIMIT_WINDOW_MS,
+      'Too many AI schedule requests. Try again in a few minutes.',
+    );
     const availabilityWeekStart = await this.resolveAvailabilityWeekStart(venueId, weekStartDate);
     const weekStartDayUtc = new Date(`${availabilityWeekStart}T00:00:00.000Z`);
     const weekEndDayUtc = new Date(weekStartDayUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -1228,14 +1242,25 @@ export class SchedulingController {
   async commitAiSchedule(@VenueScope() scope: Scope, @Body() body: CommitAiScheduleDto) {
     this.requireManager(scope);
     const venueId = scope!.venueId;
+    // Re-check availability server-side rather than trusting the AI's
+    // proposed assignment — mirrors auto-schedule/apply's canAssign guard.
+    const availabilityWeekStart = await this.resolveAvailabilityWeekStart(venueId, body.weekStartDate);
+    const availability = await this.prisma.availability.findMany({
+      where: { venueId, weekStart: availabilityWeekStart },
+    });
+    const availabilityByProfile = this.groupAvailabilityByProfile(availability);
+
     let created = 0;
     const failed: Array<{ shift: string; error: string }> = [];
     for (const shift of body.shifts) {
       try {
         ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
+        const profileId = shift.profileId && availabilityCovers(availabilityByProfile.get(shift.profileId), shift)
+          ? shift.profileId
+          : undefined;
         await this.assignments.createShift({
           venueId,
-          profileId: shift.profileId,
+          profileId,
           dayIndex: shift.dayIndex,
           startMinutes: shift.startMinutes,
           endMinutes: shift.endMinutes,

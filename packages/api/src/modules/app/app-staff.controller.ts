@@ -7,12 +7,15 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { EmailService } from '../../email/email.service';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mapProfile } from './app-mappers';
 import { ProfileService } from './profile.service';
 import { StaffImportParserService } from './staff-import-parser.service';
 
 const MAX_STAFF_IMPORT_ROWS = 100;
+const AI_PARSE_RATE_LIMIT_MAX = 20;
+const AI_PARSE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 class StaffDto {
   @IsString()
@@ -226,7 +229,14 @@ export class AppStaffController {
   @UseGuards(AuthGuard)
   @Post('staff/import/parse')
   async parseStaffImport(@CurrentUser() user: AuthUser, @Body() body: ParseStaffImportDto) {
-    await this.profiles.requireManagerProfile(user);
+    const profile = await this.profiles.requireManagerProfile(user);
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `ai-parse:staff-import:${profile.venueId}`,
+      AI_PARSE_RATE_LIMIT_MAX,
+      AI_PARSE_RATE_LIMIT_WINDOW_MS,
+      'Too many AI parse requests. Try again in a few minutes.',
+    );
     return this.staffImportParser.parse(body.text);
   }
 

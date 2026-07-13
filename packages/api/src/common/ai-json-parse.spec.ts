@@ -27,6 +27,12 @@ describe('resolveAiApiKey', () => {
     delete process.env.OPENAI_API_KEY;
     expect(resolveAiApiKey()).toBeUndefined();
   });
+
+  it('refuses a legacy OPENAI_API_KEY that is not OpenRouter-shaped, so a real OpenAI key never gets forwarded to OpenRouter', () => {
+    delete process.env.AI_API_KEY;
+    process.env.OPENAI_API_KEY = 'sk-proj-a-real-openai-key';
+    expect(resolveAiApiKey()).toBeUndefined();
+  });
 });
 
 describe('resolveAiModel', () => {

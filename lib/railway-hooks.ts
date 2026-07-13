@@ -137,12 +137,12 @@ const mutationRoutes: Record<string, Route> = {
     path: '/v1/app/venue-roles',
     method: 'POST',
     body: ({ name }) => ({ name }),
-    invalidate: [['staffAuth.listVenueRoles']],
+    invalidate: [['staffAuth', 'listVenueRoles']],
   },
   'staffAuth.removeVenueRole': {
     path: (args) => `/v1/app/venue-roles/${args.roleId ?? args.id ?? args}`,
     method: 'DELETE',
-    invalidate: [['staffAuth.listVenueRoles']],
+    invalidate: [['staffAuth', 'listVenueRoles']],
   },
   'invites.createInvite': {
     path: '/v1/app/invites',
@@ -167,7 +167,18 @@ const mutationRoutes: Record<string, Route> = {
   'scheduling.commitAiSchedule': {
     path: '/v1/scheduling/ai-schedule/commit',
     method: 'POST',
-    body: ({ shifts }) => ({ shifts }),
+    // Strip the preview-only display fields (dayLabel, startTime, endTime,
+    // reason, memberName) — the API's ValidationPipe rejects unknown properties.
+    body: ({ shifts }) => ({
+      shifts: (shifts ?? []).map((s: any) => ({
+        dayIndex: s.dayIndex,
+        startMinutes: s.startMinutes,
+        endMinutes: s.endMinutes,
+        jobTitle: s.jobTitle,
+        station: s.station,
+        ...(s.profileId ? { profileId: s.profileId } : {}),
+      })),
+    }),
     invalidate: [['scheduling', 'getManagerSchedule'], ['scheduling', 'getLaborForecast']],
   },
   'operations.addLogbookEntry': {
@@ -341,13 +352,13 @@ const mutationRoutes: Record<string, Route> = {
     path: '/v1/bar-inventory/prep-board',
     method: 'POST',
     body: ({ itemId, kind, title, quantity, unit, station, notes, dueDate, status }) => ({ itemId, kind, title, quantity, unit, station, notes, dueDate, status }),
-    invalidate: [['barInventory.listPrepBoard'], ['operations.getDailyBrief']],
+    invalidate: [['barInventory', 'listPrepBoard'], ['operations', 'getDailyBrief']],
   },
   'barInventory.updatePrepBoardItemStatus': {
     path: (args) => `/v1/bar-inventory/prep-board/${args.itemId ?? args.id}/status`,
     method: 'PATCH',
     body: ({ status }) => ({ status }),
-    invalidate: [['barInventory.listPrepBoard'], ['operations.getDailyBrief']],
+    invalidate: [['barInventory', 'listPrepBoard'], ['operations', 'getDailyBrief']],
   },
   'chat.ensureChatSetup': { path: '/v1/chat/setup', method: 'POST', body: () => ({}), invalidate: [['chat', 'conversations']] },
   'chat.openDm': { path: '/v1/chat/dm', method: 'POST', body: ({ targetProfileId }) => ({ targetProfileId }), invalidate: [['chat', 'conversations']] },
@@ -431,7 +442,10 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
   const route = queryRoutes[key];
   const enabled = args !== 'skip';
   const query = useReactQuery({
-    queryKey: [key, args],
+    // Split the dotted key ('app.listVenueStaff' -> ['app', 'listVenueStaff', args])
+    // so `invalidate: [['app', 'listVenueStaff']]` arrays throughout this file
+    // actually prefix-match this query's key instead of silently matching nothing.
+    queryKey: [...key.split('.'), args],
     enabled,
     queryFn: () => (route ? requestRoute<T>(route, args) : Promise.resolve(defaultQueryResult(key) as T)),
   });
@@ -452,7 +466,7 @@ export function useMutation<TArgs = any, TResult = any>(
       return requestRoute<TResult>(route, args);
     },
     onSuccess: async () => {
-      const invalidations = route?.invalidate ?? [[key]];
+      const invalidations = route?.invalidate ?? [key.split('.')];
       await Promise.all(invalidations.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
     },
   });
