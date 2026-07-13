@@ -31,7 +31,13 @@ export function minutesToTime(minutes: number): string {
   return `${displayHour}:${mins.toString().padStart(2, '0')} ${suffix}`;
 }
 
-export function mapClockEntry(entry: TimeEntryRow, profile: ClockProfile, venue: ClockVenue) {
+export function mapClockEntry(
+  entry: TimeEntryRow,
+  profile: ClockProfile,
+  venue: ClockVenue,
+  options?: { includeLocation?: boolean },
+) {
+  const includeLocation = options?.includeLocation !== false;
   return {
     _id: entry.id,
     memberId: profile.id,
@@ -42,14 +48,14 @@ export function mapClockEntry(entry: TimeEntryRow, profile: ClockProfile, venue:
     venueName: venue.name,
     clockInAt: entry.clockInAt.getTime(),
     clockOutAt: entry.clockOutAt?.getTime() ?? null,
-    clockInLat: entry.clockInLat,
-    clockInLng: entry.clockInLng,
-    clockInAccuracyM: entry.clockInAccuracyM,
-    clockInMocked: entry.clockInMocked,
-    clockOutLat: entry.clockOutLat ?? null,
-    clockOutLng: entry.clockOutLng ?? null,
-    clockOutAccuracyM: entry.clockOutAccuracyM ?? null,
-    clockOutMocked: entry.clockOutMocked ?? null,
+    clockInLat: includeLocation ? entry.clockInLat : null,
+    clockInLng: includeLocation ? entry.clockInLng : null,
+    clockInAccuracyM: includeLocation ? entry.clockInAccuracyM : null,
+    clockInMocked: includeLocation ? entry.clockInMocked : null,
+    clockOutLat: includeLocation ? (entry.clockOutLat ?? null) : null,
+    clockOutLng: includeLocation ? (entry.clockOutLng ?? null) : null,
+    clockOutAccuracyM: includeLocation ? (entry.clockOutAccuracyM ?? null) : null,
+    clockOutMocked: includeLocation ? (entry.clockOutMocked ?? null) : null,
     isOpen: entry.isOpen,
     breaks: entry.breaks ?? null,
   };

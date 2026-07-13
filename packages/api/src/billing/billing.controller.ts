@@ -210,13 +210,21 @@ export class BillingController {
   }
 
   private async resolveStripeVenueId(object: any): Promise<string | null> {
-    const metaVenueId = object?.metadata?.venueId;
+    const metaVenueId = typeof object?.metadata?.venueId === 'string' ? object.metadata.venueId : null;
+    const subId = typeof object?.id === 'string' ? object.id : null;
+    const customerId = typeof object?.customer === 'string' ? object.customer : null;
+    return this.resolveStripeVenueIdByRefs(metaVenueId, subId, customerId);
+  }
+
+  private async resolveStripeVenueIdByRefs(
+    metaVenueId: string | null,
+    subId: string | null,
+    customerId: string | null,
+  ): Promise<string | null> {
     if (typeof metaVenueId === 'string' && metaVenueId) {
       const venue = await this.prisma.venue.findUnique({ where: { id: metaVenueId }, select: { id: true } });
       if (venue) return venue.id;
     }
-    const subId = typeof object?.id === 'string' ? object.id : null;
-    const customerId = typeof object?.customer === 'string' ? object.customer : null;
     if (!subId && !customerId) return null;
     const existing = await this.prisma.subscription.findFirst({
       where: {
@@ -235,39 +243,12 @@ export class BillingController {
     if (!stripeInvoiceId) return;
     const subId = typeof invoice?.subscription === 'string' ? invoice.subscription : null;
     const customerId = typeof invoice?.customer === 'string' ? invoice.customer : null;
-    const metaVenueId = typeof invoice?.metadata?.venueId === 'string' ? invoice.metadata.venueId : null;
-    const sub =
-      subId || customerId
-        ? await this.prisma.subscription.findFirst({
-            where: {
-              OR: [
-                ...(subId ? [{ externalSubscriptionId: subId }] : []),
-                ...(customerId ? [{ externalCustomerId: customerId }] : []),
-              ],
-            },
-            select: { venueId: true },
-          })
-        : null;
-    const venueId = metaVenueId ?? sub?.venueId ?? null;
+    const venueId = await this.resolveStripeVenueIdByRefs(
+      typeof invoice?.metadata?.venueId === 'string' ? invoice.metadata.venueId : null,
+      subId,
+      customerId,
+    );
     if (!venueId) return;
-
-    // Per-event idempotency: skip if this exact event was already processed.
-    try {
-      await this.prisma.subscriptionEvent.create({
-        data: {
-          venueId,
-          source: 'stripe',
-          externalEventId: event.id ?? `inv:${stripeInvoiceId}:${event.type}`,
-          eventType: event.type ?? 'invoice',
-          payload: event as never,
-          processedAt: new Date(),
-          status: 'processed',
-        },
-      });
-    } catch (error: any) {
-      if (error?.code === 'P2002') return;
-      throw error;
-    }
 
     const data = {
       venueId,
@@ -280,42 +261,79 @@ export class BillingController {
       periodEnd: unixToDate(invoice.period_end) ?? eventAt,
       paidAt: unixToDate(invoice.status_transitions?.paid_at),
     };
-    // stripeInvoiceId is unique, so concurrent re-deliveries upsert one row.
-    await this.prisma.invoice.upsert({
-      where: { stripeInvoiceId },
-      create: { stripeInvoiceId, ...data },
-      update: data,
-    });
-  }
-
-  private async recordStripeRefund(charge: any, event: StripeEvent, _eventAt: Date) {
-    const stripeInvoiceId = typeof charge?.invoice === 'string' ? charge.invoice : null;
-    if (!stripeInvoiceId) return;
-
-    const invoice = await this.prisma.invoice.findUnique({ where: { stripeInvoiceId } });
-    if (!invoice) return;
-
     try {
-      await this.prisma.subscriptionEvent.create({
-        data: {
-          venueId: invoice.venueId,
-          source: 'stripe',
-          externalEventId: event.id ?? `refund:${stripeInvoiceId}`,
-          eventType: event.type ?? 'charge.refunded',
-          payload: event as never,
-          processedAt: new Date(),
-          status: 'processed',
-        },
+      await this.prisma.$transaction(async (tx) => {
+        await tx.invoice.upsert({
+          where: { stripeInvoiceId },
+          create: { stripeInvoiceId, ...data },
+          update: data,
+        });
+        await tx.subscriptionEvent.create({
+          data: {
+            venueId,
+            source: 'stripe',
+            externalEventId: event.id ?? `inv:${stripeInvoiceId}:${event.type}`,
+            eventType: event.type ?? 'invoice',
+            payload: event as never,
+            processedAt: new Date(),
+            status: 'processed',
+          },
+        });
       });
     } catch (error: any) {
       if (error?.code === 'P2002') return;
       throw error;
     }
+  }
 
-    await this.prisma.invoice.update({
-      where: { stripeInvoiceId },
-      data: { status: charge.refunded ? 'refunded' : 'partially_refunded' },
-    });
+  private async recordStripeRefund(charge: any, event: StripeEvent, eventAt: Date) {
+    const stripeInvoiceId = typeof charge?.invoice === 'string' ? charge.invoice : null;
+    if (!stripeInvoiceId) return;
+
+    const invoice = await this.prisma.invoice.findUnique({ where: { stripeInvoiceId } });
+    const venueId =
+      invoice?.venueId
+      ?? await this.resolveStripeVenueIdByRefs(
+        typeof charge?.metadata?.venueId === 'string' ? charge.metadata.venueId : null,
+        null,
+        typeof charge?.customer === 'string' ? charge.customer : null,
+      );
+    if (!venueId) return;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.invoice.upsert({
+          where: { stripeInvoiceId },
+          create: {
+            venueId,
+            stripeInvoiceId,
+            amountCents: 0,
+            currency: String(charge?.currency ?? 'usd').toUpperCase(),
+            status: charge.refunded ? 'refunded' : 'partially_refunded',
+            invoiceUrl: null,
+            hostedInvoiceUrl: null,
+            periodStart: eventAt,
+            periodEnd: eventAt,
+            paidAt: null,
+          },
+          update: { status: charge.refunded ? 'refunded' : 'partially_refunded' },
+        });
+        await tx.subscriptionEvent.create({
+          data: {
+            venueId,
+            source: 'stripe',
+            externalEventId: event.id ?? `refund:${stripeInvoiceId}`,
+            eventType: event.type ?? 'charge.refunded',
+            payload: event as never,
+            processedAt: new Date(),
+            status: 'processed',
+          },
+        });
+      });
+    } catch (error: any) {
+      if (error?.code === 'P2002') return;
+      throw error;
+    }
   }
 
   async applyStripeSubscription(input: SubscriptionInput) {
@@ -335,6 +353,7 @@ export class BillingController {
     const eventAt = input.eventAt ?? now;
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`billing:${input.venueId}`}))`;
         const venue = await tx.venue.findUnique({ where: { id: input.venueId } });
         if (!venue) return null;
 

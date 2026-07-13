@@ -180,56 +180,71 @@ export class AppBillingController {
     await assertWithinSharedRateLimit(this.prisma, `apple-sync:${user.sub}`, 10, 60_000);
 
     const profile = await this.profiles.requireBillingProfile(user);
+    this.assertAllowedAppleSync(body.productId, body.entitlementId);
     const verified = await this.verifyRevenueCatEntitlement(profile.venueId!, body.productId, body.entitlementId);
     if (!verified) {
       return this.getMyVenueBilling(user);
     }
     const status: SubscriptionStatus = 'active';
     const now = new Date();
-    const existing = await this.prisma.subscription.findFirst({ where: { venueId: profile.venueId! } });
-    await this.prisma.$transaction([
-      this.prisma.venue.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`billing:${profile.venueId!}`}))`;
+      const existing = await tx.subscription.findFirst({ where: { venueId: profile.venueId! } });
+      await tx.venue.update({
         where: { id: profile.venueId! },
         data: {
           subscriptionStatus: status,
           subscriptionPlatform: 'apple',
         },
-      }),
-      existing
-        ? this.prisma.subscription.update({
-            where: { id: existing.id },
-            data: {
-              status,
-              platform: 'apple',
-              planId: body.productId,
-              currentPeriodStart: verified.currentPeriodStart ?? existing.currentPeriodStart ?? now,
-              currentPeriodEnd: verified.currentPeriodEnd ?? existing.currentPeriodEnd,
-              cancelAtPeriodEnd: false,
-              cancelledAt: null,
-              externalCustomerId: profile.venueId!,
-              lastRevenueCatEventAt: now,
-            },
-          })
-        : this.prisma.subscription.create({
-            data: {
-              venueId: profile.venueId!,
-              status,
-              platform: 'apple',
-              planId: body.productId,
-              priceCents: 0,
-              currency: 'USD',
-              trialStartedAt: now,
-              trialEndsAt: now,
-              currentPeriodStart: verified.currentPeriodStart ?? now,
-              currentPeriodEnd: verified.currentPeriodEnd,
-              cancelAtPeriodEnd: false,
-              externalCustomerId: profile.venueId!,
-              lastRevenueCatEventAt: now,
-            },
-          }),
-    ]);
+      });
+      if (existing) {
+        await tx.subscription.update({
+          where: { id: existing.id },
+          data: {
+            status,
+            platform: 'apple',
+            planId: body.productId,
+            currentPeriodStart: verified.currentPeriodStart ?? existing.currentPeriodStart ?? now,
+            currentPeriodEnd: verified.currentPeriodEnd ?? existing.currentPeriodEnd,
+            cancelAtPeriodEnd: false,
+            cancelledAt: null,
+            externalCustomerId: profile.venueId!,
+            lastRevenueCatEventAt: now,
+          },
+        });
+        return;
+      }
+      await tx.subscription.create({
+        data: {
+          venueId: profile.venueId!,
+          status,
+          platform: 'apple',
+          planId: body.productId,
+          priceCents: 0,
+          currency: 'USD',
+          trialStartedAt: now,
+          trialEndsAt: now,
+          currentPeriodStart: verified.currentPeriodStart ?? now,
+          currentPeriodEnd: verified.currentPeriodEnd,
+          cancelAtPeriodEnd: false,
+          externalCustomerId: profile.venueId!,
+          lastRevenueCatEventAt: now,
+        },
+      });
+    });
 
     return this.getMyVenueBilling(user);
+  }
+
+  private assertAllowedAppleSync(productId: string, entitlementId?: string) {
+    const allowedProducts = new Set(this.csvEnv('REVENUECAT_ALLOWED_PRODUCT_IDS', 'com.venuewrangler.monthly'));
+    const allowedEntitlements = new Set(this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro'));
+    if (!allowedProducts.has(productId)) {
+      throw new BadRequestException('That Apple subscription product is not allowed for this app.');
+    }
+    if (entitlementId && !allowedEntitlements.has(entitlementId)) {
+      throw new BadRequestException('That RevenueCat entitlement is not allowed for this app.');
+    }
   }
 
   private async verifyRevenueCatEntitlement(venueId: string, productId: string, entitlementId?: string) {
@@ -254,9 +269,12 @@ export class AppBillingController {
     const subscriber = json?.subscriber ?? {};
     const entitlements = subscriber.entitlements ?? {};
     const subscriptions = subscriber.subscriptions ?? {};
+    const allowedEntitlements = new Set(this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro'));
     const matchingEntitlement = entitlementId
       ? entitlements[entitlementId]
-      : Object.values(entitlements).find((entitlement: any) => entitlement?.product_identifier === productId);
+      : Object.entries(entitlements).find(([key, entitlement]: [string, any]) =>
+          allowedEntitlements.has(key) && entitlement?.product_identifier === productId,
+        )?.[1];
     const matchingSubscription = subscriptions[productId];
     const expiresAt = parseRevenueCatDate(matchingEntitlement?.expires_date ?? matchingSubscription?.expires_date);
     const purchasedAt = parseRevenueCatDate(matchingEntitlement?.purchase_date ?? matchingSubscription?.purchase_date);
@@ -266,6 +284,14 @@ export class AppBillingController {
     }
 
     return { currentPeriodStart: purchasedAt, currentPeriodEnd: expiresAt };
+  }
+
+  private csvEnv(key: string, fallback: string): string[] {
+    const raw = this.config.get<string>(key) ?? fallback;
+    return raw
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 }
 

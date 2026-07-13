@@ -83,7 +83,7 @@ export class AuthService {
       });
       let result;
       if (existingByUser) {
-        const unclaimedProfile = emailVerified
+        const adoptableProfile = emailVerified
           ? await tx.profile.findFirst({
               where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
               orderBy: { createdAt: 'asc' },
@@ -91,10 +91,10 @@ export class AuthService {
             })
           : null;
 
-        if (unclaimedProfile && (!existingByUser.venueId || existingByUser.venueId === unclaimedProfile.venueId)) {
+        if (adoptableProfile && (!existingByUser.venueId || existingByUser.venueId === adoptableProfile.venueId)) {
           await tx.profile.delete({ where: { id: existingByUser.id } });
           result = await tx.profile.update({
-            where: { id: unclaimedProfile.id },
+            where: { id: adoptableProfile.id },
             data: { userId },
             include: { venue: true },
           });
@@ -111,28 +111,30 @@ export class AuthService {
           });
         }
       } else {
-        const claimedProfile = (grant
-          ? await tx.profile.findFirst({
-              where: { userId: null, venueId: grant.venueId, email: { equals: email, mode: 'insensitive' } },
-              orderBy: { createdAt: 'asc' },
-              include: { venue: true },
-            })
-          : await tx.profile.findFirst({
-              where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
-              orderBy: { createdAt: 'asc' },
-              include: { venue: true },
-            })) || null;
-        if (claimedProfile) {
+        const adoptableProfile = emailVerified
+          ? (grant
+              ? await tx.profile.findFirst({
+                  where: { userId: null, venueId: grant.venueId, email: { equals: email, mode: 'insensitive' } },
+                  orderBy: { createdAt: 'asc' },
+                  include: { venue: true },
+                })
+              : await tx.profile.findFirst({
+                  where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
+                  orderBy: { createdAt: 'asc' },
+                  include: { venue: true },
+                }))
+          : null;
+        if (adoptableProfile) {
           result = await tx.profile.update({
-            where: { id: claimedProfile.id },
+            where: { id: adoptableProfile.id },
             data: {
               userId,
               email,
-              fullName: trimmedFullName || claimedProfile.fullName,
-              role: grant?.role ?? claimedProfile.role,
-              jobTitle: grant?.jobTitle ?? claimedProfile.jobTitle,
-              venueId: grant?.venueId ?? claimedProfile.venueId,
-              trialEndsAt: claimedProfile.trialEndsAt ?? trialEndsAt,
+              fullName: trimmedFullName || adoptableProfile.fullName,
+              role: grant?.role ?? adoptableProfile.role,
+              jobTitle: grant?.jobTitle ?? adoptableProfile.jobTitle,
+              venueId: grant?.venueId ?? adoptableProfile.venueId,
+              trialEndsAt: adoptableProfile.trialEndsAt ?? trialEndsAt,
             },
             include: { venue: true },
           });

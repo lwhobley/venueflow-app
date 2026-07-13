@@ -11,6 +11,7 @@ type SessionState = {
 };
 
 export type AuthState = SessionState & {
+  authEpoch: number;
   hydrated: boolean;
   setHydrated: (hydrated: boolean) => void;
   setSession: (session: {
@@ -41,20 +42,28 @@ const webStorage = {
 
 const storage = Platform.OS === 'web' ? webStorage : secureStorage;
 
-const createAuthStore = (set: (partial: Partial<AuthState>) => void): AuthState => ({
+const createAuthStore = (set: any): AuthState => ({
+  authEpoch: 0,
   hydrated: false,
   user: null,
   venue: null,
   token: null,
   setHydrated: (hydrated: boolean) => set({ hydrated }),
   setSession: (session: { user: UserSummary; venue: Venue | null; token?: string | null }) =>
-    set({
+    set((state: AuthState) => ({
       user: session.user,
       venue: session.venue,
       ...(session.token !== undefined ? { token: session.token } : {}),
-    }),
+      authEpoch: session.token !== undefined ? state.authEpoch + 1 : state.authEpoch,
+    })),
   setVenue: (venue: Venue) => set({ venue }),
-  clearSession: () => set({ user: null, venue: null, token: null }),
+  clearSession: () =>
+    set((state: AuthState) => ({
+      user: null,
+      venue: null,
+      token: null,
+      authEpoch: state.authEpoch + 1,
+    })),
 });
 
 export const useAuthStore = create<AuthState>()(

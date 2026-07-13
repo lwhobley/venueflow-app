@@ -12,6 +12,7 @@ export class ReservationMutationService {
     guestName: string;
     partySize: number;
     reservationTime: string;
+    durationMinutes?: number;
     status?: string;
     notes?: string;
     source?: string;
@@ -20,6 +21,20 @@ export class ReservationMutationService {
     tableNumbers?: string[];
     phone?: string;
     email?: string;
+    guestCompany?: string;
+    occasion?: string;
+    isPrivateEvent?: boolean;
+    eventName?: string;
+    eventStatus?: string;
+    eventSpace?: string;
+    setupStyle?: string;
+    menuNotes?: string;
+    beverageNotes?: string;
+    billingNotes?: string;
+    contractStatus?: string;
+    beoStatus?: string;
+    estimatedValueCents?: number;
+    depositDueCents?: number;
   }) {
     const guestName = args.guestName.trim();
     if (!guestName) throw new BadRequestException('Guest name is required');
@@ -42,7 +57,21 @@ export class ReservationMutationService {
       specialRequests: args.specialRequests?.trim() ?? null,
       guestPhone: args.phone?.trim() ?? null,
       guestEmail: args.email?.trim() ?? null,
-      durationMinutes: 90,
+      guestCompany: args.guestCompany?.trim() ?? null,
+      occasion: args.occasion?.trim() ?? null,
+      isPrivateEvent: args.isPrivateEvent ?? null,
+      eventName: args.eventName?.trim() ?? null,
+      eventStatus: args.eventStatus?.trim() ?? null,
+      eventSpace: args.eventSpace?.trim() ?? null,
+      setupStyle: args.setupStyle?.trim() ?? null,
+      menuNotes: args.menuNotes?.trim() ?? null,
+      beverageNotes: args.beverageNotes?.trim() ?? null,
+      billingNotes: args.billingNotes?.trim() ?? null,
+      contractStatus: args.contractStatus?.trim() ?? null,
+      beoStatus: args.beoStatus?.trim() ?? null,
+      estimatedValueCents: args.estimatedValueCents ?? null,
+      depositDueCents: args.depositDueCents ?? null,
+      durationMinutes: args.durationMinutes ?? 90,
     };
 
     await this.assertNoHoldConflict(args.venueId, reservationTime);

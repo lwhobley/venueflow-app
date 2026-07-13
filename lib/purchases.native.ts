@@ -23,7 +23,7 @@ const isDev = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).
 // The effective key the SDK may be configured with. Empty => purchases off.
 const EFFECTIVE_KEY = isTestKey && !isDev ? '' : API_KEY;
 
-export const PURCHASES_SUPPORTED = true;
+export const PURCHASES_SUPPORTED = Platform.OS === 'ios' && Boolean(EFFECTIVE_KEY);
 
 export type PurchasePackage = {
   id: string;
@@ -52,6 +52,15 @@ export async function configurePurchases(appUserId?: string): Promise<void> {
     }
   } catch (e) {
     console.error('[purchases] configure failed:', e);
+  }
+}
+
+export async function logoutPurchases(): Promise<void> {
+  if (!configured) return;
+  try {
+    await Purchases.logOut();
+  } catch (e) {
+    console.warn('[purchases] logOut failed:', e instanceof Error ? e.message : String(e));
   }
 }
 

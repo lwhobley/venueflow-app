@@ -112,7 +112,7 @@ export default function InviteCheckScreen() {
       pathname: '/(auth)/register',
       params: {
         email: contact.trim(),
-        venueName: invite.venueName,
+        ...(invite.venueName ? { venueName: invite.venueName } : {}),
         inviteFound: '1',
       },
     });
@@ -181,12 +181,16 @@ export default function InviteCheckScreen() {
                 <Text variant="labelMedium" style={{ color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
                   Invite found
                 </Text>
-                <Text variant="titleLarge" style={{ fontWeight: '800', color: colors.text }}>
-                  {stage.invite.venueName}
-                </Text>
-                <Text variant="bodyMedium" style={{ color: colors.muted }}>
-                  Role: {stage.invite.jobTitle}
-                </Text>
+                {stage.invite.venueName ? (
+                  <Text variant="titleLarge" style={{ fontWeight: '800', color: colors.text }}>
+                    {stage.invite.venueName}
+                  </Text>
+                ) : null}
+                {stage.invite.jobTitle ? (
+                  <Text variant="bodyMedium" style={{ color: colors.muted }}>
+                    Role: {stage.invite.jobTitle}
+                  </Text>
+                ) : null}
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
                   {user
                     ? 'Confirm your invite to join the team automatically.'

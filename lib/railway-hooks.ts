@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useMutation as useReactMutation, useQuery as useReactQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from './api-client';
+import { useAuthStore } from './auth-store';
 import type { RailwayFunctionRef } from './railway-api';
 
 type QueryArgs = Record<string, unknown> | 'skip' | undefined;
@@ -33,6 +34,7 @@ const queryRoutes: Record<string, Route> = {
   'scheduling.listBlackouts': { path: '/v1/scheduling/blackouts' },
   'scheduling.getManagerSchedule': { path: '/v1/scheduling/manager' },
   'scheduling.getLaborForecast': { path: '/v1/scheduling/labor-forecast' },
+  'scheduling.listScheduleMemory': { path: (args) => `/v1/scheduling/memory${args?.limit ? `?limit=${args.limit}` : ''}` },
   'scheduling.previewAutoSchedule': { path: (args) => `/v1/scheduling/auto-schedule/preview?weekStartDate=${encodeURIComponent(args.weekStartDate ?? '')}` },
   'scheduling.listScheduleTemplates': { path: '/v1/scheduling/templates' },
   'scheduling.getMySchedule': { path: '/v1/scheduling/me' },
@@ -300,6 +302,12 @@ const mutationRoutes: Record<string, Route> = {
   'scheduling.copyDayShifts': { path: '/v1/scheduling/copy-day', method: 'POST', body: stripVenue, invalidate: scheduleInvalidations() },
   'scheduling.clearWeek': { path: '/v1/scheduling/clear-week', method: 'POST', body: () => ({}), invalidate: scheduleInvalidations() },
   'scheduling.restoreShifts': { path: '/v1/scheduling/restore-shifts', method: 'POST', body: ({ shifts }) => ({ shifts }), invalidate: scheduleInvalidations() },
+  'scheduling.addScheduleMemoryNote': {
+    path: '/v1/scheduling/memory',
+    method: 'POST',
+    body: ({ title, detail, weekStart }) => ({ title, detail, weekStart }),
+    invalidate: [['scheduling', 'listScheduleMemory']],
+  },
   'scheduling.applyAutoSchedule': {
     path: '/v1/scheduling/auto-schedule/apply',
     method: 'POST',
@@ -338,13 +346,13 @@ const mutationRoutes: Record<string, Route> = {
   },
   'pos.upsertPosConnection': { path: '/v1/pos/connections', method: 'POST', body: ({ provider, externalLocationId, status }) => ({ provider, externalLocationId, status }) },
   'reservationIntegrations.upsertReservationConnection': { path: '/v1/integrations/reservations', method: 'POST', body: stripVenue },
-  'guests.rotateLeadsWebhookSecret': { path: '/v1/guests/rotate-webhook-secret', method: 'POST', body: () => ({}), invalidate: [['guests', 'list']] },
-  'operations.upsertManagerGoal': { path: '/v1/operations/manager-goal', method: 'PATCH', body: stripVenue, invalidate: [['operations', 'dashboard']] },
-  'barInventory.upsertBarItem': { path: '/v1/bar-inventory', method: 'POST', body: stripVenue, invalidate: [['barInventory', 'stock']] },
-  'barInventory.recordBarStockMovement': { path: (args) => `/v1/bar-inventory/${args.itemId}/movement`, method: 'POST', body: ({ movementType, quantity, notes }) => ({ movementType, quantity, notes }), invalidate: [['barInventory', 'stock']] },
-  'barInventory.importParsedBarItems': { path: '/v1/bar-inventory/import', method: 'POST', body: ({ items }) => ({ items }), invalidate: [['barInventory', 'stock']] },
+  'guests.rotateLeadsWebhookSecret': { path: '/v1/guests/rotate-webhook-secret', method: 'POST', body: () => ({}), invalidate: [['guests', 'listGuests']] },
+  'operations.upsertManagerGoal': { path: '/v1/operations/manager-goal', method: 'PATCH', body: stripVenue, invalidate: [['operations', 'getManagerDashboard']] },
+  'barInventory.upsertBarItem': { path: '/v1/bar-inventory', method: 'POST', body: stripVenue, invalidate: [['barInventory', 'getBarStock']] },
+  'barInventory.recordBarStockMovement': { path: (args) => `/v1/bar-inventory/${args.itemId}/movement`, method: 'POST', body: ({ movementType, quantity, notes }) => ({ movementType, quantity, notes }), invalidate: [['barInventory', 'getBarStock']] },
+  'barInventory.importParsedBarItems': { path: '/v1/bar-inventory/import', method: 'POST', body: ({ items }) => ({ items }), invalidate: [['barInventory', 'getBarStock']] },
   'barInventory.parseBarInventoryInput': { path: '/v1/bar-inventory/parse', method: 'POST', body: ({ text, imageBase64, imageMimeType }) => ({ text, imageBase64, imageMimeType }) },
-  'barInventory.updateItemCost': { path: (args) => `/v1/bar-inventory/${args.itemId}/cost`, method: 'PATCH', body: ({ unitCostCents }) => ({ unitCostCents }), invalidate: [['barInventory', 'stock']] },
+  'barInventory.updateItemCost': { path: (args) => `/v1/bar-inventory/${args.itemId}/cost`, method: 'PATCH', body: ({ unitCostCents }) => ({ unitCostCents }), invalidate: [['barInventory', 'getBarStock']] },
   'barInventory.lookupBySku': { path: (args) => `/v1/bar-inventory/sku/${encodeURIComponent(args.sku)}`, method: 'GET' },
   'barInventory.sendPurchaseOrderEmail': { path: '/v1/bar-inventory/purchase-order/send-email', method: 'POST', body: () => ({}) },
   'barInventory.sendInventoryDigest': { path: '/v1/bar-inventory/send-digest', method: 'POST', body: () => ({}) },
@@ -360,74 +368,74 @@ const mutationRoutes: Record<string, Route> = {
     body: ({ status }) => ({ status }),
     invalidate: [['barInventory', 'listPrepBoard'], ['operations', 'getDailyBrief']],
   },
-  'chat.ensureChatSetup': { path: '/v1/chat/setup', method: 'POST', body: () => ({}), invalidate: [['chat', 'conversations']] },
-  'chat.openDm': { path: '/v1/chat/dm', method: 'POST', body: ({ targetProfileId }) => ({ targetProfileId }), invalidate: [['chat', 'conversations']] },
-  'chat.createGroup': { path: '/v1/chat/group', method: 'POST', body: ({ name, memberIds }) => ({ name, memberIds }), invalidate: [['chat', 'conversations']] },
-  'chat.deleteConversation': { path: (args) => `/v1/chat/conversations/${args.conversationId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['chat', 'conversations']] },
+  'chat.ensureChatSetup': { path: '/v1/chat/setup', method: 'POST', body: () => ({}), invalidate: [['chat', 'listConversations']] },
+  'chat.openDm': { path: '/v1/chat/dm', method: 'POST', body: ({ targetProfileId }) => ({ targetProfileId }), invalidate: [['chat', 'listConversations']] },
+  'chat.createGroup': { path: '/v1/chat/group', method: 'POST', body: ({ name, memberIds }) => ({ name, memberIds }), invalidate: [['chat', 'listConversations']] },
+  'chat.deleteConversation': { path: (args) => `/v1/chat/conversations/${args.conversationId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['chat', 'listConversations']] },
   'chat.sendMessage': { path: (args) => `/v1/chat/conversations/${args.conversationId}/messages`, method: 'POST', body: (args) => ({ text: args.text, shiftId: args.shiftId, swapId: args.swapId, imageUrl: args.imageUrl }), invalidate: [['chat', 'getMessages']] },
   'chat.toggleReaction': { path: (args) => `/v1/chat/messages/${args.messageId}/react`, method: 'POST', body: ({ emoji }) => ({ emoji }), invalidate: [['chat', 'getMessages']] },
   'chat.editMessage': { path: (args) => `/v1/chat/messages/${args.messageId}`, method: 'PATCH', body: ({ text }) => ({ text }), invalidate: [['chat', 'getMessages']] },
   'chat.uploadImage': { path: '/v1/chat/images', method: 'POST', body: ({ dataBase64, mimeType }) => ({ dataBase64, mimeType }) },
-  'floor.saveFloorPlan': { path: '/v1/floor', method: 'POST', body: ({ tables }) => ({ tables }), invalidate: [['floor', 'active'], ['floor', 'stats']] },
-  'floor.clearActiveFloorPlan': { path: '/v1/floor', method: 'DELETE', invalidate: [['floor', 'active'], ['floor', 'stats']] },
-  'tables.markDirty': { path: (args) => `/v1/floor/tables/${args.tableId ?? args.id ?? args}/status`, method: 'PATCH', body: () => ({ status: 'dirty' }), invalidate: [['floor', 'active'], ['floor', 'stats']] },
-  'tables.markClean': { path: (args) => `/v1/floor/tables/${args.tableId ?? args.id ?? args}/status`, method: 'PATCH', body: () => ({ status: 'available' }), invalidate: [['floor', 'active'], ['floor', 'stats']] },
-  'tables.mergeTablesForParty': { path: '/v1/floor/tables/merge', method: 'POST', body: stripVenue, invalidate: [['floor', 'active']] },
-  'tables.splitMergedTables': { path: (args) => `/v1/floor/tables/merge-groups/${args.mergeGroupId ?? args.id ?? args}/split`, method: 'POST', body: () => ({}), invalidate: [['floor', 'active']] },
-  'floorBinding.releaseAssignment': { path: (args) => `/v1/floor/assignments/${args.assignmentId ?? args.tableId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['floor', 'active'], ['floor', 'stats']] },
-  'floorBinding.assignReservationToTables': { path: '/v1/floor/assign-reservation', method: 'POST', body: ({ reservationId, tableIds }) => ({ reservationId, tableIds }), invalidate: [['floor', 'active']] },
-  'floorBinding.addToWaitlist': { path: '/v1/floor/waitlist', method: 'POST', body: ({ guestName, partySize, phone, guestPhone, email, notes }) => ({ guestName, partySize, phone: phone ?? guestPhone, email, notes }), invalidate: [['floor', 'waitlist']] },
-  'floorBinding.markWaitlistReady': { path: (args) => `/v1/floor/waitlist/${args.waitlistId ?? args.id ?? args}/ready`, method: 'PATCH', body: () => ({}), invalidate: [['floor', 'waitlist']] },
-  'floorBinding.removeFromWaitlist': { path: (args) => `/v1/floor/waitlist/${args.waitlistId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['floor', 'waitlist']] },
+  'floor.saveFloorPlan': { path: '/v1/floor', method: 'POST', body: mapFloorPlanBody, invalidate: floorInvalidations() },
+  'floor.clearActiveFloorPlan': { path: '/v1/floor', method: 'DELETE', invalidate: floorInvalidations() },
+  'tables.markDirty': { path: (args) => `/v1/floor/tables/${args.tableId ?? args.id ?? args}/status`, method: 'PATCH', body: () => ({ status: 'dirty' }), invalidate: floorInvalidations() },
+  'tables.markClean': { path: (args) => `/v1/floor/tables/${args.tableId ?? args.id ?? args}/status`, method: 'PATCH', body: () => ({ status: 'available' }), invalidate: floorInvalidations() },
+  'tables.mergeTablesForParty': { path: '/v1/floor/tables/merge', method: 'POST', body: stripVenue, invalidate: floorActiveInvalidations() },
+  'tables.splitMergedTables': { path: (args) => `/v1/floor/tables/merge-groups/${args.mergeGroupId ?? args.id ?? args}/split`, method: 'POST', body: () => ({}), invalidate: floorActiveInvalidations() },
+  'floorBinding.releaseAssignment': { path: (args) => `/v1/floor/assignments/${args.assignmentId ?? args.tableId ?? args.id ?? args}`, method: 'DELETE', invalidate: floorInvalidations() },
+  'floorBinding.assignReservationToTables': { path: '/v1/floor/assign-reservation', method: 'POST', body: ({ reservationId, tableIds }) => ({ reservationId, tableIds }), invalidate: floorActiveInvalidations() },
+  'floorBinding.addToWaitlist': { path: '/v1/floor/waitlist', method: 'POST', body: ({ guestName, partySize, phone, guestPhone, email, notes }) => ({ guestName, partySize, phone: phone ?? guestPhone, email, notes }), invalidate: floorWaitlistInvalidations() },
+  'floorBinding.markWaitlistReady': { path: (args) => `/v1/floor/waitlist/${args.waitlistId ?? args.id ?? args}/ready`, method: 'PATCH', body: () => ({}), invalidate: floorWaitlistInvalidations() },
+  'floorBinding.removeFromWaitlist': { path: (args) => `/v1/floor/waitlist/${args.waitlistId ?? args.id ?? args}`, method: 'DELETE', invalidate: floorWaitlistInvalidations() },
   'floorBinding.assignWaitlistToTables': {
     path: '/v1/floor/assign-waitlist',
     method: 'POST',
     body: ({ waitlistId, tableIds, holdType, startsAt, endsAt }) => ({ waitlistId, tableIds, holdType, startsAt, endsAt }),
-    invalidate: [['floor', 'active'], ['floor', 'waitlist']],
+    invalidate: [...floorActiveInvalidations(), ...floorWaitlistInvalidations()],
   },
-  'guests.upsertGuest': { path: '/v1/guests', method: 'POST', body: stripVenue, invalidate: [['guests', 'list']] },
-  'guests.ingestLeads': { path: '/v1/guests/ingest-leads', method: 'POST', body: ({ leads }) => ({ leads }), invalidate: [['guests', 'list']] },
-  'guests.removeGuest': { path: (args) => `/v1/guests/${args.guestId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['guests', 'list']] },
-  'crm.saveLead': { path: '/v1/crm/leads', method: 'POST', body: stripVenue, invalidate: [['crm', 'leads']] },
-  'crm.saveBeo': { path: '/v1/crm/beos', method: 'POST', body: stripVenue, invalidate: [['crm', 'beos']] },
-  'crm.saveContract': { path: '/v1/crm/contracts', method: 'POST', body: stripVenue, invalidate: [['crm', 'contracts']] },
-  'crm.convertBeoToContract': { path: (args) => `/v1/crm/beos/${args.beoId ?? args.id}/convert`, method: 'POST', body: () => ({}), invalidate: [['crm', 'beos'], ['crm', 'contracts']] },
-  'crm.addNote': { path: (args) => `/v1/crm/leads/${args.leadId}/notes`, method: 'POST', body: ({ text }) => ({ text }), invalidate: [['crm', 'leads']] },
+  'guests.upsertGuest': { path: '/v1/guests', method: 'POST', body: stripVenue, invalidate: [['guests', 'listGuests']] },
+  'guests.ingestLeads': { path: '/v1/guests/ingest-leads', method: 'POST', body: ({ leads }) => ({ leads }), invalidate: [['guests', 'listGuests']] },
+  'guests.removeGuest': { path: (args) => `/v1/guests/${args.guestId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['guests', 'listGuests']] },
+  'crm.saveLead': { path: '/v1/crm/leads', method: 'POST', body: stripVenue, invalidate: [['crm', 'listLeads']] },
+  'crm.saveBeo': { path: '/v1/crm/beos', method: 'POST', body: stripVenue, invalidate: [['crm', 'listBeos']] },
+  'crm.saveContract': { path: '/v1/crm/contracts', method: 'POST', body: stripVenue, invalidate: [['crm', 'listContracts']] },
+  'crm.convertBeoToContract': { path: (args) => `/v1/crm/beos/${args.beoId ?? args.id}/convert`, method: 'POST', body: () => ({}), invalidate: [['crm', 'listBeos'], ['crm', 'listContracts']] },
+  'crm.addNote': { path: (args) => `/v1/crm/leads/${args.leadId}/notes`, method: 'POST', body: ({ text }) => ({ text }), invalidate: [['crm', 'listLeads'], ['crm', 'getLeadActivity']] },
   'crm.emailBeo': {
     path: (args) => `/v1/crm/beos/${args.beoId}/email`,
     method: 'POST',
     body: ({ toEmail, message }) => ({ toEmail, message }),
-    invalidate: [['crm', 'beos']],
+    invalidate: [['crm', 'listBeos']],
   },
   'crm.saveTemplate': {
     path: '/v1/crm/templates',
     method: 'POST',
     body: stripVenue,
-    invalidate: [['crm', 'templates']],
+    invalidate: [['crm', 'listTemplates']],
   },
   'crm.deleteTemplate': {
     path: (args) => `/v1/crm/templates/${args.templateId}`,
     method: 'DELETE',
     body: () => ({}),
-    invalidate: [['crm', 'templates']],
+    invalidate: [['crm', 'listTemplates']],
   },
   'crm.renderTemplate': {
     path: (args) => `/v1/crm/templates/${args.templateId}/render`,
     method: 'POST',
     body: ({ leadId, beoId }) => ({ leadId, beoId }),
   },
-  'reservations.saveReservation': { path: '/v1/reservations', method: 'POST', body: stripVenue, invalidate: [['reservations', 'page']] },
-  'reservations.removeReservation': { path: (args) => `/v1/reservations/${args.reservationId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['reservations', 'page']] },
+  'reservations.saveReservation': { path: '/v1/reservations', method: 'POST', body: mapReservationBody, invalidate: [['reservations', 'getReservationsPage']] },
+  'reservations.removeReservation': { path: (args) => `/v1/reservations/${args.reservationId ?? args.id ?? args}`, method: 'DELETE', invalidate: [['reservations', 'getReservationsPage']] },
   'reservations.createHold': {
     path: '/v1/reservations/holds',
     method: 'POST',
     body: ({ startsAt, endsAt, reason }) => ({ startsAt, endsAt, reason }),
-    invalidate: [['reservations', 'holds']],
+    invalidate: [['reservations', 'listHolds']],
   },
   'reservations.deleteHold': {
     path: (args) => `/v1/reservations/holds/${args.holdId}`,
     method: 'DELETE',
-    invalidate: [['reservations', 'holds']],
+    invalidate: [['reservations', 'listHolds']],
   },
   'payroll.recordPayrollExport': { path: '/v1/payroll/record-export', method: 'POST', body: stripVenue },
   'push.registerPushToken': {
@@ -441,14 +449,14 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
   const key = getKey(ref);
   const route = queryRoutes[key];
   if (!route) throw new Error(`Unknown Railway query route: ${key}`);
+  const authEpoch = useAuthStore((state) => state.authEpoch);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const venueId = useAuthStore((state) => state.venue?.id ?? null);
   const enabled = args !== 'skip';
   const query = useReactQuery({
-    // Split the dotted key ('app.listVenueStaff' -> ['app', 'listVenueStaff', args])
-    // so `invalidate: [['app', 'listVenueStaff']]` arrays throughout this file
-    // actually prefix-match this query's key instead of silently matching nothing.
-    queryKey: [...key.split('.'), args],
+    queryKey: [...key.split('.'), args, authEpoch, userId, venueId],
     enabled,
-    queryFn: () => requestRoute<T>(route, args),
+    queryFn: ({ signal }) => requestRoute<T>(route, args, signal),
   });
   return query.data as T;
 }
@@ -494,10 +502,11 @@ function getKey(ref: RailwayFunctionRef) {
   return ref.__railwayKey;
 }
 
-function requestRoute<T>(route: Route, args: any): Promise<T> {
+function requestRoute<T>(route: Route, args: any, signal?: AbortSignal): Promise<T> {
   const path = typeof route.path === 'function' ? route.path(args ?? {}) : route.path;
   return apiRequest<T>(path, {
     method: route.method ?? 'GET',
+    signal,
     body: route.method && route.method !== 'GET' && route.method !== 'DELETE' ? route.body?.(args ?? {}) ?? args ?? {} : undefined,
   });
 }
@@ -525,6 +534,65 @@ function clockInvalidations() {
   return [['app', 'getClockBoard'], ['app', 'getDashboard'], ['app', 'getMyTimeClock']];
 }
 
+function floorActiveInvalidations() {
+  return [['floor', 'getActiveFloorPlan'], ['floorBinding', 'getActiveFloorPlan']];
+}
+
+function floorWaitlistInvalidations() {
+  return [['floorBinding', 'getOpenWaitlist']];
+}
+
+function floorInvalidations() {
+  return [...floorActiveInvalidations(), ...floorWaitlistInvalidations(), ['floor', 'getFloorStats']];
+}
+
 function scheduleInvalidations() {
   return [['scheduling', 'getManagerSchedule'], ['scheduling', 'getLaborForecast'], ['scheduling', 'getMySchedule'], ['scheduling', 'getMyShiftSwaps'], ['scheduling', 'listShiftSwaps']];
+}
+
+function normalizeReservationTimeInput(value: unknown) {
+  if (typeof value === 'number') return new Date(value).toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
+
+function mapReservationBody(args: any) {
+  const { venueId, guestPhone, guestEmail, phone, email, reservationTime, ...rest } = args ?? {};
+  return {
+    ...rest,
+    reservationTime: normalizeReservationTimeInput(reservationTime),
+    phone: phone ?? guestPhone,
+    email: email ?? guestEmail,
+  };
+}
+
+function mapFloorPlanBody(args: any) {
+  const { venueId, tables, chairs, name, width, height, backgroundImageUrl } = args ?? {};
+  return {
+    ...(name ? { name } : {}),
+    ...(typeof width === 'number' ? { width } : {}),
+    ...(typeof height === 'number' ? { height } : {}),
+    ...(typeof backgroundImageUrl === 'string' ? { backgroundImageUrl } : {}),
+    tables: (tables ?? []).map((table: any) => ({
+      id: table.id,
+      label: table.label,
+      x: table.x,
+      y: table.y,
+      width: table.width,
+      height: table.height,
+      shape: table.shape,
+      section: table.section,
+      capacity: table.capacity ?? table.seats,
+      seatLabelStyle: table.seatLabelStyle,
+      rotation: table.rotation,
+      minSpend: table.minSpend,
+      isReservable: table.isReservable,
+    })),
+    chairs: (chairs ?? []).map((chair: any) => ({
+      x: chair.x,
+      y: chair.y,
+      rotation: chair.rotation,
+      ...(chair.label ? { label: chair.label } : {}),
+    })),
+  };
 }

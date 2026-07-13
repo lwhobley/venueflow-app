@@ -385,6 +385,9 @@ export class ChatController {
       where: { id, venueId: scope.venueId },
     });
     if (!conv) throw new NotFoundException('Conversation not found');
+    if (!canDeleteConversation(conv.type, conv.name)) {
+      throw new ForbiddenException('Only custom group chats can be deleted');
+    }
 
     await this.prisma.$transaction([
       this.prisma.message.deleteMany({ where: { conversationId: id } }),
@@ -544,6 +547,13 @@ export class ChatController {
     if (!scope) throw new ForbiddenException('No venue profile found');
     const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
     if (!msg) throw new NotFoundException('Message not found');
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: msg.conversationId, venueId: scope.venueId },
+    });
+    if (!conv) throw new NotFoundException('Conversation not found');
+    if (!canAccessConversation(conv.memberIds, conv.type, scope.profileId)) {
+      throw new ForbiddenException('Not a participant');
+    }
 
     const reactions = (msg.reactions as Record<string, string[]> | null) || {};
     const emoji = body.emoji;
@@ -575,6 +585,16 @@ export class ChatController {
     if (!scope) throw new ForbiddenException('No venue profile found');
     const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
     if (!msg) throw new NotFoundException('Message not found');
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: msg.conversationId, venueId: scope.venueId },
+    });
+    if (!conv) throw new NotFoundException('Conversation not found');
+    if (!canAccessConversation(conv.memberIds, conv.type, scope.profileId)) {
+      throw new ForbiddenException('Not a participant');
+    }
+    if (msg.senderId !== scope.profileId) {
+      throw new ForbiddenException('Only the sender can edit this message');
+    }
 
     const text = body.text.trim();
     if (!text) throw new BadRequestException('Text is required');
@@ -636,4 +656,8 @@ function canAccessConversation(memberIds: string[], type: string, profileId: str
     return memberIds.includes(profileId);
   }
   return true;
+}
+
+function canDeleteConversation(type: string, name: string | null) {
+  return type === 'group' && name !== GENERAL_GROUP_NAME;
 }

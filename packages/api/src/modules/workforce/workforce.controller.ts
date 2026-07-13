@@ -107,13 +107,7 @@ export class WorkforceController {
         return { status: 'not_found' };
       }
 
-      return {
-        status: 'found',
-        venueName: unclaimedProfile.venue.name,
-        jobTitle: unclaimedProfile.jobTitle,
-        role: unclaimedProfile.role,
-        expiresAt: unclaimedProfile.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000,
-      };
+      return { status: 'found' };
     }
     if (invite.usedBy) {
       return { status: 'used' };
@@ -121,13 +115,7 @@ export class WorkforceController {
     if (invite.expiresAt.getTime() < Date.now()) {
       return { status: 'expired' };
     }
-    return {
-      status: 'found',
-      venueName: invite.venue.name,
-      jobTitle: invite.jobTitle,
-      role: invite.role,
-      expiresAt: invite.expiresAt.getTime(),
-    };
+    return { status: 'found' };
   }
 
   // ─── Public: venue search ──────────────────────────────────────────────────

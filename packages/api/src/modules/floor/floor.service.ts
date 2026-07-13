@@ -180,17 +180,29 @@ export class FloorService {
     };
   }
 
-  async saveFloorPlan(venueId: string, tables: Array<{
-    label: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    shape: string;
-    section?: string;
-    capacity: number;
+  async saveFloorPlan(venueId: string, input: {
+    name?: string;
+    width?: number;
+    height?: number;
+    backgroundImageUrl?: string | null;
+    tables: Array<{
+      label: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      shape: string;
+      section?: string;
+      capacity: number;
+      seatLabelStyle?: string;
+      rotation?: number;
+      minSpend?: number;
+      isReservable?: boolean;
+      chairs?: Array<{ x: number; y: number; rotation: number; label?: string }>;
+    }>;
     chairs?: Array<{ x: number; y: number; rotation: number; label?: string }>;
-  }>) {
+  }) {
+    const tables = input.tables ?? [];
     await this.prisma.$transaction(async (tx) => {
       const existing = await tx.floorPlan.findFirst({ where: { venueId, isActive: true } });
       if (existing) {
@@ -200,9 +212,10 @@ export class FloorService {
       const plan = await tx.floorPlan.create({
         data: {
           venueId,
-          name: 'Floor Plan',
-          width: 800,
-          height: 600,
+          name: input.name?.trim() || 'Floor Plan',
+          width: input.width ?? 800,
+          height: input.height ?? 600,
+          backgroundImageUrl: input.backgroundImageUrl ?? null,
           isActive: true,
         },
       });
@@ -217,14 +230,15 @@ export class FloorService {
             label: table.label,
             shape: (table.shape as TableShape) ?? 'square',
             seats: table.capacity,
+            seatLabelStyle: table.seatLabelStyle ?? null,
             x: table.x,
             y: table.y,
             width: table.width,
             height: table.height,
-            rotation: 0,
+            rotation: table.rotation ?? 0,
             section: (table.section as TableSection) ?? 'main',
-            minSpend: 0,
-            isReservable: true,
+            minSpend: table.minSpend ?? 0,
+            isReservable: table.isReservable ?? true,
           })),
         });
 
@@ -242,8 +256,10 @@ export class FloorService {
           })),
         });
 
-        // Collect all chairs across all tables for a single batch insert.
-        const allChairs = tables.flatMap(
+      }
+
+      const allChairs = [
+        ...tables.flatMap(
           (table) =>
             (table.chairs ?? []).map((chair) => ({
               venueId,
@@ -253,10 +269,18 @@ export class FloorService {
               rotation: chair.rotation,
               label: chair.label ?? null,
             })),
-        );
-        if (allChairs.length > 0) {
-          await tx.floorChair.createMany({ data: allChairs });
-        }
+        ),
+        ...((input.chairs ?? []).map((chair) => ({
+          venueId,
+          floorPlanId: plan.id,
+          x: chair.x,
+          y: chair.y,
+          rotation: chair.rotation,
+          label: chair.label ?? null,
+        }))),
+      ];
+      if (allChairs.length > 0) {
+        await tx.floorChair.createMany({ data: allChairs });
       }
 
       return plan;

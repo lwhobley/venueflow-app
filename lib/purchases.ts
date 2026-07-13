@@ -15,6 +15,10 @@ export async function configurePurchases(_appUserId?: string): Promise<void> {
   /* no-op on web */
 }
 
+export async function logoutPurchases(): Promise<void> {
+  /* no-op on web */
+}
+
 export async function isPremiumActive(): Promise<boolean> {
   return false;
 }

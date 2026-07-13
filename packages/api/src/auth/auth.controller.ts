@@ -452,7 +452,10 @@ export class AuthController {
   @Post('logout')
   async logout(@CurrentUser() user: AuthUser) {
     if (user.sid) {
-      await this.prisma.session.delete({ where: { id: user.sid } });
+      await this.prisma.$transaction([
+        this.prisma.session.delete({ where: { id: user.sid } }),
+        this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } }),
+      ]);
     }
     return { ok: true };
   }
@@ -460,7 +463,10 @@ export class AuthController {
   // Revoke every session for the account (all devices).
   @Post('logout-all')
   async logoutAll(@CurrentUser() user: AuthUser) {
-    await this.prisma.session.deleteMany({ where: { userId: user.sub } });
+    await this.prisma.$transaction([
+      this.prisma.session.deleteMany({ where: { userId: user.sub } }),
+      this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } }),
+    ]);
     return { ok: true };
   }
 
