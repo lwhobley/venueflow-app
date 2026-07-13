@@ -11,15 +11,13 @@ import { bootstrapE2eApp, signTestToken } from './test/e2e-app';
  * exception filter) against a real Postgres test database and drives it over
  * HTTP via supertest. This is the layer the review flagged as missing —
  * everything else in the suite tests services/guards/extensions directly.
- *
- * Skips gracefully when no test DB is available (no Docker / TEST_DATABASE_URL),
- * matching the existing integration-spec pattern.
  */
 describe('e2e smoke: auth, billing, scheduling', () => {
-  let app: INestApplication | null;
-  let prisma: PrismaService | null;
-  let jwt: JwtService | null;
+  let app: INestApplication;
+  let prisma: PrismaService;
+  let jwt: JwtService;
   let teardown: () => Promise<void> = async () => {};
+  let venueIds: string[] = [];
 
   // Subscribed venue/profile (happy path) + unsubscribed venue/profile (billing gate).
   let subscribedSession: { userId: string; sid: string };
@@ -31,12 +29,11 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     prisma = boot.prisma;
     jwt = boot.jwt;
     teardown = boot.teardown;
-    if (!app || !prisma) return;
-
     const [activeVenue, expiredVenue] = await Promise.all([
       prisma.venue.create({ data: { name: 'E2E Active Venue', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC', subscriptionStatus: 'active' } }),
       prisma.venue.create({ data: { name: 'E2E Expired Venue', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC', subscriptionStatus: 'expired' } }),
     ]);
+    venueIds = [activeVenue.id, expiredVenue.id];
 
     const [activeUser, expiredUser] = await Promise.all([
       prisma.user.create({ data: { email: 'e2e-active@test.local' } }),
@@ -58,17 +55,20 @@ describe('e2e smoke: auth, billing, scheduling', () => {
   }, 60_000);
 
   afterAll(async () => {
+    const userIds = [subscribedSession.userId, unsubscribedSession.userId];
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.profile.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.venue.deleteMany({ where: { id: { in: venueIds } } });
     await teardown();
   });
 
   describe('auth', () => {
     it('rejects a request with no bearer token', async () => {
-      if (!app) return;
       await request(app.getHttpServer()).get('/api/v1/app/me').expect(401);
     });
 
     it('rejects a garbage/invalid token', async () => {
-      if (!app) return;
       await request(app.getHttpServer())
         .get('/api/v1/app/me')
         .set('Authorization', 'Bearer not-a-real-jwt')
@@ -76,7 +76,6 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     });
 
     it('rejects a well-formed token with no matching Session row', async () => {
-      if (!app || !jwt) return;
       const token = signTestToken(jwt, { sub: 'nonexistent-user', sid: 'nonexistent-session' });
       await request(app.getHttpServer())
         .get('/api/v1/app/me')
@@ -85,7 +84,6 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     });
 
     it('accepts a valid token backed by a real Session row', async () => {
-      if (!app || !jwt) return;
       const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
       const res = await request(app.getHttpServer())
         .get('/api/v1/app/me')
@@ -98,7 +96,6 @@ describe('e2e smoke: auth, billing, scheduling', () => {
 
   describe('billing gate', () => {
     it('returns 402 for a venue without an active subscription', async () => {
-      if (!app || !jwt) return;
       const token = signTestToken(jwt, { sub: unsubscribedSession.userId, sid: unsubscribedSession.sid });
       await request(app.getHttpServer())
         .get('/api/v1/scheduling/availability/me')
@@ -107,7 +104,6 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     });
 
     it('allows the same route for a venue with an active subscription', async () => {
-      if (!app || !jwt) return;
       const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
       await request(app.getHttpServer())
         .get('/api/v1/scheduling/availability/me')
@@ -118,7 +114,6 @@ describe('e2e smoke: auth, billing, scheduling', () => {
 
   describe('validation', () => {
     it('rejects a request body with unknown fields (whitelist: true, forbidNonWhitelisted: true)', async () => {
-      if (!app || !jwt) return;
       const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
       await request(app.getHttpServer())
         .patch('/api/v1/app/venue')

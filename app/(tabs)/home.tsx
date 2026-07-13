@@ -10,6 +10,8 @@ import { CollapsibleSection } from '../../components/AppCard';
 import { AiCopilotPanel } from '../../components/AiCopilotPanel';
 import { AlertsPanel } from '../../components/AlertsPanel';
 import { CosmicInsights } from '../../components/CosmicInsights';
+import { OperationsAutopilotPanel } from '../../components/OperationsAutopilotPanel';
+import { ProfitabilityPulsePanel } from '../../components/ProfitabilityPulsePanel';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
@@ -202,6 +204,20 @@ export default function HomeScreen() {
           <StatusPill palette={palette} tone="warn">{t('dashboard.coverageAlert')}</StatusPill>
           <CommandText palette={palette} variant="body">{t('dashboard.openShiftNotice', { count: openShifts })}</CommandText>
         </CommandSurface>
+      ) : null}
+
+      {canManage && dailyBrief ? (
+        <OperationsAutopilotPanel
+          palette={palette}
+          priorityActions={dailyBrief.priorityActions}
+        />
+      ) : null}
+
+      {canManage && dailyBrief ? (
+        <ProfitabilityPulsePanel
+          palette={palette}
+          pulse={dailyBrief.profitabilityPulse}
+        />
       ) : null}
 
       {canManage && dailyBrief ? (

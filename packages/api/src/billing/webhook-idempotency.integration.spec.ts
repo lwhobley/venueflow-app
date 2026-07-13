@@ -18,25 +18,17 @@ import type { PrismaService } from '../prisma/prisma.service';
  * delivery, Postgres rolls back the whole transaction — not just the audit
  * row. This spec verifies that rollback actually happens against real
  * Postgres, not just that the second call returns a "duplicate" flag.
- *
- * Skips gracefully when no test DB is available, matching the other
- * integration specs.
  */
 describe('billing webhook idempotency (integration)', () => {
-  let prisma: PrismaClient | null = null;
+  let prisma: PrismaClient;
   let teardown: () => Promise<void> = async () => {};
   let controller: BillingController;
   let venueId = '';
 
   beforeAll(async () => {
-    try {
-      const db = await setupTestDb();
-      prisma = db.prisma;
-      teardown = db.teardown;
-    } catch (err) {
-      console.warn('Skipping webhook idempotency integration tests — no test DB:', (err as Error).message);
-      return;
-    }
+    const db = await setupTestDb();
+    prisma = db.prisma;
+    teardown = db.teardown;
     // ConfigService is only used by the HTTP webhook handlers (secret lookup),
     // not by applyStripeSubscription/applyAppleSubscription — a stub is fine.
     const configStub = { get: () => undefined } as any;
@@ -44,7 +36,6 @@ describe('billing webhook idempotency (integration)', () => {
   }, 60_000);
 
   beforeEach(async () => {
-    if (!prisma) return;
     const venue = await prisma.venue.create({
       data: { name: 'Idempotency Test Venue', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' },
     });
@@ -52,16 +43,13 @@ describe('billing webhook idempotency (integration)', () => {
   });
 
   afterAll(async () => {
-    if (prisma) {
-      await prisma.subscriptionEvent.deleteMany();
-      await prisma.subscription.deleteMany();
-      await prisma.venue.deleteMany();
-    }
+    await prisma.subscriptionEvent.deleteMany();
+    await prisma.subscription.deleteMany();
+    await prisma.venue.deleteMany();
     await teardown();
   });
 
   it('a replayed Stripe event is a no-op: exactly one SubscriptionEvent row, unchanged subscription state', async () => {
-    if (!prisma) return;
     const eventAt = new Date();
     const payload = {
       venueId,
@@ -98,7 +86,6 @@ describe('billing webhook idempotency (integration)', () => {
   });
 
   it('a replayed RevenueCat event is also a no-op', async () => {
-    if (!prisma) return;
     const eventAt = new Date();
     const payload = {
       venueId,
@@ -124,7 +111,6 @@ describe('billing webhook idempotency (integration)', () => {
   });
 
   it('an out-of-order (stale) event is ignored without overwriting newer state', async () => {
-    if (!prisma) return;
     const now = new Date();
     const earlier = new Date(now.getTime() - 60_000);
 

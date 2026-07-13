@@ -217,7 +217,9 @@ model User {
   sessions                  Session[]
   accounts                  AuthAccount[]
   password                  PasswordCredential?
-  joinRequests              WorkplaceJoinRequest[]
+  joinRequests              WorkplaceJoinRequest[]      @relation("WorkplaceJoinRequestUser")
+  decidedJoinRequests       WorkplaceJoinRequest[]      @relation("WorkplaceJoinRequestDecider")
+  joinRequestEvents         WorkplaceJoinRequestEvent[]
 }
 
 model Session {
@@ -288,6 +290,7 @@ model Venue {
   shiftSwaps                    ShiftSwap[]
   availability                  Availability[]
   conversations                 Conversation[]
+  messages                      Message[]
   conversationReads             ConversationRead[]
   chatImages                    ChatImage[]
   notifications                 NotificationEvent[]
@@ -331,6 +334,7 @@ model Venue {
   auditLogs                     AuditLog[]
   managerGoals                  ManagerGoal[]
   venueEvents                   VenueEvent[]
+  scheduleMemoryNotes           ScheduleMemoryNote[]
   reservationSetting            ReservationSetting?
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
@@ -366,9 +370,17 @@ model Profile {
   timeEntries      TimeEntry[]
   staffRequests    StaffRequest[]
   sentMessages     Message[]
+  conversationReads ConversationRead[]
+  notificationEvents NotificationEvent[]
+  notificationReads NotificationRead[]
+  requestedShiftSwaps ShiftSwap[]          @relation("ShiftSwapRequesterProfile")
+  targetShiftSwaps    ShiftSwap[]          @relation("ShiftSwapTargetProfile")
   crmNotes         CrmNote[]
+  crmActivityLogs  CrmActivityLog[]
+  tableStateHistory TableStateHistory[]
   servedTables     TableState[]           @relation("ServerTables")
   assignedLeads    CrmLead[]              @relation("AssignedLeads")
+  createdScheduleMemoryNotes ScheduleMemoryNote[] @relation("ScheduleMemoryCreatedBy")
 
   @@index([venueId])
   @@index([email])
@@ -390,6 +402,9 @@ model ScheduleShift {
   updatedAt    DateTime    @updatedAt
   venue        Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
   profile      Profile?    @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  requesterSwaps ShiftSwap[] @relation("ShiftSwapRequesterShift")
+  targetSwaps    ShiftSwap[] @relation("ShiftSwapTargetShift")
+  messages       Message[]
 
   @@index([venueId])
   @@index([profileId])
@@ -418,6 +433,22 @@ model ScheduleTemplate {
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId])
+}
+
+model ScheduleMemoryNote {
+  id                  String   @id @default(cuid())
+  venueId             String
+  weekStart           String
+  title               String
+  detail              String
+  createdByProfileId   String?
+  createdAt           DateTime @default(now())
+  venue               Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  createdByProfile    Profile? @relation("ScheduleMemoryCreatedBy", fields: [createdByProfileId], references: [id], onDelete: SetNull)
+
+  @@index([venueId])
+  @@index([venueId, weekStart])
+  @@index([venueId, createdAt])
 }
 
 model Availability {
@@ -498,6 +529,9 @@ model Message {
   reactions      Json?
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         Profile?     @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  venue          Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  shift          ScheduleShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  swap           ShiftSwap?   @relation(fields: [swapId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@index([senderId])
@@ -511,6 +545,7 @@ model ConversationRead {
   readAt         DateTime     @default(now())
   venue          Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  profile        Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, profileId])
   @@index([conversationId])
@@ -541,6 +576,8 @@ model NotificationEvent {
   body      String
   createdAt DateTime @default(now())
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile   Profile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  reads     NotificationRead[]
 
   @@index([venueId, createdAt])
   @@index([profileId, createdAt])
@@ -553,6 +590,8 @@ model NotificationRead {
   venueId        String
   readAt         DateTime @default(now())
   venue          Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  notification   NotificationEvent @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  profile        Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([notificationId, profileId])
   @@index([profileId])
@@ -623,6 +662,11 @@ model ShiftSwap {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   venue              Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  requesterProfile   Profile  @relation("ShiftSwapRequesterProfile", fields: [requesterProfileId], references: [id], onDelete: Cascade)
+  targetProfile      Profile  @relation("ShiftSwapTargetProfile", fields: [targetProfileId], references: [id], onDelete: Cascade)
+  requesterShift     ScheduleShift @relation("ShiftSwapRequesterShift", fields: [requesterShiftId], references: [id], onDelete: Cascade)
+  targetShift        ScheduleShift? @relation("ShiftSwapTargetShift", fields: [targetShiftId], references: [id], onDelete: SetNull)
+  messages           Message[]
 
   @@index([venueId])
   @@index([requesterProfileId])
@@ -736,6 +780,7 @@ model Waitlist {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   venue       Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  tableAssignments TableAssignment[]
 
   @@index([venueId, requestedAt])
   @@index([venueId, status])
@@ -792,6 +837,8 @@ model FloorTable {
   isReservable   Boolean
   floorPlan      FloorPlan    @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
   tableStates    TableState[]
+  tableAssignments TableAssignment[]
+  stateHistory   TableStateHistory[]
 
   @@index([floorPlanId])
   @@index([floorPlanId, section])
@@ -848,6 +895,8 @@ model TableAssignment {
   releasedReason String?
   venue          Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
   reservation    Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  waitlist       Waitlist?  @relation(fields: [waitlistId], references: [id], onDelete: SetNull)
+  table          FloorTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
 
   @@index([tableId, startsAt])
   @@index([reservationId])
@@ -958,6 +1007,7 @@ model CrmLead {
   notes               CrmNote[]
   beos                CrmBeo[]
   contracts           CrmContract[]
+  activityLogs        CrmActivityLog[]
 
   @@index([venueId])
   @@index([venueId, status])
@@ -1051,6 +1101,8 @@ model CrmActivityLog {
   detail    String?
   createdAt DateTime @default(now())
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  lead      CrmLead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  actor     Profile? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([leadId, createdAt])
   @@index([venueId, createdAt])
@@ -1465,6 +1517,8 @@ model TableStateHistory {
   timestamp  DateTime
   metadata   Json?
   venue      Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  table      FloorTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  actor      Profile?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([tableId, timestamp])
   @@index([venueId, timestamp])
@@ -1488,7 +1542,6 @@ model Invite {
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([email])
-  @@index([phone])
   @@index([venueId])
 }
 
@@ -1503,7 +1556,8 @@ model WorkplaceJoinRequest {
   createdAt    DateTime                    @default(now())
   updatedAt    DateTime                    @updatedAt
   venue        Venue                       @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  user         User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User                        @relation("WorkplaceJoinRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy    User?                       @relation("WorkplaceJoinRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
   events       WorkplaceJoinRequestEvent[]
 
   @@index([venueId])
@@ -1520,6 +1574,7 @@ model WorkplaceJoinRequestEvent {
   payload   Json?
   createdAt DateTime             @default(now())
   request   WorkplaceJoinRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor     User?                @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([requestId, createdAt])
 }

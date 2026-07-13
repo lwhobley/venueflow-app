@@ -108,6 +108,18 @@ class BlackoutDto {
   reason!: string;
 }
 
+class ScheduleMemoryNoteDto {
+  @IsString()
+  title!: string;
+
+  @IsString()
+  detail!: string;
+
+  @IsString()
+  @IsOptional()
+  weekStart?: string;
+}
+
 class ShiftDto {
   @IsInt()
   dayIndex!: number;
@@ -629,6 +641,58 @@ export class SchedulingController {
     // Surface the venue's weekly labor budget here so callers (e.g. the Reports
     // efficiency card) don't have to fetch the full manager schedule for it.
     return { ...forecast, laborBudgetHours: venue?.weeklyLaborBudgetHours ?? null };
+  }
+
+  @RequireSubscription()
+  @Get('memory')
+  async listScheduleMemory(@VenueScope() scope: Scope, @Query('limit') limitRaw?: string) {
+    this.requireManager(scope);
+    const limit = Math.min(20, Math.max(1, Number(limitRaw) || 8));
+    const notes = await this.prisma.scheduleMemoryNote.findMany({
+      where: { venueId: scope!.venueId },
+      orderBy: [{ createdAt: 'desc' }],
+      take: limit,
+    });
+    return {
+      notes: notes.map((note) => ({
+        _id: note.id,
+        title: note.title,
+        detail: note.detail,
+        weekStart: note.weekStart,
+        createdAt: note.createdAt.getTime(),
+      })),
+    };
+  }
+
+  @RequireSubscription()
+  @Post('memory')
+  async addScheduleMemoryNote(@VenueScope() scope: Scope, @Body() body: ScheduleMemoryNoteDto) {
+    this.requireManager(scope);
+    const title = body.title.trim();
+    const detail = body.detail.trim();
+    if (!title) throw new BadRequestException('Memory title is required');
+    if (!detail) throw new BadRequestException('Memory detail is required');
+    const venue = await this.prisma.venue.findUnique({
+      where: { id: scope!.venueId },
+      select: { timezone: true },
+    });
+    const weekStart = body.weekStart?.trim() || weekStartFor(todayInZone(venue?.timezone ?? null));
+    const note = await this.prisma.scheduleMemoryNote.create({
+      data: {
+        venueId: scope!.venueId,
+        weekStart,
+        title,
+        detail,
+        createdByProfileId: scope!.profileId,
+      },
+    });
+    return {
+      _id: note.id,
+      title: note.title,
+      detail: note.detail,
+      weekStart: note.weekStart,
+      createdAt: note.createdAt.getTime(),
+    };
   }
 
   @RequireSubscription()
@@ -1186,7 +1250,7 @@ export class SchedulingController {
     const weekStartDayUtc = new Date(`${availabilityWeekStart}T00:00:00.000Z`);
     const weekEndDayUtc = new Date(weekStartDayUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    const [venue, shifts, staff, availability, reservations, venueEvents] = await Promise.all([
+    const [venue, shifts, staff, availability, reservations, venueEvents, memoryNotes] = await Promise.all([
       this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true, weeklyLaborBudgetHours: true } }),
       this.prisma.scheduleShift.findMany({ where: { venueId } }),
       this.prisma.profile.findMany({ where: { venueId }, orderBy: { fullName: 'asc' } }),
@@ -1203,6 +1267,11 @@ export class SchedulingController {
       this.prisma.venueEvent.findMany({
         where: { venueId, startsAt: { gte: weekStartDayUtc, lt: weekEndDayUtc } },
         select: { startsAt: true, expectedGuests: true },
+      }),
+      this.prisma.scheduleMemoryNote.findMany({
+        where: { venueId },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
       }),
     ]);
 
@@ -1222,6 +1291,7 @@ export class SchedulingController {
       staff: staff.map((p) => ({ id: p.id, fullName: p.fullName, jobTitle: p.jobTitle, role: p.role })),
       availabilityByProfile: this.groupAvailabilityByProfile(availability),
       existingShifts: shifts.map((s) => ({ dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, jobTitle: s.jobTitle, profileId: s.profileId })),
+      memoryNotes: memoryNotes.map((note) => ({ weekStart: note.weekStart, title: note.title, detail: note.detail })),
     });
 
     const nameById = new Map(staff.map((p) => [p.id, p.fullName]));
