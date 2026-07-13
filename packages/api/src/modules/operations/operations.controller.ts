@@ -2,23 +2,35 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   NotFoundException,
+  Param,
   Patch,
+  Post,
+  Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import type { Response } from 'express';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
+import { Public } from '../../auth/public.decorator';
+import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { S3ImageService } from '../chat/s3-image.service';
 import { buildDailyBriefAlerts } from './daily-brief-alerts';
 
 const GOAL_PERIODS = ['day', 'week'] as const;
 const GOAL_STATUSES = ['open', 'done', 'cancelled'] as const;
+const LOGBOOK_CATEGORIES = ['handoff', 'incident', 'maintenance', 'general'] as const;
+const CHECKLIST_KINDS = ['opening', 'closing'] as const;
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 type ManagerGoalPeriod = (typeof GOAL_PERIODS)[number];
 type ManagerGoalStatus = (typeof GOAL_STATUSES)[number];
@@ -43,6 +55,40 @@ class UpsertManagerGoalDto {
 
   @IsIn(GOAL_STATUSES)
   status!: ManagerGoalStatus;
+}
+
+class LogbookEntryDto {
+  @IsString()
+  category!: string;
+
+  @IsString()
+  body!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  pinned?: boolean;
+}
+
+class ChecklistTemplateItemDto {
+  @IsIn(CHECKLIST_KINDS)
+  kind!: (typeof CHECKLIST_KINDS)[number];
+
+  @IsString()
+  title!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  requiresPhoto?: boolean;
+}
+
+class CompleteChecklistItemDto {
+  @IsOptional()
+  @IsString()
+  photoBase64?: string;
+
+  @IsOptional()
+  @IsString()
+  photoMimeType?: string;
 }
 
 function cleanText(value: string | undefined): string | undefined {
@@ -127,10 +173,45 @@ function mapEvent(
   };
 }
 
+function mapLogbookEntry(entry: {
+  id: string;
+  authorProfileId: string;
+  authorName: string;
+  category: string;
+  body: string;
+  pinned: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    _id: entry.id,
+    authorProfileId: entry.authorProfileId,
+    authorName: entry.authorName,
+    category: entry.category,
+    body: entry.body,
+    pinned: entry.pinned,
+    createdAt: entry.createdAt.getTime(),
+    updatedAt: entry.updatedAt.getTime(),
+  };
+}
+
+function mapChecklistItem(item: { id: string; kind: string; title: string; sortOrder: number; requiresPhoto: boolean }) {
+  return {
+    _id: item.id,
+    kind: item.kind,
+    title: item.title,
+    sortOrder: item.sortOrder,
+    requiresPhoto: item.requiresPhoto,
+  };
+}
+
 @Controller('v1/operations')
 @UseGuards(AuthGuard)
 export class OperationsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3ImageService: S3ImageService,
+  ) {}
 
   @RequireSubscription('active')
   @Get('manager-dashboard')
@@ -404,6 +485,192 @@ export class OperationsController {
     return mapGoal(created);
   }
 
+  // ─── Manager logbook: shift handoff notes shared across the whole team ────
+
+  @Get('logbook')
+  async listLogbook(@CurrentUser() user: AuthUser, @Query('limit') limitRaw?: string) {
+    const profile = await this.requireVenueProfile(user);
+    const limit = Math.min(200, Math.max(1, Number(limitRaw) || 50));
+    const entries = await this.prisma.logbookEntry.findMany({
+      where: { venueId: profile.venueId! },
+      orderBy: [{ pinned: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+    });
+    return { entries: entries.map(mapLogbookEntry) };
+  }
+
+  @Post('logbook')
+  async addLogbookEntry(@CurrentUser() user: AuthUser, @Body() body: LogbookEntryDto) {
+    const profile = await this.requireVenueProfile(user);
+    const text = body.body.trim();
+    if (!text) throw new BadRequestException('Entry text is required');
+    const category = LOGBOOK_CATEGORIES.includes(body.category as (typeof LOGBOOK_CATEGORIES)[number])
+      ? body.category
+      : 'general';
+    const created = await this.prisma.logbookEntry.create({
+      data: {
+        venueId: profile.venueId!,
+        authorProfileId: profile.id,
+        authorName: profile.fullName,
+        category,
+        body: text,
+        // Only managers/admins can pin an entry to the top of the feed.
+        pinned: Boolean(body.pinned) && isAdminRole(profile.role),
+      },
+    });
+    return mapLogbookEntry(created);
+  }
+
+  @Delete('logbook/:id')
+  async deleteLogbookEntry(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const profile = await this.requireVenueProfile(user);
+    const entry = await this.prisma.logbookEntry.findFirst({ where: { id, venueId: profile.venueId! } });
+    if (!entry) throw new NotFoundException('Entry not found');
+    if (entry.authorProfileId !== profile.id && !isAdminRole(profile.role)) {
+      throw new ForbiddenException('You can only remove your own entries');
+    }
+    await this.prisma.logbookEntry.delete({ where: { id: entry.id } });
+    return { ok: true };
+  }
+
+  // ─── Opening/closing task checklists with photo proof ─────────────────────
+
+  @Get('checklist')
+  async getChecklist(@CurrentUser() user: AuthUser, @Query('kind') kind: string, @Query('date') dateParam?: string) {
+    const profile = await this.requireVenueProfile(user);
+    if (!CHECKLIST_KINDS.includes(kind as (typeof CHECKLIST_KINDS)[number])) {
+      throw new BadRequestException('kind must be "opening" or "closing"');
+    }
+    const venueId = profile.venueId!;
+    const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : dateKey();
+    const items = await this.prisma.checklistTemplateItem.findMany({
+      where: { venueId, kind, active: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+    if (items.length === 0) return { date, kind, items: [] };
+    await this.ensureChecklistCompletions(venueId, items.map((item) => item.id), date);
+    const completions = await this.prisma.checklistCompletion.findMany({
+      where: { venueId, date, templateItemId: { in: items.map((item) => item.id) } },
+    });
+    const completionByItem = new Map(completions.map((completion) => [completion.templateItemId, completion]));
+    return {
+      date,
+      kind,
+      items: items.map((item) => {
+        const completion = completionByItem.get(item.id);
+        return {
+          _id: item.id,
+          title: item.title,
+          requiresPhoto: item.requiresPhoto,
+          sortOrder: item.sortOrder,
+          completionId: completion?.id ?? null,
+          status: completion?.status ?? 'pending',
+          completedByName: completion?.completedByName ?? null,
+          completedAt: toMs(completion?.completedAt),
+          hasPhoto: Boolean(completion?.photoKey),
+        };
+      }),
+    };
+  }
+
+  @Post('checklist/items')
+  async addChecklistItem(@CurrentUser() user: AuthUser, @Body() body: ChecklistTemplateItemDto) {
+    const profile = await this.requireManagerProfile(user);
+    const title = body.title.trim();
+    if (!title) throw new BadRequestException('Title is required');
+    const sortOrder = await this.prisma.checklistTemplateItem.count({
+      where: { venueId: profile.venueId!, kind: body.kind, active: true },
+    });
+    const created = await this.prisma.checklistTemplateItem.create({
+      data: {
+        venueId: profile.venueId!,
+        kind: body.kind,
+        title,
+        requiresPhoto: Boolean(body.requiresPhoto),
+        sortOrder,
+      },
+    });
+    return mapChecklistItem(created);
+  }
+
+  @Delete('checklist/items/:id')
+  async removeChecklistItem(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const profile = await this.requireManagerProfile(user);
+    const item = await this.prisma.checklistTemplateItem.findFirst({ where: { id, venueId: profile.venueId! } });
+    if (!item) throw new NotFoundException('Checklist item not found');
+    // Soft-deactivate rather than delete so past completions (with photo proof) stay intact.
+    await this.prisma.checklistTemplateItem.update({ where: { id: item.id }, data: { active: false } });
+    return { ok: true };
+  }
+
+  @Post('checklist/complete/:completionId')
+  async completeChecklistItem(
+    @CurrentUser() user: AuthUser,
+    @Param('completionId') completionId: string,
+    @Body() body: CompleteChecklistItemDto,
+  ) {
+    const profile = await this.requireVenueProfile(user);
+    const venueId = profile.venueId!;
+    const completion = await this.prisma.checklistCompletion.findFirst({
+      where: { id: completionId, venueId },
+      include: { templateItem: true },
+    });
+    if (!completion) throw new NotFoundException('Checklist item not found');
+    if (completion.templateItem.requiresPhoto && !body.photoBase64) {
+      throw new BadRequestException('This task requires a photo before it can be marked done');
+    }
+    let photoKey: string | undefined;
+    if (body.photoBase64) {
+      const data = Buffer.from(body.photoBase64, 'base64');
+      if (data.length === 0) throw new BadRequestException('Photo is empty');
+      if (data.length > MAX_PHOTO_BYTES) throw new BadRequestException('Photo is too large (max 5MB)');
+      photoKey = await this.s3ImageService.upload(data, body.photoMimeType || 'image/jpeg', venueId);
+    }
+    const updated = await this.prisma.checklistCompletion.update({
+      where: { id: completion.id },
+      data: {
+        status: 'done',
+        completedBy: profile.id,
+        completedByName: profile.fullName,
+        completedAt: new Date(),
+        ...(photoKey ? { photoKey } : {}),
+      },
+    });
+    return {
+      _id: updated.id,
+      status: updated.status,
+      completedByName: updated.completedByName,
+      completedAt: toMs(updated.completedAt),
+      hasPhoto: Boolean(updated.photoKey),
+    };
+  }
+
+  // Public capability URL, same model as the chat image endpoint: the cuid is
+  // unguessable and only ever surfaced to the owning venue's own staff.
+  @Public()
+  @SkipVenueScope()
+  @Get('checklist/photo/:completionId')
+  async getChecklistPhoto(@Param('completionId') completionId: string, @Res() res: Response) {
+    const completion = await this.prisma.checklistCompletion.findUnique({ where: { id: completionId } });
+    if (!completion?.photoKey) throw new NotFoundException('Photo not found');
+    const url = await this.s3ImageService.getPresignedUrl(completion.photoKey);
+    return res.redirect(302, url);
+  }
+
+  private async ensureChecklistCompletions(venueId: string, templateItemIds: string[], date: string) {
+    const existing = await this.prisma.checklistCompletion.findMany({
+      where: { venueId, date, templateItemId: { in: templateItemIds } },
+      select: { templateItemId: true },
+    });
+    const seen = new Set(existing.map((row) => row.templateItemId));
+    const missing = templateItemIds.filter((id) => !seen.has(id));
+    if (missing.length === 0) return;
+    await this.prisma.checklistCompletion.createMany({
+      data: missing.map((templateItemId) => ({ venueId, templateItemId, date, status: 'pending' })),
+      skipDuplicates: true,
+    });
+  }
+
   private async getProfile(user: AuthUser) {
     return this.prisma.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
   }
@@ -412,6 +679,12 @@ export class OperationsController {
     const profile = await this.getProfile(user);
     if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
     if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
+    return profile;
+  }
+
+  private async requireVenueProfile(user: AuthUser) {
+    const profile = await this.getProfile(user);
+    if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
     return profile;
   }
 }

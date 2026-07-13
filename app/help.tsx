@@ -49,6 +49,8 @@ const SECTIONS: GuideSection[] = [
     summary: 'Build the week, publish shifts, and handle swap requests.',
     steps: [
       'Open the Schedule tab and build shifts for the week — copy a previous day or apply a template to speed this up.',
+      'On the Forecast tab, tap Generate AI draft to have shifts proposed automatically from demand (covers, private events) and staff availability — review each proposed shift, remove any you don\'t want, then create the rest in one batch.',
+      'The Forecast tab also flags predictive compliance risks before you publish: staff approaching or over 40h, long shifts (6h+) that need a break, and "clopening" pairs — closing one day and opening the next with too little rest.',
       'Publish the schedule when it is ready so staff can see their shifts and get notified.',
       'Open Shift swaps to review swap requests staff have submitted between each other.',
       'Use the Request review queue to approve or deny availability changes and other schedule requests before they take effect.',
@@ -173,6 +175,30 @@ const SECTIONS: GuideSection[] = [
       'New staff onboarding tracks each person\'s setup checklist (profile, certifications, training, first-shift readiness).',
       'The role-based audit log records every staff change — who added, edited, or deactivated whom.',
       'Deactivate selected staff to remove someone\'s access without deleting their history.',
+    ],
+  },
+  {
+    key: 'logbook',
+    tab: 'Profile',
+    title: 'Shift logbook',
+    summary: 'Handoff notes shared with the whole team, so nothing gets lost between shifts.',
+    steps: [
+      'Open Shift logbook from Profile to see the running feed of notes for the venue.',
+      'Post an entry with a category — shift handoff, incident, maintenance, or general — and a short note for the next shift.',
+      'Managers and admins can pin an important entry to the top of the feed.',
+      'You can remove your own entries any time; managers can remove any entry.',
+    ],
+  },
+  {
+    key: 'checklist',
+    tab: 'Profile',
+    title: 'Opening/closing task checklist',
+    summary: 'A daily task list for opening and closing the venue, with photo proof on tasks that need it.',
+    steps: [
+      'Open Opening/closing checklist from Profile and switch between the Opening and Closing lists.',
+      'Tap Mark done on a task, or Take photo & complete on tasks that require photo proof — the photo is attached to that day\'s completion.',
+      'Managers and admins can add new tasks and choose whether a task requires a photo.',
+      'The checklist resets automatically each day — yesterday\'s completions (and photos) stay on record.',
     ],
   },
   {

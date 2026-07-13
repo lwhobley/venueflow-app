@@ -325,6 +325,9 @@ model Venue {
   barInventoryMovements         BarInventoryMovement[]
   prepBoardItems                PrepBoardItem[]
   staffOnboardingTasks          StaffOnboardingTask[]
+  logbookEntries                LogbookEntry[]
+  checklistTemplateItems        ChecklistTemplateItem[]
+  checklistCompletions          ChecklistCompletion[]
   auditLogs                     AuditLog[]
   managerGoals                  ManagerGoal[]
   venueEvents                   VenueEvent[]
@@ -1329,6 +1332,56 @@ model StaffOnboardingTask {
   @@unique([profileId, title])
   @@index([venueId, profileId])
   @@index([venueId, status])
+}
+
+model LogbookEntry {
+  id              String   @id @default(cuid())
+  venueId         String
+  authorProfileId String
+  authorName      String
+  category        String
+  body            String
+  pinned          Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  venue           Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, createdAt])
+  @@index([venueId, pinned])
+}
+
+model ChecklistTemplateItem {
+  id            String                @id @default(cuid())
+  venueId       String
+  kind          String
+  title         String
+  sortOrder     Int                   @default(0)
+  requiresPhoto Boolean               @default(false)
+  active        Boolean               @default(true)
+  createdAt     DateTime              @default(now())
+  venue         Venue                 @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  completions   ChecklistCompletion[]
+
+  @@index([venueId, kind, active])
+}
+
+model ChecklistCompletion {
+  id              String                 @id @default(cuid())
+  venueId         String
+  templateItemId  String
+  date            String
+  status          String
+  completedBy     String?
+  completedByName String?
+  completedAt     DateTime?
+  photoKey        String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  venue           Venue                  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  templateItem    ChecklistTemplateItem  @relation(fields: [templateItemId], references: [id], onDelete: Cascade)
+
+  @@unique([templateItemId, date])
+  @@index([venueId, date])
 }
 
 model AuditLog {

@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { View } from 'react-native';
-import { Card, Text } from 'react-native-paper';
+import { Button, Card, Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useQuery } from '../../lib/railway-hooks';
+import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { errorMessage } from '../../lib/format';
 
 type DaypartRow = { key: string; label: string; covers: number; scheduledPeople: number };
 type ForecastDay = {
@@ -21,6 +23,19 @@ type ForecastDay = {
 };
 type Alert = { kind: string; severity: 'warning' | 'critical'; message: string; dayLabel?: string };
 type OtRisk = { name: string; scheduledHours: number; overLimit: boolean };
+type ProposedShift = {
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  jobTitle: string;
+  station: string;
+  profileId: string | null;
+  reason: string;
+  dayLabel: string;
+  startTime: string;
+  endTime: string;
+  memberName: string | null;
+};
 type ForecastData = {
   days: ForecastDay[];
   totals: { covers: number; scheduledHours: number; suggestedHours: number; gapHours: number };
@@ -124,6 +139,80 @@ function OTRow({ risk }: { risk: OtRisk }) {
   );
 }
 
+function AiScheduleBuilder() {
+  const previewAiSchedule = useAction(api.scheduling.previewAiSchedule);
+  const commitAiSchedule = useMutation(api.scheduling.commitAiSchedule);
+  const [proposal, setProposal] = useState<ProposedShift[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const onGenerate = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await previewAiSchedule({});
+      const shifts = (result.shifts ?? []) as ProposedShift[];
+      setProposal(shifts);
+      setMessage(shifts.length > 0 ? `Proposed ${shifts.length} shift${shifts.length === 1 ? '' : 's'}. Review below, then create.` : 'No gaps to fill — the schedule already covers demand.');
+    } catch (e) {
+      setError(errorMessage(e, 'Could not generate an AI schedule.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCommit = async () => {
+    if (proposal.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await commitAiSchedule({ shifts: proposal });
+      setMessage(`Created ${result.created} shift${result.created === 1 ? '' : 's'}.${result.failed?.length ? ` ${result.failed.length} failed.` : ''}`);
+      setProposal([]);
+    } catch (e) {
+      setError(errorMessage(e, 'Could not create the proposed shifts.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeProposed = (index: number) => setProposal((prev) => prev.filter((_, i) => i !== index));
+
+  return (
+    <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card.Content style={{ gap: spacing.sm }}>
+        <Text variant="titleMedium" style={{ fontWeight: '700' }}>AI schedule builder</Text>
+        <Text style={{ color: colors.muted, fontSize: 12 }}>
+          Generates new shifts to close the demand gap above, respecting availability and the labor budget.
+        </Text>
+        <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void onGenerate()}>
+          Generate AI draft
+        </Button>
+        {proposal.length > 0 ? (
+          <View style={{ gap: spacing.sm }}>
+            {proposal.map((shift, index) => (
+              <View key={index} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontWeight: '700' }}>{shift.dayLabel} {shift.startTime}-{shift.endTime} · {shift.jobTitle}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{shift.memberName ?? 'Open shift'} · {shift.reason}</Text>
+                </View>
+                <Button mode="text" textColor={colors.muted} compact onPress={() => removeProposed(index)}>Remove</Button>
+              </View>
+            ))}
+            <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void onCommit()}>
+              Create {proposal.length} shift{proposal.length === 1 ? '' : 's'}
+            </Button>
+          </View>
+        ) : null}
+        {error ? <Text style={{ color: colors.danger, fontSize: 12 }}>{error}</Text> : null}
+        {message ? <Text style={{ color: accents[2].fg, fontSize: 12 }}>{message}</Text> : null}
+      </Card.Content>
+    </Card>
+  );
+}
+
 export function LaborForecastPanel() {
   const { isReady } = useAuthenticatedSession();
   const forecast = useQuery(api.scheduling.getLaborForecast, isReady ? {} : 'skip') as ForecastData | null | undefined;
@@ -221,6 +310,8 @@ export function LaborForecastPanel() {
           </Card.Content>
         </Card>
       )}
+
+      <AiScheduleBuilder />
     </View>
   );
 }

@@ -152,6 +152,52 @@ describe('buildLaborForecast — overtime watch', () => {
   });
 });
 
+describe('buildLaborForecast — predictive compliance alerts', () => {
+  it('flags a shift of 6h or more as needing a break, but not a shorter one', () => {
+    const result = buildLaborForecast(
+      baseInput({
+        shifts: [
+          { dayIndex: 0, startMinutes: 600, endMinutes: 600 + 6 * 60, profileId: 'p1' }, // exactly 6h
+          { dayIndex: 1, startMinutes: 600, endMinutes: 600 + 5 * 60, profileId: 'p1' }, // 5h
+        ],
+        nameById: new Map([['p1', 'Alex']]),
+      }),
+    );
+    const breakAlerts = result.alerts.filter((a) => a.kind === 'break_reminder');
+    expect(breakAlerts).toHaveLength(1);
+    expect(breakAlerts[0].message).toContain('Alex');
+  });
+
+  it('flags a clopening pair (close one day, open the next) under the rest threshold', () => {
+    const result = buildLaborForecast(
+      baseInput({
+        shifts: [
+          { dayIndex: 0, startMinutes: 900, endMinutes: 1380, profileId: 'p1' }, // closes 11pm
+          { dayIndex: 1, startMinutes: 360, endMinutes: 720, profileId: 'p1' }, // opens 6am — 7h off
+        ],
+        nameById: new Map([['p1', 'Alex']]),
+      }),
+    );
+    const risk = result.alerts.filter((a) => a.kind === 'clopening_risk');
+    expect(risk).toHaveLength(1);
+    expect(risk[0].severity).toBe('critical');
+    expect(risk[0].message).toContain('Alex');
+  });
+
+  it('does not flag two shifts on consecutive days with adequate rest', () => {
+    const result = buildLaborForecast(
+      baseInput({
+        shifts: [
+          { dayIndex: 0, startMinutes: 600, endMinutes: 960, profileId: 'p1' }, // ends 4pm
+          { dayIndex: 1, startMinutes: 600, endMinutes: 960, profileId: 'p1' }, // starts 10am next day — 18h off
+        ],
+        nameById: new Map([['p1', 'Alex']]),
+      }),
+    );
+    expect(result.alerts.filter((a) => a.kind === 'clopening_risk')).toHaveLength(0);
+  });
+});
+
 describe('buildLaborForecast — totals and events', () => {
   it('always returns seven days and aggregates weekly totals', () => {
     const result = buildLaborForecast(
