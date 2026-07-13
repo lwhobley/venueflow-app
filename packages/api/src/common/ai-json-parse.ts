@@ -55,7 +55,12 @@ export async function callAiJson(input: AiJsonCallInput): Promise<unknown> {
 // Resolve the AI provider key/model with backward-compatible env var names —
 // this used to be OpenAI-only; AI_API_KEY / AI_*_MODEL are the current names.
 export function resolveAiApiKey(): string | undefined {
-  return process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
+  if (process.env.AI_API_KEY) return process.env.AI_API_KEY;
+  // Only reuse the legacy OPENAI_API_KEY var if it's actually shaped like an
+  // OpenRouter key — this helper only ever calls the OpenRouter endpoint, so
+  // a real OpenAI-format key must never be forwarded there.
+  const legacy = process.env.OPENAI_API_KEY;
+  return legacy?.startsWith('sk-or-') ? legacy : undefined;
 }
 
 export function resolveAiModel(specificEnvVar: string | undefined, fallback: string): string {

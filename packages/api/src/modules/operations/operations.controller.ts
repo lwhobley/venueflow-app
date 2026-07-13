@@ -22,6 +22,7 @@ import { isAdminRole } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { todayInZone } from '../../common/pay-period';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3ImageService } from '../chat/s3-image.service';
 import { buildDailyBriefAlerts } from './daily-brief-alerts';
@@ -487,6 +488,7 @@ export class OperationsController {
 
   // ─── Manager logbook: shift handoff notes shared across the whole team ────
 
+  @RequireSubscription('active')
   @Get('logbook')
   async listLogbook(@CurrentUser() user: AuthUser, @Query('limit') limitRaw?: string) {
     const profile = await this.requireVenueProfile(user);
@@ -499,6 +501,7 @@ export class OperationsController {
     return { entries: entries.map(mapLogbookEntry) };
   }
 
+  @RequireSubscription('active')
   @Post('logbook')
   async addLogbookEntry(@CurrentUser() user: AuthUser, @Body() body: LogbookEntryDto) {
     const profile = await this.requireVenueProfile(user);
@@ -521,6 +524,7 @@ export class OperationsController {
     return mapLogbookEntry(created);
   }
 
+  @RequireSubscription('active')
   @Delete('logbook/:id')
   async deleteLogbookEntry(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const profile = await this.requireVenueProfile(user);
@@ -535,6 +539,7 @@ export class OperationsController {
 
   // ─── Opening/closing task checklists with photo proof ─────────────────────
 
+  @RequireSubscription('active')
   @Get('checklist')
   async getChecklist(@CurrentUser() user: AuthUser, @Query('kind') kind: string, @Query('date') dateParam?: string) {
     const profile = await this.requireVenueProfile(user);
@@ -542,7 +547,7 @@ export class OperationsController {
       throw new BadRequestException('kind must be "opening" or "closing"');
     }
     const venueId = profile.venueId!;
-    const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : dateKey();
+    const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayInZone(profile.venue?.timezone);
     const items = await this.prisma.checklistTemplateItem.findMany({
       where: { venueId, kind, active: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -573,6 +578,7 @@ export class OperationsController {
     };
   }
 
+  @RequireSubscription('active')
   @Post('checklist/items')
   async addChecklistItem(@CurrentUser() user: AuthUser, @Body() body: ChecklistTemplateItemDto) {
     const profile = await this.requireManagerProfile(user);
@@ -593,6 +599,7 @@ export class OperationsController {
     return mapChecklistItem(created);
   }
 
+  @RequireSubscription('active')
   @Delete('checklist/items/:id')
   async removeChecklistItem(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const profile = await this.requireManagerProfile(user);
@@ -603,6 +610,7 @@ export class OperationsController {
     return { ok: true };
   }
 
+  @RequireSubscription('active')
   @Post('checklist/complete/:completionId')
   async completeChecklistItem(
     @CurrentUser() user: AuthUser,
@@ -616,6 +624,9 @@ export class OperationsController {
       include: { templateItem: true },
     });
     if (!completion) throw new NotFoundException('Checklist item not found');
+    if (completion.status === 'done') {
+      throw new BadRequestException('This task is already marked done for today');
+    }
     if (completion.templateItem.requiresPhoto && !body.photoBase64) {
       throw new BadRequestException('This task requires a photo before it can be marked done');
     }

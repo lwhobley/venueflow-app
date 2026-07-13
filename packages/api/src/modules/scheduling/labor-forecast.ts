@@ -147,17 +147,33 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
   // so a manager can fix the schedule instead of discovering a violation later.
   const complianceAlerts: ForecastAlert[] = [];
 
+  // One alert per person (not per shift) — a manager with several long shifts
+  // this week doesn't need a separate line for each one, just a heads-up.
+  const longShiftsByProfile = new Map<string, number>();
+  let unassignedLongShifts = 0;
   for (const shift of shifts) {
     const durationMinutes = shift.endMinutes - shift.startMinutes;
-    if (durationMinutes >= BREAK_REQUIRED_MINUTES) {
-      const name = shift.profileId ? nameById.get(shift.profileId) ?? 'Staff member' : 'This shift';
-      complianceAlerts.push({
-        kind: 'break_reminder',
-        severity: 'warning',
-        message: `${name} is scheduled ${round1(durationMinutes / 60)}h on ${dayLabel(shift.dayIndex)} — make sure a break is logged.`,
-        dayLabel: dayLabel(shift.dayIndex),
-      });
+    if (durationMinutes < BREAK_REQUIRED_MINUTES) continue;
+    if (shift.profileId) {
+      longShiftsByProfile.set(shift.profileId, (longShiftsByProfile.get(shift.profileId) ?? 0) + 1);
+    } else {
+      unassignedLongShifts += 1;
     }
+  }
+  for (const [profileId, count] of longShiftsByProfile) {
+    const name = nameById.get(profileId) ?? 'Staff member';
+    complianceAlerts.push({
+      kind: 'break_reminder',
+      severity: 'warning',
+      message: `${name} has ${count} shift${count === 1 ? '' : 's'} of ${BREAK_REQUIRED_MINUTES / 60}h+ this week — make sure breaks are logged.`,
+    });
+  }
+  if (unassignedLongShifts > 0) {
+    complianceAlerts.push({
+      kind: 'break_reminder',
+      severity: 'warning',
+      message: `${unassignedLongShifts} open shift${unassignedLongShifts === 1 ? '' : 's'} this week ${unassignedLongShifts === 1 ? 'is' : 'are'} ${BREAK_REQUIRED_MINUTES / 60}h+ — whoever picks it up will need a break logged.`,
+    });
   }
 
   const shiftsByProfile = new Map<string, ForecastShift[]>();
@@ -175,6 +191,11 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
       byDay.set(shift.dayIndex, rows);
     }
     for (const [dayIndex, todayShifts] of byDay) {
+      // dayIndex is a day-of-week slot in the current weekly template, not a
+      // real calendar date, so `% 7` wraps Saturday (6) into Sunday (0) of the
+      // SAME stored week — correct only insofar as the template repeats
+      // identically week to week, same limitation the OT/understaffed checks
+      // above already have by operating on one week of shifts at a time.
       const nextDayIndex = (dayIndex + 1) % 7;
       const nextDayShifts = byDay.get(nextDayIndex);
       if (!nextDayShifts) continue;

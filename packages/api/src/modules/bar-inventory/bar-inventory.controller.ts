@@ -19,6 +19,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell } from '../../common/csv';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { EmailService } from '../../email/email.service';
@@ -30,6 +31,8 @@ const MOVEMENT_TYPES = ['count', 'received', 'waste', 'comp', 'transfer', 'corre
 const PREP_ITEM_KINDS = ['prep', 'eighty_six'] as const;
 const PREP_ITEM_STATUSES = ['open', 'done', 'cancelled'] as const;
 const MAX_IMPORT_ITEMS = 100;
+const AI_PARSE_RATE_LIMIT_MAX = 20;
+const AI_PARSE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 type BarStockCategory = (typeof CATEGORIES)[number];
 type BarStockMovementType = (typeof MOVEMENT_TYPES)[number];
@@ -459,7 +462,14 @@ export class BarInventoryController {
     @CurrentUser() user: AuthUser,
     @Body() body: ParseBarInventoryInputDto,
   ) {
-    await this.requireManagerProfile(user);
+    const profile = await this.requireManagerProfile(user);
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `ai-parse:bar-inventory:${profile.venueId}`,
+      AI_PARSE_RATE_LIMIT_MAX,
+      AI_PARSE_RATE_LIMIT_WINDOW_MS,
+      'Too many AI parse requests. Try again in a few minutes.',
+    );
     return this.parser.parse(body);
   }
 
