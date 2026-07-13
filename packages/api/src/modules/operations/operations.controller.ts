@@ -23,7 +23,9 @@ import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { todayInZone } from '../../common/pay-period';
+import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MediaAccessService } from '../chat/media-access.service';
 import { S3ImageService } from '../chat/s3-image.service';
 import { buildDailyBriefAlerts } from './daily-brief-alerts';
 
@@ -99,16 +101,6 @@ function cleanText(value: string | undefined): string | undefined {
 
 function toMs(date: Date | null | undefined): number | null {
   return date ? date.getTime() : null;
-}
-
-function dateKey(date = new Date()): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function dayBounds(date = new Date()) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
 }
 
 function mapGoal(goal: {
@@ -211,6 +203,7 @@ function mapChecklistItem(item: { id: string; kind: string; title: string; sortO
 export class OperationsController {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
   ) {}
 
@@ -220,9 +213,11 @@ export class OperationsController {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
     const now = new Date();
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+    const timezone = profile.venue?.timezone;
+    const today = zonedIsoDate(timezone, now.getTime());
+    const todayBounds = zonedDayBounds(timezone, 0);
+    const todayStart = new Date(todayBounds.start);
+    const todayEnd = new Date(todayBounds.end);
     const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     const [reservations, goals, venueEvents] = await Promise.all([
@@ -276,7 +271,7 @@ export class OperationsController {
     ).length;
 
     const filteredGoals = goals
-      .filter((g) => g.status === 'open' || g.targetDate >= dateKey())
+      .filter((g) => g.status === 'open' || g.targetDate >= today)
       .slice(0, 8)
       .map(mapGoal);
 
@@ -318,9 +313,13 @@ export class OperationsController {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
     const now = new Date();
-    const today = dateKey(now);
-    const { start: todayStart, end: todayEnd } = dayBounds(now);
-    const tomorrowEnd = new Date(todayEnd.getTime() + 24 * 60 * 60 * 1000);
+    const timezone = profile.venue?.timezone;
+    const today = zonedIsoDate(timezone, now.getTime());
+    const todayBounds = zonedDayBounds(timezone, 0);
+    const tomorrowBounds = zonedDayBounds(timezone, 1);
+    const todayStart = new Date(todayBounds.start);
+    const todayEnd = new Date(todayBounds.end);
+    const tomorrowEnd = new Date(tomorrowBounds.end);
 
     const [
       reservations,
@@ -343,7 +342,7 @@ export class OperationsController {
         take: 100,
       }),
       this.prisma.scheduleShift.findMany({
-        where: { venueId, dayIndex: todayStart.getDay() },
+        where: { venueId, dayIndex: zonedDayOfWeek(timezone, now.getTime()) },
         orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }],
         take: 100,
       }),
@@ -561,7 +560,7 @@ export class OperationsController {
     return {
       date,
       kind,
-      items: items.map((item) => {
+      items: await Promise.all(items.map(async (item) => {
         const completion = completionByItem.get(item.id);
         return {
           _id: item.id,
@@ -573,8 +572,16 @@ export class OperationsController {
           completedByName: completion?.completedByName ?? null,
           completedAt: toMs(completion?.completedAt),
           hasPhoto: Boolean(completion?.photoKey),
+          photoUrl: completion?.photoKey
+            ? await this.mediaAccess.createPath(
+                'checklist-photo',
+                completion.id,
+                venueId,
+                `/v1/operations/checklist/photo/${completion.id}`,
+              )
+            : null,
         };
-      }),
+      })),
     };
   }
 
@@ -656,14 +663,19 @@ export class OperationsController {
     };
   }
 
-  // Public capability URL, same model as the chat image endpoint: the cuid is
-  // unguessable and only ever surfaced to the owning venue's own staff.
+  // Short-lived token allows React Native <Image> to load without a bearer
+  // header while keeping the permanent completion id from granting access.
   @Public()
   @SkipVenueScope()
   @Get('checklist/photo/:completionId')
-  async getChecklistPhoto(@Param('completionId') completionId: string, @Res() res: Response) {
+  async getChecklistPhoto(
+    @Param('completionId') completionId: string,
+    @Query('token') token: string | undefined,
+    @Res() res: Response,
+  ) {
     const completion = await this.prisma.checklistCompletion.findUnique({ where: { id: completionId } });
     if (!completion?.photoKey) throw new NotFoundException('Photo not found');
+    await this.mediaAccess.assertToken(token, 'checklist-photo', completionId, completion.venueId);
     const url = await this.s3ImageService.getPresignedUrl(completion.photoKey);
     return res.redirect(302, url);
   }

@@ -23,6 +23,7 @@ import { RequireSubscription } from '../../billing/require-subscription.decorato
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { zonedDateBounds } from '../../common/venue-time';
 import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -289,12 +290,9 @@ export class ReservationsController {
     };
     if (date) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Invalid date');
-      // NOTE: Date boundaries use UTC. For venues not in UTC this means the
-      // window may not align with local midnight. Until the Venue model stores
-      // a timezone, callers should be aware of this offset.
-      const start = new Date(`${date}T00:00:00.000Z`);
-      const end = new Date(`${date}T23:59:59.999Z`);
-      where['reservationTime'] = { gte: start, lte: end };
+      const timezone = await this.getVenueTimezone(scope.venueId);
+      const { start, end } = zonedDateBounds(timezone, date);
+      where['reservationTime'] = { gte: new Date(start), lt: new Date(end) };
     }
     if (status) {
       if (!RESERVATION_STATUSES.includes(status as any)) throw new BadRequestException('Invalid status');
@@ -371,10 +369,10 @@ export class ReservationsController {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new BadRequestException('Pass ?date=YYYY-MM-DD');
     }
-    // NOTE: Date boundaries use UTC — see getReservationsPage comment for
-    // the timezone caveat. Will be venue-local once Venue stores a tz.
-    const start = new Date(`${date}T00:00:00.000Z`);
-    const end = new Date(`${date}T23:59:59.999Z`);
+    const timezone = await this.getVenueTimezone(scope.venueId);
+    const bounds = zonedDateBounds(timezone, date);
+    const start = new Date(bounds.start);
+    const end = new Date(bounds.end);
 
     const [reservations, plan] = await Promise.all([
       this.prisma.reservation.findMany({
@@ -382,7 +380,7 @@ export class ReservationsController {
           venueId: scope.venueId,
           deletedAt: null,
           status: { notIn: ['cancelled', 'no_show'] },
-          reservationTime: { gte: start, lte: end },
+          reservationTime: { gte: start, lt: end },
         },
         select: { reservationTime: true, partySize: true, durationMinutes: true },
       }),
@@ -396,9 +394,9 @@ export class ReservationsController {
       .filter((t) => t.isReservable)
       .reduce((sum, t) => sum + t.seats, 0);
 
-    // 96 buckets of 15 minutes covering the venue's day.
+    const bucketCount = Math.ceil((end.getTime() - start.getTime()) / (15 * 60 * 1000));
     const buckets: Array<{ slot: number; startsAt: number; covers: number }> = [];
-    for (let i = 0; i < 96; i += 1) {
+    for (let i = 0; i < bucketCount; i += 1) {
       buckets.push({ slot: i, startsAt: start.getTime() + i * 15 * 60 * 1000, covers: 0 });
     }
     for (const r of reservations) {
@@ -408,7 +406,7 @@ export class ReservationsController {
       const startMs = r.reservationTime.getTime();
       const endMs = startMs + r.durationMinutes * 60 * 1000;
       const firstSlot = Math.max(0, Math.floor((startMs - start.getTime()) / (15 * 60 * 1000)));
-      const lastSlot = Math.min(95, Math.floor((endMs - 1 - start.getTime()) / (15 * 60 * 1000)));
+      const lastSlot = Math.min(bucketCount - 1, Math.floor((endMs - 1 - start.getTime()) / (15 * 60 * 1000)));
       for (let i = firstSlot; i <= lastSlot; i += 1) {
         buckets[i].covers += r.partySize;
       }
@@ -541,11 +539,13 @@ export class ReservationsController {
       const timeFilter: Record<string, Date> = {};
       if (startDate) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new BadRequestException('Invalid start date');
-        timeFilter['gte'] = new Date(`${startDate}T00:00:00.000Z`);
+        const timezone = await this.getVenueTimezone(scope.venueId);
+        timeFilter['gte'] = new Date(zonedDateBounds(timezone, startDate).start);
       }
       if (endDate) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new BadRequestException('Invalid end date');
-        timeFilter['lte'] = new Date(`${endDate}T23:59:59.999Z`);
+        const timezone = await this.getVenueTimezone(scope.venueId);
+        timeFilter['lt'] = new Date(zonedDateBounds(timezone, endDate).end);
       }
       where['reservationTime'] = timeFilter;
     }
@@ -567,5 +567,10 @@ export class ReservationsController {
       ].join(','));
     }
     return rows.join('\n');
+  }
+
+  private async getVenueTimezone(venueId: string): Promise<string | null> {
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } });
+    return venue?.timezone ?? null;
   }
 }

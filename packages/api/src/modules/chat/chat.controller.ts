@@ -10,6 +10,7 @@ import {
   Param,
   Post,
   Patch,
+  Query,
   Res,
   StreamableFile,
 } from '@nestjs/common';
@@ -22,6 +23,7 @@ import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { MediaAccessService } from './media-access.service';
 import { S3ImageService } from './s3-image.service';
 
 // Chat photo uploads. Kept small — images are picker-compressed (quality 0.5)
@@ -92,6 +94,7 @@ function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
 export class ChatController {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
   ) {}
 
@@ -458,17 +461,22 @@ export class ChatController {
     return {
       title,
       readReceipts,
-      messages: messages.map((m) => ({
-        _id: m.id,
-        id: m.id,
-        text: m.text,
-        senderName: (m.senderId && nameById.get(m.senderId)) || 'Former teammate',
-        createdAt: m.createdAt.getTime(),
-        mine: m.senderId === scope.profileId,
-        shiftId: m.shiftId,
-        swapId: m.swapId,
-        imageUrl: m.imageUrl,
-        reactions: m.reactions || {},
+      messages: await Promise.all(messages.map(async (m) => {
+        const imageId = m.imageUrl?.match(/^\/v1\/chat\/images\/([a-zA-Z0-9_-]+)$/)?.[1];
+        return {
+          _id: m.id,
+          id: m.id,
+          text: m.text,
+          senderName: (m.senderId && nameById.get(m.senderId)) || 'Former teammate',
+          createdAt: m.createdAt.getTime(),
+          mine: m.senderId === scope.profileId,
+          shiftId: m.shiftId,
+          swapId: m.swapId,
+          imageUrl: imageId
+            ? await this.mediaAccess.createPath('chat-image', imageId, scope.venueId, m.imageUrl!)
+            : m.imageUrl,
+          reactions: m.reactions || {},
+        };
       })),
     };
   }
@@ -602,19 +610,19 @@ export class ChatController {
 
     // Relative path so the stored value stays portable across environments;
     // the client resolves it against its configured API base when rendering.
-    return { imageUrl: `/v1/chat/images/${image.id}` };
+    const path = `/v1/chat/images/${image.id}`;
+    return { imageUrl: await this.mediaAccess.createPath('chat-image', image.id, scope.venueId, path) };
   }
 
-  // Public capability URL: the cuid is unguessable and only ever appears in the
-  // owning venue's messages, so it serves as the access token (same model as an
-  // image CDN's signed URL). Bypasses auth so React Native <Image> can load it
-  // directly without attaching a bearer header.
+  // React Native <Image> cannot attach the app's bearer token, so this endpoint
+  // accepts a short-lived token issued only in authenticated venue responses.
   @Public()
   @SkipVenueScope()
   @Get('images/:id')
-  async getImage(@Param('id') id: string, @Res() res: Response) {
+  async getImage(@Param('id') id: string, @Query('token') token: string | undefined, @Res() res: Response) {
     const image = await this.prisma.chatImage.findUnique({ where: { id } });
     if (!image) throw new NotFoundException('Image not found');
+    await this.mediaAccess.assertToken(token, 'chat-image', id, image.venueId);
     const url = await this.s3ImageService.getPresignedUrl(image.s3Key);
     return res.redirect(302, url);
   }

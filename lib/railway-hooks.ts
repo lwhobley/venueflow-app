@@ -440,6 +440,7 @@ const mutationRoutes: Record<string, Route> = {
 export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T {
   const key = getKey(ref);
   const route = queryRoutes[key];
+  if (!route) throw new Error(`Unknown Railway query route: ${key}`);
   const enabled = args !== 'skip';
   const query = useReactQuery({
     // Split the dotted key ('app.listVenueStaff' -> ['app', 'listVenueStaff', args])
@@ -447,7 +448,7 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
     // actually prefix-match this query's key instead of silently matching nothing.
     queryKey: [...key.split('.'), args],
     enabled,
-    queryFn: () => (route ? requestRoute<T>(route, args) : Promise.resolve(defaultQueryResult(key) as T)),
+    queryFn: () => requestRoute<T>(route, args),
   });
   return query.data as T;
 }
@@ -485,7 +486,7 @@ export function useAuthActions() {
     signIn: async () => {
       throw new Error('Use Railway password auth instead.');
     },
-    signOut: async () => undefined,
+    signOut: async () => apiRequest<{ ok: true }>('/v1/auth/logout', { method: 'POST' }),
   };
 }
 
@@ -526,16 +527,4 @@ function clockInvalidations() {
 
 function scheduleInvalidations() {
   return [['scheduling', 'getManagerSchedule'], ['scheduling', 'getLaborForecast'], ['scheduling', 'getMySchedule'], ['scheduling', 'getMyShiftSwaps'], ['scheduling', 'listShiftSwaps']];
-}
-
-function defaultQueryResult(key: string) {
-  if (key.includes('list') || key.includes('export') || key.includes('getMyShiftSwaps')) return [];
-  if (key.endsWith('getManagerDashboard')) return null;
-  if (key.endsWith('getManagerInsights')) return null;
-  if (key.includes('Dashboard')) return null;
-  if (key.includes('Overview')) return null;
-  if (key.includes('Page')) return null;
-  if (key.includes('Stats')) return null;
-  if (key.includes('FloorPlan')) return null;
-  return null;
 }

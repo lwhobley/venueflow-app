@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { zonedDayBounds, zonedIsoDate } from './venue-time';
+import { zonedDateBounds, zonedDayBounds, zonedIsoDate } from './venue-time';
 
 describe('zonedIsoDate', () => {
   it('renders a known instant in venue-local time', () => {
@@ -47,5 +47,13 @@ describe('zonedDayBounds', () => {
     const today = zonedDayBounds('America/Chicago', 0);
     const yesterday = zonedDayBounds('America/Chicago', -1);
     expect(yesterday.end).toBe(today.start);
+  });
+});
+
+describe('zonedDateBounds', () => {
+  it('maps a Chicago calendar day to UTC across daylight saving time', () => {
+    const spring = zonedDateBounds('America/Chicago', '2026-03-08');
+    expect(new Date(spring.start).toISOString()).toBe('2026-03-08T06:00:00.000Z');
+    expect(new Date(spring.end).toISOString()).toBe('2026-03-09T05:00:00.000Z');
   });
 });

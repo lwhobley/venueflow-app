@@ -20,6 +20,7 @@ type ChecklistItem = {
   completedByName: string | null;
   completedAt: number | null;
   hasPhoto: boolean;
+  photoUrl: string | null;
 };
 
 type ChecklistResponse = { date: string; kind: string; items: ChecklistItem[] };
@@ -140,9 +141,9 @@ export default function ChecklistScreen() {
                 ) : null}
               </View>
 
-              {item.hasPhoto ? (
+              {item.hasPhoto && item.photoUrl ? (
                 <Image
-                  source={{ uri: resolveMediaUrl(`/v1/operations/checklist/photo/${item.completionId}`) }}
+                  source={{ uri: resolveMediaUrl(item.photoUrl) }}
                   style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: colors.background }}
                   resizeMode="cover"
                 />

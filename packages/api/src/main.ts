@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { jsonBodyLimitForPath } from './common/body-limit';
 import { initSentry } from './observability/sentry';
 
 const DEFAULT_CORS_ORIGINS = [
@@ -39,7 +40,7 @@ async function bootstrap() {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl ?? req.url ?? '';
     const path = url.split('?')[0].replace(/\/+$/, '');
-    const limit = path === '/api/v1/chat/images' ? config.get<string>('JSON_BODY_LIMIT', '8mb') : '1mb';
+    const limit = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '8mb'));
     json({
       limit,
       verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
