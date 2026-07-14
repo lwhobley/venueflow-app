@@ -34,7 +34,7 @@ export async function resolveVenueSubscriptionStatus(
     if (!trialExpired) {
       return 'trialing';
     }
-    await persistExpiredTrial(prisma, input.venueId, subscription?.id);
+    persistExpiredTrial(prisma, input.venueId, subscription?.id);
     return 'expired';
   }
 
@@ -43,7 +43,7 @@ export async function resolveVenueSubscriptionStatus(
     if (!trialExpired) {
       return 'trialing';
     }
-    await persistExpiredTrial(prisma, input.venueId, subscription.id);
+    persistExpiredTrial(prisma, input.venueId, subscription.id);
     return 'expired';
   }
 
@@ -62,8 +62,15 @@ export async function resolveVenueSubscriptionStatus(
   return trialEndsAt ? 'expired' : null;
 }
 
-async function persistExpiredTrial(prisma: PrismaService, venueId: string, subscriptionId?: string) {
-  await Promise.all([
+/**
+ * Best-effort persistence of trial expiry. Deliberately fire-and-forget: the
+ * caller has already computed the correct 'expired' status to return, so this
+ * write is only a cache-update. Not awaited (keeps the read path fast) and
+ * self-swallowing (a read-replica or transient failure must not surface as an
+ * unhandled rejection on what is otherwise a GET).
+ */
+function persistExpiredTrial(prisma: PrismaService, venueId: string, subscriptionId?: string) {
+  void Promise.all([
     prisma.venue.updateMany({
       where: { id: venueId, subscriptionStatus: 'trialing' },
       data: { subscriptionStatus: 'expired' },
@@ -74,5 +81,7 @@ async function persistExpiredTrial(prisma: PrismaService, venueId: string, subsc
           data: { status: 'expired' },
         })
       : Promise.resolve(),
-  ]);
+  ]).catch(() => {
+    // Swallow: the returned status is authoritative regardless of this write.
+  });
 }

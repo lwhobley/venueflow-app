@@ -47,7 +47,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * the string is not a valid calendar date. A calendar date's identity (and its
  * weekday) is timezone-independent, so we deliberately do not involve a venue tz.
  */
-function parseIsoCalendarDate(dateStr: string | null | undefined): Date | null {
+export function parseIsoCalendarDate(dateStr: string | null | undefined): Date | null {
   if (!dateStr || !ISO_DATE_RE.test(dateStr)) return null;
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d, 12));
@@ -63,7 +63,7 @@ function parseIsoCalendarDate(dateStr: string | null | undefined): Date | null {
  * or reversed range throws rather than silently feeding NaN into a balance
  * decrement.
  */
-function calculateRequestHours(startStr?: string | null, endStr?: string | null): number {
+export function calculateRequestHours(startStr?: string | null, endStr?: string | null): number {
   if (!startStr) return HOURS_PER_DAY;
   const start = parseIsoCalendarDate(startStr);
   if (!start) throw new BadRequestException('Request dates must be valid YYYY-MM-DD values.');

@@ -34,6 +34,10 @@ export async function stripeRequest<T = any>(
   method: 'GET' | 'POST',
   path: string,
   params?: Record<string, unknown>,
+  // When set, Stripe returns the SAME result for repeated POSTs carrying this
+  // key (24h window) instead of creating a new object — used to dedupe
+  // concurrent/retried checkout-session creation.
+  idempotencyKey?: string,
 ): Promise<T> {
   const body = params ? encode(params).join('&') : undefined;
   const url = method === 'GET' && body ? `${STRIPE_API}${path}?${body}` : `${STRIPE_API}${path}`;
@@ -42,6 +46,7 @@ export async function stripeRequest<T = any>(
     headers: {
       Authorization: `Bearer ${secretKey}`,
       'Content-Type': 'application/x-www-form-urlencoded',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
     body: method === 'POST' ? body : undefined,
     signal: AbortSignal.timeout(10000),

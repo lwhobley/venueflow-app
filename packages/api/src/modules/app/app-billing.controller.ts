@@ -81,6 +81,11 @@ export class AppBillingController {
     }
     const priceId = await this.resolveStripePriceId(secret);
     const base = this.webBaseUrl();
+    // Idempotency key bucketed per venue per 10 minutes: rapid re-submits
+    // (double-click, screen remount, client retry) reuse one checkout session
+    // instead of creating duplicate subscriptions. The existing active/trialing
+    // check above covers the case where the first checkout already completed.
+    const idempotencyKey = `checkout:${profile.venueId}:${Math.floor(Date.now() / (10 * 60 * 1000))}`;
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/checkout/sessions', {
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
@@ -91,7 +96,7 @@ export class AppBillingController {
       allow_promotion_codes: true,
       metadata: { venueId: profile.venueId },
       subscription_data: { metadata: { venueId: profile.venueId } },
-    });
+    }, idempotencyKey);
     if (!session.url) {
       throw new ServiceUnavailableException('Stripe did not return a checkout URL.');
     }

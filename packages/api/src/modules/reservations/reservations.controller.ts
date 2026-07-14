@@ -13,7 +13,7 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import type { Request } from 'express';
@@ -150,13 +150,19 @@ class SaveReservationDto {
 }
 
 class ReservationSyncEventDto {
+  // Non-empty: both ids key the idempotency/dedup uniqueness, so an empty
+  // string would collapse distinct events onto one row.
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
   externalEventId!: string;
 
   @IsString()
   eventType!: string;
 
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
   externalId!: string;
 
   @IsString()
