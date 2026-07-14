@@ -48,6 +48,17 @@ export default function RootLayout() {
   );
   const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
   const storeHydrated = useAuthStore((state: AuthState) => state.hydrated);
+  const authScopeKey = useAuthStore(
+    (state: AuthState) => `${state.authEpoch}:${state.user?.id ?? 'anon'}:${state.venue?.id ?? 'none'}`,
+  );
+  const lastAuthScopeKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (lastAuthScopeKey.current === authScopeKey) return;
+    lastAuthScopeKey.current = authScopeKey;
+    void queryClient.cancelQueries();
+    queryClient.clear();
+  }, [authScopeKey, queryClient]);
 
   // Consume a session handed off from the marketing site (venuewrangler.com) so
   // a user who just created a workspace lands signed in. Runs after the store
