@@ -70,7 +70,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="integrations"
-        options={{ title: t('nav.integrations'), href: null, tabBarIcon: icon('connection') }}
+        options={{ title: t('nav.integrations'), href: canManage ? '/integrations' : null, tabBarIcon: icon('connection') }}
       />
       <Tabs.Screen
         name="sales"
@@ -82,7 +82,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="bar-stock"
-        options={{ title: t('nav.inventory'), href: canManage ? '/bar-stock' : null, tabBarIcon: icon('glass-cocktail') }}
+        options={{ title: t('nav.inventory'), href: '/bar-stock', tabBarIcon: icon('glass-cocktail') }}
       />
       <Tabs.Screen
         name="reports"

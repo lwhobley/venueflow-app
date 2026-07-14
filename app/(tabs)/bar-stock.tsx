@@ -84,7 +84,9 @@ type PrepBoard = {
 
 export default function BarStockScreen() {
   const { venue, isReady, canManage, profileLoading } = useVenueAuth();
-  const stock = useQuery(api.barInventory.getBarStock, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
+  // Inventory (stock levels) is visible to every venue member; edits below stay
+  // manager-only. The velocity/prep-board/report queries remain manager-gated.
+  const stock = useQuery(api.barInventory.getBarStock, isReady && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
   const velocity = useQuery(api.barInventory.getUsageVelocity, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as VelocityRow[] | null | undefined;
   const prepBoard = useQuery(api.barInventory.listPrepBoard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as PrepBoard | null | undefined;
   const upsertBarItem = useMutation(api.barInventory.upsertBarItem);
@@ -329,6 +331,76 @@ export default function BarStockScreen() {
       setMessage(errorMessage(e, 'Could not update prep board.'));
     }
   };
+
+  // Non-managers get a read-only inventory view: current stock levels and the
+  // reorder list, with no edit controls. Financial figures (unit cost, value on
+  // hand) stay manager-only.
+  if (!canManage) {
+    return (
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={{ gap: 4 }}>
+          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Bar Stock</Text>
+          <Text style={{ color: colors.muted }}>Current stock levels. Ask a manager to make changes.</Text>
+        </View>
+
+        {profileLoading || stock === undefined ? (
+          <Text style={{ color: colors.muted }}>Loading…</Text>
+        ) : (
+          <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              {[
+                { label: 'Items', value: String(items.length), a: accents[0] },
+                { label: 'Below par', value: String(lowItems.length), a: accents[4] },
+              ].map((metric) => (
+                <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: 16 }}>
+                  <Card.Content>
+                    <Text style={{ color: metric.a.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
+                    <Text style={{ color: colors.muted }}>{metric.label}</Text>
+                  </Card.Content>
+                </Card>
+              ))}
+            </View>
+
+            {lowItems.length > 0 ? (
+              <Card style={{ backgroundColor: accents[4].bg, borderRadius: 16 }}>
+                <Card.Content style={{ gap: spacing.sm }}>
+                  <Text variant="titleMedium" style={{ color: accents[4].fg, fontWeight: '700' }}>Reorder list</Text>
+                  {lowItems.slice(0, 8).map((item) => (
+                    <Text key={item._id} style={{ color: colors.charcoal }}>{item.name}: {item.onHand} {item.unit} on hand, par {item.parLevel}</Text>
+                  ))}
+                </Card.Content>
+              </Card>
+            ) : null}
+
+            <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+              <Card.Content style={{ gap: spacing.sm }}>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Stock list</Text>
+                {items.length === 0 ? (
+                  <Text style={{ color: colors.muted }}>No bar stock yet.</Text>
+                ) : (
+                  items.map((item) => (
+                    <View key={item._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontWeight: '700' }}>{item.name}</Text>
+                        <Text style={{ color: colors.muted }}>{item.category} · {item.area ?? 'unassigned'}</Text>
+                      </View>
+                      <Chip compact style={{ backgroundColor: item.onHand <= item.parLevel ? accents[4].bg : accents[2].bg }}>
+                        {item.onHand} / {item.parLevel}
+                      </Chip>
+                    </View>
+                  ))
+                )}
+              </Card.Content>
+            </Card>
+          </>
+        )}
+      </ScrollView>
+    );
+  }
 
   // Barcode scanner overlay
   if (showScanner && Platform.OS !== 'web') {
