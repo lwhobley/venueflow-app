@@ -205,7 +205,7 @@ export const appApi = {
   upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string; phone?: string; altPhone?: string; address?: string; dateOfBirth?: string; certifications?: string[] }) =>
     apiRequest('/v1/app/staff', { method: 'POST', body }),
   deactivateVenueStaff: (staffId: string) => apiRequest('/v1/app/staff/' + staffId, { method: 'DELETE' }),
-  createStaffRequest: (body: { kind: string; title: string; details: string; availability?: any }) =>
+  createStaffRequest: (body: { kind: string; title: string; details: string; availability?: any; timeCorrection?: { timeEntryId?: string | null; clockInAt: number; clockOutAt?: number | null; reason?: string } }) =>
     apiRequest('/v1/staff-requests', { method: 'POST', body }),
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
     apiRequest<any>('/v1/app/venue', { method: 'PATCH', body }),

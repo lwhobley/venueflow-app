@@ -14,8 +14,12 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -23,7 +27,6 @@ import { Prisma, RequestStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapStaffRequest } from '../../common/mappers';
-import { zonedDayOfWeek } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -34,14 +37,47 @@ type Scope = VenueScopedRequest['venueScope'];
 
 const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'availability', 'shift_swap', 'open_shift', 'sick_leave', 'time_correction', 'other'];
 const REVIEW_STATUSES = ['approved', 'denied', 'cancelled'];
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const HOURS_PER_DAY = 8.0;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * Parse a strict YYYY-MM-DD calendar date to noon UTC (noon dodges DST edges),
+ * rejecting malformed or impossible values (e.g. 2026-02-31). Returns null when
+ * the string is not a valid calendar date. A calendar date's identity (and its
+ * weekday) is timezone-independent, so we deliberately do not involve a venue tz.
+ */
+function parseIsoCalendarDate(dateStr: string | null | undefined): Date | null {
+  if (!dateStr || !ISO_DATE_RE.test(dateStr)) return null;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return null;
+  }
+  return dt;
+}
+
+/**
+ * Whole-day hours for a PTO/sick request. Requires valid, non-reversed
+ * YYYY-MM-DD dates and always returns a finite, positive number — a malformed
+ * or reversed range throws rather than silently feeding NaN into a balance
+ * decrement.
+ */
 function calculateRequestHours(startStr?: string | null, endStr?: string | null): number {
-  if (!startStr) return 8.0;
-  const start = new Date(startStr);
-  const end = endStr ? new Date(endStr) : start;
-  const diffTime = Math.abs(end.getTime() - start.getTime());
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  return diffDays * 8.0;
+  if (!startStr) return HOURS_PER_DAY;
+  const start = parseIsoCalendarDate(startStr);
+  if (!start) throw new BadRequestException('Request dates must be valid YYYY-MM-DD values.');
+  const end = endStr ? parseIsoCalendarDate(endStr) : start;
+  if (!end) throw new BadRequestException('Request dates must be valid YYYY-MM-DD values.');
+  if (end.getTime() < start.getTime()) {
+    throw new BadRequestException('End date must be on or after the start date.');
+  }
+  const diffDays = Math.round((end.getTime() - start.getTime()) / MS_PER_DAY) + 1;
+  const hours = diffDays * HOURS_PER_DAY;
+  if (!Number.isFinite(hours) || hours <= 0) {
+    throw new BadRequestException('Could not compute request hours from the provided dates.');
+  }
+  return hours;
 }
 
 class AvailabilityBlockDto {
@@ -58,6 +94,31 @@ class AvailabilityBlockDto {
   available!: boolean;
 }
 
+// Time-correction payload for the clock screen. Distinct from AvailabilityBlock:
+// corrections are a single object (not an array of weekly blocks), so they need
+// their own validated shape — sending this under `availability` fails @IsArray
+// and every submission would 400.
+class TimeCorrectionDto {
+  @IsOptional()
+  @IsString()
+  timeEntryId?: string | null;
+
+  // Epoch milliseconds, as produced by the client's Date(...).getTime().
+  @IsNumber()
+  @Min(0)
+  clockInAt!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  clockOutAt?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 class CreateStaffRequestDto {
   @IsString()
   @IsIn(REQUEST_KINDS)
@@ -71,6 +132,7 @@ class CreateStaffRequestDto {
 
   @IsString()
   @IsOptional()
+  @Matches(ISO_DATE_RE, { message: 'requestedForDate must be a YYYY-MM-DD date' })
   requestedForDate?: string;
 
   @IsString()
@@ -79,10 +141,12 @@ class CreateStaffRequestDto {
 
   @IsString()
   @IsOptional()
+  @Matches(ISO_DATE_RE, { message: 'requestedRangeStart must be a YYYY-MM-DD date' })
   requestedRangeStart?: string;
 
   @IsString()
   @IsOptional()
+  @Matches(ISO_DATE_RE, { message: 'requestedRangeEnd must be a YYYY-MM-DD date' })
   requestedRangeEnd?: string;
 
   @IsArray()
@@ -90,6 +154,11 @@ class CreateStaffRequestDto {
   @ValidateNested({ each: true })
   @Type(() => AvailabilityBlockDto)
   availability?: AvailabilityBlockDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TimeCorrectionDto)
+  timeCorrection?: TimeCorrectionDto;
 }
 
 class ReviewStaffRequestDto {
@@ -152,6 +221,20 @@ export class StaffRequestsController {
       }
     }
 
+    // Time corrections carry a single correction object (stored in the same
+    // `availability` JSON column the reviewer reads). Validate it here so an
+    // approval later can't act on a nonsensical range.
+    if (body.kind === 'time_correction') {
+      if (!body.timeCorrection) {
+        throw new BadRequestException('Time correction details are required.');
+      }
+      const { clockInAt, clockOutAt } = body.timeCorrection;
+      if (clockOutAt != null && clockOutAt <= clockInAt) {
+        throw new BadRequestException('Clock-out time must be after clock-in time.');
+      }
+    }
+    const requestPayload = body.kind === 'time_correction' ? body.timeCorrection : body.availability;
+
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
     const request = await this.prisma.staffRequest.create({
       data: {
@@ -165,8 +248,8 @@ export class StaffRequestsController {
         requestedShiftId: body.requestedShiftId,
         requestedRangeStart: body.requestedRangeStart,
         requestedRangeEnd: body.requestedRangeEnd,
-        availability: body.availability
-          ? (body.availability as unknown as Prisma.InputJsonValue)
+        availability: requestPayload
+          ? (requestPayload as unknown as Prisma.InputJsonValue)
           : undefined,
       },
     });
@@ -252,21 +335,30 @@ export class StaffRequestsController {
       if (request.kind === 'sick_leave' || request.kind === 'time_off') {
         const reqStart = request.requestedRangeStart || request.requestedForDate;
         const reqEnd = request.requestedRangeEnd || request.requestedForDate || reqStart;
-        if (reqStart && reqEnd) {
-          const venue = await tx.venue.findUnique({ where: { id: request.venueId }, select: { timezone: true } });
-          const tz = venue?.timezone ?? null;
-          const start = new Date(reqStart);
-          const end = new Date(reqEnd);
-          const dayIndices: number[] = [];
-          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            dayIndices.push(zonedDayOfWeek(tz, d.getTime()));
+        const start = parseIsoCalendarDate(reqStart);
+        const end = parseIsoCalendarDate(reqEnd);
+        if (start && end && end.getTime() >= start.getTime()) {
+          // Weekday comes straight from the calendar date (getUTCDay on the
+          // noon-UTC anchor), NOT from the venue timezone — a date's weekday is
+          // the same everywhere, so the old `new Date('YYYY-MM-DD')` UTC-midnight
+          // + zonedDayOfWeek combination could shift a Tuesday request onto
+          // Monday shifts for west-of-UTC venues.
+          //
+          // NOTE: ScheduleShift is a weekly template keyed only by dayIndex (no
+          // date/week column), so this necessarily opens every matching weekday
+          // rather than only shifts within the requested date range. Scoping to
+          // a specific week would require adding a date/week field to the shift
+          // model — tracked separately.
+          const dayIndices = new Set<number>();
+          for (let t = start.getTime(); t <= end.getTime(); t += MS_PER_DAY) {
+            dayIndices.add(new Date(t).getUTCDay());
           }
-          if (dayIndices.length > 0) {
+          if (dayIndices.size > 0) {
             await tx.scheduleShift.updateMany({
               where: {
                 venueId: request.venueId,
                 profileId: request.profileId,
-                dayIndex: { in: dayIndices },
+                dayIndex: { in: [...dayIndices] },
               },
               data: {
                 profileId: null,

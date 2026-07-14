@@ -245,32 +245,45 @@ export class ReservationsController {
     let processed = 0;
     let failed = 0;
 
-    // Each event gets its own transaction: a poison event fails (and its
-    // idempotency row commits as errored) without rolling back every event
-    // already processed earlier in the same batch, and without forcing the
-    // provider to redeliver the whole batch on retry.
     for (const event of body.events) {
+      // 1) Claim the idempotency row in its OWN committed transaction, before
+      //    any processing. If processing later fails and its transaction rolls
+      //    back, this row survives so the failure stays recorded (and the event
+      //    can be retried) — the previous single-transaction structure rolled
+      //    the row away on failure, so the "mark failed" update matched nothing.
       try {
-        const outcome = await this.prisma.$transaction(async (tx) => {
-          try {
-            await tx.reservationSyncEvent.create({
-              data: {
-                venueId,
-                provider,
-                externalEventId: event.externalEventId,
-                eventType: event.eventType,
-                payload: event as unknown as Prisma.InputJsonValue,
-                processedAt: now,
-                status: 'processing',
-              },
-            });
-          } catch (error: any) {
-            if (error?.code === 'P2002') {
-              return 'duplicate' as const;
-            }
-            throw error;
-          }
+        await this.prisma.reservationSyncEvent.create({
+          data: {
+            venueId,
+            provider,
+            externalEventId: event.externalEventId,
+            eventType: event.eventType,
+            payload: event as unknown as Prisma.InputJsonValue,
+            processedAt: now,
+            status: 'processing',
+          },
+        });
+      } catch (error: any) {
+        if (error?.code !== 'P2002') throw error;
+        // Already seen: skip only if it previously succeeded; otherwise
+        // fall through and reprocess (retry a prior failed/interrupted attempt).
+        const prior = await this.prisma.reservationSyncEvent.findFirst({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          select: { status: true },
+        });
+        if (prior?.status === 'processed') {
+          duplicates += 1;
+          continue;
+        }
+        await this.prisma.reservationSyncEvent.updateMany({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          data: { status: 'processing', errorMessage: null, processedAt: now },
+        });
+      }
 
+      // 2) Process the reservation in a separate transaction.
+      try {
+        const reservationId = await this.prisma.$transaction(async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-sync:${venueId}:${provider}:${event.externalId}`}))`;
           const fields: Prisma.ReservationUpdateInput = {
             guestName: event.guestName,
@@ -287,7 +300,7 @@ export class ReservationsController {
             where: { venueId, source: provider, externalId: event.externalId },
             select: { id: true },
           });
-          const reservationId = existing
+          return existing
             ? (await tx.reservation.update({ where: { id: existing.id }, data: fields, select: { id: true } })).id
             : (await tx.reservation.create({
                 data: {
@@ -306,26 +319,21 @@ export class ReservationsController {
                 },
                 select: { id: true },
               })).id;
-
-          await tx.reservationSyncEvent.updateMany({
-            where: { venueId, provider, externalEventId: event.externalEventId },
-            data: {
-              reservationId,
-              processedAt: now,
-              status: 'processed',
-              errorMessage: null,
-            },
-          });
-          return 'processed' as const;
         });
-        if (outcome === 'duplicate') duplicates += 1;
-        else processed += 1;
+
+        // 3) Mark processed (committed independently of the processing tx).
+        await this.prisma.reservationSyncEvent.updateMany({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          data: { reservationId, processedAt: new Date(), status: 'processed', errorMessage: null },
+        });
+        processed += 1;
       } catch (error: any) {
-        failed += 1;
+        // The 'processing' row was committed in step 1, so this update matches it.
         await this.prisma.reservationSyncEvent.updateMany({
           where: { venueId, provider, externalEventId: event.externalEventId },
           data: { status: 'failed', errorMessage: String(error?.message ?? error).slice(0, 500) },
         });
+        failed += 1;
       }
     }
 

@@ -87,7 +87,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     });
 
     it('accepts a valid token backed by a real Session row', async () => {
-      const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
+      const token = signTestToken(jwt, { sub: subscribedSession!.userId, sid: subscribedSession!.sid });
       const res = await request(app.getHttpServer())
         .get('/api/v1/app/me')
         .set('Authorization', `Bearer ${token}`)
@@ -99,7 +99,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
 
   describe('billing gate', () => {
     it('returns 402 for a venue without an active subscription', async () => {
-      const token = signTestToken(jwt, { sub: unsubscribedSession.userId, sid: unsubscribedSession.sid });
+      const token = signTestToken(jwt, { sub: unsubscribedSession!.userId, sid: unsubscribedSession!.sid });
       await request(app.getHttpServer())
         .get('/api/v1/scheduling/availability/me')
         .set('Authorization', `Bearer ${token}`)
@@ -107,7 +107,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     });
 
     it('allows the same route for a venue with an active subscription', async () => {
-      const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
+      const token = signTestToken(jwt, { sub: subscribedSession!.userId, sid: subscribedSession!.sid });
       await request(app.getHttpServer())
         .get('/api/v1/scheduling/availability/me')
         .set('Authorization', `Bearer ${token}`)
@@ -117,7 +117,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
 
   describe('validation', () => {
     it('rejects a request body with unknown fields (whitelist: true, forbidNonWhitelisted: true)', async () => {
-      const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
+      const token = signTestToken(jwt, { sub: subscribedSession!.userId, sid: subscribedSession!.sid });
       await request(app.getHttpServer())
         .patch('/api/v1/app/venue')
         .set('Authorization', `Bearer ${token}`)

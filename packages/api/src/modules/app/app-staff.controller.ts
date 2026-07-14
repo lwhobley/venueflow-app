@@ -6,6 +6,7 @@ import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -109,7 +110,10 @@ const DEFAULT_ONBOARDING_TASKS = [
 ] as const;
 
 // Venue-staff roster CRUD for /v1/app/staff*. Split out of AppController;
-// routes, role checks, and response shapes are unchanged.
+// routes, role checks, and response shapes are unchanged. Subscription-gated
+// at the class level (matching the sibling /v1/staff StaffController) so an
+// expired venue can't keep reading staff PII / mutating the roster.
+@RequireSubscription()
 @Controller('v1/app')
 export class AppStaffController {
   constructor(

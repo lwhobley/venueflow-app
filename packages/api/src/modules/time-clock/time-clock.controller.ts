@@ -138,6 +138,7 @@ export class TimeClockController {
     };
   }
 
+  @RequireSubscription()
   @Get('me')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
     const profile = await this.prisma.profile.findUnique({
