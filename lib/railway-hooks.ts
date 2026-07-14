@@ -368,7 +368,7 @@ const mutationRoutes: Record<string, Route> = {
   'chat.toggleReaction': { path: (args) => `/v1/chat/messages/${args.messageId}/react`, method: 'POST', body: ({ emoji }) => ({ emoji }), invalidate: [['chat', 'getMessages']] },
   'chat.editMessage': { path: (args) => `/v1/chat/messages/${args.messageId}`, method: 'PATCH', body: ({ text }) => ({ text }), invalidate: [['chat', 'getMessages']] },
   'chat.uploadImage': { path: '/v1/chat/images', method: 'POST', body: ({ dataBase64, mimeType }) => ({ dataBase64, mimeType }) },
-  'floor.saveFloorPlan': { path: '/v1/floor', method: 'POST', body: ({ tables }) => ({ tables }), invalidate: [['floor', 'active'], ['floor', 'stats']] },
+  'floor.saveFloorPlan': { path: '/v1/floor', method: 'POST', body: mapFloorPlanBody, invalidate: [['floor', 'active'], ['floor', 'stats']] },
   'floor.clearActiveFloorPlan': { path: '/v1/floor', method: 'DELETE', invalidate: [['floor', 'active'], ['floor', 'stats']] },
   'tables.markDirty': { path: (args) => `/v1/floor/tables/${args.tableId ?? args.id ?? args}/status`, method: 'PATCH', body: () => ({ status: 'dirty' }), invalidate: [['floor', 'active'], ['floor', 'stats']] },
   'tables.markClean': { path: (args) => `/v1/floor/tables/${args.tableId ?? args.id ?? args}/status`, method: 'PATCH', body: () => ({ status: 'available' }), invalidate: [['floor', 'active'], ['floor', 'stats']] },
@@ -509,6 +509,41 @@ function stripVenue(args: any) {
 function stripVenueAndIds(args: any) {
   const { venueId, shiftId, id, ...rest } = args ?? {};
   return rest;
+}
+
+// The floor API expects `capacity` (not `seats`) per table and accepts a
+// top-level standalone `chairs` array plus the plan name/dimensions. The
+// editor's draft uses `seats`, so translate here — otherwise the API rejects
+// the save (capacity is required) and standalone chairs never persist.
+function mapFloorPlanBody(args: any) {
+  const { tables, chairs, name, width, height, backgroundImageUrl } = args ?? {};
+  return {
+    ...(name ? { name } : {}),
+    ...(typeof width === 'number' ? { width } : {}),
+    ...(typeof height === 'number' ? { height } : {}),
+    ...(typeof backgroundImageUrl === 'string' ? { backgroundImageUrl } : {}),
+    tables: (tables ?? []).map((table: any) => ({
+      id: table.id,
+      label: table.label,
+      x: table.x,
+      y: table.y,
+      width: table.width,
+      height: table.height,
+      shape: table.shape,
+      section: table.section,
+      capacity: table.capacity ?? table.seats,
+      seatLabelStyle: table.seatLabelStyle,
+      rotation: table.rotation,
+      minSpend: table.minSpend,
+      isReservable: table.isReservable,
+    })),
+    chairs: (chairs ?? []).map((chair: any) => ({
+      x: chair.x,
+      y: chair.y,
+      rotation: chair.rotation,
+      ...(chair.label ? { label: chair.label } : {}),
+    })),
+  };
 }
 
 function locationBody(args: any) {

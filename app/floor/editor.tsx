@@ -64,6 +64,59 @@ const MIN_SIZE = 50;
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 const snap = (v: number, grid = 10) => Math.round(v / grid) * grid;
 
+// A ready-made starter layout: a grid of tables across the service areas plus a
+// short row of standalone bar stools. Every position is clamped into the given
+// room, so it also lands sensibly in a smaller venue.
+function buildSampleLayout(venueW: number, venueH: number): { tables: DraftTable[]; chairs: DraftChair[] } {
+  const tables: DraftTable[] = [];
+  const chairs: DraftChair[] = [];
+  let n = 0;
+  const addTable = (shape: Shape, section: Section, x: number, y: number) => {
+    const d = shapeDefaults[shape];
+    n += 1;
+    tables.push({
+      key: `sample_t_${n}`,
+      label: `T${n}`,
+      shape,
+      seats: d.seats,
+      seatLabelStyle: 'number',
+      x: snap(clamp(x, 0, Math.max(0, venueW - d.width))),
+      y: snap(clamp(y, 0, Math.max(0, venueH - d.height))),
+      width: d.width,
+      height: d.height,
+      rotation: 0,
+      section,
+      minSpend: section === 'vip' ? 25000 : 0,
+      isReservable: true,
+    });
+  };
+
+  // Main dining: 2 rows × 3 columns of round 4-tops.
+  for (const ry of [90, 300]) for (const cx of [90, 300, 510]) addTable('round', 'main', cx, ry);
+  // Two large rectangle tables along the lower main area.
+  addTable('rect', 'main', 90, 520);
+  addTable('rect', 'main', 300, 520);
+  // VIP booths down the right side.
+  addTable('booth', 'vip', 760, 90);
+  addTable('booth', 'vip', 760, 240);
+  // Patio rounds, lower-right.
+  addTable('round', 'patio', 780, 420);
+  addTable('round', 'patio', 780, 560);
+
+  // A short bar: four standalone stools in a row.
+  for (let i = 0; i < 4; i += 1) {
+    chairs.push({
+      key: `sample_c_${i + 1}`,
+      x: snap(clamp(520 + i * 44, 0, Math.max(0, venueW - CHAIR_SIZE))),
+      y: snap(clamp(560, 0, Math.max(0, venueH - CHAIR_SIZE))),
+      rotation: 0,
+      label: '',
+    });
+  }
+
+  return { tables, chairs };
+}
+
 // Chair (seat) positions around a table in table-local coordinates.
 function chairPositions(shape: Shape, w: number, h: number, seats: number): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
@@ -485,6 +538,18 @@ export default function FloorEditorScreen() {
     setTimeout(() => setSaved(false), 2500);
   };
 
+  const loadSampleLayout = () => {
+    const sample = buildSampleLayout(venueW, venueH);
+    setTables(sample.tables);
+    setChairs(sample.chairs);
+    setSelectedKey(null);
+    setSelectedChairKey(null);
+    setClearMessage(
+      `Loaded a sample layout with ${sample.tables.length} tables and ${sample.chairs.length} chairs. Publish to save it.`,
+    );
+    setTimeout(() => setClearMessage(null), 4000);
+  };
+
   const onClearFloorPlan = async () => {
     if (!venue?.id) return;
     setTables([]);
@@ -529,6 +594,7 @@ export default function FloorEditorScreen() {
             <Button mode="contained-tonal" icon="rectangle-outline" onPress={() => addTable('rect')}>Rectangle</Button>
             <Button mode="contained-tonal" icon="sofa-outline" onPress={() => addTable('booth')}>Booth</Button>
             <Button mode="contained-tonal" icon="seat-outline" onPress={addChair}>Chair</Button>
+            <Button mode="contained-tonal" icon="auto-fix" onPress={loadSampleLayout}>Load sample</Button>
             <Button mode="outlined" textColor={colors.danger} icon="delete-sweep-outline" onPress={() => void onClearFloorPlan()}>Clear floor plan</Button>
           </View>
           {clearMessage ? <Text style={{ color: colors.muted }}>{clearMessage}</Text> : null}
