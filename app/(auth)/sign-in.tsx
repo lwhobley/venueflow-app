@@ -105,8 +105,9 @@ export default function SignInScreen() {
 
   const submit = async () => {
     const trimmed = email.trim();
-    if (!trimmed.includes('@') || password.trim().length < 6) {
-      Alert.alert('Check your details', 'Enter a valid email and a password with at least 6 characters.');
+    const minPasswordLength = flow === 'signUp' ? 8 : 6;
+    if (!trimmed.includes('@') || password.trim().length < minPasswordLength) {
+      Alert.alert('Check your details', `Enter a valid email and a password with at least ${minPasswordLength} characters.`);
       return;
     }
     if (flow === 'signUp' && !fullName.trim()) {

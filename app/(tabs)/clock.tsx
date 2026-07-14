@@ -185,7 +185,7 @@ export default function ClockScreen() {
         kind: 'time_correction',
         title: `Timesheet correction request for ${correctionDate}`,
         details: `Correct shift on ${correctionDate}: clock-in at ${correctionInTime}, clock-out at ${correctionOutTime}. Reason: ${correctionReason}`,
-        availability: {
+        timeCorrection: {
           timeEntryId: null,
           clockInAt,
           clockOutAt,

@@ -29,8 +29,8 @@ export default function ResetPasswordScreen() {
   };
 
   const reset = async () => {
-    if (!email.trim().includes('@') || !code.trim() || newPassword.length < 6) {
-      Alert.alert('Reset password', 'Enter your email, the reset code, and a new password.');
+    if (!email.trim().includes('@') || !code.trim() || newPassword.length < 8) {
+      Alert.alert('Reset password', 'Enter your email, the reset code, and a new password of at least 8 characters.');
       return;
     }
     setResetting(true);

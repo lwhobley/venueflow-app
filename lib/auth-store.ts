@@ -57,7 +57,17 @@ const webStorage = {
 
 const storage = Platform.OS === 'web' ? webStorage : secureStorage;
 
-const createAuthStore = (set: any): AuthState => ({
+// Zustand's set: accepts either a partial object or an updater function (this
+// store uses both). Typed explicitly so the returned shapes stay checked.
+type SetAuthState = (
+  partial:
+    | AuthState
+    | Partial<AuthState>
+    | ((state: AuthState) => AuthState | Partial<AuthState>),
+  replace?: false,
+) => void;
+
+const createAuthStore = (set: SetAuthState): AuthState => ({
   authEpoch: 0,
   hydrated: false,
   user: null,

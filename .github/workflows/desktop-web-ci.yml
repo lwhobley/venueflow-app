@@ -1,0 +1,50 @@
+name: Desktop Web CI
+
+# The desktop-web branch deploys the web frontend (app/, components/, lib/,
+# site/) to Cloudflare — but its deploy workflow only builds, it doesn't
+# typecheck. This gate runs the frontend typecheck on every push/PR so a
+# contract drift or type error can't ship to the web app unnoticed. It
+# intentionally does NOT touch packages/api (that is deployed from main and is
+# excluded from the root tsconfig).
+
+on:
+  push:
+    branches: [desktop-web]
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'tsconfig.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/desktop-web-ci.yml'
+  pull_request:
+    branches: [desktop-web]
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'tsconfig.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/desktop-web-ci.yml'
+
+jobs:
+  typecheck:
+    name: Frontend typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Root tsconfig excludes packages/api, so this compiles only the web app
+      # (app/, components/, lib/) and needs no Prisma client generation.
+      - name: Typecheck (app + lib)
+        run: npm run typecheck

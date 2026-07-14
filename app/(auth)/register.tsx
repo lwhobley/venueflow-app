@@ -38,7 +38,7 @@ export default function RegisterScreen() {
     if (!firstName.trim()) next.firstName = 'Required';
     if (!lastName.trim()) next.lastName = 'Required';
     if (!email.trim().includes('@')) next.email = 'Enter a valid email address.';
-    if (password.length < 6) next.password = 'At least 6 characters required.';
+    if (password.length < 8) next.password = 'At least 8 characters required.';
     if (password !== confirmPassword) next.confirmPassword = 'Passwords do not match.';
     if (!termsAccepted) next.terms = 'You must accept the terms to continue.';
     setErrors(next);
