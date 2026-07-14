@@ -8,11 +8,12 @@ import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
-import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
+import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
@@ -249,6 +250,7 @@ export class AppController {
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
     const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`register-venue:${user.sub}`}))`;
       // Re-check inside the transaction so a double-submit doesn't create a
       // second venue + subscription for an owner who already has one.
       const current = await tx.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
@@ -325,9 +327,10 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('dashboard')
   async getDashboard(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
+    const profile = await this.requireVenueProfile(user);
     if (!profile?.venue) return null;
     const canManage = isAdminRole(profile.role);
     const shiftWhere = {
@@ -373,9 +376,10 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('manager-insights')
   async getManagerInsights(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
+    const profile = await this.requireVenueProfile(user);
     if (!profile?.venueId || !isAdminRole(profile.role)) return null;
     const venueId = profile.venueId;
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -425,13 +429,13 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('notifications')
   async getNotifications(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venueId) return [];
+    const profile = await this.requireVenueProfile(user);
     const rows = await this.prisma.notificationEvent.findMany({
       where: {
-        venueId: profile.venueId,
+        venueId: profile.venueId!,
         OR: [
           { audience: 'staff' },
           ...(isAdminRole(profile.role) ? [{ audience: 'managers' }] : []),
@@ -473,10 +477,10 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('clock-board')
   async getClockBoard(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venue) return null;
+    const profile = await this.requireVenueProfile(user);
     const entries = await this.prisma.timeEntry.findMany({
       where: { venueId: profile.venueId!, isOpen: true },
       include: { profile: true, venue: true },
@@ -485,7 +489,7 @@ export class AppController {
     });
     const openEntries = entries.map((entry) => mapClockEntry(entry, entry.profile, entry.venue));
     return {
-      venue: mapVenue(profile.venue),
+      venue: mapVenue(profile.venue!),
       activeClockEntries: isAdminRole(profile.role) ? openEntries : [],
       employeeEntry: openEntries.find((entry) => entry.memberId === profile.id) ?? null,
       managerAlerts: [],
@@ -493,18 +497,17 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('time-clock')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile) return null;
+    const profile = await this.requireVenueProfile(user);
     const entries = await this.prisma.timeEntry.findMany({
       where: { profileId: profile.id },
       orderBy: { clockInAt: 'desc' },
       take: 100,
     });
     const open = entries.find((entry) => entry.isOpen) ?? null;
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = new Date(zonedDayBounds(profile.venue?.timezone ?? null, 0).start);
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const punches = entries
       .flatMap((entry) => [

@@ -218,7 +218,9 @@ export class StaffRequestsController {
       throw new ForbiddenException('Not authorized');
     }
 
-    const request = await this.prisma.staffRequest.findUnique({ where: { id } });
+    const result = await this.prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "StaffRequest" WHERE "id" = ${id} FOR UPDATE`;
+    const request = await tx.staffRequest.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Request not found');
     if (request.venueId !== scope.venueId) {
       throw new ForbiddenException('Request does not belong to this venue');
@@ -227,7 +229,7 @@ export class StaffRequestsController {
       throw new BadRequestException('Only pending requests can be reviewed');
     }
 
-    const reviewer = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+    const reviewer = await tx.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
 
     // Handle approval side-effects
     if (body.status === 'approved') {
@@ -235,13 +237,13 @@ export class StaffRequestsController {
         const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
         // Atomic decrement clamped at zero so two concurrent approvals can't
         // both read the same balance and under-deduct (lost update).
-        await this.prisma.$executeRaw`
+        await tx.$executeRaw`
           UPDATE "Profile"
           SET "sickHoursAccrued" = GREATEST(0, "sickHoursAccrued" - ${hours})
           WHERE id = ${request.profileId}`;
       } else if (request.kind === 'time_off') {
         const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
-        await this.prisma.$executeRaw`
+        await tx.$executeRaw`
           UPDATE "Profile"
           SET "ptoHoursAccrued" = GREATEST(0, "ptoHoursAccrued" - ${hours})
           WHERE id = ${request.profileId}`;
@@ -251,7 +253,7 @@ export class StaffRequestsController {
         const reqStart = request.requestedRangeStart || request.requestedForDate;
         const reqEnd = request.requestedRangeEnd || request.requestedForDate || reqStart;
         if (reqStart && reqEnd) {
-          const venue = await this.prisma.venue.findUnique({ where: { id: request.venueId }, select: { timezone: true } });
+          const venue = await tx.venue.findUnique({ where: { id: request.venueId }, select: { timezone: true } });
           const tz = venue?.timezone ?? null;
           const start = new Date(reqStart);
           const end = new Date(reqEnd);
@@ -260,7 +262,7 @@ export class StaffRequestsController {
             dayIndices.push(zonedDayOfWeek(tz, d.getTime()));
           }
           if (dayIndices.length > 0) {
-            await this.prisma.scheduleShift.updateMany({
+            await tx.scheduleShift.updateMany({
               where: {
                 venueId: request.venueId,
                 profileId: request.profileId,
@@ -281,11 +283,11 @@ export class StaffRequestsController {
           // Only correct a time entry that belongs to this venue AND the same
           // staff member who filed the request — never a foreign entry id
           // smuggled in via the client-supplied availability blob.
-          const target = await this.prisma.timeEntry.findFirst({
+          const target = await tx.timeEntry.findFirst({
             where: { id: correction.timeEntryId, venueId: request.venueId, profileId: request.profileId },
           });
           if (!target) throw new BadRequestException('Time entry not found for this request');
-          await this.prisma.timeEntry.update({
+          await tx.timeEntry.update({
             where: { id: target.id },
             data: {
               clockInAt: new Date(correction.clockInAt),
@@ -301,7 +303,7 @@ export class StaffRequestsController {
           const dayStart = new Date(correctedClockIn);
           dayStart.setHours(0, 0, 0, 0);
           const dayEnd = new Date(dayStart.getTime() + 86400000);
-          const existing = await this.prisma.timeEntry.findFirst({
+          const existing = await tx.timeEntry.findFirst({
             where: {
               profileId: request.profileId,
               venueId: request.venueId,
@@ -309,7 +311,7 @@ export class StaffRequestsController {
             },
           });
           if (existing) {
-            await this.prisma.timeEntry.update({
+            await tx.timeEntry.update({
               where: { id: existing.id },
               data: {
                 clockInAt: correctedClockIn,
@@ -318,7 +320,7 @@ export class StaffRequestsController {
               },
             });
           } else {
-            await this.prisma.timeEntry.create({
+            await tx.timeEntry.create({
               data: {
                 profileId: request.profileId,
                 venueId: request.venueId,
@@ -342,7 +344,7 @@ export class StaffRequestsController {
       }
     }
 
-    const updated = await this.prisma.staffRequest.update({
+    const updated = await tx.staffRequest.update({
       where: { id: request.id },
       data: {
         status: body.status as RequestStatus,
@@ -351,6 +353,9 @@ export class StaffRequestsController {
         responseNotes: body.responseNotes,
       },
     });
+    return { request, reviewer, updated };
+    });
+    const { request, reviewer, updated } = result;
 
     await this.notifications.notifyProfile({
       venueId: scope.venueId,

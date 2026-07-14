@@ -72,6 +72,13 @@ export class AppBillingController {
     await assertWithinSharedRateLimit(this.prisma, `stripe-checkout:${user.sub}`, 10, 60_000);
     const profile = await this.profiles.requireBillingProfile(user);
     const secret = this.requireStripeSecret();
+    const existing = await this.prisma.subscription.findFirst({
+      where: { venueId: profile.venueId! },
+      select: { status: true, platform: true, externalCustomerId: true },
+    });
+    if (existing?.platform === 'stripe' && (existing.status === 'active' || existing.status === 'trialing')) {
+      throw new BadRequestException('This venue already has an active Stripe subscription.');
+    }
     const priceId = await this.resolveStripePriceId(secret);
     const base = this.webBaseUrl();
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/checkout/sessions', {
@@ -80,6 +87,7 @@ export class AppBillingController {
       success_url: `${base}/app/billing?status=success`,
       cancel_url: `${base}/app/billing?status=cancelled`,
       client_reference_id: profile.venueId,
+      ...(existing?.externalCustomerId ? { customer: existing.externalCustomerId } : {}),
       allow_promotion_codes: true,
       metadata: { venueId: profile.venueId },
       subscription_data: { metadata: { venueId: profile.venueId } },

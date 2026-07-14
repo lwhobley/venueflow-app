@@ -27,7 +27,11 @@ async function bootstrap() {
   // beyond that hop count can't be spoofed into req.ip. Configurable because
   // the actual hop count depends on the deployment topology; verify it against
   // the platform's proxy chain rather than assuming a single hop.
-  const trustProxyHops = config.get<number>('TRUST_PROXY_HOPS', 1);
+  const rawTrustProxyHops = config.get<string>('TRUST_PROXY_HOPS', '1');
+  const trustProxyHops = Number(rawTrustProxyHops);
+  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
+    throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
+  }
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   // Only accept fully-qualified http(s) origins. Reject wildcards — the server
   // sends credentials (cookies), and a wildcard origin with credentials is both

@@ -40,6 +40,7 @@ describe('tenant isolation extension (integration)', () => {
   }, 60_000);
 
   afterAll(async () => {
+    if (!base) return;
     await base.barInventoryItem.deleteMany();
     await base.venue.deleteMany();
     await teardown();

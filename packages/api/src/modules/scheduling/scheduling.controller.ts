@@ -42,6 +42,7 @@ import {
 } from '../../common/pay-period';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { withSerializableRetry } from '../../common/tx-retry';
+import { zonedDateBounds } from '../../common/venue-time';
 import { buildLaborForecast } from './labor-forecast';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
@@ -1247,11 +1248,13 @@ export class SchedulingController {
       'Too many AI schedule requests. Try again in a few minutes.',
     );
     const availabilityWeekStart = await this.resolveAvailabilityWeekStart(venueId, weekStartDate);
-    const weekStartDayUtc = new Date(`${availabilityWeekStart}T00:00:00.000Z`);
-    const weekEndDayUtc = new Date(weekStartDayUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true, weeklyLaborBudgetHours: true } });
+    const timezone = venue?.timezone ?? null;
+    const weekStartDayUtc = new Date(zonedDateBounds(timezone, availabilityWeekStart).start);
+    const nextWeekStart = addDays(availabilityWeekStart, 7);
+    const weekEndDayUtc = new Date(zonedDateBounds(timezone, nextWeekStart).start);
 
-    const [venue, shifts, staff, availability, reservations, venueEvents, memoryNotes] = await Promise.all([
-      this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true, weeklyLaborBudgetHours: true } }),
+    const [shifts, staff, availability, reservations, venueEvents, memoryNotes] = await Promise.all([
       this.prisma.scheduleShift.findMany({ where: { venueId } }),
       this.prisma.profile.findMany({ where: { venueId }, orderBy: { fullName: 'asc' } }),
       this.prisma.availability.findMany({ where: { venueId, weekStart: availabilityWeekStart } }),
