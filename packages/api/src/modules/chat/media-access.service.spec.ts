@@ -15,7 +15,7 @@ describe('MediaAccessService', () => {
       .resolves.toBe('/v1/chat/images/image-1?token=signed-token');
     expect(jwt.signAsync).toHaveBeenCalledWith(
       { purpose: 'media-access', kind: 'chat-image', mediaId: 'image-1', venueId: 'venue-1' },
-      { expiresIn: '1h' },
+      { expiresIn: '15m' },
     );
   });
 

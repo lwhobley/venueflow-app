@@ -243,81 +243,95 @@ export class ReservationsController {
     const now = new Date();
     let duplicates = 0;
     let processed = 0;
+    let failed = 0;
 
-    await this.prisma.$transaction(async (tx) => {
-      for (const event of body.events) {
-        try {
-          await tx.reservationSyncEvent.create({
-            data: {
-              venueId,
-              provider,
-              externalEventId: event.externalEventId,
-              eventType: event.eventType,
-              payload: event as unknown as Prisma.InputJsonValue,
-              processedAt: now,
-              status: 'processing',
-            },
-          });
-        } catch (error: any) {
-          if (error?.code === 'P2002') {
-            duplicates += 1;
-            continue;
-          }
-          throw error;
-        }
-
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-sync:${venueId}:${provider}:${event.externalId}`}))`;
-        const fields: Prisma.ReservationUpdateInput = {
-          guestName: event.guestName,
-          partySize: event.partySize,
-          reservationTime: new Date(event.reservationTime),
-          durationMinutes: event.durationMinutes ?? 90,
-          status: (event.status ?? 'confirmed') as ReservationStatus,
-          guestPhone: event.phone?.trim() ?? null,
-          guestEmail: event.email?.trim() ?? null,
-          notes: event.notes?.trim() ?? null,
-          specialRequests: event.specialRequests?.trim() ?? null,
-        };
-        const existing = await tx.reservation.findFirst({
-          where: { venueId, source: provider, externalId: event.externalId },
-          select: { id: true },
-        });
-        const reservationId = existing
-          ? (await tx.reservation.update({ where: { id: existing.id }, data: fields, select: { id: true } })).id
-          : (await tx.reservation.create({
+    // Each event gets its own transaction: a poison event fails (and its
+    // idempotency row commits as errored) without rolling back every event
+    // already processed earlier in the same batch, and without forcing the
+    // provider to redeliver the whole batch on retry.
+    for (const event of body.events) {
+      try {
+        const outcome = await this.prisma.$transaction(async (tx) => {
+          try {
+            await tx.reservationSyncEvent.create({
               data: {
                 venueId,
-                source: provider,
-                externalId: event.externalId,
-                guestName: event.guestName,
-                partySize: event.partySize,
-                reservationTime: new Date(event.reservationTime),
-                durationMinutes: event.durationMinutes ?? 90,
-                status: (event.status ?? 'confirmed') as ReservationStatus,
-                guestPhone: event.phone?.trim() ?? null,
-                guestEmail: event.email?.trim() ?? null,
-                notes: event.notes?.trim() ?? null,
-                specialRequests: event.specialRequests?.trim() ?? null,
+                provider,
+                externalEventId: event.externalEventId,
+                eventType: event.eventType,
+                payload: event as unknown as Prisma.InputJsonValue,
+                processedAt: now,
+                status: 'processing',
               },
-              select: { id: true },
-            })).id;
+            });
+          } catch (error: any) {
+            if (error?.code === 'P2002') {
+              return 'duplicate' as const;
+            }
+            throw error;
+          }
 
-        await tx.reservationSyncEvent.updateMany({
-          where: { venueId, provider, externalEventId: event.externalEventId },
-          data: {
-            reservationId,
-            processedAt: now,
-            status: 'processed',
-            errorMessage: null,
-          },
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-sync:${venueId}:${provider}:${event.externalId}`}))`;
+          const fields: Prisma.ReservationUpdateInput = {
+            guestName: event.guestName,
+            partySize: event.partySize,
+            reservationTime: new Date(event.reservationTime),
+            durationMinutes: event.durationMinutes ?? 90,
+            status: (event.status ?? 'confirmed') as ReservationStatus,
+            guestPhone: event.phone?.trim() ?? null,
+            guestEmail: event.email?.trim() ?? null,
+            notes: event.notes?.trim() ?? null,
+            specialRequests: event.specialRequests?.trim() ?? null,
+          };
+          const existing = await tx.reservation.findFirst({
+            where: { venueId, source: provider, externalId: event.externalId },
+            select: { id: true },
+          });
+          const reservationId = existing
+            ? (await tx.reservation.update({ where: { id: existing.id }, data: fields, select: { id: true } })).id
+            : (await tx.reservation.create({
+                data: {
+                  venueId,
+                  source: provider,
+                  externalId: event.externalId,
+                  guestName: event.guestName,
+                  partySize: event.partySize,
+                  reservationTime: new Date(event.reservationTime),
+                  durationMinutes: event.durationMinutes ?? 90,
+                  status: (event.status ?? 'confirmed') as ReservationStatus,
+                  guestPhone: event.phone?.trim() ?? null,
+                  guestEmail: event.email?.trim() ?? null,
+                  notes: event.notes?.trim() ?? null,
+                  specialRequests: event.specialRequests?.trim() ?? null,
+                },
+                select: { id: true },
+              })).id;
+
+          await tx.reservationSyncEvent.updateMany({
+            where: { venueId, provider, externalEventId: event.externalEventId },
+            data: {
+              reservationId,
+              processedAt: now,
+              status: 'processed',
+              errorMessage: null,
+            },
+          });
+          return 'processed' as const;
         });
-        processed += 1;
+        if (outcome === 'duplicate') duplicates += 1;
+        else processed += 1;
+      } catch (error: any) {
+        failed += 1;
+        await this.prisma.reservationSyncEvent.updateMany({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          data: { status: 'failed', errorMessage: String(error?.message ?? error).slice(0, 500) },
+        });
       }
+    }
 
-      await tx.reservationConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });
-    });
+    await this.prisma.reservationConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });
 
-    return { ok: true, processed, duplicates };
+    return { ok: true, processed, duplicates, failed };
   }
 
   @RequireSubscription('active')

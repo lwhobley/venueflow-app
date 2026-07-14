@@ -18,6 +18,7 @@ type Scope = VenueScopedRequest['venueScope'];
 
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 const MAX_INGEST_ROWS = 1000;
+const INGEST_CHUNK_SIZE = 100;
 const INGEST_RATE_LIMIT_MAX = 120;
 const INGEST_RATE_LIMIT_WINDOW_MS = 60_000;
 // Source of truth for which POS providers can register a webhook connection.
@@ -185,8 +186,11 @@ export class PosController {
       throw new UnauthorizedException('Invalid webhook secret');
     }
 
-    // Batch all upserts into a single transaction to eliminate per-row roundtrips.
-    await this.prisma.$transaction([
+    // Batch upserts into chunked transactions (not one single transaction for
+    // the whole payload) so a large delivery (up to MAX_INGEST_ROWS checks +
+    // MAX_INGEST_ROWS labor punches) can't hold one transaction's locks for an
+    // extended period.
+    const operations = [
       ...( body.checks ?? []).map((check) => {
         const data = {
           tableLabel: check.tableLabel ?? null,
@@ -240,7 +244,10 @@ export class PosController {
           update: data,
         });
       }),
-    ]);
+    ];
+    for (let i = 0; i < operations.length; i += INGEST_CHUNK_SIZE) {
+      await this.prisma.$transaction(operations.slice(i, i + INGEST_CHUNK_SIZE));
+    }
 
     const checksUpserted = (body.checks ?? []).length;
     const laborUpserted = (body.laborPunches ?? []).length;

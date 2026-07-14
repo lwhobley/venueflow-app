@@ -22,6 +22,10 @@ const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const EMAIL_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 600_000;
+// Applies to newly-set passwords (signup, change, reset). Sign-in keeps the
+// DTO's lower MinLength(6) floor so existing users with a shorter legacy
+// password are not locked out.
+const MIN_NEW_PASSWORD_LENGTH = 8;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
@@ -152,6 +156,11 @@ export class AuthController {
     if (user?.password) {
       throw new BadRequestException('An account already exists for this email. Sign in instead.');
     }
+    // The DTO's MinLength(6) is a floor shared with sign-in (existing users may
+    // have shorter legacy passwords); new passwords must meet the current bar.
+    if (body.password.length < MIN_NEW_PASSWORD_LENGTH) {
+      throw new BadRequestException(`Password must be at least ${MIN_NEW_PASSWORD_LENGTH} characters.`);
+    }
 
     // Build the display name from fullName (legacy) or firstName + lastName.
     const resolvedFullName = body.fullName?.trim()
@@ -278,6 +287,9 @@ export class AuthController {
   @Post('change-password')
   async changePassword(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: ChangePasswordDto) {
     await assertWithinSharedRateLimit(this.prisma, `change-password:${user.sub}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+    if (body.newPassword.length < MIN_NEW_PASSWORD_LENGTH) {
+      throw new BadRequestException(`Password must be at least ${MIN_NEW_PASSWORD_LENGTH} characters.`);
+    }
     const existing = await this.prisma.passwordCredential.findUnique({ where: { userId: user.sub } });
     if (existing) {
       const ok = await this.authService.verifyPassword(body.currentPassword ?? '', existing.salt, existing.iterations, existing.passwordHash);
@@ -342,7 +354,7 @@ export class AuthController {
     if (account.emailVerificationSentAt.getTime() + EMAIL_CODE_TTL_MS < Date.now()) {
       throw new BadRequestException('That verification code has expired. Request a new code.');
     }
-    if (account.emailVerificationCodeHash !== this.authService.hashOneTimeCode(body.code)) {
+    if (!this.authService.oneTimeCodeHashesMatch(account.emailVerificationCodeHash, this.authService.hashOneTimeCode(body.code))) {
       throw new BadRequestException('That verification code is not valid.');
     }
     await this.prisma.user.update({
@@ -397,6 +409,9 @@ export class AuthController {
   @Post('reset-password')
   async resetPassword(@Req() request: Request, @Body() body: ResetPasswordDto) {
     const email = body.email.trim().toLowerCase();
+    if (body.newPassword.length < MIN_NEW_PASSWORD_LENGTH) {
+      throw new BadRequestException(`Password must be at least ${MIN_NEW_PASSWORD_LENGTH} characters.`);
+    }
     await assertWithinSharedRateLimit(this.prisma, `reset-password:ip:${getClientIp(request)}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `reset-password:email:${email}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
 
@@ -412,7 +427,7 @@ export class AuthController {
       !account?.passwordResetCodeHash ||
       !account.passwordResetExpiresAt ||
       account.passwordResetExpiresAt.getTime() < Date.now() ||
-      account.passwordResetCodeHash !== this.authService.hashOneTimeCode(body.code)
+      !this.authService.oneTimeCodeHashesMatch(account.passwordResetCodeHash, this.authService.hashOneTimeCode(body.code))
     ) {
       throw new BadRequestException('That password reset code is invalid or expired.');
     }

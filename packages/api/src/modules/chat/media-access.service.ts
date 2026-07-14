@@ -17,7 +17,11 @@ export class MediaAccessService {
   async createPath(kind: MediaKind, mediaId: string, venueId: string, path: string): Promise<string> {
     const token = await this.jwt.signAsync<MediaAccessClaims>(
       { purpose: 'media-access', kind, mediaId, venueId },
-      { expiresIn: '1h' },
+      // Short-lived: this token is the only gate on an otherwise-public image
+      // route (React Native <Image> can't send a bearer header). 15 minutes
+      // comfortably covers a single viewing session while limiting exposure
+      // if the URL leaks (logs, screenshots, shared links).
+      { expiresIn: '15m' },
     );
     return `${path}?token=${encodeURIComponent(token)}`;
   }

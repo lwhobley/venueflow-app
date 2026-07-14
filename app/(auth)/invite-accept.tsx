@@ -35,7 +35,7 @@ export default function InviteAcceptScreen() {
   const validate = (): string | null => {
     if (!fullName.trim()) return 'Enter your name.';
     if (!email.trim().includes('@')) return 'Enter a valid email address.';
-    if (password.length < 6) return 'Password must be at least 6 characters.';
+    if (password.length < 8) return 'Password must be at least 8 characters.';
     if (password !== confirmPassword) return 'Passwords do not match.';
     return null;
   };

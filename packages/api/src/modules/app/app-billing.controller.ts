@@ -50,8 +50,8 @@ export class AppBillingController {
       venueId: subscription.venueId,
       status: subscription.status,
       platform: subscription.platform,
-      trialStartedAt: subscription.trialStartedAt.getTime(),
-      trialEndsAt: subscription.trialEndsAt.getTime(),
+      trialStartedAt: toMs(subscription.trialStartedAt),
+      trialEndsAt: toMs(subscription.trialEndsAt),
       currentPeriodStart: toMs(subscription.currentPeriodStart),
       currentPeriodEnd: toMs(subscription.currentPeriodEnd),
       cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
@@ -129,12 +129,16 @@ export class AppBillingController {
   }
 
   // Prefer an explicitly configured price; otherwise reuse-or-create one keyed
-  // by a stable lookup_key so we never accumulate duplicate prices.
+  // by a stable lookup_key so we never accumulate duplicate prices. Provisioning
+  // pricing from a request path is a fallback for environments that haven't set
+  // STRIPE_PRICE_ID yet, not the intended steady state — set it once the price
+  // exists so pricing is deploy-configured rather than created ad hoc.
   private async resolveStripePriceId(secret: string): Promise<string> {
     const configured = this.config.get<string>('STRIPE_PRICE_ID');
     if (configured) return configured;
     if (this.cachedStripePriceId) return this.cachedStripePriceId;
 
+    this.logger.warn('STRIPE_PRICE_ID is not configured; resolving/creating a price at request time. Set STRIPE_PRICE_ID once a price exists to avoid this.');
     const found = await stripeRequest<{ data?: { id: string }[] }>(secret, 'GET', '/prices', {
       lookup_keys: [STRIPE_PRICE_LOOKUP_KEY],
       active: true,
@@ -222,8 +226,12 @@ export class AppBillingController {
           planId: body.productId,
           priceCents: 0,
           currency: 'USD',
-          trialStartedAt: now,
-          trialEndsAt: now,
+          // status is always 'active' here (verified real-money entitlement),
+          // never a trial — leave trial dates unset rather than stamping
+          // "now" for both, which would misrepresent this as an instantly
+          // expired trial.
+          trialStartedAt: null,
+          trialEndsAt: null,
           currentPeriodStart: verified.currentPeriodStart ?? now,
           currentPeriodEnd: verified.currentPeriodEnd,
           cancelAtPeriodEnd: false,

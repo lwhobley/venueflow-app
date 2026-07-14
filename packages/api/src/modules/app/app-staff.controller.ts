@@ -286,10 +286,6 @@ export class AppStaffController {
     } else {
       existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
     }
-    if (existing) {
-      const isDemoting = isOwnerOrAdminRole(existing.role) && !isOwnerOrAdminRole(body.role);
-      await this.assertCanManageLegacyStaffTarget(viewer, existing, isDemoting);
-    }
     const employeeFields = {
       phone: body.phone?.trim() || null,
       altPhone: body.altPhone?.trim() || null,
@@ -300,6 +296,8 @@ export class AppStaffController {
     const row = await this.prisma.$transaction(async (tx) => {
       let created;
       if (existing) {
+        const isDemoting = isOwnerOrAdminRole(existing.role) && !isOwnerOrAdminRole(body.role);
+        await this.assertCanManageLegacyStaffTarget(viewer, existing, isDemoting, tx);
         const roleChanged = existing.role !== body.role || existing.venueId !== body.venueId;
         created = await tx.profile.update({
           where: { id: existing.id },
@@ -366,8 +364,8 @@ export class AppStaffController {
     const viewer = await this.profiles.requireManagerProfile(user);
     const staff = await this.prisma.profile.findFirst({ where: { id: staffId, venueId: viewer.venueId! } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    await this.assertCanManageLegacyStaffTarget(viewer, staff, true);
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertCanManageLegacyStaffTarget(viewer, staff, true, tx);
       const u = await tx.profile.update({ where: { id: staff.id }, data: { venueId: null } });
       if (staff.userId) {
         await tx.session.deleteMany({ where: { userId: staff.userId } });
@@ -394,6 +392,7 @@ export class AppStaffController {
     viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null },
     target: { id: string; role: Role; venueId: string | null },
     demotingOrRemoving = false,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
     // Editing your own profile is always allowed; the last-owner guard below
     // still prevents a sole owner from self-demoting out of access.
@@ -404,7 +403,10 @@ export class AppStaffController {
     // remove or demote the target. Harmless edits (name, phone, job title) on
     // the sole owner/admin are safe and should not be blocked.
     if (demotingOrRemoving && isOwnerOrAdminRole(target.role)) {
-      const ownerAdminCount = await this.prisma.profile.count({
+      // Advisory-lock the venue so two concurrent demotions/removals can't both
+      // read the same pre-write count and both pass the guard.
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${viewer.venueId}`}))`;
+      const ownerAdminCount = await db.profile.count({
         where: { venueId: viewer.venueId, role: { in: ['owner', 'admin'] } },
       });
       if (ownerAdminCount <= 1) {

@@ -106,6 +106,12 @@ export class BillingController {
     if (!event?.type || !venueId) {
       return { ok: true, ignored: true };
     }
+    // Only apply state for the product/entitlement this app actually sells.
+    // Without this, any event RevenueCat delivers under the same account
+    // (e.g. a different app's product) could flip a venue's status.
+    if (!this.isAllowedRevenueCatEvent(event.product_id, event.entitlement_ids)) {
+      return { ok: true, ignored: true };
+    }
 
     const expiresInFuture = event.expiration_at_ms ? event.expiration_at_ms > Date.now() : false;
     const status = event.type === 'CANCELLATION' && expiresInFuture
@@ -207,6 +213,21 @@ export class BillingController {
     }
 
     return { ok: true, ignored: true };
+  }
+
+  private isAllowedRevenueCatEvent(productId: string | undefined, entitlementIds: string[] | undefined): boolean {
+    const allowedProducts = this.csvEnv('REVENUECAT_ALLOWED_PRODUCT_IDS', 'com.venuewrangler.monthly');
+    const allowedEntitlements = this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro');
+    if (productId && !allowedProducts.has(productId)) return false;
+    if (entitlementIds && entitlementIds.length > 0 && !entitlementIds.some((id) => allowedEntitlements.has(id))) {
+      return false;
+    }
+    return true;
+  }
+
+  private csvEnv(key: string, fallback: string): Set<string> {
+    const raw = this.config.get<string>(key) ?? fallback;
+    return new Set(raw.split(',').map((value) => value.trim()).filter(Boolean));
   }
 
   private async resolveStripeVenueId(object: any): Promise<string | null> {
@@ -409,8 +430,13 @@ export class BillingController {
               planId: input.planId,
               priceCents: input.priceCents ?? 0,
               currency: input.currency ?? 'USD',
-              trialStartedAt: now,
-              trialEndsAt: now,
+              // Only a genuinely trialing subscription has trial dates; a
+              // subscription applied directly at another status (e.g. an
+              // active Stripe/Apple event with no prior trial) has none —
+              // stamping "now" for both would misrepresent it as a trial that
+              // started and instantly expired.
+              trialStartedAt: input.status === 'trialing' ? now : null,
+              trialEndsAt: input.status === 'trialing' ? now : null,
               currentPeriodStart: input.currentPeriodStart ?? now,
               currentPeriodEnd: input.currentPeriodEnd,
               cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,

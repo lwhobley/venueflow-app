@@ -88,7 +88,10 @@ export class AiSchedulerService {
       const availabilityText = windows.length
         ? windows.map((w) => `${dayLabel(w.dayIndex)} ${minutesToTime(w.startMinutes)}-${minutesToTime(w.endMinutes)}`).join(', ')
         : 'no availability submitted';
-      lines.push(`- id=${member.id} name=${member.fullName} jobTitle=${member.jobTitle} role=${member.role} availability=[${availabilityText}]`);
+      // Deliberately no staff name here: the model only needs `id` to assign a
+      // shift, and the caller re-resolves display names locally from `id` on
+      // the response — no reason to send staff PII to a third-party model.
+      lines.push(`- id=${member.id} jobTitle=${member.jobTitle} role=${member.role} availability=[${availabilityText}]`);
     }
 
     lines.push('Shifts already on the schedule (do not duplicate this coverage):');

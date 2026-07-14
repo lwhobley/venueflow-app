@@ -25,6 +25,12 @@ export function assertWithinGeofence(
   if (accuracy > 50) {
     throw new BadRequestException('Location accuracy must be 50m or better.');
   }
+  // A new venue defaults to (0,0) until a manager sets real coordinates. Left
+  // unguarded, every clock punch would be evaluated against a geofence in the
+  // Gulf of Guinea and fail with a confusing "outside the venue" error.
+  if (venue.latitude === 0 && venue.longitude === 0) {
+    throw new BadRequestException('This venue\'s location is not configured yet. Ask a manager to set it in Venue Settings.');
+  }
   const earthRadius = 6371000;
   const toRadians = (value: number) => (value * Math.PI) / 180;
   const deltaLat = toRadians(lat - venue.latitude);

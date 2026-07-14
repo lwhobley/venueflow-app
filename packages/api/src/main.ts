@@ -20,10 +20,15 @@ async function bootstrap() {
   initSentry();
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.enableShutdownHooks();
-  // Behind Railway's proxy: trust the first hop so req.ip and X-Forwarded-For
-  // reflect the real client (used for rate-limit keys), not the proxy.
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
   const config = app.get(ConfigService);
+  // Behind the platform's proxy: trust exactly as many hops as sit in front of
+  // this process so req.ip reflects the real client (used for rate-limit
+  // keys), not the proxy — and so a client-supplied X-Forwarded-For entry
+  // beyond that hop count can't be spoofed into req.ip. Configurable because
+  // the actual hop count depends on the deployment topology; verify it against
+  // the platform's proxy chain rather than assuming a single hop.
+  const trustProxyHops = config.get<number>('TRUST_PROXY_HOPS', 1);
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   // Only accept fully-qualified http(s) origins. Reject wildcards — the server
   // sends credentials (cookies), and a wildcard origin with credentials is both
   // spec-violating and dangerous if the middleware ever reflects the requester.

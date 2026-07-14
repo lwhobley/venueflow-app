@@ -33,8 +33,12 @@ export class S3ImageService {
     return key;
   }
 
-  /** Generate a pre-signed GET URL valid for 1 hour. */
-  async getPresignedUrl(key: string, expiresInSeconds = 3600): Promise<string> {
+  /**
+   * Generate a pre-signed GET URL. Short-lived by default: this URL requires
+   * no auth at all once issued, so keep the window tight — it's only meant to
+   * be followed immediately via the 302 redirect from the media-access route.
+   */
+  async getPresignedUrl(key: string, expiresInSeconds = 300): Promise<string> {
     const { GetObjectCommand } = await import('@aws-sdk/client-s3');
     return getSignedUrl(
       this.s3,

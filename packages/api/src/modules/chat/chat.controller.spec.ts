@@ -26,6 +26,7 @@ function makeController() {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ id: 'msg-created' }),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockReturnValue('message-delete-many'),
     },
     chatImage: {

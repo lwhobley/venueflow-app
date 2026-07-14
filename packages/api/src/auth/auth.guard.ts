@@ -7,7 +7,8 @@ import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { enterTenant } from '../prisma/tenant-context';
 
-const TENANT_ISOLATION_ENFORCED = process.env['TENANT_ISOLATION_ENFORCED'] === 'true';
+// Enforced by default (fail-closed); set to 'false' to roll back instantly.
+const TENANT_ISOLATION_ENFORCED = process.env['TENANT_ISOLATION_ENFORCED'] !== 'false';
 
 export type AuthUser = {
   sub: string;
