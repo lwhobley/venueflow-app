@@ -3,6 +3,8 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
+delete config.watcher?.unstable_workerThreads;
+
 const apiPath = path.join(__dirname, 'packages/api').replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 
 config.resolver.blockList = [

@@ -48,7 +48,7 @@ export default function SignInScreen() {
   const inviteToken = typeof inviteParam === 'string' ? inviteParam : undefined;
   const [invitePreview] = useState<InvitePreview | null>(null);
 
-  const [flow, setFlow] = useState<'signIn' | 'signUp'>('signUp');
+  const [flow, setFlow] = useState<'signIn' | 'signUp'>(inviteToken ? 'signUp' : 'signIn');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -148,7 +148,7 @@ export default function SignInScreen() {
           <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
           {!inviteToken ? (
             <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>
-              Time tracking, scheduling, reservations, and team chat. Create a free account to get started - your 14-day trial begins right away.
+              Time tracking, scheduling, reservations, and team chat for venue teams.
             </Text>
           ) : null}
         </View>
@@ -165,12 +165,14 @@ export default function SignInScreen() {
               <Text style={{ color: authColors.danger, textAlign: 'center' }}>{formError}</Text>
             ) : null}
 
-            <SegmentedButtons
-              theme={authControlTheme}
-              value={flow}
-              onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
-              buttons={[{ value: 'signUp', label: 'Create account' }, { value: 'signIn', label: 'Sign in' }]}
-            />
+            {inviteToken ? (
+              <SegmentedButtons
+                theme={authControlTheme}
+                value={flow}
+                onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
+                buttons={[{ value: 'signUp', label: 'Join team' }, { value: 'signIn', label: 'Sign in' }]}
+              />
+            ) : null}
 
             {flow === 'signUp' ? (
               <TextInput {...authInputProps} label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
@@ -180,13 +182,13 @@ export default function SignInScreen() {
 
             <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
-                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Create free account')
+                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Join team')
                 : 'Sign in'}
             </Button>
 
             {!inviteToken ? (
               <Text style={{ color: authColors.muted, fontSize: 12, textAlign: 'center' }}>
-                You don't need a venue to sign up. An admin or manager adds your email to their team to give you access.
+                Use the review credentials provided in App Store Connect. Team members join by invitation from their venue manager.
               </Text>
             ) : null}
           </Card.Content>

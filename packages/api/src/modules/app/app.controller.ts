@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, GoneException, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { Role } from '@prisma/client';
 import { randomBytes } from 'crypto';
@@ -194,70 +194,9 @@ export class AppController {
   @UseGuards(AuthGuard)
   @Post('register-venue')
   async registerVenue(@CurrentUser() user: AuthUser, @Body() body: RegisterVenueDto) {
-    await this.ensureUser(user);
-    const businessName = body.businessName.trim();
-    if (!businessName) throw new Error('Enter your business name');
-    if (body.staffRange === '50+') throw new Error('For 50+ staff, please contact admin@venuewrangler.com to set up your account.');
-    if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new Error('Choose a staff size range');
-
-    const existingProfile = await this.getProfile(user);
-    if (existingProfile?.venue) {
-      return { profile: this.mapProfile(existingProfile), venue: this.mapVenue(existingProfile.venue) };
-    }
-
-    const plan = planForStaffRange(body.staffRange);
-    const trialStartedAt = new Date();
-    const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
-    const result = await this.prisma.$transaction(async (tx) => {
-      const venue = await tx.venue.create({
-        data: {
-          name: businessName,
-          latitude: 0,
-          longitude: 0,
-          geofenceRadiusM: 150,
-          phone: body.phone?.trim() || null,
-          address: body.address?.trim() || null,
-          venueType: body.venueType?.trim() || null,
-          staffRange: body.staffRange,
-          subscriptionStatus: 'trialing',
-          subscriptionPlatform: null,
-        },
-      });
-      await tx.subscription.create({
-        data: {
-          venueId: venue.id,
-          status: 'trialing',
-          platform: null,
-          planId: plan.planId,
-          priceCents: plan.priceCents,
-          currency: 'USD',
-          trialStartedAt,
-          trialEndsAt,
-          cancelAtPeriodEnd: false,
-        },
-      });
-      const profile = await tx.profile.upsert({
-        where: { userId: user.sub },
-        update: {
-          venueId: venue.id,
-          role: 'admin',
-          jobTitle: 'Owner',
-          fullName: body.ownerName?.trim() || existingProfile?.fullName || user.name || 'Owner',
-        },
-        create: {
-          userId: user.sub,
-          email: user.email ?? `${user.sub}@venuewrangler.local`,
-          fullName: body.ownerName?.trim() || user.name || 'Owner',
-          role: 'admin',
-          jobTitle: 'Owner',
-          venueId: venue.id,
-          trialEndsAt,
-        },
-      });
-      return { profile, venue };
-    });
-
-    return { profile: this.mapProfile(result.profile), venue: this.mapVenue(result.venue) };
+    void user;
+    void body;
+    throw new GoneException('Venue registration is handled outside the app.');
   }
 
   @UseGuards(AuthGuard)

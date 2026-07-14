@@ -58,6 +58,9 @@ export class AuthController {
     if (user?.password) {
       throw new BadRequestException('An account already exists for this email. Sign in instead.');
     }
+    if (!body.inviteToken) {
+      throw new BadRequestException('Account creation requires an invitation from a venue manager.');
+    }
 
     const result = await hashPassword(body.password);
     const nextUser = await this.prisma.user.upsert({
