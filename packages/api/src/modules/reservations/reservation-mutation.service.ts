@@ -74,7 +74,7 @@ export class ReservationMutationService {
       durationMinutes: args.durationMinutes ?? 90,
     };
 
-    await this.assertNoHoldConflict(args.venueId, reservationTime);
+    await this.assertNoHoldConflict(args.venueId, reservationTime, data.durationMinutes);
 
     if (args.reservationId) {
       const existing = await this.prisma.reservation.findFirst({
@@ -141,8 +141,8 @@ export class ReservationMutationService {
     });
   }
 
-  private async assertNoHoldConflict(venueId: string, reservationTime: Date) {
-    const endTime = new Date(reservationTime.getTime() + 90 * 60 * 1000);
+  private async assertNoHoldConflict(venueId: string, reservationTime: Date, durationMinutes: number) {
+    const endTime = new Date(reservationTime.getTime() + durationMinutes * 60 * 1000);
     const hold = await this.prisma.reservationHold.findFirst({
       where: {
         venueId,

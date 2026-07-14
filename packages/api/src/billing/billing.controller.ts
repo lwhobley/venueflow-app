@@ -69,6 +69,8 @@ type SubscriptionInput = {
   currentPeriodStart?: Date | null;
   currentPeriodEnd?: Date | null;
   cancelAtPeriodEnd?: boolean;
+  trialStartedAt?: Date | null;
+  trialEndsAt?: Date | null;
   eventId?: string;
   eventType?: string;
   eventAt?: Date;
@@ -133,6 +135,8 @@ export class BillingController {
       externalCustomerId: venueId,
       currentPeriodStart: event.purchased_at_ms ? new Date(event.purchased_at_ms) : null,
       currentPeriodEnd: event.expiration_at_ms ? new Date(event.expiration_at_ms) : null,
+      trialStartedAt: status === 'trialing' && event.purchased_at_ms ? new Date(event.purchased_at_ms) : null,
+      trialEndsAt: status === 'trialing' && event.expiration_at_ms ? new Date(event.expiration_at_ms) : null,
       cancelAtPeriodEnd: event.type === 'CANCELLATION' && expiresInFuture,
       eventId: event.id ?? `${event.type}:${venueId}:${event.event_timestamp_ms ?? Date.now()}`,
       eventType: event.type,
@@ -193,6 +197,8 @@ export class BillingController {
         externalCustomerId: typeof object.customer === 'string' ? object.customer : null,
         currentPeriodStart: unixToDate(periodStart),
         currentPeriodEnd: unixToDate(periodEnd),
+        trialStartedAt: unixToDate(object.trial_start),
+        trialEndsAt: unixToDate(object.trial_end),
         cancelAtPeriodEnd: Boolean(object.cancel_at_period_end),
         eventId: event.id,
         eventType: event.type,
@@ -418,6 +424,8 @@ export class BillingController {
               cancelledAt: input.status === 'cancelled' ? now : input.status === 'active' ? null : existing.cancelledAt,
               externalSubscriptionId: input.externalSubscriptionId ?? existing.externalSubscriptionId,
               externalCustomerId: input.externalCustomerId ?? existing.externalCustomerId,
+              trialStartedAt: input.trialStartedAt !== undefined ? input.trialStartedAt : existing.trialStartedAt,
+              trialEndsAt: input.trialEndsAt !== undefined ? input.trialEndsAt : existing.trialEndsAt,
               ...eventTimestamp,
             },
           });
@@ -435,8 +443,8 @@ export class BillingController {
               // active Stripe/Apple event with no prior trial) has none —
               // stamping "now" for both would misrepresent it as a trial that
               // started and instantly expired.
-              trialStartedAt: input.status === 'trialing' ? now : null,
-              trialEndsAt: input.status === 'trialing' ? now : null,
+              trialStartedAt: input.trialStartedAt !== undefined ? input.trialStartedAt : (input.status === 'trialing' ? now : null),
+              trialEndsAt: input.trialEndsAt !== undefined ? input.trialEndsAt : (input.status === 'trialing' ? now : null),
               currentPeriodStart: input.currentPeriodStart ?? now,
               currentPeriodEnd: input.currentPeriodEnd,
               cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
