@@ -300,7 +300,9 @@ export class BarInventoryController {
   @RequireSubscription('active')
   @Get()
   async getBarStock(@CurrentUser() user: AuthUser) {
-    const profile = await this.requireManagerProfile(user);
+    // Read-only inventory is visible to any venue member; mutations below
+    // still require a manager profile.
+    const profile = await this.requireVenueProfile(user);
     const items = await this.prisma.barInventoryItem.findMany({
       where: { venueId: profile.venueId! },
       take: 300,
@@ -985,12 +987,19 @@ export class BarInventoryController {
   }
 
   private async requireManagerProfile(user: AuthUser) {
+    const profile = await this.requireVenueProfile(user);
+    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
+    return profile;
+  }
+
+  // Any active member of a venue — used for read-only inventory access. Edits
+  // still go through requireManagerProfile.
+  private async requireVenueProfile(user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
     if (profile.membershipStatus !== null && profile.membershipStatus !== 'active') {
       throw new ForbiddenException('Profile is not active for this venue');
     }
-    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
     return profile;
   }
 }
