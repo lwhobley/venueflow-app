@@ -16,7 +16,20 @@
       "Bash(rm -f convex/cleanup.ts)",
       "Bash(sed -n '1,45p' components/SubscriptionGate.tsx)",
       "Bash(node -e \"const m=require\\('./node_modules/@convex-dev/auth/dist/server/index.js'\\); console.log\\(Object.keys\\(m\\).filter\\(k=>/account|signIn|store|modify|retrieve|create/i.test\\(k\\)\\)\\)\")",
-      "PowerShell(cd \"C:\\\\Users\\\\lwhob\\\\Downloads\\\\a0-project\"; npx vitest run 2>&1 | Select-String \"Tests |FAIL\"; \"--- mutation/query counts + authz usage per new file ---\"; foreach \\($f in @\\('pos','push','reservationIntegrations','payroll','operations','barInventory','guests','notifications'\\)\\) { $p=\"convex/$f.ts\"; if \\(Test-Path $p\\) { $defs=\\(Select-String -Path $p -Pattern \"export const \\\\w+ = \\(mutation|query|action|internalMutation|internalQuery|internalAction\\)\"\\).Count; $authz=\\(Select-String -Path $p -Pattern \"require\\(VenueMember|VenueManager|Profile\\)|getAuthUserId\"\\).Count; \"$f : defs=$defs authz=$authz\" } })"
+      "PowerShell(cd \"C:\\\\Users\\\\lwhob\\\\Downloads\\\\a0-project\"; npx vitest run 2>&1 | Select-String \"Tests |FAIL\"; \"--- mutation/query counts + authz usage per new file ---\"; foreach \\($f in @\\('pos','push','reservationIntegrations','payroll','operations','barInventory','guests','notifications'\\)\\) { $p=\"convex/$f.ts\"; if \\(Test-Path $p\\) { $defs=\\(Select-String -Path $p -Pattern \"export const \\\\w+ = \\(mutation|query|action|internalMutation|internalQuery|internalAction\\)\"\\).Count; $authz=\\(Select-String -Path $p -Pattern \"require\\(VenueMember|VenueManager|Profile\\)|getAuthUserId\"\\).Count; \"$f : defs=$defs authz=$authz\" } })",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(git checkout *)",
+      "Bash(git stash *)",
+      "Bash(node node_modules/convex/bin/main.js dev --once)",
+      "Bash(node node_modules/convex/bin/main.js deploy -y)",
+      "Bash(node node_modules/convex/bin/main.js run oneoff:scrubEnishPlanIds)",
+      "Bash(node node_modules/convex/bin/main.js run oneoff:scrubEnishPlanIds --prod)",
+      "Bash(timeout 12 node node_modules/convex/bin/main.js logs)",
+      "Bash(node node_modules/convex/bin/main.js logs --history 50)",
+      "Bash(node node_modules/convex/bin/main.js function-spec)",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{try{const j=JSON.parse\\(s\\);const fns=\\(j.functions||j\\).filter?\\(j.functions||j\\):[];const list=\\(j.functions||j\\);const arr=Array.isArray\\(list\\)?list:[];const names=arr.map\\(f=>f.identifier||f.path||f.name\\).filter\\(Boolean\\);console.log\\('total',names.length\\);console.log\\(names.filter\\(n=>/scheduling/.test\\(n\\)\\).join\\('\\\\n'\\)\\);}catch\\(e\\){console.log\\('parse-fail',e.message\\);console.log\\(s.slice\\(0,500\\)\\);}}\\)\")",
+      "Bash(git check-ignore *)",
+      "Bash(node -e \"console.log\\(require\\('expo-constants/package.json'\\).version\\)\")"
     ]
   }
 }
