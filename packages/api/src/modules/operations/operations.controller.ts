@@ -24,6 +24,7 @@ import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { todayInZone } from '../../common/pay-period';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MediaAccessService } from '../chat/media-access.service';
 import { S3ImageService } from '../chat/s3-image.service';
 import { buildDailyBriefAlerts } from './daily-brief-alerts';
 
@@ -211,6 +212,7 @@ function mapChecklistItem(item: { id: string; kind: string; title: string; sortO
 export class OperationsController {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
   ) {}
 
@@ -561,7 +563,7 @@ export class OperationsController {
     return {
       date,
       kind,
-      items: items.map((item) => {
+      items: await Promise.all(items.map(async (item) => {
         const completion = completionByItem.get(item.id);
         return {
           _id: item.id,
@@ -573,8 +575,16 @@ export class OperationsController {
           completedByName: completion?.completedByName ?? null,
           completedAt: toMs(completion?.completedAt),
           hasPhoto: Boolean(completion?.photoKey),
+          photoUrl: completion?.photoKey
+            ? await this.mediaAccess.createPath(
+                'checklist-photo',
+                completion.id,
+                venueId,
+                `/v1/operations/checklist/photo/${completion.id}`,
+              )
+            : null,
         };
-      }),
+      })),
     };
   }
 
@@ -656,14 +666,20 @@ export class OperationsController {
     };
   }
 
-  // Public capability URL, same model as the chat image endpoint: the cuid is
-  // unguessable and only ever surfaced to the owning venue's own staff.
+  // Short-lived token allows React Native <Image> (and the web app's own
+  // <img>) to load without a bearer header while keeping the permanent
+  // completion id from granting access on its own.
   @Public()
   @SkipVenueScope()
   @Get('checklist/photo/:completionId')
-  async getChecklistPhoto(@Param('completionId') completionId: string, @Res() res: Response) {
+  async getChecklistPhoto(
+    @Param('completionId') completionId: string,
+    @Query('token') token: string | undefined,
+    @Res() res: Response,
+  ) {
     const completion = await this.prisma.checklistCompletion.findUnique({ where: { id: completionId } });
     if (!completion?.photoKey) throw new NotFoundException('Photo not found');
+    await this.mediaAccess.assertToken(token, 'checklist-photo', completionId, completion.venueId);
     const url = await this.s3ImageService.getPresignedUrl(completion.photoKey);
     return res.redirect(302, url);
   }
