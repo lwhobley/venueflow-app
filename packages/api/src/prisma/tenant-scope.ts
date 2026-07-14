@@ -17,7 +17,7 @@ export const VENUE_SCOPED_MODELS: ReadonlySet<string> = new Set([
   'NotificationRead', 'PaymentMethod', 'PayrollExport', 'PosCheck', 'PosConnection',
   'PosLaborPunch', 'PrepBoardItem', 'Profile', 'PushToken', 'Reservation', 'ReservationConnection',
   'ReservationHold', 'ReservationSetting', 'ReservationSyncEvent', 'ScheduleEmailEvent',
-  'ScheduleShift', 'ScheduleTemplate', 'ShiftSwap', 'StaffOnboardingTask', 'StaffRequest', 'Subscription',
+  'ScheduleMemoryNote', 'ScheduleShift', 'ScheduleTemplate', 'ShiftSwap', 'StaffOnboardingTask', 'StaffRequest', 'Subscription',
   'SubscriptionEvent', 'TableAssignment', 'TableState', 'TableStateHistory', 'Team',
   'TimeEntry', 'VenueEvent', 'VenueRole', 'Waitlist', 'WorkplaceJoinRequest',
 ]);

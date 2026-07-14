@@ -10,44 +10,39 @@ import { runWithTenant } from './tenant-context';
  * that the rest of the app injects.
  */
 describe('PrismaService cutover (integration)', () => {
-  let prisma: any = null;
+  let prisma: any;
   let teardown: () => Promise<void> = async () => {};
   let venueA = '';
   let venueB = '';
 
   beforeAll(async () => {
-    try {
-      const setup = await setupTestDb();
-      teardown = setup.teardown;
-      // PrismaService reads DATABASE_URL at construction time; point it at the
-      // same DB setupTestDb() prepared, and turn the flag on for this suite.
-      process.env.DATABASE_URL = setup.url;
-      process.env.TENANT_ISOLATION_ENFORCED = 'true';
-      // Import AFTER env is set so the constructor branches into the Proxy path.
-      const { PrismaService } = await import('./prisma.service');
-      prisma = new PrismaService();
-      await prisma.$connect();
+    const setup = await setupTestDb();
+    teardown = setup.teardown;
+    // PrismaService reads DATABASE_URL at construction time; point it at the
+    // same DB setupTestDb() prepared, and turn the flag on for this suite.
+    process.env.DATABASE_URL = setup.url;
+    process.env.TENANT_ISOLATION_ENFORCED = 'true';
+    // Import AFTER env is set so the constructor branches into the Proxy path.
+    const { PrismaService } = await import('./prisma.service');
+    prisma = new PrismaService();
+    await prisma.$connect();
 
-      // Seed without a tenant context — extension stays inert during setup.
-      const [a, b] = await Promise.all([
-        setup.prisma.venue.create({ data: { name: 'Cutover A', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
-        setup.prisma.venue.create({ data: { name: 'Cutover B', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
-      ]);
-      venueA = a.id;
-      venueB = b.id;
-      await Promise.all([
-        setup.prisma.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
-        setup.prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
-      ]);
-    } catch (err) {
-      console.warn('Skipping PrismaService cutover tests — no test DB:', (err as Error).message);
-      prisma = null;
-    }
+    // Seed without a tenant context — extension stays inert during setup.
+    const [a, b] = await Promise.all([
+      setup.prisma.venue.create({ data: { name: 'Cutover A', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
+      setup.prisma.venue.create({ data: { name: 'Cutover B', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
+    ]);
+    venueA = a.id;
+    venueB = b.id;
+    await Promise.all([
+      setup.prisma.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      setup.prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+    ]);
   }, 60_000);
 
   afterAll(async () => {
     delete process.env.TENANT_ISOLATION_ENFORCED;
-    if (prisma) await prisma.$disconnect();
+    await prisma.$disconnect();
     await teardown();
   });
 
@@ -57,20 +52,17 @@ describe('PrismaService cutover (integration)', () => {
     runWithTenant(venueId, async () => await fn());
 
   it('scopes findMany through PrismaService when context is bound', async () => {
-    if (!prisma) return;
     const rows = (await asTenant(venueA, () => prisma.barInventoryItem.findMany())) as Array<{ name: string }>;
     expect(rows.map((r) => r.name)).toContain('A-Item');
     expect(rows.map((r) => r.name)).not.toContain('B-Item');
   });
 
   it('hostile where via PrismaService cannot reach another tenant', async () => {
-    if (!prisma) return;
     const rows = (await asTenant(venueA, () => prisma.barInventoryItem.findMany({ where: { venueId: venueB } }))) as unknown[];
     expect(rows).toHaveLength(0);
   });
 
   it('PrismaService.create forces the bound venueId', async () => {
-    if (!prisma) return;
     const created = (await asTenant(venueA, () =>
       prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Forced', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     )) as { venueId: string };
@@ -78,7 +70,6 @@ describe('PrismaService cutover (integration)', () => {
   });
 
   it('without a tenant context PrismaService still works (extension is inert)', async () => {
-    if (!prisma) return;
     const rows = (await prisma.barInventoryItem.findMany()) as unknown[];
     expect(rows.length).toBeGreaterThanOrEqual(2);
   });

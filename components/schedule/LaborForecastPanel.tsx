@@ -4,9 +4,11 @@ import { Button, Card, Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
+import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { errorMessage } from '../../lib/format';
+import { ScheduleMemoryPanel } from './ScheduleMemoryPanel';
 
 type DaypartRow = { key: string; label: string; covers: number; scheduledPeople: number };
 type ForecastDay = {
@@ -42,6 +44,33 @@ type ForecastData = {
   alerts: Alert[];
   otRisk: OtRisk[];
 };
+
+function buildScheduleExplainability(forecast: ForecastData) {
+  const bullets: string[] = [];
+  const worstGap = [...forecast.days].filter((day) => day.gapHours !== 0).sort((a, b) => Math.abs(b.gapHours) - Math.abs(a.gapHours))[0];
+  if (worstGap) {
+    bullets.push(
+      worstGap.gapHours > 0
+        ? `${worstGap.dayLabel} is the biggest shortfall at ${worstGap.gapHours}h under the forecast.`
+        : `${worstGap.dayLabel} has ${Math.abs(worstGap.gapHours)}h of cushion that could be trimmed.`,
+    );
+  }
+  const eventHeavyDay = [...forecast.days].filter((day) => day.privateEvents > 0).sort((a, b) => b.privateEvents - a.privateEvents)[0];
+  if (eventHeavyDay) {
+    bullets.push(`${eventHeavyDay.dayLabel} carries ${eventHeavyDay.privateEvents} private event${eventHeavyDay.privateEvents === 1 ? '' : 's'}, so the draft leans toward event coverage.`);
+  }
+  if (forecast.otRisk.length > 0) {
+    bullets.push(`${forecast.otRisk.length} staff member${forecast.otRisk.length === 1 ? '' : 's'} are at or near overtime, so the model should spread hours instead of stacking one person.`);
+  }
+  if (forecast.alerts.length > 0) {
+    const critical = forecast.alerts.filter((alert) => alert.severity === 'critical').length;
+    bullets.push(critical > 0 ? `${critical} critical forecast alert${critical === 1 ? '' : 's'} should be handled before publishing.` : `${forecast.alerts.length} forecast alert${forecast.alerts.length === 1 ? '' : 's'} shape the draft.`);
+  }
+  if (bullets.length === 0) {
+    bullets.push('The current week is balanced, so the AI draft mainly preserves coverage and keeps the roster even.');
+  }
+  return bullets.slice(0, 3);
+}
 
 const STATUS_COLOR: Record<ForecastDay['status'], string> = {
   under: colors.danger,
@@ -213,7 +242,7 @@ function AiScheduleBuilder() {
   );
 }
 
-export function LaborForecastPanel() {
+export function LaborForecastPanel({ venueId }: { venueId: Id<'venues'> }) {
   const { isReady } = useAuthenticatedSession();
   const forecast = useQuery(api.scheduling.getLaborForecast, isReady ? {} : 'skip') as ForecastData | null | undefined;
 
@@ -238,6 +267,7 @@ export function LaborForecastPanel() {
   }
 
   const gapColor = forecast.totals.gapHours > 0 ? colors.danger : forecast.totals.gapHours < -6 ? colors.warning : colors.success;
+  const explainability = buildScheduleExplainability(forecast);
 
   return (
     <View style={{ gap: spacing.md }}>
@@ -311,7 +341,20 @@ export function LaborForecastPanel() {
         </Card>
       )}
 
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Why the AI draft looks this way</Text>
+          {explainability.map((item) => (
+            <View key={item} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs }}>
+              <MaterialCommunityIcons name="lightbulb-outline" size={16} color={colors.primary} style={{ marginTop: 2 }} />
+              <Text style={{ flex: 1, color: colors.charcoal, fontSize: 13 }}>{item}</Text>
+            </View>
+          ))}
+        </Card.Content>
+      </Card>
+
       <AiScheduleBuilder />
+      <ScheduleMemoryPanel venueId={venueId} />
     </View>
   );
 }

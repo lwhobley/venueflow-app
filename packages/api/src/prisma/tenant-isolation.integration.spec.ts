@@ -6,12 +6,11 @@ import { runWithTenant } from './tenant-context';
 
 /**
  * End-to-end proof that the tenant-isolation extension actually isolates tenants
- * against a real Postgres. Skips gracefully when no test DB is available (no
- * Docker / TEST_DATABASE_URL), like the scheduling concurrency spec.
+ * against a real Postgres.
  */
 describe('tenant isolation extension (integration)', () => {
   let base: PrismaClient;
-  let db: ReturnType<typeof makeExtended> | null = null;
+  let db: ReturnType<typeof makeExtended>;
   let teardown: () => Promise<void> = async () => {};
   let venueA = '';
   let venueB = '';
@@ -21,15 +20,9 @@ describe('tenant isolation extension (integration)', () => {
   }
 
   beforeAll(async () => {
-    try {
-      const setup = await setupTestDb();
-      base = setup.prisma;
-      teardown = setup.teardown;
-    } catch (err) {
-      console.warn('Skipping tenant-isolation integration tests — no test DB:', (err as Error).message);
-      db = null;
-      return;
-    }
+    const setup = await setupTestDb();
+    base = setup.prisma;
+    teardown = setup.teardown;
     db = makeExtended(base);
 
     // Two tenants, each with one bar inventory item. Seeded WITHOUT a tenant
@@ -47,10 +40,8 @@ describe('tenant isolation extension (integration)', () => {
   }, 60_000);
 
   afterAll(async () => {
-    if (db) {
-      await base.barInventoryItem.deleteMany();
-      await base.venue.deleteMany();
-    }
+    await base.barInventoryItem.deleteMany();
+    await base.venue.deleteMany();
     await teardown();
   });
 
@@ -62,28 +53,24 @@ describe('tenant isolation extension (integration)', () => {
     runWithTenant(venueId, async () => await fn());
 
   it('findMany returns only the bound tenant rows', async () => {
-    if (!db) return;
-    const rows = await asTenant(venueA, () => db!.barInventoryItem.findMany());
+    const rows = await asTenant(venueA, () => db.barInventoryItem.findMany());
     expect(rows.map((r) => r.name)).toEqual(['A-Gin']);
   });
 
   it('a hostile where cannot reach another tenant', async () => {
-    if (!db) return;
     // Ask (as Venue A) for Venue B's rows — the AND-ed predicate yields nothing.
-    const rows = await asTenant(venueA, () => db!.barInventoryItem.findMany({ where: { venueId: venueB } }));
+    const rows = await asTenant(venueA, () => db.barInventoryItem.findMany({ where: { venueId: venueB } }));
     expect(rows).toHaveLength(0);
   });
 
   it('without a tenant context the extension is inert (sees all)', async () => {
-    if (!db) return;
     const rows = await db.barInventoryItem.findMany();
     expect(rows.length).toBeGreaterThanOrEqual(2);
   });
 
   it('create forces the bound venueId regardless of supplied data', async () => {
-    if (!db) return;
     const created = await asTenant(venueA, () =>
-      db!.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Vodka', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      db.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Vodka', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     );
     expect(created.venueId).toBe(venueA);
     await base.barInventoryItem.delete({ where: { id: created.id } });

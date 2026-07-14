@@ -27,6 +27,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MediaAccessService } from '../chat/media-access.service';
 import { S3ImageService } from '../chat/s3-image.service';
 import { buildDailyBriefAlerts } from './daily-brief-alerts';
+import { buildDailyBriefPriorityActions } from './daily-brief-priority-actions';
+import { buildDailyBriefProfitabilityPulse } from './daily-brief-profitability';
 
 const GOAL_PERIODS = ['day', 'week'] as const;
 const GOAL_STATUSES = ['open', 'done', 'cancelled'] as const;
@@ -328,12 +330,14 @@ export class OperationsController {
       reservations,
       shifts,
       openTimeEntries,
+      timeEntriesToday,
       pendingRequests,
       barItems,
       prepItems,
       goals,
       events,
       posChecks,
+      openChecksCount,
     ] = await Promise.all([
       this.prisma.reservation.findMany({
         where: {
@@ -353,6 +357,14 @@ export class OperationsController {
         where: { venueId, isOpen: true },
         select: { id: true },
         take: 200,
+      }),
+      this.prisma.timeEntry.findMany({
+        where: {
+          venueId,
+          clockInAt: { lt: tomorrowEnd },
+          OR: [{ clockOutAt: null }, { clockOutAt: { gte: todayStart } }],
+        },
+        select: { clockInAt: true, clockOutAt: true, breaks: true, isOpen: true },
       }),
       this.prisma.staffRequest.findMany({
         where: { venueId, status: 'pending' },
@@ -388,9 +400,11 @@ export class OperationsController {
         select: { totalCents: true, guestCount: true },
         take: 1000,
       }),
+      this.prisma.posCheck.count({ where: { venueId, status: 'open' } }),
     ]);
 
     const lowStockItems = barItems.filter((item) => item.onHand <= item.parLevel).slice(0, 8);
+    const reservationsById = new Map(reservations.map((reservation) => [reservation.id, reservation]));
     const covers = reservations.reduce((sum, row) => sum + row.partySize, 0);
     const posCovers = posChecks.reduce((sum, row) => sum + (row.guestCount ?? 0), 0);
     const salesCents = posChecks.reduce((sum, row) => sum + row.totalCents, 0);
@@ -400,6 +414,49 @@ export class OperationsController {
     const eightySixCount = prepItems.filter((item) => item.kind === 'eighty_six').length;
 
     const alerts = buildDailyBriefAlerts({
+      openShiftCount,
+      pendingRequestCount: pendingRequests.length,
+      lowStockCount: lowStockItems.length,
+      eightySixCount,
+    });
+    const priorityActions = buildDailyBriefPriorityActions({
+      openShiftCount,
+      pendingRequestCount: pendingRequests.length,
+      lowStockCount: lowStockItems.length,
+      eightySixCount,
+      events: events.map((event) => {
+        const reservation = event.reservationId ? reservationsById.get(event.reservationId) ?? null : null;
+        return {
+          title: event.title,
+          startsAt: event.startsAt.getTime(),
+          expectedGuests: event.expectedGuests,
+          reservationGuestName: reservation?.guestName ?? null,
+          reservationPartySize: reservation?.partySize ?? null,
+          notes: event.notes ?? reservation?.notes ?? reservation?.specialRequests ?? null,
+        };
+      }),
+    });
+    const laborHours = Math.round(
+      timeEntriesToday.reduce((sum, entry) => {
+        const startMs = todayStart.getTime();
+        const endMs = Math.min(entry.clockOutAt?.getTime() ?? now.getTime(), todayEnd.getTime());
+        if (endMs <= startMs || entry.clockInAt.getTime() >= todayEnd.getTime()) return sum;
+        const entryStart = Math.max(entry.clockInAt.getTime(), startMs);
+        let durationMs = Math.max(0, endMs - entryStart);
+        for (const rawBreak of (entry.breaks as any[]) ?? []) {
+          if (rawBreak?.type !== 'unpaid' || rawBreak.startAt == null || rawBreak.endAt == null) continue;
+          const breakStart = Math.max(Number(rawBreak.startAt), entryStart, startMs);
+          const breakEnd = Math.min(Number(rawBreak.endAt), endMs);
+          if (breakEnd > breakStart) durationMs -= breakEnd - breakStart;
+        }
+        return sum + Math.max(0, durationMs) / 3600000;
+      }, 0) * 10,
+    ) / 10;
+    const profitabilityPulse = buildDailyBriefProfitabilityPulse({
+      salesCents,
+      laborHours,
+      openChecks: openChecksCount,
+      activeClocks: openTimeEntries.length,
       openShiftCount,
       pendingRequestCount: pendingRequests.length,
       lowStockCount: lowStockItems.length,
@@ -450,6 +507,8 @@ export class OperationsController {
         startsAt: event.startsAt.getTime(),
         expectedGuests: event.expectedGuests,
       })),
+      priorityActions,
+      profitabilityPulse,
     };
   }
 

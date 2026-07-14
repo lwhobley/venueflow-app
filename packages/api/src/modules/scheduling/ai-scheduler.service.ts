@@ -9,6 +9,7 @@ const MAX_PROPOSED_SHIFTS = 60;
 export type AiStaffMember = { id: string; fullName: string; jobTitle: string; role: string };
 export type AiAvailabilityWindow = { dayIndex: number; startMinutes: number; endMinutes: number; available: boolean };
 export type AiExistingShift = { dayIndex: number; startMinutes: number; endMinutes: number; jobTitle: string; profileId: string | null };
+export type AiMemoryNote = { weekStart: string; title: string; detail: string };
 
 export type ProposedShift = {
   dayIndex: number;
@@ -42,6 +43,7 @@ export class AiSchedulerService {
     staff: AiStaffMember[];
     availabilityByProfile: Map<string, AiAvailabilityWindow[]>;
     existingShifts: AiExistingShift[];
+    memoryNotes: AiMemoryNote[];
   }): Promise<{ shifts: ProposedShift[] }> {
     const apiKey = resolveAiApiKey();
     if (!apiKey) throw new BadRequestException('AI parsing requires AI_API_KEY configuration');
@@ -67,6 +69,7 @@ export class AiSchedulerService {
     staff: AiStaffMember[];
     availabilityByProfile: Map<string, AiAvailabilityWindow[]>;
     existingShifts: AiExistingShift[];
+    memoryNotes: AiMemoryNote[];
   }): string {
     const lines: string[] = [];
     lines.push(`Week starting ${input.weekStart}.`);
@@ -96,6 +99,15 @@ export class AiSchedulerService {
         lines.push(
           `- ${dayLabel(shift.dayIndex)} ${minutesToTime(shift.startMinutes)}-${minutesToTime(shift.endMinutes)} ${shift.jobTitle}${shift.profileId ? ` (assigned)` : ' (open)'}`,
         );
+      }
+    }
+
+    lines.push('Schedule memory and lessons to carry forward:');
+    if (input.memoryNotes.length === 0) {
+      lines.push('- none yet');
+    } else {
+      for (const note of input.memoryNotes.slice(0, 6)) {
+        lines.push(`- ${note.weekStart}: ${note.title} - ${note.detail}`);
       }
     }
 

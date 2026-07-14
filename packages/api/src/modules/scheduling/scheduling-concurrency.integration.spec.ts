@@ -47,43 +47,29 @@ async function assertNoDoubleBookTx(
 }
 
 let prisma: PrismaClient;
-let teardown: () => Promise<void>;
+let teardown: () => Promise<void> = async () => {};
 
 // Cast PrismaClient as PrismaService for withSerializableRetry compatibility
 const asPrismaService = () => prisma as unknown as Parameters<typeof withSerializableRetry>[0];
 
 beforeAll(async () => {
-  try {
-    const db = await setupTestDb();
-    prisma = db.prisma;
-    teardown = db.teardown;
-  } catch (err) {
-    console.warn('Skipping integration tests — no test DB available:', (err as Error).message);
-    prisma = null as any;
-    teardown = async () => {};
-  }
+  const db = await setupTestDb();
+  prisma = db.prisma;
+  teardown = db.teardown;
 }, 60_000);
 
 afterAll(async () => {
   await teardown();
 }, 15_000);
 
-const skipIfNoDb = () => {
-  if (!prisma) return true;
-  return false;
-};
-
 describe('scheduling concurrency (integration)', () => {
   afterEach(async () => {
-    if (skipIfNoDb()) return;
     await cleanSchedulingData(prisma);
   });
 
   // ── Double-book prevention ─────────────────────────────────────────────
   describe('double-book prevention via assignShift', () => {
     it('blocks two concurrent assignments to the same person on the same time slot', async () => {
-      if (skipIfNoDb()) return;
-
       const { venue, profileA } = await seedSchedulingFixtures(prisma);
 
       // Create two open shifts at the same time
@@ -125,8 +111,6 @@ describe('scheduling concurrency (integration)', () => {
   // ── Claim race ─────────────────────────────────────────────────────────
   describe('claim race via claimOpenShift', () => {
     it('only one of two simultaneous claims wins', async () => {
-      if (skipIfNoDb()) return;
-
       const { venue, profileA, profileB, openShift } = await seedSchedulingFixtures(prisma);
 
       // Mirror the controller's optimistic updateMany pattern
@@ -150,8 +134,6 @@ describe('scheduling concurrency (integration)', () => {
   // ── Swap atomicity ─────────────────────────────────────────────────────
   describe('swap approval atomicity', () => {
     it('concurrent swap approvals cannot both succeed', async () => {
-      if (skipIfNoDb()) return;
-
       const { venue, profileA, profileB } = await seedSchedulingFixtures(prisma);
 
       // Create two shifts, one per person
@@ -218,8 +200,6 @@ describe('scheduling concurrency (integration)', () => {
   // ── Non-overlapping shifts should both succeed ─────────────────────────
   describe('non-overlapping shifts', () => {
     it('allows the same person to hold two non-overlapping shifts on the same day', async () => {
-      if (skipIfNoDb()) return;
-
       const { venue, profileA } = await seedSchedulingFixtures(prisma);
 
       const [morning, evening] = await Promise.all([

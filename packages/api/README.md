@@ -33,3 +33,7 @@ railway run npm run prisma:migrate:deploy -w @venue-wrangler/api
   it lives only in migration `20260608130000_clock_in_open_unique`. If
   `prisma migrate dev` ever generates a `DROP INDEX` for it, delete that
   statement before applying the migration.
+- `Invite.phone` has a partial lookup index (`Invite_phone_idx`, excluding null
+  values) that Prisma's schema language cannot express. It lives in migration
+  `20260614000000_workforce_signup` and is intentionally omitted from
+  `schema.prisma`.

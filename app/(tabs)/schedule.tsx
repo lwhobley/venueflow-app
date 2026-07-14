@@ -142,7 +142,7 @@ function ScheduleScreen() {
             {managerTab === 'calendar' ? (
               <ManagerCalendar venueId={venue.id} />
             ) : managerTab === 'forecast' ? (
-              <LaborForecastPanel />
+              <LaborForecastPanel venueId={venue.id} />
             ) : managerTab === 'requests' ? (
               <RequestQueue venueId={venue.id} />
             ) : (
