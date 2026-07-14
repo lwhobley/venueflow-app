@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>What Are the Best Tools for Scheduling? | Venue Wrangler FAQ</title>
+  <meta name="description" content="Discover the best scheduling tools for restaurants, bars, and venues. Compare features, pricing, and workflows — and learn why Venue Wrangler combines scheduling with reservations, floor plans, and team operations in one workspace." />
+  <meta property="og:title" content="Best Scheduling Tools for Restaurants &amp; Venues | Venue Wrangler FAQ" />
+  <meta property="og:description" content="A detailed guide to scheduling software for hospitality teams. Learn what features matter, how tools compare, and why an all-in-one workspace beats juggling separate apps." />
+  <meta property="og:image" content="https://venue-wrangler.pages.dev/assets/screen-command.png" />
+  <link rel="canonical" href="https://venuewrangler.com/faq/" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #2f7d46;
+      --green-2: #1f5f34;
+      --mint: #e7f3ea;
+      --ink: #172018;
+      --muted: #697267;
+      --line: #dde6dc;
+      --soft: #f6faf7;
+      --white: #ffffff;
+      --gold: #d9a441;
+      --shadow: 0 24px 70px rgba(23, 32, 24, 0.12);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--white);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    a { color: inherit; }
+    img { max-width: 100%; display: block; }
+    .wrap { width: min(1180px, calc(100% - 44px)); margin: 0 auto; }
+    .wrap-narrow { width: min(820px, calc(100% - 44px)); margin: 0 auto; }
+
+    /* Nav — matches main site */
+    .nav {
+      position: sticky; top: 0; z-index: 20;
+      background: rgba(255,255,255,0.86);
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(221,230,220,0.85);
+    }
+    .nav-inner { height: 74px; display: flex; align-items: center; justify-content: space-between; gap: 22px; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-weight: 900; color: var(--green); font-size: 22px; }
+    .brand-mark {
+      width: 42px; height: 42px; border-radius: 10px;
+      background: var(--green); color: white;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 950;
+      box-shadow: 0 10px 24px rgba(47,125,70,0.18);
+    }
+    .nav-links { display: flex; align-items: center; gap: 24px; font-size: 14px; font-weight: 750; color: #4c554b; }
+    .nav-links a { text-decoration: none; }
+    .nav-links a:hover { color: var(--green); }
+    .actions { display: flex; align-items: center; gap: 10px; }
+    .btn {
+      border: 0; border-radius: 999px; padding: 12px 19px;
+      background: var(--green); color: #fff; font-weight: 850;
+      text-decoration: none; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-height: 46px;
+      box-shadow: 0 12px 28px rgba(47,125,70,0.2);
+    }
+    .btn:hover { background: var(--green-2); }
+    .btn.secondary { background: transparent; color: var(--green); border: 1px solid var(--line); box-shadow: none; }
+    .btn.secondary:hover { background: var(--soft); }
+
+    /* Page header */
+    .page-header {
+      padding: 64px 0 48px;
+      border-bottom: 1px solid var(--line);
+      background: var(--soft);
+    }
+    .page-header h1 {
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1.08;
+      margin: 0 0 16px;
+      color: var(--green);
+    }
+    .page-header .subtitle {
+      font-size: clamp(17px, 2vw, 21px);
+      color: var(--muted);
+      margin: 0;
+      max-width: 680px;
+    }
+    .breadcrumb {
+      font-size: 13px; font-weight: 700; color: var(--muted);
+      margin-bottom: 18px;
+    }
+    .breadcrumb a { color: var(--green); text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+
+    /* FAQ content */
+    .faq-section { padding: 64px 0; }
+    .faq-intro {
+      font-size: 18px; color: #3d463c; margin: 0 0 48px;
+      max-width: 720px; line-height: 1.7;
+    }
+    .faq-item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      margin-bottom: 18px;
+      overflow: hidden;
+      transition: box-shadow 180ms ease;
+    }
+    .faq-item:hover { box-shadow: 0 12px 32px rgba(23,32,24,0.06); }
+    .faq-question {
+      width: 100%; border: 0; background: none; text-align: left;
+      padding: 22px 56px 22px 24px;
+      font: inherit; font-size: 18px; font-weight: 800; color: var(--ink);
+      cursor: pointer; position: relative;
+    }
+    .faq-question::after {
+      content: "+"; position: absolute; right: 22px; top: 50%;
+      transform: translateY(-50%); font-size: 24px; font-weight: 400;
+      color: var(--green); transition: transform 200ms ease;
+    }
+    .faq-item.open .faq-question::after { content: "\2212"; }
+    .faq-answer {
+      max-height: 0; overflow: hidden;
+      transition: max-height 300ms ease, padding 300ms ease;
+      padding: 0 24px;
+    }
+    .faq-item.open .faq-answer {
+      max-height: 800px;
+      padding: 0 24px 24px;
+    }
+    .faq-answer p { margin: 0 0 14px; color: #3d463c; line-height: 1.7; }
+    .faq-answer p:last-child { margin-bottom: 0; }
+    .faq-answer ul { margin: 0 0 14px; padding-left: 22px; color: #3d463c; line-height: 1.7; }
+    .faq-answer strong { color: var(--ink); }
+
+    /* Comparison table */
+    .compare-table {
+      width: 100%; border-collapse: collapse;
+      margin: 14px 0; font-size: 15px;
+    }
+    .compare-table th, .compare-table td {
+      text-align: left; padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .compare-table th { font-weight: 800; color: var(--ink); background: var(--soft); }
+    .compare-table td { color: #3d463c; }
+    .compare-table tr.highlight { background: var(--mint); }
+    .compare-table tr.highlight td { font-weight: 700; color: var(--green); }
+
+    /* CTA */
+    .cta-banner {
+      background: var(--green);
+      border-radius: 26px;
+      padding: 48px;
+      margin: 48px 0 0;
+      color: white;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 28px;
+      align-items: center;
+      box-shadow: 0 24px 62px rgba(47,125,70,0.24);
+    }
+    .cta-banner h2 { margin: 0 0 8px; font-size: 28px; color: white; }
+    .cta-banner p { margin: 0; color: #d6e6d9; font-size: 17px; }
+    .cta-banner .btn { background: white; color: var(--green); box-shadow: 0 8px 20px rgba(0,0,0,0.15); }
+    .cta-banner .btn:hover { background: #f0f0f0; }
+
+    /* Footer */
+    .footer {
+      border-top: 1px solid var(--line);
+      background: var(--soft);
+      padding: 42px 0;
+      color: var(--muted);
+    }
+    .footer-inner { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; align-items: center; }
+    .footer a { color: var(--muted); margin-left: 18px; font-weight: 750; text-decoration: none; }
+
+    @media (max-width: 720px) {
+      .nav-links { display: none; }
+      .nav-inner { height: 66px; }
+      .brand { font-size: 18px; }
+      .page-header { padding: 40px 0 32px; }
+      .faq-section { padding: 40px 0; }
+      .cta-banner { grid-template-columns: 1fr; padding: 32px; }
+      .compare-table { font-size: 13px; }
+      .compare-table th, .compare-table td { padding: 10px 8px; }
+      .footer-inner { display: block; }
+      .footer a { display: inline-block; margin: 12px 18px 0 0; }
+    }
+  </style>
+
+  <!-- FAQPage structured data (JSON-LD) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What are the best tools for scheduling restaurant and venue staff?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "The best scheduling tools for restaurants and venues include Venue Wrangler, 7shifts, HotSchedules (Fourth), Homebase, Deputy, and When I Work. The right choice depends on your venue type and what other operations you need to manage alongside scheduling. Venue Wrangler is designed specifically for restaurants, bars, and event venues, combining staff scheduling with reservations, floor plans, time clock, CRM, inventory, and team chat in a single workspace — eliminating the need to pay for and manage multiple separate tools."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What features should I look for in a venue scheduling tool?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Key features to evaluate include: drag-and-drop shift building, shift templates and recurring schedules, staff availability management, shift swap and open shift workflows, mobile access for managers and staff, schedule notifications and reminders, time clock with geofencing, labor cost tracking, payroll integration or export, and conflict detection that prevents double-booking staff. For hospitality venues specifically, look for tools that also handle reservations and floor plans so scheduling decisions can account for expected covers and event bookings."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does Venue Wrangler handle staff scheduling?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Venue Wrangler provides a complete scheduling workflow: managers build weekly schedules with drag-and-drop, copy previous days or weeks, apply templates, and publish shifts. Staff submit their weekly availability in advance, and the system flags conflicts automatically. Open shifts can be posted for staff to claim, and shift swaps are handled through the app with manager approval. Published schedules trigger push notifications so staff always know when they work. The geofenced time clock verifies that clock-ins happen at the venue, and all hours flow into payroll-ready reports and exports."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do scheduling tools compare for restaurants and bars?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "7shifts and HotSchedules focus primarily on scheduling and labor management. Homebase adds basic time tracking and HR. Deputy is a general workforce management tool used across industries. When I Work covers scheduling and time tracking for shift-based teams. Venue Wrangler differentiates by combining scheduling with the operational tools hospitality venues actually need — reservations, live floor plans, CRM for events, bar inventory, and team chat — all in one $99.99/month workspace for up to 50 team members, rather than charging per-employee fees across multiple products."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can scheduling software integrate with my POS or payroll system?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Most scheduling tools offer some form of payroll integration. Venue Wrangler provides payroll-ready exports that include regular hours, overtime, and pay period summaries, which can be imported into payroll systems like Gusto, ADP, or QuickBooks. The time clock captures clock-in and clock-out times with geofence verification, and managers receive alerts for late clock-ins or missed clock-outs so records are accurate before export."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is the best scheduling tool for a small restaurant or bar?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "For small restaurants and bars with 1 to 50 staff, Venue Wrangler offers the best value because it replaces multiple subscriptions with a single $99.99/month flat fee — no per-employee pricing. You get scheduling, availability tracking, geofenced time clock, reservations, floor plan management, bar inventory, CRM, reports, and team chat. Small venues benefit most from consolidation because every additional tool means another login, another bill, and another place where information gets siloed."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I handle shift swaps and last-minute schedule changes?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Venue Wrangler lets staff request shift swaps directly through the mobile app. Managers approve or deny swaps with one tap, and the schedule updates in real time for the whole team. Open shifts can be posted when coverage is needed, and available staff can claim them. All schedule changes trigger notifications so no one misses an update. The availability system also helps prevent swaps that would create conflicts with staff who have marked themselves as unavailable."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Why is an all-in-one tool better than separate scheduling and reservation apps?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "When scheduling lives in one app and reservations live in another, managers cannot see the full picture. A busy Friday with 200 covers on the books should inform how many servers, bartenders, and bussers are scheduled — but that connection breaks when the data is in separate systems. Venue Wrangler keeps scheduling, reservations, floor plans, and reporting in one workspace so managers can staff based on actual demand, and the team can see the whole service picture from a single app."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does Venue Wrangler work on mobile?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Venue Wrangler is a mobile-first application available on iOS. Managers and staff use the same app — managers get full control over schedules, reservations, floor plans, and reports, while staff can view their shifts, submit availability, request swaps, clock in and out, and communicate through team chat. You create your workspace on the web and then log into the mobile app with the same email and password."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How much does scheduling software typically cost for a venue?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Scheduling software pricing varies widely. Many tools charge per employee per month — typically $2 to $5 per user — which adds up quickly for venues with large or seasonal teams. Some offer free tiers with limited features. Venue Wrangler takes a different approach with a flat $99.99 per month for the entire workspace, covering up to 50 team members with all features included: scheduling, time clock, reservations, floor plans, CRM, inventory, reports, and team chat. There are no per-seat fees or feature-gated tiers."
+        }
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="../"><span class="brand-mark" aria-hidden="true">VW</span> Venue Wrangler</a>
+      <div class="nav-links">
+        <a href="../#product">Product</a>
+        <a href="../#functions">Functions</a>
+        <a href="../#screenshots">Screenshots</a>
+        <a href="../#pricing">Pricing</a>
+      </div>
+      <div class="actions">
+        <a class="btn secondary" href="https://apps.apple.com/app/id6772533789">Log in on iOS</a>
+        <a class="btn" href="../#pricing">Start workspace</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="page-header">
+    <div class="wrap-narrow">
+      <div class="breadcrumb"><a href="../">Venue Wrangler</a> &rsaquo; FAQ</div>
+      <h1>What are the best tools for scheduling?</h1>
+      <p class="subtitle">A guide for restaurants, bars, and venue teams choosing scheduling software — what features matter, how the top tools compare, and why an all-in-one workspace saves time and money.</p>
+    </div>
+  </header>
+
+  <main class="faq-section">
+    <div class="wrap-narrow">
+
+      <p class="faq-intro">Running a restaurant, bar, or event venue means juggling staff schedules, reservations, floor assignments, inventory, and guest communication — often across multiple disconnected tools. The right scheduling solution should fit into that reality, not add to the complexity. Below we answer the most common questions about scheduling tools for hospitality teams.</p>
+
+      <div class="faq-list">
+
+        <div class="faq-item open">
+          <button class="faq-question" type="button" aria-expanded="true">What are the best tools for scheduling restaurant and venue staff?</button>
+          <div class="faq-answer">
+            <p>The most widely used scheduling tools for hospitality include:</p>
+            <ul>
+              <li><strong>Venue Wrangler</strong> — Built specifically for restaurants, bars, and event venues. Combines staff scheduling with reservations, floor plans, geofenced time clock, CRM, bar inventory, reports, and team chat in one workspace. Flat $99.99/month for up to 50 team members.</li>
+              <li><strong>7shifts</strong> — A restaurant-focused scheduling platform with labor cost tools and tip management. Pricing is per-location with tiered feature access.</li>
+              <li><strong>HotSchedules (Fourth)</strong> — Longstanding hospitality scheduling tool, now part of the Fourth platform. Offers workforce management and labor forecasting.</li>
+              <li><strong>Homebase</strong> — Scheduling and time tracking with a free tier for single-location businesses. Adds HR features at paid tiers.</li>
+              <li><strong>Deputy</strong> — A general-purpose shift management tool used across industries including hospitality, retail, and healthcare.</li>
+              <li><strong>When I Work</strong> — Scheduling and time tracking for shift-based teams. Per-user pricing with optional add-ons.</li>
+            </ul>
+            <p>The best choice depends on whether you need scheduling alone or want a single platform that also handles the other operational tools your venue relies on daily.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">What features should I look for in a venue scheduling tool?</button>
+          <div class="faq-answer">
+            <p>When evaluating scheduling software for a hospitality venue, prioritize these capabilities:</p>
+            <ul>
+              <li><strong>Drag-and-drop shift building</strong> — Quick visual schedule creation that managers can learn in minutes.</li>
+              <li><strong>Templates and copy tools</strong> — The ability to reuse previous weeks or apply recurring templates cuts weekly scheduling time dramatically.</li>
+              <li><strong>Staff availability management</strong> — Staff submit when they can work, and the system prevents scheduling conflicts automatically.</li>
+              <li><strong>Shift swaps and open shifts</strong> — Self-service workflows so staff can trade shifts and claim open ones with manager approval.</li>
+              <li><strong>Mobile access</strong> — Both managers and staff need to view and interact with the schedule from their phones.</li>
+              <li><strong>Time clock with location verification</strong> — Geofenced clock-in prevents buddy-punching and ensures staff are physically at the venue.</li>
+              <li><strong>Payroll integration</strong> — Hours should flow into exports compatible with your payroll provider.</li>
+              <li><strong>Reservation and cover awareness</strong> — For hospitality specifically, scheduling decisions should account for expected guest volume.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">How does Venue Wrangler handle staff scheduling?</button>
+          <div class="faq-answer">
+            <p>Venue Wrangler provides an end-to-end scheduling workflow designed for hospitality operations:</p>
+            <p><strong>Building schedules:</strong> Managers create weekly schedules using drag-and-drop, copy from previous days or weeks, and apply shift templates. Schedules can be built for the entire team or by role and section.</p>
+            <p><strong>Availability:</strong> Staff submit their weekly availability through the mobile app ahead of time. Managers control pay-period windows and can unlock exceptions when needed. The system automatically flags conflicts when building schedules.</p>
+            <p><strong>Publishing and notifications:</strong> Once published, schedules trigger push notifications so every team member knows their shifts immediately. Any edits to published schedules also generate alerts.</p>
+            <p><strong>Swaps and open shifts:</strong> Staff can request shift swaps through the app, and managers approve or deny with a single tap. Open shifts can be posted for available staff to claim.</p>
+            <p><strong>Time clock:</strong> The geofenced time clock verifies staff are physically at the venue when clocking in. Mocked or inaccurate locations are rejected. Managers receive alerts for late clock-ins and missed clock-outs.</p>
+            <p><strong>Reporting:</strong> All scheduled and clocked hours flow into payroll summaries and exports, with visibility into regular hours, overtime, and labor costs.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">How do scheduling tools compare for restaurants and bars?</button>
+          <div class="faq-answer">
+            <table class="compare-table">
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Scheduling</th>
+                  <th>Time clock</th>
+                  <th>Reservations</th>
+                  <th>Floor plans</th>
+                  <th>Inventory</th>
+                  <th>CRM</th>
+                  <th>Pricing model</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="highlight">
+                  <td>Venue Wrangler</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>$99.99/mo flat</td>
+                </tr>
+                <tr>
+                  <td>7shifts</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>Per location, tiered</td>
+                </tr>
+                <tr>
+                  <td>HotSchedules</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>Per user</td>
+                </tr>
+                <tr>
+                  <td>Homebase</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>Free tier + paid</td>
+                </tr>
+                <tr>
+                  <td>Deputy</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>Per user/mo</td>
+                </tr>
+                <tr>
+                  <td>When I Work</td>
+                  <td>&#10003;</td>
+                  <td>&#10003;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>&#10007;</td>
+                  <td>Per user/mo</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>Most scheduling tools focus narrowly on shifts and time tracking. Venue Wrangler is the only option that extends into the operational workflows hospitality venues need every day — reservations, floor management, bar inventory, CRM for events, and team communication — without requiring additional subscriptions.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">Can scheduling software integrate with my POS or payroll system?</button>
+          <div class="faq-answer">
+            <p>Most scheduling tools offer some form of payroll integration, either through direct connections to payroll providers or through exportable reports.</p>
+            <p>Venue Wrangler provides payroll-ready exports that include regular hours, overtime, and pay period summaries. These can be imported into payroll systems like Gusto, ADP, or QuickBooks. The geofenced time clock captures accurate clock-in and clock-out records, and managers receive alerts for late clock-ins or missed clock-outs so records are clean before export.</p>
+            <p>For POS integration, revenue and labor data in Venue Wrangler's reporting hub give managers visibility into labor costs relative to sales — a critical metric for controlling venue profitability.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">What is the best scheduling tool for a small restaurant or bar?</button>
+          <div class="faq-answer">
+            <p>For small restaurants and bars with 1 to 50 staff, <strong>Venue Wrangler</strong> offers the strongest value proposition. Here's why:</p>
+            <ul>
+              <li><strong>Flat pricing</strong> — $99.99/month covers the entire workspace with up to 50 team members. No per-seat fees that grow as you hire for a busy season.</li>
+              <li><strong>Consolidation</strong> — Small venues feel the pain of multiple subscriptions most acutely. Venue Wrangler replaces your scheduling app, time clock, reservation system, floor plan tool, inventory tracker, and team chat with one login.</li>
+              <li><strong>Fast onboarding</strong> — Create a workspace on the web, invite your team, and everyone logs into the mobile app with their email. The learning curve is measured in minutes, not days.</li>
+              <li><strong>No feature gates</strong> — Every feature is available on the single plan. You don't need to upgrade to unlock availability management or reporting.</li>
+            </ul>
+            <p>If you only need basic scheduling and nothing else, a free-tier tool like Homebase may work. But most venues quickly outgrow isolated scheduling once they realize how much time is lost switching between disconnected apps.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">How do I handle shift swaps and last-minute schedule changes?</button>
+          <div class="faq-answer">
+            <p>Last-minute changes are a fact of life in hospitality. A good scheduling tool should make them painless rather than chaotic.</p>
+            <p>In Venue Wrangler, staff request shift swaps directly through the mobile app. The request goes to the manager, who can approve or deny with one tap. Once approved, the schedule updates in real time for the entire team, and both the original and new assignee receive notifications.</p>
+            <p>When coverage is needed urgently, managers can post open shifts that available staff can claim. The availability system prevents swaps or claims that would create conflicts — for example, a staff member who has marked themselves unavailable on that day won't be offered the shift.</p>
+            <p>All schedule changes are tracked, so there's always a clear record of who was originally scheduled, who swapped, and when the change was approved.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">Why is an all-in-one tool better than separate scheduling and reservation apps?</button>
+          <div class="faq-answer">
+            <p>When scheduling lives in one app and reservations live in another, managers lose the connection between staffing and demand. Consider a typical scenario:</p>
+            <p>Friday night has 200 covers booked, a private event in the back room, and a DJ set starting at 10 PM. The scheduling manager needs to know all of this to staff appropriately — more servers on the floor, extra bartenders, a dedicated event coordinator. But if that information is spread across three different tools, the manager is manually cross-referencing and hoping nothing slips.</p>
+            <p><strong>Venue Wrangler keeps it all in one workspace:</strong> reservations, floor plans, event details, and the schedule exist side by side. Managers can see expected covers while building the schedule. The floor plan shows which sections need coverage. Event notes from the CRM inform staffing for private dining. And the team sees the whole picture from the same app they use to check their shifts.</p>
+            <p>The result is fewer under-staffed services, less over-scheduling on slow nights, and a team that operates from a single source of truth.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">Does Venue Wrangler work on mobile?</button>
+          <div class="faq-answer">
+            <p>Yes. Venue Wrangler is a mobile-first application available on iOS through the <a href="https://apps.apple.com/app/id6772533789" style="color: var(--green); font-weight: 700;">App Store</a>. The entire team — owners, managers, and staff — uses the same app with role-appropriate access:</p>
+            <ul>
+              <li><strong>Managers</strong> get full control over schedules, reservations, floor plans, inventory, CRM, and reports.</li>
+              <li><strong>Staff</strong> can view their shifts, submit availability, request swaps, clock in and out with geofence verification, and communicate through team chat.</li>
+            </ul>
+            <p>You create your workspace on the web at <a href="https://venuewrangler.com" style="color: var(--green); font-weight: 700;">venuewrangler.com</a> and then log into the mobile app with the same email and password. Your workspace, team, and data stay in sync across both.</p>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" type="button" aria-expanded="false">How much does scheduling software typically cost for a venue?</button>
+          <div class="faq-answer">
+            <p>Scheduling software pricing varies widely across the market:</p>
+            <ul>
+              <li><strong>Per-employee pricing</strong> — Tools like Deputy and When I Work typically charge $2 to $5 per user per month. For a venue with 30 staff, that's $60 to $150/month for scheduling alone — before adding separate tools for reservations, floor plans, or inventory.</li>
+              <li><strong>Tiered pricing</strong> — 7shifts and Homebase offer free or low-cost base tiers with limited features, then charge more for capabilities like availability management, labor forecasting, or advanced reporting.</li>
+              <li><strong>Enterprise pricing</strong> — HotSchedules and similar platforms often require contacting sales for pricing, with costs that can run significantly higher for full-feature access.</li>
+            </ul>
+            <p><strong>Venue Wrangler costs $99.99/month flat</strong> for the entire workspace — up to 50 team members, all features included. There are no per-seat fees, no feature-gated tiers, and no separate charges for reservations, floor plans, inventory, CRM, or team chat. For most venues, this is less than what they'd pay combining a scheduling tool with a separate reservation system and communication platform.</p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="cta-banner">
+        <div>
+          <h2>Ready to simplify your venue operations?</h2>
+          <p>Create your workspace in minutes. Scheduling, reservations, floor plans, time clock, inventory, CRM, reports, and team chat — all in one place.</p>
+        </div>
+        <a class="btn" href="../#pricing">Start workspace</a>
+      </div>
+
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div><strong>Venue Wrangler</strong><br />&copy; 2026 Loungeability LLC. Built for restaurants, bars, and event venues.</div>
+      <div>
+        <a href="../support/">Support</a>
+        <a href="../privacy/">Privacy</a>
+        <a href="../terms/">Terms</a>
+        <a href="./">FAQ</a>
+        <a href="../support/">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.querySelectorAll('.faq-question').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var item = btn.closest('.faq-item');
+        var isOpen = item.classList.contains('open');
+        item.classList.toggle('open');
+        btn.setAttribute('aria-expanded', String(!isOpen));
+      });
+    });
+  </script>
+</body>
+</html>
