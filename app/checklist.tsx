@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react';
 import { Image, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { Button, Card, Chip, IconButton, Text, TextInput as PaperTextInput } from 'react-native-paper';
+import { Button, Chip, IconButton, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import { resolveMediaUrl } from '../lib/api-client';
-import { colors, spacing } from '../lib/theme';
+import { colors, spacing, radius, type } from '../lib/theme';
+import { AppCard, SectionHeader } from '../components/AppCard';
 import { errorMessage } from '../lib/format';
 import { useVenueAuth } from '../lib/useVenueAuth';
 
@@ -108,7 +109,7 @@ export default function ChecklistScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Task checklist</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>Task checklist</Text>
           <Text style={{ color: colors.muted }}>Opening and closing tasks, with photo proof where it matters.</Text>
         </View>
       </View>
@@ -124,8 +125,7 @@ export default function ChecklistScreen() {
         <Text style={{ color: colors.muted }}>No {kind} tasks yet{canManage ? ' — add one below.' : '.'}</Text>
       ) : (
         items.map((item) => (
-          <Card key={item._id} style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-            <Card.Content style={{ gap: spacing.sm }}>
+          <AppCard key={item._id}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: '700', textDecorationLine: item.status === 'done' ? 'line-through' : 'none' }}>{item.title}</Text>
@@ -144,31 +144,30 @@ export default function ChecklistScreen() {
               {item.hasPhoto && item.photoUrl ? (
                 <Image
                   source={{ uri: resolveMediaUrl(item.photoUrl) }}
-                  style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: colors.background }}
+                  style={{ width: '100%', height: 160, borderRadius: radius.sharp, backgroundColor: colors.background, marginTop: spacing.sm }}
                   resizeMode="cover"
                 />
               ) : null}
 
               {item.status !== 'done' ? (
                 item.requiresPhoto ? (
-                  <Button mode="contained" buttonColor={colors.primary} icon="camera" loading={busyItemId === item._id} onPress={() => void onCompleteWithPhoto(item)}>
+                  <Button mode="contained" buttonColor={colors.primary} icon="camera" loading={busyItemId === item._id} onPress={() => void onCompleteWithPhoto(item)} style={{ marginTop: spacing.sm }}>
                     Take photo & complete
                   </Button>
                 ) : (
-                  <Button mode="contained" buttonColor={colors.primary} loading={busyItemId === item._id} onPress={() => void onCompletePlain(item)}>
+                  <Button mode="contained" buttonColor={colors.primary} loading={busyItemId === item._id} onPress={() => void onCompletePlain(item)} style={{ marginTop: spacing.sm }}>
                     Mark done
                   </Button>
                 )
               ) : null}
-            </Card.Content>
-          </Card>
+          </AppCard>
         ))
       )}
 
       {canManage ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add a {kind} task</Text>
+        <AppCard>
+            <SectionHeader title={`Add a ${kind} task`} />
+            <View style={{ gap: spacing.sm }}>
             <PaperTextInput placeholder="Task title" value={newTitle} onChangeText={setNewTitle} mode="outlined" style={{ backgroundColor: colors.surface }} />
             <Chip selected={newRequiresPhoto} onPress={() => setNewRequiresPhoto((v) => !v)} icon="camera">
               Require photo proof
@@ -176,8 +175,8 @@ export default function ChecklistScreen() {
             <Button mode="outlined" textColor={colors.primary} disabled={!newTitle.trim()} onPress={() => void onAddItem()}>
               Add task
             </Button>
-          </Card.Content>
-        </Card>
+            </View>
+        </AppCard>
       ) : null}
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}

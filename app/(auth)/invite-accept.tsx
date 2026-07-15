@@ -11,7 +11,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 export default function InviteAcceptScreen() {
@@ -115,10 +116,8 @@ export default function InviteAcceptScreen() {
         </View>
 
         <View style={{ gap: 6 }}>
-          <Text variant="labelMedium" style={{ color: colors.primary, textTransform: 'uppercase', letterSpacing: 1 }}>
-            You're invited to join
-          </Text>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '800' }}>
+          <Kicker>You're invited to join</Kicker>
+          <Text style={{ ...type.title, color: colors.text }}>
             {venueName}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
@@ -204,9 +203,9 @@ export default function InviteAcceptScreen() {
 
 const styles = StyleSheet.create({
   stepRow: { flexDirection: 'row', gap: 6, marginBottom: 4 },
-  step: { flex: 1, height: 4, borderRadius: 2, backgroundColor: '#E8E2D8' },
-  stepActive: { backgroundColor: '#2F7D46' },
-  stepDone: { backgroundColor: '#A8CBB0' },
+  step: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  stepActive: { backgroundColor: colors.primary },
+  stepDone: { backgroundColor: colors.primary, opacity: 0.45 },
   card: {
     ...authCardStyle,
   },

@@ -8,11 +8,12 @@ import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { accents, colors, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useDesktopContentStyle } from '../../lib/responsive';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { errorMessage } from '../../lib/format';
 import type { Role } from '../../lib/types';
+import { SectionHeader } from '../../components/AppCard';
 
 type VenueRole = { _id: string; name: string };
 type ParsedStaffImportRow = { fullName: string; email: string; phone?: string; jobTitle: string; role: 'manager' | 'staff' };
@@ -402,29 +403,24 @@ function StaffScreen() {
       removeClippedSubviews
       ListHeaderComponent={(
         <>
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
-          Staff Management
-        </Text>
-        <Text style={{ color: colors.muted }}>
-          Add staff to {venue?.name ?? 'your venue'} and assign roles.
-        </Text>
-        <Text style={{ color: colors.muted }}>
-          Staff are scoped to this venue and can be promoted or updated without leaving the workspace.
-        </Text>
-        <Button
-          mode="outlined"
-          icon="account-check"
-          textColor={colors.primary}
-          onPress={() => router.push('/join-requests')}
-          style={{ alignSelf: 'flex-start', marginTop: 4 }}
-        >
-          Review join requests
-        </Button>
-      </View>
+      <SectionHeader
+        kicker="Team"
+        title="Staff Management"
+        subtitle={`Add staff to ${venue?.name ?? 'your venue'} and assign roles. Staff are scoped to this venue and can be promoted or updated without leaving the workspace.`}
+        trailing={
+          <Button
+            mode="outlined"
+            icon="account-check"
+            textColor={colors.primary}
+            onPress={() => router.push('/join-requests')}
+          >
+            Join requests
+          </Button>
+        }
+      />
 
       {/* Roles / positions */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Roles & positions</Text>
           <Text style={{ color: colors.muted }}>Add the positions used at your venue (e.g. Bartender, Sommelier, Line Cook).</Text>
@@ -447,7 +443,7 @@ function StaffScreen() {
       </Card>
 
       {/* Invite staff via link (primary) */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Invite staff via link</Text>
           <Text style={{ color: colors.muted }}>Generate a 7-day invite link. Staff tap it, create an account or sign in, and are automatically added to {venue?.name ?? 'your venue'}.</Text>
@@ -685,38 +681,46 @@ function StaffScreen() {
         </>
       )}
         renderItem={({ item: member }) => (
-          <Card style={{ backgroundColor: member._id === selectedStaffId ? '#F6E8E4' : colors.cream, marginBottom: spacing.sm }}>
-            <Card.Content style={{ gap: 6 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontWeight: '700' }}>{member.fullName}</Text>
-                  <Text style={{ color: colors.muted }}>{member.email}</Text>
-                </View>
-                <Chip compact>{member.role}</Chip>
+          <View
+            style={{
+              gap: 6,
+              paddingVertical: spacing.sm,
+              paddingHorizontal: member._id === selectedStaffId ? spacing.sm : 0,
+              backgroundColor: member._id === selectedStaffId ? colors.cream : 'transparent',
+              borderBottomWidth: member._id === selectedStaffId ? 0 : 1,
+              borderBottomColor: colors.divider,
+              marginBottom: spacing.sm,
+            }}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: '700' }}>{member.fullName}</Text>
+                <Text style={{ color: colors.muted }}>{member.email}</Text>
               </View>
-              <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
-              {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>Phone: {member.phone}</Text> : null}
-              {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>DOB: {member.dateOfBirth}</Text> : null}
-              {member.certifications?.length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                  {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
-                </View>
+              <Chip compact>{member.role}</Chip>
+            </View>
+            <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
+            {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>Phone: {member.phone}</Text> : null}
+            {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>DOB: {member.dateOfBirth}</Text> : null}
+            {member.certifications?.length > 0 ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
+              </View>
+            ) : null}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <Button mode="outlined" onPress={() => fillFromStaff(member)}>
+                Edit
+              </Button>
+              <Button mode="outlined" onPress={() => void onDeactivate(member)}>
+                Deactivate
+              </Button>
+              {selectedStaffId === member._id ? (
+                <Button mode="text" textColor={colors.primary} onPress={clearForm}>
+                  Deselect
+                </Button>
               ) : null}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                <Button mode="outlined" onPress={() => fillFromStaff(member)}>
-                  Edit
-                </Button>
-                <Button mode="outlined" onPress={() => void onDeactivate(member)}>
-                  Deactivate
-                </Button>
-                {selectedStaffId === member._id ? (
-                  <Button mode="text" textColor={colors.primary} onPress={clearForm}>
-                    Deselect
-                  </Button>
-                ) : null}
-              </View>
-            </Card.Content>
-          </Card>
+            </View>
+          </View>
         )}
     />
   );

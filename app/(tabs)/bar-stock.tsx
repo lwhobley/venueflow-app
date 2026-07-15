@@ -9,7 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { accents, colors, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { errorMessage } from '../../lib/format';
 import { ManagerGate } from '../../components/ManagerGate';
@@ -29,6 +29,7 @@ import {
   MovementTimeline,
 } from '../../components/bar-stock/InventoryCards';
 import { InlineMessage } from '../../components/InlineMessage';
+import { SectionHeader } from '../../components/AppCard';
 
 const categories = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
 type Category = (typeof categories)[number];
@@ -342,10 +343,7 @@ export default function BarStockScreen() {
         contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ gap: 4 }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Bar Stock</Text>
-          <Text style={{ color: colors.muted }}>Current stock levels. Ask a manager to make changes.</Text>
-        </View>
+        <SectionHeader kicker="Inventory" title="Bar Stock" subtitle="Current stock levels. Ask a manager to make changes." />
 
         {profileLoading || stock === undefined ? (
           <Text style={{ color: colors.muted }}>Loading…</Text>
@@ -356,7 +354,7 @@ export default function BarStockScreen() {
                 { label: 'Items', value: String(items.length), a: accents[0] },
                 { label: 'Below par', value: String(lowItems.length), a: accents[4] },
               ].map((metric) => (
-                <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: 16 }}>
+                <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: radius.sharp }}>
                   <Card.Content>
                     <Text style={{ color: metric.a.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
                     <Text style={{ color: colors.muted }}>{metric.label}</Text>
@@ -366,7 +364,7 @@ export default function BarStockScreen() {
             </View>
 
             {lowItems.length > 0 ? (
-              <Card style={{ backgroundColor: accents[4].bg, borderRadius: 16 }}>
+              <Card style={{ backgroundColor: accents[4].bg, borderRadius: radius.sharp }}>
                 <Card.Content style={{ gap: spacing.sm }}>
                   <Text variant="titleMedium" style={{ color: accents[4].fg, fontWeight: '700' }}>Reorder list</Text>
                   {lowItems.slice(0, 8).map((item) => (
@@ -376,7 +374,7 @@ export default function BarStockScreen() {
               </Card>
             ) : null}
 
-            <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '700' }}>Stock list</Text>
                 {items.length === 0 ? (
@@ -441,14 +439,14 @@ export default function BarStockScreen() {
           <View style={{ height: 4, width: `${Math.round(((countIndex + 1) / countItems.length) * 100)}%`, backgroundColor: colors.primary, borderRadius: 2 }} />
         </View>
         {isNewArea && (
-          <Card style={{ backgroundColor: accents[1].bg, borderRadius: 12 }}>
+          <Card style={{ backgroundColor: accents[1].bg, borderRadius: radius.sharp }}>
             <Card.Content style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
               <MaterialCommunityIcons name="map-marker" size={18} color={accents[1].fg} />
               <Text style={{ color: accents[1].fg, fontWeight: '700' }}>Area: {current.area ?? 'Unassigned'}</Text>
             </Card.Content>
           </Card>
         )}
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleLarge" style={{ fontWeight: '800' }}>{current.name}</Text>
             <Text style={{ color: colors.muted }}>{current.category} · {current.unit} · par {current.parLevel}</Text>
@@ -488,10 +486,7 @@ export default function BarStockScreen() {
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Bar Stock</Text>
-        <Text style={{ color: colors.muted }}>Count bottles, parse invoices, and keep reorder lists tight.</Text>
-      </View>
+      <SectionHeader kicker="Inventory" title="Bar Stock" subtitle="Count bottles, parse invoices, and keep reorder lists tight." />
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {[
@@ -499,7 +494,7 @@ export default function BarStockScreen() {
           { label: 'Below par', value: String(stock?.lowStockCount ?? 0), a: accents[4] },
           { label: 'Value on hand', value: money(stock?.totalValueCents ?? 0), a: accents[2] },
         ].map((metric) => (
-          <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '31%', flexGrow: 1, borderRadius: 16 }}>
+          <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '31%', flexGrow: 1, borderRadius: radius.sharp }}>
             <Card.Content>
               <Text style={{ color: metric.a.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
               <Text style={{ color: colors.muted }}>{metric.label}</Text>
@@ -549,7 +544,7 @@ export default function BarStockScreen() {
         </Button>
       </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
             <View style={{ flex: 1, minWidth: 220 }}>
@@ -635,7 +630,7 @@ export default function BarStockScreen() {
 
       {/* Scanned item result */}
       {scannedItem && (
-        <Card style={{ backgroundColor: accents[0].bg, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: accents[0].bg, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text variant="titleMedium" style={{ color: accents[0].fg, fontWeight: '700' }}>Scanned: {scannedItem.name}</Text>
@@ -679,7 +674,7 @@ export default function BarStockScreen() {
       {showAgingReport && <AgingCard report={agingReport} />}
 
       {showStockCsv && (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Stock snapshot CSV</Text>
             <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
@@ -690,7 +685,7 @@ export default function BarStockScreen() {
       )}
 
       {showMovementCsv && (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Movement log CSV (14 days)</Text>
             <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
@@ -703,7 +698,7 @@ export default function BarStockScreen() {
       {/* Usage velocity */}
       <VelocityCard velocity={velocity} />
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>AI import</Text>
           <TextInput label="Paste list, invoice text, or CSV rows" value={parseText} onChangeText={setParseText} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
@@ -729,7 +724,7 @@ export default function BarStockScreen() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add item</Text>
           <TextInput label="Name" value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
@@ -754,7 +749,7 @@ export default function BarStockScreen() {
       </Card>
 
       {lowItems.length > 0 ? (
-        <Card style={{ backgroundColor: accents[4].bg, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: accents[4].bg, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium" style={{ color: accents[4].fg, fontWeight: '700' }}>Reorder list</Text>
             {lowItems.slice(0, 8).map((item) => (
@@ -764,7 +759,7 @@ export default function BarStockScreen() {
         </Card>
       ) : null}
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Stock list</Text>
           {items.length === 0 ? (

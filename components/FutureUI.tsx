@@ -1,11 +1,15 @@
 import { ReactNode } from 'react';
-import { Platform, Pressable, StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
+import { Pressable, StyleProp, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { DesignPalette, radius, shadow, spacing } from '../lib/theme';
+import { DesignPalette, fontFamily, radius, spacing } from '../lib/theme';
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
 type CommandTextVariant = 'hero' | 'title' | 'label' | 'body' | 'caption' | 'metric';
 
+// Editorial surface: hairline border, sharp corners, no shadow, no glass
+// blur. `strong` is the one place allowed the soft radius (it reads as a
+// distinct panel, e.g. a manager brief); `inset` drops the border entirely
+// for content nested inside another surface.
 export function CommandSurface({
   palette,
   children,
@@ -24,19 +28,11 @@ export function CommandSurface({
       style={[
         {
           backgroundColor: strong ? palette.surfaceStrong : inset ? palette.surfaceSoft : palette.surface,
-          borderWidth: strong ? 1 : 0,
-          borderColor: strong ? palette.border : 'transparent',
-          borderRadius: radius.lg,
+          borderWidth: inset ? 0 : StyleSheet.hairlineWidth,
+          borderColor: palette.border,
+          borderRadius: strong ? radius.soft : radius.sharp,
           padding: inset ? spacing.md : spacing.lg,
           overflow: 'hidden',
-          ...(Platform.OS === 'web'
-            ? ({ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as ViewStyle)
-            : {}),
-          shadowColor: palette.shadow,
-          shadowOpacity: strong ? (palette.mode === 'dark' ? 0.18 : 0.08) : 0.06,
-          shadowRadius: strong ? 22 : 12,
-          shadowOffset: { width: 0, height: strong ? 12 : 5 },
-          elevation: strong ? shadow.elevation : 2,
         },
         style,
       ]}
@@ -58,17 +54,20 @@ export function CommandText({
   style?: StyleProp<TextStyle>;
 }) {
   const styles: Record<CommandTextVariant, TextStyle> = {
-    hero: { color: palette.charcoal, fontSize: 30, lineHeight: 36, fontWeight: '700' },
-    title: { color: palette.charcoal, fontSize: 17, lineHeight: 23, fontWeight: '700' },
-    label: { color: palette.muted, fontSize: 11, lineHeight: 15, fontWeight: '700', textTransform: 'uppercase' },
+    hero: { color: palette.charcoal, fontSize: 32, lineHeight: 37, letterSpacing: -0.5, fontFamily: fontFamily.display },
+    title: { color: palette.charcoal, fontSize: 18, lineHeight: 24, letterSpacing: -0.2, fontFamily: fontFamily.displayMedium },
+    label: { color: palette.muted, fontSize: 11, lineHeight: 15, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
     body: { color: palette.charcoal, fontSize: 14, lineHeight: 20, fontWeight: '500' },
     caption: { color: palette.muted, fontSize: 12, lineHeight: 17, fontWeight: '500' },
-    metric: { color: palette.charcoal, fontSize: 27, lineHeight: 32, fontWeight: '700' },
+    metric: { color: palette.charcoal, fontSize: 30, lineHeight: 34, letterSpacing: -0.4, fontFamily: fontFamily.display },
   };
 
-  return <Text style={[styles[variant], { letterSpacing: 0 }, style]}>{children}</Text>;
+  return <Text style={[styles[variant], style]}>{children}</Text>;
 }
 
+// Sharp-cornered, mostly-borderless action — never a pill. `selected` fills
+// with the accent; the resting state is a quiet outline so a row of these
+// doesn't read as a chip tray.
 export function CommandButton({
   palette,
   children,
@@ -95,27 +94,28 @@ export function CommandButton({
       style={({ pressed }) => [
         {
           minHeight: 34,
-          paddingHorizontal: 11,
+          paddingHorizontal: 12,
           paddingVertical: 7,
-          borderRadius: radius.pill,
-          borderWidth: 0,
-          backgroundColor: selected ? palette.primary : palette.surfaceSoft,
+          borderRadius: radius.sharp,
+          borderWidth: selected ? 0 : StyleSheet.hairlineWidth,
+          borderColor: palette.border,
+          backgroundColor: selected ? palette.primary : 'transparent',
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
-          opacity: pressed ? 0.82 : 1,
+          opacity: pressed ? 0.7 : 1,
         },
         style,
       ]}
     >
-      {icon ? <MaterialCommunityIcons name={icon} size={16} color={selected ? palette.backgroundAlt : palette.muted} /> : null}
+      {icon ? <MaterialCommunityIcons name={icon} size={15} color={selected ? palette.backgroundAlt : palette.muted} /> : null}
       <Text
         numberOfLines={1}
         style={{
           color: selected ? palette.backgroundAlt : palette.charcoal,
           fontSize: 12,
-          fontWeight: '700',
+          fontWeight: '600',
         }}
       >
         {children}
@@ -124,6 +124,8 @@ export function CommandButton({
   );
 }
 
+// A tag, not a pill: sharp corners, a colored left bar carries the tone
+// instead of a filled colored background.
 export function StatusPill({
   palette,
   children,
@@ -137,15 +139,15 @@ export function StatusPill({
   return (
     <View
       style={{
-        borderRadius: radius.pill,
-        borderWidth: 0,
-        backgroundColor: `${toneColor}24`,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        borderLeftWidth: 2,
+        borderLeftColor: toneColor,
+        backgroundColor: palette.surfaceSoft,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
         alignSelf: 'flex-start',
       }}
     >
-      <Text numberOfLines={1} style={{ color: toneColor, fontSize: 11, fontWeight: '800' }}>
+      <Text numberOfLines={1} style={{ color: toneColor, fontSize: 11, fontWeight: '700' }}>
         {children}
       </Text>
     </View>
@@ -162,7 +164,6 @@ export function MiniTrend({ palette, values }: { palette: DesignPalette; values:
           style={{
             width: 5,
             height: Math.max(6, (value / max) * 34),
-            borderRadius: 999,
             backgroundColor: index === values.length - 1 ? palette.primary : `${palette.primary}44`,
           }}
         />

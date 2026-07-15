@@ -1,9 +1,10 @@
 import { ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Text } from 'react-native-paper';
+import { Button, Chip, Text } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
-import { colors, spacing } from '../lib/theme';
+import { colors, spacing, type } from '../lib/theme';
+import { AppCard, SectionHeader } from '../components/AppCard';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 
 export default function HostStandScreen() {
@@ -15,7 +16,7 @@ export default function HostStandScreen() {
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
       <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
+        <Text style={{ ...type.title, color: colors.charcoal }}>
           Host Stand
         </Text>
         <Text style={{ color: colors.muted }}>
@@ -23,19 +24,18 @@ export default function HostStandScreen() {
         </Text>
       </View>
 
-      <Card style={{ backgroundColor: colors.surface }}>
-        <Card.Content style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      <AppCard>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <Chip>Occupied: {stats?.occupiedCount ?? 0}</Chip>
           <Chip>Waitlist: {stats?.waitlistSize ?? 0}</Chip>
           <Chip>Dirty: {stats?.dirtyCount ?? 0}</Chip>
           <Chip>Available: {stats?.availableCount ?? 0}</Chip>
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
 
       {floor ? (
-        <Card style={{ backgroundColor: colors.surface }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium">Quick seat map</Text>
+        <AppCard>
+            <SectionHeader title="Quick seat map" />
             {((floor.tables ?? []) as any[]).slice(0, 10).map(({ table, state }: { table: any; state: any }) => (
               <View key={table._id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -45,8 +45,7 @@ export default function HostStandScreen() {
                 <Text style={{ color: colors.muted }}>{table.section} · {table.seats} seats · party {state?.partySize ?? 0}</Text>
               </View>
             ))}
-          </Card.Content>
-        </Card>
+        </AppCard>
       ) : null}
 
       <Button mode="contained" onPress={() => router.back()}>

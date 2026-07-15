@@ -4,7 +4,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { authCardStyle, authColors, spacing } from '../../lib/theme';
+import { authCardStyle, authColors, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
 
@@ -27,7 +28,7 @@ export default function SignInScreen() {
   const authControlTheme = {
     colors: {
       primary: authColors.primary,
-      secondaryContainer: '#E5F1E7',
+      secondaryContainer: authColors.highlight,
       onSecondaryContainer: authColors.text,
       onSurface: authColors.text,
       outline: authColors.border,
@@ -143,7 +144,8 @@ export default function SignInScreen() {
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
           <Image source={logoSource} style={styles.logo} />
-          <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
+          <Kicker>{flow === 'signUp' ? 'Get started' : 'Welcome back'}</Kicker>
+          <Text style={{ ...type.title, color: authColors.text }}>Venue Wrangler</Text>
           {!inviteToken ? (
             <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>
               Time tracking, scheduling, reservations, and team chat for teams that already use Venue Wrangler.

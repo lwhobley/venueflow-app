@@ -12,7 +12,8 @@ import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 export default function RegisterScreen() {
@@ -119,7 +120,8 @@ export default function RegisterScreen() {
         </View>
 
         <View style={{ gap: 4 }}>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700' }}>
+          <Kicker>Get started</Kicker>
+          <Text style={{ ...type.title, color: colors.text }}>
             Create your account
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
@@ -267,8 +269,8 @@ export default function RegisterScreen() {
 
 const styles = StyleSheet.create({
   stepRow: { flexDirection: 'row', gap: 6, marginBottom: 4 },
-  step: { flex: 1, height: 4, borderRadius: 2, backgroundColor: '#E8E2D8' },
-  stepActive: { backgroundColor: '#2F7D46' },
+  step: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  stepActive: { backgroundColor: colors.primary },
   fieldError: { color: colors.danger, fontSize: 12, marginTop: 2, marginLeft: 4 },
   card: {
     ...authCardStyle,

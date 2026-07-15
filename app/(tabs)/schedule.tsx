@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, SegmentedButtons, Snackbar, Text } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
-import { AnimatedTab } from '../../components/AppCard';
+import { AnimatedTab, SectionHeader } from '../../components/AppCard';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { colors, spacing } from '../../lib/theme';
+import { colors, radius, spacing } from '../../lib/theme';
 import { useDesktopContentStyle } from '../../lib/responsive';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { errorMessage } from '../../lib/format';
@@ -46,7 +46,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
 
   return (
     <>
-    <Card style={{ backgroundColor: colors.surface, borderRadius: 16, marginBottom: spacing.md }}>
+    <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, marginBottom: spacing.md }}>
       <Card.Content style={{ gap: spacing.sm }}>
         <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shift swaps</Text>
         {swaps.length === 0 ? (
@@ -65,7 +65,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
         )}
       </Card.Content>
     </Card>
-    <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+    <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.sm }}>
         <Text variant="titleMedium" style={{ fontWeight: '700' }}>Request review queue</Text>
         {queue.length === 0 ? (
@@ -111,17 +111,14 @@ function ScheduleScreen() {
       contentContainerStyle={contentContainerStyle}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
-          Schedule
-        </Text>
-        <Text style={{ color: colors.muted }}>
-          {canManage ? 'Build the schedule, assign staff, and review requests.' : 'See your shifts, pick up open ones, and set your availability.'}
-        </Text>
-      </View>
+      <SectionHeader
+        kicker="Team"
+        title="Schedule"
+        subtitle={canManage ? 'Build the schedule, assign staff, and review requests.' : 'See your shifts, pick up open ones, and set your availability.'}
+      />
 
       {!venue?.id ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content>
             <Text style={{ color: colors.muted }}>No venue assigned to your account yet.</Text>
           </Card.Content>

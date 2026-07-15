@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Card, Chip, IconButton, Text, TextInput as PaperTextInput } from 'react-native-paper';
+import { Button, Chip, IconButton, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
-import { colors, spacing } from '../lib/theme';
+import { colors, spacing, type } from '../lib/theme';
+import { AppCard } from '../components/AppCard';
 import { errorMessage } from '../lib/format';
 import { useVenueAuth } from '../lib/useVenueAuth';
 
@@ -77,13 +78,13 @@ export default function LogbookScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Shift logbook</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>Shift logbook</Text>
           <Text style={{ color: colors.muted }}>What the next shift needs to know — visible to the whole team.</Text>
         </View>
       </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
+      <AppCard>
+          <View style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {CATEGORIES.map((c) => (
               <Chip key={c.value} selected={category === c.value} onPress={() => setCategory(c.value)}>{c.label}</Chip>
@@ -107,8 +108,8 @@ export default function LogbookScreen() {
             Post entry
           </Button>
           {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
 
       {entries.length === 0 ? (
         <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.lg }}>No logbook entries yet.</Text>
@@ -117,8 +118,8 @@ export default function LogbookScreen() {
           const categoryLabel = CATEGORIES.find((c) => c.value === entry.category)?.label ?? entry.category;
           const canDelete = canManage || entry.authorProfileId === myProfileId;
           return (
-            <Card key={entry._id} style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-              <Card.Content style={{ gap: 6 }}>
+            <AppCard key={entry._id}>
+                <View style={{ gap: 6 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     {entry.pinned ? <Text style={{ color: colors.primary }}>📌</Text> : null}
@@ -131,8 +132,8 @@ export default function LogbookScreen() {
                 </View>
                 <Text style={{ color: colors.charcoal, lineHeight: 20 }}>{entry.body}</Text>
                 <Text style={{ color: colors.muted, fontSize: 12 }}>{formatTimestamp(entry.createdAt)}</Text>
-              </Card.Content>
-            </Card>
+                </View>
+            </AppCard>
           );
         })
       )}

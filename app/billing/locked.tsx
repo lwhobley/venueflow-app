@@ -1,7 +1,8 @@
 import { Linking, Platform, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Button, Card, Text } from 'react-native-paper';
-import { colors, spacing } from '../../lib/theme';
+import { Button, Text } from 'react-native-paper';
+import { colors, spacing, type, authCardStyle } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useWebBilling } from '../../lib/web-billing';
@@ -33,16 +34,16 @@ export default function BillingLockedScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center' }}>
-        <Card style={{ backgroundColor: colors.surface }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="headlineSmall">{headlineByReason[reason] ?? headlineByReason.never_subscribed}</Text>
+        <View style={{ ...authCardStyle, padding: spacing.lg, gap: spacing.sm }}>
+            <Kicker>Subscription required</Kicker>
+            <Text style={{ ...type.title, color: colors.charcoal }}>{headlineByReason[reason] ?? headlineByReason.never_subscribed}</Text>
             <Text style={{ color: colors.muted }}>
               Reactivate to keep your floor plan, reservations, waitlist, and integrations running.
             </Text>
             <Text style={{ color: colors.muted }}>Venue: {venue?.name ?? 'No venue selected'}</Text>
             <Text style={{ color: colors.muted }}>Signed in as {user?.email ?? 'unknown'}</Text>
 
-            <Text variant="titleMedium">Subscribe to continue</Text>
+            <Text style={{ ...type.heading, color: colors.charcoal, marginTop: spacing.sm }}>Subscribe to continue</Text>
             <Text style={{ color: colors.muted }}>
               $99.99/month for teams of 1-50 people keeps scheduling, the live floor, time clock, reservations, bar stock,
               reports, and integrations running across your whole team.
@@ -96,8 +97,7 @@ export default function BillingLockedScreen() {
             <Button mode="text" textColor={colors.primary} onPress={() => Linking.openURL('mailto:support@venuewrangler.com')}>
               Need help? Contact support
             </Button>
-          </Card.Content>
-        </Card>
+        </View>
       </ScrollView>
     </View>
   );

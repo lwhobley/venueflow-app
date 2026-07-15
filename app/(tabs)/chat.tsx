@@ -9,6 +9,7 @@ import type { Id } from '../../lib/ids';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatRelativeTime, errorMessage } from '../../lib/format';
+import { SectionHeader } from '../../components/AppCard';
 
 type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 type FilterKey = 'all' | 'direct' | 'groups' | 'shifts';
@@ -214,10 +215,12 @@ export default function ChatScreen() {
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: spacing.xs }}>
-        <Text variant="headlineMedium" style={{ color: colors.charcoal, fontWeight: '900' }}>Chat</Text>
-        <Text style={{ color: colors.muted }}>{unreadCount ? `${unreadCount} unread conversation${unreadCount === 1 ? '' : 's'}` : 'All caught up'}</Text>
-      </View>
+      <SectionHeader
+        kicker="Team"
+        title="Chat"
+        subtitle={unreadCount ? `${unreadCount} unread conversation${unreadCount === 1 ? '' : 's'}` : 'All caught up'}
+        rule={false}
+      />
 
       <View style={{ flexDirection: 'row', backgroundColor: colors.surfaceSoft, borderRadius: radius.md, padding: 3, gap: 3 }}>
         {FILTERS.map((filter) => {

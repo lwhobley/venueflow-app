@@ -6,13 +6,14 @@ import {
   Platform,
   Pressable,
   StyleProp,
+  StyleSheet,
   UIManager,
   View,
   ViewStyle,
 } from 'react-native';
 import { Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { radius, spacing, useDesignTheme } from '../lib/theme';
+import { radius, spacing, type, useDesignTheme } from '../lib/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -20,6 +21,11 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 type CardTone = 'default' | 'soft' | 'inset';
 
+// Editorial rule: no elevation shadows. `default` is a hairline-bordered
+// panel with sharp corners (the common case — a data table row group, a
+// form section); `soft` is the one genuine "card" surface, used sparingly,
+// with the soft radius and no border; `inset` is a flush, borderless
+// recessed panel for nesting content inside another surface.
 export function AppCard({
   children,
   tone = 'default',
@@ -39,15 +45,10 @@ export function AppCard({
       style={[
         {
           backgroundColor: background,
-          borderRadius: radius.xl,
-          borderWidth: tone === 'default' ? 1 : 0,
+          borderRadius: tone === 'soft' ? radius.soft : radius.sharp,
+          borderWidth: tone === 'default' ? StyleSheet.hairlineWidth : 0,
           borderColor: palette.border,
           padding: padded ? spacing.lg : 0,
-          shadowColor: palette.shadow,
-          shadowOpacity: tone === 'default' ? 0.05 : 0,
-          shadowRadius: 12,
-          shadowOffset: { width: 0, height: 4 },
-          elevation: tone === 'default' ? 1 : 0,
           overflow: 'hidden',
         },
         style,
@@ -55,6 +56,74 @@ export function AppCard({
     >
       {children}
     </View>
+  );
+}
+
+/**
+ * Small-caps-style label sitting above a headline — the editorial "kicker"
+ * device used instead of wrapping every section in its own card.
+ */
+export function Kicker({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  const palette = useDesignTheme();
+  return (
+    <Text
+      style={[
+        { ...type.label, color: palette.primary, textTransform: 'uppercase', fontWeight: '700' },
+        style,
+      ]}
+    >
+      {children}
+    </Text>
+  );
+}
+
+/**
+ * Editorial section header: kicker + serif headline + optional trailing
+ * adornment, closed off with a hairline rule instead of a card boundary.
+ */
+export function SectionHeader({
+  kicker,
+  title,
+  subtitle,
+  trailing,
+  rule = true,
+}: {
+  kicker?: string;
+  title: string;
+  subtitle?: string;
+  trailing?: ReactNode;
+  rule?: boolean;
+}) {
+  const palette = useDesignTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        paddingBottom: spacing.md,
+        marginBottom: spacing.lg,
+        borderBottomWidth: rule ? StyleSheet.hairlineWidth : 0,
+        borderBottomColor: palette.divider,
+      }}
+    >
+      <View style={{ flex: 1 }}>
+        {kicker ? <Kicker style={{ marginBottom: 4 }}>{kicker}</Kicker> : null}
+        <Text style={{ ...type.title, color: palette.charcoal }}>{title}</Text>
+        {subtitle ? (
+          <Text style={{ ...type.body, color: palette.muted, marginTop: 4 }}>{subtitle}</Text>
+        ) : null}
+      </View>
+      {trailing}
+    </View>
+  );
+}
+
+/** A plain hairline rule for separating open-layout sections without a box. */
+export function Rule({ style }: { style?: StyleProp<ViewStyle> }) {
+  const palette = useDesignTheme();
+  return (
+    <View style={[{ height: StyleSheet.hairlineWidth, backgroundColor: palette.divider }, style]} />
   );
 }
 

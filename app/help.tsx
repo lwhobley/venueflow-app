@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Card, IconButton, Text, TextInput } from 'react-native-paper';
-import { colors, spacing } from '../lib/theme';
+import { IconButton, Text, TextInput } from 'react-native-paper';
+import { colors, spacing, type } from '../lib/theme';
+import { AppCard, Kicker } from '../components/AppCard';
 
 type GuideSection = {
   key: string;
@@ -240,7 +241,7 @@ export default function HelpScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Help & feature guide</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>Help & feature guide</Text>
           <Text style={{ color: colors.muted }}>How to work each part of Venue Wrangler.</Text>
         </View>
       </View>
@@ -260,8 +261,7 @@ export default function HelpScreen() {
         filtered.map((section) => {
           const isOpen = expandedKey === section.key;
           return (
-            <Card key={section.key} style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-              <Card.Content style={{ gap: spacing.sm }}>
+            <AppCard key={section.key}>
                 <Pressable
                   onPress={() => setExpandedKey(isOpen ? null : section.key)}
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}
@@ -269,10 +269,8 @@ export default function HelpScreen() {
                   accessibilityLabel={`${isOpen ? 'Collapse' : 'Expand'} ${section.title} instructions`}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                      {section.tab}
-                    </Text>
-                    <Text variant="titleMedium" style={{ fontWeight: '700' }}>{section.title}</Text>
+                    <Kicker>{section.tab}</Kicker>
+                    <Text style={{ ...type.heading, color: colors.charcoal, marginTop: 2 }}>{section.title}</Text>
                     <Text style={{ color: colors.muted }}>{section.summary}</Text>
                   </View>
                   <MaterialCommunityIcons
@@ -282,7 +280,7 @@ export default function HelpScreen() {
                   />
                 </Pressable>
                 {isOpen ? (
-                  <View style={{ gap: 6, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm }}>
+                  <View style={{ gap: 6, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, marginTop: spacing.sm }}>
                     {section.steps.map((step, index) => (
                       <View key={index} style={{ flexDirection: 'row', gap: 8 }}>
                         <Text style={{ color: colors.primary, fontWeight: '700' }}>{index + 1}.</Text>
@@ -291,8 +289,7 @@ export default function HelpScreen() {
                     ))}
                   </View>
                 ) : null}
-              </Card.Content>
-            </Card>
+            </AppCard>
           );
         })
       )}

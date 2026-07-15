@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Linking, ScrollView, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { colors, spacing, radius, shadow } from '../../lib/theme';
+import { colors, spacing, radius, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import {
   PURCHASES_SUPPORTED,
   getOfferingPackages,
@@ -101,12 +102,13 @@ export default function PaywallScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Add your team</Text>
+        <Kicker>Subscription required</Kicker>
+        <Text style={{ ...type.display, color: colors.charcoal }}>Add your team</Text>
         <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Upgrade to one flat monthly plan for teams of 1-50 people to share scheduling, the live floor, time clock, and team chat.</Text>
       </View>
 
       {!PURCHASES_SUPPORTED ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.lg }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
           <Card.Content>
             <Text style={{ color: colors.muted }}>Subscriptions are managed in the mobile app.</Text>
           </Card.Content>
@@ -117,7 +119,7 @@ export default function PaywallScreen() {
         (packages.length ? packages : FALLBACK_TIERS).map((pkg) => {
           const live = packages.length > 0;
           return (
-            <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.lg, ...shadow }}>
+            <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.soft, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{MONTHLY_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>

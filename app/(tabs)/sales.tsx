@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Card, Chip, SegmentedButtons, Text } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
-import { AnimatedTab } from '../../components/AppCard';
+import { AnimatedTab, SectionHeader } from '../../components/AppCard';
 import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { accents, colors, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatMoney, formatPct, formatDuration } from '../../lib/format';
 import { ScheduleSkeleton } from '../../components/schedule/ScheduleSkeleton';
@@ -28,7 +28,7 @@ function MiniBar({ value, max, color }: { value: number; max: number; color: str
 
 function KpiTile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent: typeof accents[number] }) {
   return (
-    <Card style={{ backgroundColor: accent.bg, borderRadius: 14, minWidth: '47%', flexGrow: 1 }}>
+    <Card style={{ backgroundColor: accent.bg, borderRadius: radius.sharp, minWidth: '47%', flexGrow: 1 }}>
       <Card.Content style={{ gap: 2 }}>
         <Text style={{ fontSize: 22, fontWeight: '800', color: accent.fg }}>{value}</Text>
         {sub ? <Text style={{ fontSize: 12, color: colors.muted }}>{sub}</Text> : null}
@@ -47,7 +47,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
   if (!dashboard || dashboard.summary.checkCount === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content>
           <Text style={{ color: colors.muted }}>No sales data for this period. Connect a POS integration to start receiving data.</Text>
         </Card.Content>
@@ -73,7 +73,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Discounts / comps / promos */}
       {(summary.discountCents + summary.compCents + summary.promoCents) > 0 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Discounts & voids</Text>
             {[
@@ -96,7 +96,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Daily sparkline */}
       {byDay.length > 1 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Sales by day</Text>
             {byDay.map((d) => (
@@ -114,7 +114,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Tender mix */}
       {byTender.length > 0 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Tender mix</Text>
             {byTender.map((t, i) => (
@@ -132,7 +132,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Revenue centers */}
       {byRevenueCenter.length > 1 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Revenue centers</Text>
             {byRevenueCenter.map((r, i) => (
@@ -150,7 +150,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Avg check time */}
       {summary.avgCheckTimeMins != null ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content>
             <Text variant="titleSmall" style={{ fontWeight: '700' }}>Avg table turn</Text>
             <Text style={{ fontSize: 28, fontWeight: '800', color: colors.primary, marginTop: 4 }}>{formatDuration(summary.avgCheckTimeMins)}</Text>
@@ -168,7 +168,7 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content><Text style={{ color: colors.muted }}>No server data for this period.</Text></Card.Content>
       </Card>
     );
@@ -177,7 +177,7 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   const maxSales = Math.max(...data.map((r) => r.salesCents), 1);
 
   return (
-    <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+    <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.md }}>
         <Text variant="titleMedium" style={{ fontWeight: '700' }}>By server</Text>
         {data.map((r, i) => (
@@ -203,7 +203,7 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
                 </Chip>
               ) : null}
               {r.compCents + r.discountCents > 0 ? (
-                <Chip compact style={{ backgroundColor: '#FDE7E9' }}>
+                <Chip compact style={{ backgroundColor: `${colors.danger}1A` }}>
                   <Text style={{ fontSize: 11, color: colors.danger }}>-{formatMoney(r.compCents + r.discountCents)} off</Text>
                 </Chip>
               ) : null}
@@ -221,7 +221,7 @@ function ItemsTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content><Text style={{ color: colors.muted }}>No menu item data yet. Make sure your POS integration transmits line-item detail.</Text></Card.Content>
       </Card>
     );
@@ -231,7 +231,7 @@ function ItemsTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   const categories = Array.from(new Set(data.map((r) => r.category).filter(Boolean))) as string[];
 
   return (
-    <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+    <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.md }}>
         <Text variant="titleMedium" style={{ fontWeight: '700' }}>Top items by revenue</Text>
         {categories.length > 1
@@ -269,7 +269,7 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.byEmployee.length === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content><Text style={{ color: colors.muted }}>No labor data for this period. Configure the /pos/labor webhook endpoint to receive punch data.</Text></Card.Content>
       </Card>
     );
@@ -284,7 +284,7 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
         <KpiTile label="Tips paid out" value={formatMoney(data.totalTipsCents)} accent={accents[1]} />
       </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.md }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>By employee</Text>
           {((data.byEmployee ?? []) as any[]).map((emp, i) => (
@@ -301,7 +301,7 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
                   <Text style={{ fontSize: 11, color: accents[0].fg }}>{formatDuration(emp.regularMins)} reg</Text>
                 </Chip>
                 {emp.overtimeMins > 0 ? (
-                  <Chip compact style={{ backgroundColor: '#FDE7E9' }}>
+                  <Chip compact style={{ backgroundColor: `${colors.danger}1A` }}>
                     <Text style={{ fontSize: 11, color: colors.danger }}>{formatDuration(emp.overtimeMins)} OT</Text>
                   </Chip>
                 ) : null}
@@ -333,7 +333,7 @@ function SalesScreen() {
     return (
       <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Sales analytics">
         <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content>
               <Text style={{ color: colors.muted }}>No venue assigned to your account yet.</Text>
             </Card.Content>
@@ -352,13 +352,12 @@ function SalesScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: spacing.sm }}>
-          <View style={{ gap: 4 }}>
-            <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Sales</Text>
-            <Text style={{ color: colors.muted }}>{venue.name ?? 'Venue'} · POS analytics</Text>
-          </View>
-          <DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />
-        </View>
+        <SectionHeader
+          kicker="Performance"
+          title="Sales"
+          subtitle={`${venue.name ?? 'Venue'} · POS analytics`}
+          trailing={<DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />}
+        />
 
         {/* Tab switcher */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ minWidth: 620 }}>

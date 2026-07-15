@@ -3,7 +3,7 @@ import { Alert, Pressable, ScrollView, View, Linking, TextInput } from 'react-na
 import { Card, Text } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { accents, colors, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
@@ -215,7 +215,7 @@ export default function ClockScreen() {
       showsVerticalScrollIndicator={false}
     >
       {/* Header: live time + date + venue pill */}
-      <View style={{ backgroundColor: colors.primary, borderRadius: 22, padding: spacing.xl, alignItems: 'center', gap: 6 }}>
+      <View style={{ backgroundColor: colors.primary, borderRadius: radius.soft, padding: spacing.xl, alignItems: 'center', gap: 6 }}>
         <Text style={{ color: 'rgba(255,255,255,0.85)', fontWeight: '700' }}>{user?.full_name ?? 'Time clock'}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
           <Text style={{ color: '#fff', fontSize: 56, fontWeight: '800', lineHeight: 60 }}>{time}</Text>
@@ -228,7 +228,7 @@ export default function ClockScreen() {
       </View>
 
       {salaried ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: 4 }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Salaried role</Text>
             <Text style={{ color: colors.muted }}>
@@ -247,7 +247,7 @@ export default function ClockScreen() {
               disabled={busy}
               style={{
                 backgroundColor: accents[1].fg,
-                borderRadius: 18,
+                borderRadius: radius.sharp,
                 paddingVertical: 20,
                 alignItems: 'center',
                 opacity: busy ? 0.7 : 1,
@@ -263,7 +263,7 @@ export default function ClockScreen() {
               disabled={!canClock || busy}
               style={{
                 backgroundColor: canClock ? (isClockedIn ? colors.danger : colors.secondary) : colors.border,
-                borderRadius: 18,
+                borderRadius: radius.sharp,
                 paddingVertical: 20,
                 alignItems: 'center',
                 opacity: busy ? 0.7 : 1,
@@ -291,7 +291,7 @@ export default function ClockScreen() {
               disabled={busy}
               style={{
                 backgroundColor: colors.primary,
-                borderRadius: 18,
+                borderRadius: radius.sharp,
                 paddingVertical: 12,
                 alignItems: 'center',
                 marginTop: 4,
@@ -319,7 +319,7 @@ export default function ClockScreen() {
           )}
 
           {/* Period totals */}
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text variant="titleMedium" style={{ fontWeight: '700' }}>Period totals</Text>
@@ -345,7 +345,7 @@ export default function ClockScreen() {
           </Card>
 
           {/* Daily punches */}
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text variant="titleMedium" style={{ fontWeight: '700' }}>Daily punches</Text>
@@ -368,7 +368,7 @@ export default function ClockScreen() {
           </Card>
 
           {/* Time Correction Form */}
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <Pressable
                 onPress={() => setShowCorrection(!showCorrection)}
@@ -397,10 +397,10 @@ export default function ClockScreen() {
                       style={{
                         borderWidth: 1,
                         borderColor: colors.border,
-                        borderRadius: 8,
+                        borderRadius: radius.sharp,
                         padding: 10,
-                        backgroundColor: '#fff',
-                        color: '#000',
+                        backgroundColor: colors.surface,
+                        color: colors.charcoal,
                       }}
                     />
                   </View>
@@ -415,10 +415,10 @@ export default function ClockScreen() {
                         style={{
                           borderWidth: 1,
                           borderColor: colors.border,
-                          borderRadius: 8,
+                          borderRadius: radius.sharp,
                           padding: 10,
-                          backgroundColor: '#fff',
-                          color: '#000',
+                          backgroundColor: colors.surface,
+                          color: colors.charcoal,
                         }}
                       />
                     </View>
@@ -432,10 +432,10 @@ export default function ClockScreen() {
                         style={{
                           borderWidth: 1,
                           borderColor: colors.border,
-                          borderRadius: 8,
+                          borderRadius: radius.sharp,
                           padding: 10,
-                          backgroundColor: '#fff',
-                          color: '#000',
+                          backgroundColor: colors.surface,
+                          color: colors.charcoal,
                         }}
                       />
                     </View>
@@ -450,10 +450,10 @@ export default function ClockScreen() {
                       style={{
                         borderWidth: 1,
                         borderColor: colors.border,
-                        borderRadius: 8,
+                        borderRadius: radius.sharp,
                         padding: 10,
-                        backgroundColor: '#fff',
-                        color: '#000',
+                        backgroundColor: colors.surface,
+                        color: colors.charcoal,
                       }}
                     />
                   </View>
@@ -462,7 +462,7 @@ export default function ClockScreen() {
                     disabled={busy}
                     style={{
                       backgroundColor: colors.primary,
-                      borderRadius: 12,
+                      borderRadius: radius.sharp,
                       paddingVertical: 12,
                       alignItems: 'center',
                       marginTop: 4,
@@ -481,7 +481,7 @@ export default function ClockScreen() {
       {/* Manager board */}
       {isAdmin ? (
         <>
-          <Card style={{ backgroundColor: managerAlerts.length > 0 ? '#FDE7E9' : colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: managerAlerts.length > 0 ? `${colors.danger}1A` : colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <Text variant="titleMedium" style={{ fontWeight: '700' }}>Manager alerts</Text>
               {managerAlerts.length === 0 ? (
@@ -496,7 +496,7 @@ export default function ClockScreen() {
               )}
             </Card.Content>
           </Card>
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <Text variant="titleMedium" style={{ fontWeight: '700' }}>Who's clocked in</Text>
               {activeClockEntries.length === 0 ? (
