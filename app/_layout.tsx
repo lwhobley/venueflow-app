@@ -6,6 +6,11 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { PaperProvider } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
+import {
+  Fraunces_500Medium,
+  Fraunces_600SemiBold,
+  Fraunces_600SemiBold_Italic,
+} from '@expo-google-fonts/fraunces';
 import { A0PurchaseProvider } from '../lib/a0-purchases-stub';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { makePaperTheme, useAppearanceStore, designPalettes } from '../lib/theme';
@@ -28,7 +33,12 @@ export default function RootLayout() {
   // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
   // and the nav use it). We hold the first paint until it's loaded, otherwise
   // web shows blank "tofu" squares. A load error still lets the app through.
-  const [fontsLoaded, fontError] = useFonts(MaterialCommunityIcons.font);
+  const [fontsLoaded, fontError] = useFonts({
+    ...MaterialCommunityIcons.font,
+    Fraunces_500Medium,
+    Fraunces_600SemiBold,
+    Fraunces_600SemiBold_Italic,
+  });
   // Only block the first paint on web (where an unloaded glyph font shows tofu
   // squares). On native the icon font is bundled and renders fine, so never
   // gate there — a gate could leave a blank screen if loading misbehaves.

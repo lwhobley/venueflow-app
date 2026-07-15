@@ -1,9 +1,10 @@
 import { Linking, View } from 'react-native';
-import { Button, Card, Text } from 'react-native-paper';
+import { Button, Text } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { colors, spacing } from '../../lib/theme';
+import { AppCard, SectionHeader } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling } from '../../lib/permissions';
@@ -45,9 +46,9 @@ export default function BillingScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
-      <Card style={{ backgroundColor: colors.surface }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="headlineSmall">Billing</Text>
+      <AppCard>
+          <SectionHeader kicker="Account" title="Billing" />
+          <View style={{ gap: spacing.sm }}>
           <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
           <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'Not configured'}</Text>
           {inTrial ? <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in intro access</Text> : null}
@@ -66,8 +67,8 @@ export default function BillingScreen() {
           <Button mode="text" textColor={colors.primary} onPress={() => router.push('/(tabs)/profile')}>
             Back to profile
           </Button>
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
     </View>
   );
 }

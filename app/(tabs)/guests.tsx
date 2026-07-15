@@ -5,10 +5,11 @@ import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { accents, colors, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatMoney, formatShortDate, formatShortDateTime, formatFullDateTime, splitTags, errorMessage } from '../../lib/format';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
+import { SectionHeader } from '../../components/AppCard';
 import { CrmSalesWorkspace } from '../../components/CrmSalesWorkspace';
 
 type LifecycleStage = 'lead' | 'regular' | 'vip' | 'lapsed';
@@ -427,10 +428,11 @@ function GuestsScreenInner() {
       removeClippedSubviews
       ListHeaderComponent={
         <View style={{ gap: spacing.md, marginBottom: spacing.sm }}>
-          <View style={{ gap: 4 }}>
-            <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>CRM</Text>
-            <Text style={{ color: colors.muted }}>Sales pipeline, event docs, guest intelligence, and follow-up cues for {venue?.name ?? 'your venue'}.</Text>
-          </View>
+          <SectionHeader
+            kicker="Relationships"
+            title="CRM"
+            subtitle={`Sales pipeline, event docs, guest intelligence, and follow-up cues for ${venue?.name ?? 'your venue'}.`}
+          />
 
           <CrmSalesWorkspace venueId={venue?.id} enabled={isReady && canManage} />
 
@@ -444,7 +446,7 @@ function GuestsScreenInner() {
               { label: 'Opted in', value: String(crmStats.optedIn), accent: accents[4] },
               { label: 'Follow-up', value: String(crmStats.needsFollowUp), accent: accents[5] },
             ].map((metric) => (
-              <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, width: '31%', minWidth: 105, flexGrow: 1, borderRadius: 16 }}>
+              <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, width: '31%', minWidth: 105, flexGrow: 1, borderRadius: radius.sharp }}>
                 <Card.Content>
                   <Text style={{ color: metric.accent.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
                   <Text style={{ color: colors.muted }}>{metric.label}</Text>
@@ -453,7 +455,7 @@ function GuestsScreenInner() {
             ))}
           </View>
 
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest directory</Text>
@@ -480,7 +482,7 @@ function GuestsScreenInner() {
               </ScrollView>
               {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
               {showLeadImport ? (
-                <Card style={{ backgroundColor: accents[5].bg, borderRadius: 14 }}>
+                <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                   <Card.Content style={{ gap: spacing.sm }}>
                     <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>Lead intake</Text>
                     <Text style={{ color: colors.muted }}>
@@ -547,16 +549,16 @@ function GuestsScreenInner() {
       }
       ListEmptyComponent={
         guests === undefined ? (
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>Loading guests…</Text></Card.Content></Card>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>Loading guests…</Text></Card.Content></Card>
         ) : (
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>No guests match this segment yet.</Text></Card.Content></Card>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>No guests match this segment yet.</Text></Card.Content></Card>
         )
       }
       ListFooterComponent={
         <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>CRM profile</Text>
           {!selectedGuest ? (
-            <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}><Card.Content><Text style={{ color: colors.muted }}>Select a guest to view their relationship profile.</Text></Card.Content></Card>
+            <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>Select a guest to view their relationship profile.</Text></Card.Content></Card>
           ) : (
             <GuestProfilePanel
               guest={profile?.guest ?? selectedGuest}
@@ -582,7 +584,7 @@ type GuestListItemProps = {
 
 const GuestListItem = memo(function GuestListItem({ guest, isSelected, onOpen, onEdit }: GuestListItemProps) {
   return (
-    <Card style={{ backgroundColor: isSelected ? accents[2].bg : colors.surface, borderRadius: 16 }}>
+    <Card style={{ backgroundColor: isSelected ? accents[2].bg : colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.sm }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
           <View style={{ flex: 1 }}>
@@ -649,7 +651,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
 
   return (
     <View style={{ gap: spacing.sm }}>
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
             <View style={{ flex: 1 }}>
@@ -678,7 +680,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
       </Card>
 
       {generatedDocument ? (
-        <Card style={{ backgroundColor: accents[5].bg, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium" style={{ color: accents[5].fg, fontWeight: '800' }}>Generated document</Text>
             <Text style={{ color: colors.muted }}>Copy this draft into your BEO or contract template and tighten legal/payment terms before sending.</Text>
@@ -688,7 +690,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
         </Card>
       ) : null}
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Preferences</Text>
           <Preference label="Favorite table" value={guest.favoriteTable} />
@@ -701,7 +703,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest intelligence</Text>
           <Text style={{ color: colors.muted }}>Last visit: {formatShortDate(guest.lastVisitAt)} · Next reservation: {formatShortDate(guest.upcomingReservationAt)}</Text>
@@ -723,7 +725,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Timeline</Text>
           {profile === undefined ? (
@@ -749,7 +751,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <View style={{ minWidth: 135, flexGrow: 1, padding: spacing.sm, borderRadius: 12, backgroundColor: accents[0].bg }}>
+    <View style={{ minWidth: 135, flexGrow: 1, padding: spacing.sm, borderRadius: radius.sharp, backgroundColor: accents[0].bg }}>
       <Text style={{ color: accents[0].fg, fontSize: 18, fontWeight: '800' }}>{value}</Text>
       <Text style={{ color: colors.muted, fontSize: 12 }}>{label}</Text>
     </View>

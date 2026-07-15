@@ -5,9 +5,10 @@ import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { colors, spacing } from '../../lib/theme';
+import { colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatTime, errorMessage } from '../../lib/format';
+import { SectionHeader } from '../../components/AppCard';
 import { router } from 'expo-router';
 
 const sectionFilters = ['all', 'main', 'patio', 'bar', 'vip'] as const;
@@ -243,14 +244,7 @@ function FloorScreen() {
 
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
-          Floor Plan
-        </Text>
-        <Text style={{ color: colors.muted }}>
-          Live tables for {venue?.name ?? 'your venue'}.
-        </Text>
-      </View>
+      <SectionHeader kicker="Service" title="Floor Plan" subtitle={`Live tables for ${venue?.name ?? 'your venue'}.`} />
       {actionError ? <Text style={{ color: colors.danger }}>{actionError}</Text> : null}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
@@ -327,7 +321,7 @@ function FloorScreen() {
             <View
               style={{
                 height: 560,
-                borderRadius: 24,
+                borderRadius: radius.soft,
                 backgroundColor: '#18120E',
                 borderWidth: 1,
                 borderColor: '#2C241D',

@@ -3,13 +3,14 @@ import { ScrollView, View } from 'react-native';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { accents, colors, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatMoney, formatShortDateTime, errorMessage } from '../../lib/format';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
 import { InlineMessage } from '../../components/InlineMessage';
 import { ManagerGate } from '../../components/ManagerGate';
+import { SectionHeader } from '../../components/AppCard';
 
 // Must stay in sync with POS_PROVIDERS in packages/api/src/modules/pos/pos.controller.ts
 // and the PosProvider enum in prisma/schema.prisma.
@@ -128,19 +129,20 @@ function IntegrationsScreenInner() {
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Integrations</Text>
-        <Text style={{ color: colors.muted }}>Connect POS, reservation sync, and provider activity for {venue?.name ?? 'your venue'}.</Text>
-      </View>
+      <SectionHeader
+        kicker="Connections"
+        title="Integrations"
+        subtitle={`Connect POS, reservation sync, and provider activity for ${venue?.name ?? 'your venue'}.`}
+      />
 
       {newSecret ? (
-        <Card style={{ backgroundColor: '#FFF7E6', borderRadius: 16, borderWidth: 1, borderColor: '#F2C97D' }}>
+        <Card style={{ backgroundColor: colors.surfaceSoft, borderRadius: radius.sharp, borderWidth: 1, borderColor: colors.warning }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text style={{ fontWeight: '800', color: colors.charcoal }}>Webhook secret — copy it now</Text>
             <Text style={{ color: colors.muted, fontSize: 13 }}>
               Send this in the x-venueflow-connection-secret header on each webhook. It is shown once and cannot be retrieved later — save it, then rotate if you lose it.
             </Text>
-            <Text selectable style={{ fontFamily: 'monospace', fontSize: 14, color: colors.charcoal, backgroundColor: colors.surface, padding: spacing.sm, borderRadius: 8 }}>
+            <Text selectable style={{ fontFamily: 'monospace', fontSize: 14, color: colors.charcoal, backgroundColor: colors.surface, padding: spacing.sm, borderRadius: radius.sharp }}>
               {newSecret}
             </Text>
             <Button compact mode="text" textColor={colors.primary} onPress={() => setNewSecret(null)}>I've saved it</Button>
@@ -155,7 +157,7 @@ function IntegrationsScreenInner() {
           { label: 'Open checks', value: String(overview?.openChecks ?? 0), a: accents[3] },
           { label: 'Last sync', value: overview?.lastSyncAt ? formatShortDateTime(overview.lastSyncAt) : 'Never', a: accents[4] },
         ].map((metric) => (
-          <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: 16 }}>
+          <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: radius.sharp }}>
             <Card.Content>
               <Text style={{ color: metric.a.fg, fontSize: 24, fontWeight: '800' }}>{metric.value}</Text>
               <Text style={{ color: colors.muted }}>{metric.label}</Text>
@@ -164,7 +166,7 @@ function IntegrationsScreenInner() {
         ))}
       </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>POS sync</Text>
           <ProviderDropdown
@@ -186,7 +188,7 @@ function IntegrationsScreenInner() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservation integration</Text>
           <ProviderDropdown
@@ -204,7 +206,7 @@ function IntegrationsScreenInner() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>CRM lead capture</Text>
           <Text style={{ color: colors.muted }}>
@@ -216,7 +218,7 @@ function IntegrationsScreenInner() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Connections</Text>
           {(overview?.connections ?? []).length === 0 ? (
@@ -233,7 +235,7 @@ function IntegrationsScreenInner() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservation connections</Text>
           {(reservationOverview?.connections ?? []).length === 0 ? (
@@ -260,7 +262,7 @@ function IntegrationsScreenInner() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Recent checks</Text>
           {(overview?.recentChecks ?? []).length === 0 ? (

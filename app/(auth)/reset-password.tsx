@@ -3,7 +3,8 @@ import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } f
 import { router } from 'expo-router';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 
 export default function ResetPasswordScreen() {
   const [email, setEmail] = useState('');
@@ -53,7 +54,8 @@ export default function ResetPasswordScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ gap: 6, alignItems: 'center' }}>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
+          <Kicker>Account recovery</Kicker>
+          <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
             Reset your password
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>

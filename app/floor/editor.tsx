@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Dimensions, PanResponder, Pressable, ScrollView, View } from 'react-native';
-import { Button, Card, Chip, IconButton, Text, TextInput } from 'react-native-paper';
+import { Button, Chip, IconButton, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { accents, colors, spacing } from '../../lib/theme';
+import { colors, spacing, type } from '../../lib/theme';
+import { AppCard, SectionHeader } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
@@ -579,15 +580,14 @@ export default function FloorEditorScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Floor editor</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>Floor editor</Text>
           <Text style={{ color: colors.muted }}>Drag to move · drag the corner to resize · tap to select.</Text>
         </View>
       </View>
 
       {/* Add shapes */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add to floor</Text>
+      <AppCard>
+          <SectionHeader title="Add to floor" />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button mode="contained-tonal" icon="circle-outline" onPress={() => addTable('round')}>Circle</Button>
             <Button mode="contained-tonal" icon="square-outline" onPress={() => addTable('square')}>Square</Button>
@@ -597,15 +597,13 @@ export default function FloorEditorScreen() {
             <Button mode="contained-tonal" icon="auto-fix" onPress={loadSampleLayout}>Load sample</Button>
             <Button mode="outlined" textColor={colors.danger} icon="delete-sweep-outline" onPress={() => void onClearFloorPlan()}>Clear floor plan</Button>
           </View>
-          {clearMessage ? <Text style={{ color: colors.muted }}>{clearMessage}</Text> : null}
-        </Card.Content>
-      </Card>
+          {clearMessage ? <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{clearMessage}</Text> : null}
+      </AppCard>
 
       {/* Venue size */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Venue size</Text>
-          <Text style={{ color: colors.muted }}>Resize the room rectangle to fit your venue.</Text>
+      <AppCard>
+          <SectionHeader title="Venue size" subtitle="Resize the room rectangle to fit your venue." />
+          <View style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ width: 56 }}>Width</Text>
             <IconButton icon="minus" mode="outlined" size={16} onPress={() => setVenueW((w) => Math.max(400, w - 100))} />
@@ -618,13 +616,12 @@ export default function FloorEditorScreen() {
             <Text style={{ minWidth: 48, textAlign: 'center' }}>{venueH}</Text>
             <IconButton icon="plus" mode="outlined" size={16} onPress={() => setVenueH((h) => Math.min(2000, h + 100))} />
           </View>
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
 
       {/* Service-area legend */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Service areas</Text>
+      <AppCard>
+          <SectionHeader title="Service areas" />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
             {sections.map((s) => (
               <View key={s} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -633,12 +630,10 @@ export default function FloorEditorScreen() {
               </View>
             ))}
           </View>
-        </Card.Content>
-      </Card>
+      </AppCard>
 
       {/* Canvas */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
+      <AppCard>
           <View
             style={{
               width: canvasW,
@@ -680,17 +675,16 @@ export default function FloorEditorScreen() {
             </Pressable>
           </View>
           {tables.length === 0 && chairs.length === 0 ? (
-            <Text style={{ color: colors.muted, textAlign: 'center' }}>Add a table or chair above to start building your floor.</Text>
+            <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.sm }}>Add a table or chair above to start building your floor.</Text>
           ) : null}
-        </Card.Content>
-      </Card>
+      </AppCard>
 
       {/* Selected table inspector */}
       {selected ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
+        <AppCard>
+          <View style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{selected.label}</Text>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>{selected.label}</Text>
               <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelected}>Delete</Button>
             </View>
 
@@ -751,15 +745,15 @@ export default function FloorEditorScreen() {
             >
               {selected.isReservable ? 'Reservable' : 'Not reservable'}
             </Chip>
-          </Card.Content>
-        </Card>
+          </View>
+        </AppCard>
       ) : null}
 
       {selectedChair ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
+        <AppCard>
+          <View style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Chair{selectedChair.label ? ` · ${selectedChair.label}` : ''}</Text>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>Chair{selectedChair.label ? ` · ${selectedChair.label}` : ''}</Text>
               <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelectedChair}>Delete</Button>
             </View>
             <TextInput label="Label (e.g. Bar 1)" value={selectedChair.label} onChangeText={(v) => updateChair(selectedChair.key, { label: v })} mode="outlined" style={{ backgroundColor: colors.surface }} />
@@ -770,14 +764,14 @@ export default function FloorEditorScreen() {
               <IconButton icon="rotate-right" mode="outlined" size={16} onPress={() => updateChair(selectedChair.key, { rotation: (selectedChair.rotation + 15) % 360 })} />
             </View>
             <Text style={{ color: colors.muted }}>Drag the chair on the canvas to position it.</Text>
-          </Card.Content>
-        </Card>
+          </View>
+        </AppCard>
       ) : null}
 
       <Button mode="contained" buttonColor={colors.primary} icon="content-save" onPress={() => void onPublish()}>
         Save & publish floor plan
       </Button>
-      {saved ? <Text style={{ color: accents[2].fg, textAlign: 'center' }}>Saved ✓</Text> : null}
+      {saved ? <Text style={{ color: colors.success, textAlign: 'center' }}>Saved ✓</Text> : null}
     </ScrollView>
   );
 }

@@ -1,7 +1,8 @@
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { Redirect, router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { authCardStyle, authColors as colors, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 export default function TeamChoiceScreen() {
@@ -29,7 +30,8 @@ export default function TeamChoiceScreen() {
         }}
       >
         <View style={{ gap: 6, alignItems: 'center' }}>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
+          <Kicker>Get started</Kicker>
+          <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
             Join your team
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>

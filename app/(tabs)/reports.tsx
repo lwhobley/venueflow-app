@@ -4,11 +4,12 @@ import { Button, Card, Text } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { accents, colors, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
 import { ManagerGate } from '../../components/ManagerGate';
+import { SectionHeader } from '../../components/AppCard';
 
 // What we record as the export destination on /v1/payroll/record-export. The
 // server stores `provider` as a free-form string today, so this list is purely
@@ -81,15 +82,14 @@ export default function ReportsScreen() {
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: spacing.sm }}>
-        <View style={{ gap: 4 }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Reports</Text>
-          <Text style={{ color: colors.muted }}>{venue?.name ?? 'Venue'} analytics and exports.</Text>
-        </View>
-        <DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />
-      </View>
+      <SectionHeader
+        kicker="Insights"
+        title="Reports"
+        subtitle={`${venue?.name ?? 'Venue'} analytics and exports.`}
+        trailing={<DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />}
+      />
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Integrations</Text>
           <Text style={{ color: colors.muted }}>Manage POS, reservation sync, payroll, and provider connections from the reporting hub.</Text>
@@ -100,7 +100,7 @@ export default function ReportsScreen() {
       </Card>
 
       {/* Live metrics — always show current state */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Live snapshot</Text>
@@ -110,7 +110,7 @@ export default function ReportsScreen() {
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
             {metrics.map((metric) => (
-              <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, minWidth: '47%', flexGrow: 1, borderRadius: 14 }}>
+              <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, minWidth: '47%', flexGrow: 1, borderRadius: radius.sharp }}>
                 <Card.Content style={{ gap: 4 }}>
                   <Text style={{ color: metric.accent.fg, fontSize: 26, fontWeight: '800' }}>{metric.value}</Text>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{metric.label}</Text>
@@ -135,27 +135,27 @@ export default function ReportsScreen() {
         const utilizationPct = suggested > 0 ? Math.round((scheduled / suggested) * 100) : null;
         const budgetPct = budgetHours ? Math.round((scheduled / budgetHours) * 100) : null;
         return (
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <Text variant="titleMedium" style={{ fontWeight: '700' }}>Labor efficiency</Text>
               <Text style={{ color: colors.muted, fontSize: 12 }}>7-day rolling forecast vs. scheduled coverage.</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-                <View style={{ backgroundColor: accents[2].bg, borderRadius: 12, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
+                <View style={{ backgroundColor: accents[2].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                   <Text style={{ color: accents[2].fg, fontSize: 22, fontWeight: '800' }}>{scheduled}h</Text>
                   <Text style={{ color: colors.muted, fontSize: 11 }}>Scheduled this week</Text>
                 </View>
-                <View style={{ backgroundColor: accents[1].bg, borderRadius: 12, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
+                <View style={{ backgroundColor: accents[1].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                   <Text style={{ color: accents[1].fg, fontSize: 22, fontWeight: '800' }}>{suggested}h</Text>
                   <Text style={{ color: colors.muted, fontSize: 11 }}>Demand-suggested</Text>
                 </View>
                 {utilizationPct !== null && (
-                  <View style={{ backgroundColor: utilizationPct < 80 ? `${colors.danger}22` : utilizationPct > 120 ? `${colors.warning}22` : `${colors.success}22`, borderRadius: 12, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
+                  <View style={{ backgroundColor: utilizationPct < 80 ? `${colors.danger}22` : utilizationPct > 120 ? `${colors.warning}22` : `${colors.success}22`, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                     <Text style={{ color: utilizationPct < 80 ? colors.danger : utilizationPct > 120 ? colors.warning : colors.success, fontSize: 22, fontWeight: '800' }}>{utilizationPct}%</Text>
                     <Text style={{ color: colors.muted, fontSize: 11 }}>Coverage utilization</Text>
                   </View>
                 )}
                 {budgetPct !== null && (
-                  <View style={{ backgroundColor: accents[0].bg, borderRadius: 12, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
+                  <View style={{ backgroundColor: accents[0].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                     <Text style={{ color: accents[0].fg, fontSize: 22, fontWeight: '800' }}>{budgetPct}%</Text>
                     <Text style={{ color: colors.muted, fontSize: 11 }}>Of {budgetHours}h budget</Text>
                   </View>
@@ -197,7 +197,7 @@ export default function ReportsScreen() {
         );
       })() : null}
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Time entries CSV</Text>
@@ -214,7 +214,7 @@ export default function ReportsScreen() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <View style={{ flex: 1 }}>
@@ -253,7 +253,7 @@ export default function ReportsScreen() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservations CSV</Text>

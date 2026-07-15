@@ -12,7 +12,8 @@ import * as Haptics from 'expo-haptics';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi, type InviteCheckResult } from '../../lib/api-client';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 
 type Stage =
   | { kind: 'entry' }
@@ -138,7 +139,8 @@ export default function InviteCheckScreen() {
         </View>
 
         <View style={{ gap: 6 }}>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700' }}>
+          <Kicker>Join a team</Kicker>
+          <Text style={{ ...type.title, color: colors.text }}>
             Find your invite
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
@@ -182,7 +184,7 @@ export default function InviteCheckScreen() {
                   Invite found
                 </Text>
                 {stage.invite.venueName ? (
-                  <Text variant="titleLarge" style={{ fontWeight: '800', color: colors.text }}>
+                  <Text style={{ ...type.heading, color: colors.text }}>
                     {stage.invite.venueName}
                   </Text>
                 ) : null}

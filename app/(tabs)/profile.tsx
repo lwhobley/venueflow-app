@@ -5,7 +5,7 @@ import { Button, Card, Text } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { useAuthActions } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { colors, spacing } from '../../lib/theme';
+import { colors, radius, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling, canManageVenue } from '../../lib/permissions';
@@ -57,7 +57,7 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
-      <Card style={{ backgroundColor: colors.surface, marginBottom: spacing.md, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, marginBottom: spacing.md, borderRadius: radius.soft }}>
         <Card.Content style={{ gap: 6 }}>
           <Text variant="headlineSmall" style={{ fontWeight: '700' }}>Profile</Text>
           <Text>{user?.full_name}</Text>
@@ -101,7 +101,7 @@ export default function ProfileScreen() {
         Sign out
       </Button>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16, marginTop: spacing.md }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.soft, marginTop: spacing.md }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.danger }}>Account deletion</Text>
           <Text style={{ color: colors.muted }}>

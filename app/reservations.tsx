@@ -6,7 +6,8 @@ import { router } from 'expo-router';
 import { useMutation, useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import type { Id } from '../lib/ids';
-import { accents, colors, spacing } from '../lib/theme';
+import { accents, colors, spacing, radius, type } from '../lib/theme';
+import { AppCard, SectionHeader } from '../components/AppCard';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { canManageVenue } from '../lib/permissions';
@@ -378,7 +379,7 @@ function ReservationsScreen() {
         <>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <View style={{ gap: 4, flex: 1 }}>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Reservations</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>Reservations</Text>
           <Text style={{ color: colors.muted }}>Book guests and seat them on the floor at {venue?.name ?? 'your venue'}.</Text>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }}>
@@ -392,7 +393,7 @@ function ReservationsScreen() {
       {/* Stats */}
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
         {statCards.map((s) => (
-          <Card key={s.label} style={{ flex: 1, backgroundColor: s.a.bg, borderRadius: 16 }}>
+          <Card key={s.label} style={{ flex: 1, backgroundColor: s.a.bg, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: 2 }}>
               <Text style={{ color: s.a.fg, fontSize: 24, fontWeight: '800' }}>{s.value}</Text>
               <Text style={{ color: colors.muted }}>{s.label}</Text>
@@ -403,43 +404,31 @@ function ReservationsScreen() {
 
       {/* Cover pacing */}
       {pacing && pacing.buckets.length > 0 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
-              <View>
-                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Cover pacing — {pacing.date}</Text>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>
-                  Peak {pacing.peakCovers} covers · {pacing.totalReservations} bookings · seating capacity {pacing.seatingCapacity || '—'}
-                </Text>
-              </View>
-            </View>
+        <AppCard>
+            <SectionHeader title={`Cover pacing — ${pacing.date}`} subtitle={`Peak ${pacing.peakCovers} covers · ${pacing.totalReservations} bookings · seating capacity ${pacing.seatingCapacity || '—'}`} />
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 100 }}>
               {pacing.buckets.map((b, i) => {
                 const ratio = pacing.peakCovers > 0 ? b.covers / pacing.peakCovers : 0;
                 const overCapacity = pacing.seatingCapacity > 0 && b.covers > pacing.seatingCapacity;
                 return (
                   <View key={i} style={{ flex: 1, height: '100%', justifyContent: 'flex-end' }}>
-                    <View style={{ height: `${Math.max(2, ratio * 100)}%`, backgroundColor: overCapacity ? colors.danger : colors.primary, borderRadius: 2 }} />
+                    <View style={{ height: `${Math.max(2, ratio * 100)}%`, backgroundColor: overCapacity ? colors.danger : colors.primary, borderRadius: radius.sharp }} />
                   </View>
                 );
               })}
             </View>
             {pacing.seatingCapacity > 0 && pacing.peakCovers > pacing.seatingCapacity ? (
-              <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '700' }}>
+              <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '700', marginTop: spacing.sm }}>
                 Peak exceeds seating capacity — consider spreading bookings or pacing the kitchen.
               </Text>
             ) : null}
-          </Card.Content>
-        </Card>
+        </AppCard>
       ) : null}
 
       {/* Reservation holds */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Holds & blocked time</Text>
-          <Text style={{ color: colors.muted, fontSize: 12 }}>
-            Block off windows (staff meeting, buyout, deep clean) so the booking form refuses overlapping reservations.
-          </Text>
+      <AppCard>
+          <SectionHeader title="Holds & blocked time" subtitle="Block off windows (staff meeting, buyout, deep clean) so the booking form refuses overlapping reservations." />
+          <View style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
             <TextInput label="Date" value={holdDate} onChangeText={setHoldDate} mode="outlined" dense placeholder="YYYY-MM-DD" style={{ width: 150, backgroundColor: colors.surface }} />
             <TextInput label="Start" value={holdStart} onChangeText={setHoldStart} mode="outlined" dense style={{ width: 90, backgroundColor: colors.surface }} />
@@ -465,13 +454,13 @@ function ReservationsScreen() {
               </View>
             ))
           )}
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
 
       {/* Waitlist */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Waitlist</Text>
+      <AppCard>
+          <SectionHeader title="Waitlist" />
+          <View style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
             <TextInput label="Walk-in name" value={wlName} onChangeText={setWlName} mode="outlined" dense style={{ flex: 1, backgroundColor: colors.surface }} />
             <IconButton icon="minus" mode="outlined" size={16} onPress={() => setWlParty((p) => Math.max(1, p - 1))} />
@@ -506,7 +495,7 @@ function ReservationsScreen() {
                     <Button compact mode="text" textColor={colors.danger} onPress={() => void handleRemoveFromWaitlist(w.id)}>Remove</Button>
                   </View>
                   {seatingWaitlistId === w.id ? (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: colors.background, borderRadius: 12, padding: 10 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: colors.background, borderRadius: radius.sharp, padding: 10 }}>
                       {openTables.length === 0 ? (
                         <Text style={{ color: colors.danger }}>No open tables.</Text>
                       ) : (
@@ -520,15 +509,14 @@ function ReservationsScreen() {
               );
             })
           )}
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
 
       {/* New reservation */}
       {canManage ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
+        <AppCard>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>New reservation</Text>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>New reservation</Text>
               <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                 <Button compact mode={showPrivateEventForm ? 'contained' : 'outlined'} buttonColor={showPrivateEventForm ? colors.primary : undefined} textColor={showPrivateEventForm ? '#fff' : colors.primary} onPress={() => {
                   setShowForm(true);
@@ -544,7 +532,7 @@ function ReservationsScreen() {
               </View>
             </View>
             {showForm ? (
-              <>
+              <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
                 <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                   <TextInput label="First name" value={guestFirstName} onChangeText={setGuestFirstName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
                   <TextInput label="Last name" value={guestLastName} onChangeText={setGuestLastName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
@@ -554,7 +542,7 @@ function ReservationsScreen() {
                   <TextInput label="Email" value={guestEmail} onChangeText={setGuestEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                 </View>
                 {autofill?.guest ? (
-                  <Card style={{ backgroundColor: accents[2].bg, borderRadius: 12 }}>
+                  <Card style={{ backgroundColor: accents[2].bg, borderRadius: radius.sharp }}>
                     <Card.Content style={{ gap: 4, padding: spacing.sm }}>
                       <Text style={{ color: accents[2].fg, fontWeight: '800' }}>Returning guest — {autofill.guest.fullName}</Text>
                       <Text style={{ color: colors.muted, fontSize: 12 }}>
@@ -654,7 +642,7 @@ function ReservationsScreen() {
                   ))}
                 </View>
                 {showPrivateEventForm ? (
-                  <Card style={{ backgroundColor: accents[5].bg, borderRadius: 14 }}>
+                  <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                     <Card.Content style={{ gap: spacing.sm }}>
                       <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>Private event booking</Text>
                       <Text style={{ color: colors.muted }}>Capture event details needed to generate BEOs and contracts from CRM.</Text>
@@ -676,27 +664,24 @@ function ReservationsScreen() {
                 <TextInput label="Guest notes / requests" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
                 <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()} accessibilityLabel="Create reservation">Create reservation</Button>
-              </>
+              </View>
             ) : null}
-          </Card.Content>
-        </Card>
+        </AppCard>
       ) : null}
 
       {/* Reservation list */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
+      <AppCard>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Bookings</Text>
+            <Text style={{ ...type.heading, color: colors.charcoal }}>Bookings</Text>
             <DateRangeBar selected={listDateRange} presets={listPresets} onSelect={setListDateRange} />
           </View>
-          {deleteError ? <Text style={{ color: colors.danger }}>{deleteError}</Text> : null}
+          {deleteError ? <Text style={{ color: colors.danger, marginTop: spacing.sm }}>{deleteError}</Text> : null}
           {page === undefined ? (
-            <Text style={{ color: colors.muted }}>Loading…</Text>
+            <Text style={{ color: colors.muted, marginTop: spacing.sm }}>Loading…</Text>
           ) : sorted.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No reservations for {listDateRange.shortLabel.toLowerCase()}.</Text>
+            <Text style={{ color: colors.muted, marginTop: spacing.sm }}>No reservations for {listDateRange.shortLabel.toLowerCase()}.</Text>
           ) : null}
-        </Card.Content>
-      </Card>
+      </AppCard>
         </>
       )}
         renderItem={({ item: res }) => {
@@ -717,7 +702,7 @@ function ReservationsScreen() {
               {res.guestCompany ? <Text style={{ color: colors.muted }}>{res.guestCompany}</Text> : null}
               {res.occasion ? <Chip compact style={{ alignSelf: 'flex-start' }}>{res.occasion}</Chip> : null}
               {res.isPrivateEvent ? (
-                <Card style={{ backgroundColor: accents[5].bg, borderRadius: 12 }}>
+                <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                   <Card.Content style={{ gap: 4 }}>
                     <Text style={{ color: accents[5].fg, fontWeight: '800' }}>{res.eventName || 'Private event'}</Text>
                     <Text style={{ color: colors.muted }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || 'Event details pending'}</Text>
@@ -747,7 +732,7 @@ function ReservationsScreen() {
               ) : null}
 
               {assigningId === res.id ? (
-                <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: 12, padding: 10 }}>
+                <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: radius.sharp, padding: 10 }}>
                   <Text style={{ color: colors.muted }}>Tap an open table to reserve, or long-actions to seat now:</Text>
                   {openTables.length === 0 ? (
                     <Text style={{ color: colors.danger }}>No open tables. Build a floor plan first.</Text>

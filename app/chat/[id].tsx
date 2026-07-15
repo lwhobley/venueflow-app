@@ -8,7 +8,8 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { resolveMediaUrl } from '../../lib/api-client';
 import type { Id } from '../../lib/ids';
-import { accents, colors, radius, spacing } from '../../lib/theme';
+import { accents, colors, radius, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { formatTime, errorMessage } from '../../lib/format';
 
@@ -479,7 +480,7 @@ export default function ConversationScreen() {
               <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.cream, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="message-text-outline" size={28} color={colors.primary} />
               </View>
-              <Text style={{ color: colors.charcoal, fontWeight: '900', fontSize: 16 }}>No messages yet</Text>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>No messages yet</Text>
               <Text style={{ color: colors.muted, textAlign: 'center' }}>Start the thread with a quick update.</Text>
             </View>
           ) : (
@@ -554,7 +555,7 @@ export default function ConversationScreen() {
             <Dialog.Title style={{ fontSize: 16 }}>Share Shift</Dialog.Title>
             <Dialog.ScrollArea style={{ maxHeight: 340, paddingHorizontal: 0 }}>
               <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: spacing.md }}>
-                <Text style={{ color: colors.charcoal, fontWeight: '900', marginVertical: spacing.sm }}>My shifts</Text>
+                <Kicker style={{ marginVertical: spacing.sm }}>My shifts</Kicker>
                 {mineShifts.length === 0 ? (
                   <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>No shifts scheduled.</Text>
                 ) : (
@@ -563,7 +564,7 @@ export default function ConversationScreen() {
                   ))
                 )}
 
-                <Text style={{ color: colors.charcoal, fontWeight: '900', marginVertical: spacing.sm }}>Open shifts</Text>
+                <Kicker style={{ marginVertical: spacing.sm }}>Open shifts</Kicker>
                 {openShifts.length === 0 ? (
                   <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>No open shifts.</Text>
                 ) : (

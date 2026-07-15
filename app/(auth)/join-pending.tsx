@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { authCardStyle, authColors as colors, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, spacing, type } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 
 type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'unknown';
@@ -61,7 +61,7 @@ export default function JoinPendingScreen() {
             <Text style={{ fontSize: 36 }}>⏳</Text>
           </View>
           <View style={{ gap: 6, alignItems: 'center' }}>
-            <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
+            <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
               Waiting for approval
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
@@ -102,7 +102,7 @@ export default function JoinPendingScreen() {
             <Text style={{ fontSize: 36 }}>✅</Text>
           </View>
           <View style={{ gap: 6, alignItems: 'center' }}>
-            <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '700', textAlign: 'center' }}>
+            <Text style={{ ...type.title, color: colors.primary, textAlign: 'center' }}>
               You're in!
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
@@ -126,7 +126,7 @@ export default function JoinPendingScreen() {
             <Text style={{ fontSize: 36 }}>❌</Text>
           </View>
           <View style={{ gap: 6, alignItems: 'center' }}>
-            <Text variant="headlineMedium" style={{ color: colors.danger, fontWeight: '700', textAlign: 'center' }}>
+            <Text style={{ ...type.title, color: colors.danger, textAlign: 'center' }}>
               Request declined
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
@@ -147,7 +147,7 @@ export default function JoinPendingScreen() {
       {(status === 'cancelled' || status === 'unknown') && (
         <>
           <View style={{ gap: 6, alignItems: 'center' }}>
-            <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
+            <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
               No active request
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>

@@ -11,7 +11,7 @@ import {
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button, Text } from 'react-native-paper';
-import { authColors as colors, spacing } from '../../lib/theme';
+import { authColors as colors, spacing, type } from '../../lib/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -87,7 +87,7 @@ function AnimatedSlide({ item, index, scrollX }: { item: Slide; index: number; s
       </Animated.View>
 
       <Animated.View style={{ opacity: textOpacity, transform: [{ translateY: textTranslate }] }}>
-        <Text variant="headlineSmall" style={styles.title}>{item.title}</Text>
+        <Text style={styles.title}>{item.title}</Text>
         <Text variant="bodyLarge" style={styles.description}>{item.description}</Text>
       </Animated.View>
     </View>
@@ -131,7 +131,7 @@ export default function WelcomeScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.logoArea}>
-        <Text variant="headlineLarge" style={styles.logo}>Venue Wrangler</Text>
+        <Text style={styles.logo}>Venue Wrangler</Text>
       </View>
 
       <View style={{ flex: 1 }}>
@@ -205,8 +205,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   logo: {
+    ...type.title,
     color: colors.primary,
-    fontWeight: '800',
   },
   slide: {
     alignItems: 'center',
@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: 80,
-    backgroundColor: '#E5F1E7',
+    backgroundColor: colors.highlight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -239,13 +239,13 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#E5F1E7',
+    backgroundColor: colors.highlight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
+    ...type.heading,
     color: colors.text,
-    fontWeight: '700',
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#D4CFC6',
+    backgroundColor: colors.border,
   },
   dotActive: {
     backgroundColor: colors.primary,

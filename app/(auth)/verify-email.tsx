@@ -4,7 +4,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 
 export default function VerifyEmailScreen() {
   const { invite } = useLocalSearchParams<{ invite?: string }>();
@@ -94,7 +95,8 @@ export default function VerifyEmailScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ gap: 6, alignItems: 'center' }}>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
+          <Kicker>One more step</Kicker>
+          <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
             Verify your email
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
