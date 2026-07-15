@@ -584,12 +584,12 @@ function ReservationsScreen() {
                   <Text style={{ minWidth: 28, textAlign: 'center' }}>{partySize}</Text>
                   <IconButton icon="plus" mode="outlined" size={16} onPress={() => setPartySize((p) => Math.min(30, p + 1))} />
                 </View>
-                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                   <Menu
                     visible={dateMenuOpen}
                     onDismiss={() => setDateMenuOpen(false)}
                     anchor={
-                      <Button mode="outlined" onPress={() => setDateMenuOpen(true)} style={{ flex: 1 }} contentStyle={{ justifyContent: 'flex-start' }}>
+                      <Button mode="outlined" onPress={() => setDateMenuOpen(true)} style={{ flex: 1, minWidth: 140 }} contentStyle={{ justifyContent: 'flex-start' }}>
                         {selectedDateOption?.label ?? date}
                       </Button>
                     }
@@ -612,11 +612,19 @@ function ReservationsScreen() {
                       />
                     ))}
                   </Menu>
+                  <TextInput
+                    label="Time"
+                    value={time}
+                    onChangeText={setTime}
+                    mode="outlined"
+                    placeholder="HH:MM"
+                    style={{ width: 90, backgroundColor: colors.surface }}
+                  />
                   <Menu
                     visible={mealMenuOpen}
                     onDismiss={() => setMealMenuOpen(false)}
                     anchor={
-                      <Button mode="outlined" onPress={() => setMealMenuOpen(true)} style={{ flex: 1 }} contentStyle={{ justifyContent: 'flex-start' }}>
+                      <Button mode="outlined" onPress={() => setMealMenuOpen(true)} style={{ flex: 1, minWidth: 140 }} contentStyle={{ justifyContent: 'flex-start' }}>
                         {MEAL_TIMES[selectedMeal]?.label ?? selectedMeal}
                       </Button>
                     }
@@ -637,6 +645,9 @@ function ReservationsScreen() {
                     })}
                   </Menu>
                 </View>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  Meal sets a quick default time and course duration — edit Time directly for any other slot.
+                </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {reservationSources.map((s) => (
                     <Chip key={s} selected={source === s} onPress={() => setSource(s)}>{s.replace('_', ' ')}</Chip>
