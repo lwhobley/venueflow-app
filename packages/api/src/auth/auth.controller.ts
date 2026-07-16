@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Logger, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 import type { Request } from 'express';
 import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
@@ -82,6 +82,7 @@ class ChangePasswordDto {
 
 class VerifyEmailDto {
   @IsString()
+  @Matches(/^\d{8}$/)
   code!: string;
 }
 
@@ -95,6 +96,7 @@ class ResetPasswordDto {
   email!: string;
 
   @IsString()
+  @Matches(/^\d{8}$/)
   code!: string;
 
   @IsString()

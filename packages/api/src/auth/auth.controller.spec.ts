@@ -133,7 +133,7 @@ describe('AuthController email invite signup', () => {
     const authService = {
       hashPassword: vi.fn().mockResolvedValue({ salt: 'salt', hash: 'hash' }),
       issueSession: vi.fn().mockResolvedValue({ session: { id: 'session-1' }, profile }),
-      generateOneTimeCode: vi.fn().mockReturnValue('123456'),
+      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const email = { send: vi.fn(), sendOrThrow: vi.fn().mockResolvedValue(undefined) };

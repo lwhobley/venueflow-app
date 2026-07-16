@@ -779,7 +779,7 @@
             <div style="height:16px"></div>
             <button class="btn" type="submit" id="signupButton">Start workspace</button>
             <div id="verificationStep" hidden style="margin-top:16px;">
-              <label>Email verification code<input id="verificationCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" /></label>
+              <label>Email verification code<input id="verificationCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="8-digit code" /></label>
               <div style="height:12px"></div>
               <button class="btn" type="button" id="verifyButton">Verify email &amp; create workspace</button>
             </div>
@@ -931,7 +931,7 @@
           return;
         }
         verificationStep.hidden = false;
-        statusEl.textContent = "We sent a 6-digit verification code to your email. Enter it below to create your workspace.";
+        statusEl.textContent = "We sent an 8-digit verification code to your email. Enter it below to create your workspace.";
         verificationCode.focus();
       } catch (error) {
         statusEl.className = "status error";

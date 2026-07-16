@@ -21,6 +21,7 @@ import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
+import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -29,7 +30,6 @@ import { S3ImageService } from './s3-image.service';
 
 // Chat photo uploads. Kept small — images are picker-compressed (quality 0.5)
 // before they reach us; reject anything larger so the DB store stays lean.
-const ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 type Scope = VenueScopedRequest['venueScope'];
@@ -640,13 +640,14 @@ export class ChatController {
     const data = Buffer.from(body.dataBase64, 'base64');
     if (data.length === 0) throw new BadRequestException('Image is empty');
     if (data.length > MAX_IMAGE_BYTES) throw new BadRequestException('Image is too large (max 5MB)');
+    const mime = assertAllowedImageBytes(data, body.mimeType);
 
-    const s3Key = await this.s3ImageService.upload(data, body.mimeType, scope.venueId);
+    const s3Key = await this.s3ImageService.upload(data, mime, scope.venueId);
 
     const image = await this.prisma.chatImage.create({
       data: {
         venueId: scope.venueId,
-        mimeType: body.mimeType,
+        mimeType: mime,
         s3Key,
         uploadedBy: scope.profileId,
       },
@@ -669,6 +670,7 @@ export class ChatController {
     if (!image) throw new NotFoundException('Image not found');
     await this.mediaAccess.assertToken(token, 'chat-image', id, image.venueId);
     const url = await this.s3ImageService.getPresignedUrl(image.s3Key);
+    res.setHeader('Referrer-Policy', 'no-referrer');
     return res.redirect(302, url);
   }
 }
@@ -677,14 +679,14 @@ function canAccessConversation(memberIds: string[], type: string, profileId: str
   if (type === 'dm') {
     return memberIds.includes(profileId);
   }
-  if ((type === 'group' || type === 'role' || type === 'shift') && memberIds.length > 0) {
+  // Deny empty membership lists — until ensureContextualConversations
+  // repopulates members, nobody (including managers) can read/send. Prefer a
+  // brief access gap over an open venue-wide conversation.
+  if (memberIds.length === 0) return false;
+  if (type === 'group' || type === 'role' || type === 'shift') {
     return memberIds.includes(profileId);
   }
-  // A memberless group/role/shift conversation (e.g. before the next
-  // ensureContextualConversations sync repopulates it) is visible to the rest
-  // of the caller's own venue — access is already scoped to venueId upstream
-  // (VenueScope), so this never crosses a tenant boundary.
-  return true;
+  return false;
 }
 
 function canDeleteConversation(type: string, name: string | null) {

@@ -280,7 +280,11 @@ describe('SchedulingAssignmentService', () => {
 
     expect(result).toEqual({ restored: 2 });
     expect(prisma.profile.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ['profile-1', 'missing-member'] }, venueId: 'venue-1' },
+      where: {
+        id: { in: ['profile-1', 'missing-member'] },
+        venueId: 'venue-1',
+        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+      },
       select: { id: true },
     });
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(1, {

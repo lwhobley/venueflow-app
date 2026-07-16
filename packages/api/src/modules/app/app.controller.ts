@@ -10,6 +10,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
+import { unpaidBreakMs } from '../../common/break-duration';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
@@ -523,7 +524,7 @@ export class AppController {
       const breaks = (entry.breaks as any[]) || [];
       for (const b of breaks) {
         if (b.type === 'unpaid' && b.startAt && b.endAt) {
-          durationMs -= (b.endAt - b.startAt);
+          durationMs -= unpaidBreakMs(b.startAt, b.endAt);
         }
       }
       return sum + Math.max(0, durationMs) / 3600000;
@@ -541,6 +542,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Post('clock-in')
   async clockIn(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
     const profile = await this.requireVenueProfile(user);
@@ -598,6 +600,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Post('clock-out')
   async clockOut(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
     const profile = await this.requireVenueProfile(user);
@@ -606,8 +609,8 @@ export class AppController {
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
     if (!existing) throw new BadRequestException('No active clock-in found');
-    const entry = await this.prisma.timeEntry.update({
-      where: { id: existing.id },
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: existing.id, isOpen: true, updatedAt: existing.updatedAt },
       data: {
         clockOutAt: new Date(),
         clockOutLat: body.lat,
@@ -616,53 +619,63 @@ export class AppController {
         clockOutMocked: body.mocked,
         isOpen: false,
       },
+    });
+    if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');
+    const entry = await this.prisma.timeEntry.findUniqueOrThrow({
+      where: { id: existing.id },
       include: { profile: true, venue: true },
     });
     return mapClockEntry(entry, entry.profile, entry.venue);
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Post('time-clock/break-start')
   async startBreak(@CurrentUser() user: AuthUser, @Body() body: BreakStartDto) {
     const profile = await this.requireVenueProfile(user);
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const entry = await tx.timeEntry.findFirst({
-        where: { profileId: profile.id, isOpen: true },
-        include: { profile: true, venue: true },
-      });
-      if (!entry) throw new BadRequestException('No active clock-in found');
-      const breaks = (entry.breaks as any[]) || [];
-      if (breaks.find((b: any) => b.endAt === null)) throw new BadRequestException('Already on a break');
-      const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
-      return tx.timeEntry.update({
-        where: { id: entry.id },
-        data: { breaks: newBreaks },
-        include: { profile: true, venue: true },
-      });
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: profile.id, isOpen: true },
+      include: { profile: true, venue: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+    const breaks = (entry.breaks as any[]) || [];
+    if (breaks.find((b: any) => b.endAt === null)) throw new BadRequestException('Already on a break');
+    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
+      data: { breaks: newBreaks },
+    });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({
+      where: { id: entry.id },
+      include: { profile: true, venue: true },
     });
     return mapClockEntry(updated, updated.profile, updated.venue);
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Post('time-clock/break-end')
   async endBreak(@CurrentUser() user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const entry = await tx.timeEntry.findFirst({
-        where: { profileId: profile.id, isOpen: true },
-        include: { profile: true, venue: true },
-      });
-      if (!entry) throw new BadRequestException('No active clock-in found');
-      const breaks = (entry.breaks as any[]) || [];
-      const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
-      if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
-      const newBreaks = [...breaks];
-      newBreaks[activeBreakIndex] = { ...newBreaks[activeBreakIndex], endAt: Date.now() };
-      return tx.timeEntry.update({
-        where: { id: entry.id },
-        data: { breaks: newBreaks },
-        include: { profile: true, venue: true },
-      });
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: profile.id, isOpen: true },
+      include: { profile: true, venue: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
+    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
+    const newBreaks = [...breaks];
+    newBreaks[activeBreakIndex] = { ...newBreaks[activeBreakIndex], endAt: Date.now() };
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
+      data: { breaks: newBreaks },
+    });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({
+      where: { id: entry.id },
+      include: { profile: true, venue: true },
     });
     return mapClockEntry(updated, updated.profile, updated.venue);
   }

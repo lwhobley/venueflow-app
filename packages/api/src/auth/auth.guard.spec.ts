@@ -47,16 +47,18 @@ function makeGuard(options?: {
     },
     profile: {
       findUnique: vi.fn().mockResolvedValue(
-        options?.profile ?? {
-          id: 'profile-live',
-          email: 'live@example.com',
-          fullName: 'Live User',
-          role: 'staff',
-          allAccess: false,
-          trialEndsAt: new Date('2026-01-01T00:00:00Z'),
-          venueId: 'venue-live',
-          venue: { name: 'Live Venue', subscriptionStatus: 'active' },
-        },
+        options && 'profile' in options
+          ? options.profile
+          : {
+              id: 'profile-live',
+              email: 'live@example.com',
+              fullName: 'Live User',
+              role: 'staff',
+              allAccess: false,
+              trialEndsAt: new Date('2026-01-01T00:00:00Z'),
+              venueId: 'venue-live',
+              venue: { name: 'Live Venue', subscriptionStatus: 'active' },
+            },
       ),
     },
   } as any;
@@ -80,6 +82,19 @@ describe('AuthGuard', () => {
       role: 'staff',
       allAccess: false,
       venueStatus: 'active',
+    });
+  });
+
+  it('clears privilege claims when the live profile is missing', async () => {
+    const { guard } = makeGuard({ profile: null });
+    const context = makeContext('token-1');
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(context.switchToHttp().getRequest().user).toMatchObject({
+      profileId: undefined,
+      role: undefined,
+      allAccess: false,
+      venueId: null,
     });
   });
 

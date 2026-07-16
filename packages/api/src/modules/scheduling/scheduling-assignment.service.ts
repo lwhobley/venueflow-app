@@ -200,7 +200,11 @@ export class SchedulingAssignmentService {
     );
     const members = referencedIds.length
       ? await this.prisma.profile.findMany({
-          where: { id: { in: referencedIds }, venueId: args.venueId },
+          where: {
+            id: { in: referencedIds },
+            venueId: args.venueId,
+            OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+          },
           select: { id: true },
         })
       : [];
@@ -612,7 +616,13 @@ export class SchedulingAssignmentService {
   }
 
   async assertVenueMember(venueId: string, profileId: string) {
-    const member = await this.prisma.profile.findFirst({ where: { id: profileId, venueId } });
+    const member = await this.prisma.profile.findFirst({
+      where: {
+        id: profileId,
+        venueId,
+        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+      },
+    });
     if (!member) throw new BadRequestException('Staff member is not in this venue');
     return member;
   }

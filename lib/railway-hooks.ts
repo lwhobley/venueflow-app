@@ -445,7 +445,7 @@ const mutationRoutes: Record<string, Route> = {
   },
 };
 
-export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T {
+export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T | undefined {
   const key = getKey(ref);
   const route = queryRoutes[key];
   if (!route) throw new Error(`Unknown Railway query route: ${key}`);
@@ -458,7 +458,9 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
     enabled,
     queryFn: ({ signal }) => requestRoute<T>(route, args, signal),
   });
-  return query.data as T;
+  // Loading/error leave data undefined — callers must treat as T | undefined.
+  // Do not cast away undefined; that hid loading races and silent failures.
+  return query.data;
 }
 
 export function useMutation<TArgs = any, TResult = any>(

@@ -22,6 +22,8 @@ import { isAdminRole } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
+import { isActiveMembership } from '../../common/membership';
 import { todayInZone } from '../../common/pay-period';
 import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -92,7 +94,7 @@ class CompleteChecklistItemDto {
   photoBase64?: string;
 
   @IsOptional()
-  @IsString()
+  @IsIn([...ALLOWED_IMAGE_MIME])
   photoMimeType?: string;
 }
 
@@ -444,7 +446,9 @@ export class OperationsController {
           if (rawBreak?.type !== 'unpaid' || rawBreak.startAt == null || rawBreak.endAt == null) continue;
           const breakStart = Math.max(Number(rawBreak.startAt), entryStart, startMs);
           const breakEnd = Math.min(Number(rawBreak.endAt), endMs);
-          if (breakEnd > breakStart) durationMs -= breakEnd - breakStart;
+          if (Number.isFinite(breakStart) && Number.isFinite(breakEnd) && breakEnd > breakStart) {
+            durationMs -= breakEnd - breakStart;
+          }
         }
         return sum + Math.max(0, durationMs) / 3600000;
       }, 0) * 10,
@@ -701,7 +705,8 @@ export class OperationsController {
       const data = Buffer.from(body.photoBase64, 'base64');
       if (data.length === 0) throw new BadRequestException('Photo is empty');
       if (data.length > MAX_PHOTO_BYTES) throw new BadRequestException('Photo is too large (max 5MB)');
-      photoKey = await this.s3ImageService.upload(data, body.photoMimeType || 'image/jpeg', venueId);
+      const mime = assertAllowedImageBytes(data, body.photoMimeType);
+      photoKey = await this.s3ImageService.upload(data, mime, venueId);
     }
     const updated = await this.prisma.checklistCompletion.update({
       where: { id: completion.id },
@@ -736,6 +741,7 @@ export class OperationsController {
     if (!completion?.photoKey) throw new NotFoundException('Photo not found');
     await this.mediaAccess.assertToken(token, 'checklist-photo', completionId, completion.venueId);
     const url = await this.s3ImageService.getPresignedUrl(completion.photoKey);
+    res.setHeader('Referrer-Policy', 'no-referrer');
     return res.redirect(302, url);
   }
 
@@ -758,8 +764,7 @@ export class OperationsController {
   }
 
   private async requireManagerProfile(user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
+    const profile = await this.requireVenueProfile(user);
     if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
     return profile;
   }
@@ -767,6 +772,9 @@ export class OperationsController {
   private async requireVenueProfile(user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
+    if (!isActiveMembership(profile.membershipStatus)) {
+      throw new ForbiddenException('Profile is not active for this venue');
+    }
     return profile;
   }
 }

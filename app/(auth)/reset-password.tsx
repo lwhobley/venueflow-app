@@ -86,7 +86,7 @@ export default function ResetPasswordScreen() {
               onChangeText={setCode}
               keyboardType="number-pad"
               mode="outlined"
-              maxLength={6}
+              maxLength={8}
             />
             <TextInput
               {...inputProps}

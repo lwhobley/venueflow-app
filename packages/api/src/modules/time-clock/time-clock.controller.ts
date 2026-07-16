@@ -11,6 +11,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
+import { unpaidBreakMs } from '../../common/break-duration';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -177,7 +178,7 @@ export class TimeClockController {
       const breaks = (entry.breaks as any[]) || [];
       for (const b of breaks) {
         if (b.type === 'unpaid' && b.startAt && b.endAt) {
-          durationMs -= (b.endAt - b.startAt);
+          durationMs -= unpaidBreakMs(b.startAt, b.endAt);
         }
       }
       return sum + Math.max(0, durationMs) / 3600000;

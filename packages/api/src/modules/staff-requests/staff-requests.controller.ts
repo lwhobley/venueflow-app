@@ -27,6 +27,7 @@ import { Prisma, RequestStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapStaffRequest } from '../../common/mappers';
+import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -332,45 +333,54 @@ export class StaffRequestsController {
           WHERE id = ${request.profileId}`;
       }
       
-      if (request.kind === 'sick_leave' || request.kind === 'time_off') {
-        const reqStart = request.requestedRangeStart || request.requestedForDate;
-        const reqEnd = request.requestedRangeEnd || request.requestedForDate || reqStart;
-        const start = parseIsoCalendarDate(reqStart);
-        const end = parseIsoCalendarDate(reqEnd);
-        if (start && end && end.getTime() >= start.getTime()) {
-          // Weekday comes straight from the calendar date (getUTCDay on the
-          // noon-UTC anchor), NOT from the venue timezone — a date's weekday is
-          // the same everywhere, so the old `new Date('YYYY-MM-DD')` UTC-midnight
-          // + zonedDayOfWeek combination could shift a Tuesday request onto
-          // Monday shifts for west-of-UTC venues.
-          //
-          // NOTE: ScheduleShift is a weekly template keyed only by dayIndex (no
-          // date/week column), so this necessarily opens every matching weekday
-          // rather than only shifts within the requested date range. Scoping to
-          // a specific week would require adding a date/week field to the shift
-          // model — tracked separately.
-          const dayIndices = new Set<number>();
-          for (let t = start.getTime(); t <= end.getTime(); t += MS_PER_DAY) {
-            dayIndices.add(new Date(t).getUTCDay());
-          }
-          if (dayIndices.size > 0) {
-            await tx.scheduleShift.updateMany({
-              where: {
-                venueId: request.venueId,
-                profileId: request.profileId,
-                dayIndex: { in: [...dayIndices] },
-              },
-              data: {
-                profileId: null,
-                status: 'open',
-              },
-            });
-          }
-        }
-      }
+      // PTO/sick: deduct balances above, but do NOT auto-unassign ScheduleShift
+      // rows. Shifts are weekly templates keyed only by dayIndex (no week/date),
+      // so opening by weekday would clear every matching day forever. Managers
+      // adjust the affected week's schedule manually after approval.
 
       if (request.kind === 'time_correction') {
         const correction = (request.availability as any) || {};
+        const venue = await tx.venue.findUnique({
+          where: { id: request.venueId },
+          select: { timezone: true },
+        });
+        const correctedClockIn = new Date(correction.clockInAt);
+        if (isNaN(correctedClockIn.getTime())) {
+          throw new BadRequestException('Invalid correction clock-in time');
+        }
+        const correctedClockOut = correction.clockOutAt ? new Date(correction.clockOutAt) : null;
+        if (correction.clockOutAt && (!correctedClockOut || isNaN(correctedClockOut.getTime()))) {
+          throw new BadRequestException('Invalid correction clock-out time');
+        }
+        const willBeOpen = !correctedClockOut;
+
+        const applyCorrection = async (targetId: string) => {
+          if (willBeOpen) {
+            const otherOpen = await tx.timeEntry.findFirst({
+              where: {
+                profileId: request.profileId,
+                venueId: request.venueId,
+                isOpen: true,
+                id: { not: targetId },
+              },
+              select: { id: true },
+            });
+            if (otherOpen) {
+              throw new BadRequestException(
+                'Cannot leave this correction open — staff already has an open clock-in.',
+              );
+            }
+          }
+          await tx.timeEntry.update({
+            where: { id: targetId },
+            data: {
+              clockInAt: correctedClockIn,
+              clockOutAt: correctedClockOut,
+              isOpen: willBeOpen,
+            },
+          });
+        };
+
         if (correction.timeEntryId) {
           // Only correct a time entry that belongs to this venue AND the same
           // staff member who filed the request — never a foreign entry id
@@ -379,47 +389,48 @@ export class StaffRequestsController {
             where: { id: correction.timeEntryId, venueId: request.venueId, profileId: request.profileId },
           });
           if (!target) throw new BadRequestException('Time entry not found for this request');
-          await tx.timeEntry.update({
-            where: { id: target.id },
-            data: {
-              clockInAt: new Date(correction.clockInAt),
-              clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : null,
-              isOpen: correction.clockOutAt ? false : true,
-            },
-          });
+          await applyCorrection(target.id);
         } else {
-          // No specific entry ID — find an existing open entry for this profile
-          // on the same calendar day and correct it. Only create a new entry if
-          // none exists (the employee genuinely forgot to clock in).
-          const correctedClockIn = new Date(correction.clockInAt);
-          const dayStart = new Date(correctedClockIn);
-          dayStart.setHours(0, 0, 0, 0);
-          const dayEnd = new Date(dayStart.getTime() + 86400000);
+          // No specific entry ID — find an existing entry for this profile on the
+          // same venue-local calendar day and correct it. Only create a new entry
+          // if none exists (the employee genuinely forgot to clock in).
+          const dayIso = zonedIsoDate(venue?.timezone ?? null, correctedClockIn.getTime());
+          const { start: dayStartMs, end: dayEndMs } = zonedDateBounds(
+            venue?.timezone ?? null,
+            dayIso,
+          );
           const existing = await tx.timeEntry.findFirst({
             where: {
               profileId: request.profileId,
               venueId: request.venueId,
-              clockInAt: { gte: dayStart, lt: dayEnd },
+              clockInAt: { gte: new Date(dayStartMs), lt: new Date(dayEndMs) },
             },
           });
           if (existing) {
-            await tx.timeEntry.update({
-              where: { id: existing.id },
-              data: {
-                clockInAt: correctedClockIn,
-                clockOutAt: correction.clockOutAt ? new Date(correction.clockOutAt) : null,
-                isOpen: !correction.clockOutAt,
-              },
-            });
+            await applyCorrection(existing.id);
           } else {
+            if (willBeOpen) {
+              const otherOpen = await tx.timeEntry.findFirst({
+                where: {
+                  profileId: request.profileId,
+                  venueId: request.venueId,
+                  isOpen: true,
+                },
+                select: { id: true },
+              });
+              if (otherOpen) {
+                throw new BadRequestException(
+                  'Cannot create an open correction — staff already has an open clock-in.',
+                );
+              }
+            }
             await tx.timeEntry.create({
               data: {
                 profileId: request.profileId,
                 venueId: request.venueId,
                 clockInAt: correctedClockIn,
-                clockOutAt: correction.clockOutAt
-                  ? new Date(correction.clockOutAt)
-                  : new Date(correctedClockIn.getTime() + 8 * 60 * 60 * 1000),
+                clockOutAt: correctedClockOut
+                  ?? new Date(correctedClockIn.getTime() + 8 * 60 * 60 * 1000),
                 clockInLat: 0,
                 clockInLng: 0,
                 clockInAccuracyM: 0,
@@ -428,6 +439,8 @@ export class StaffRequestsController {
                 clockOutLng: 0,
                 clockOutAccuracyM: 0,
                 clockOutMocked: false,
+                // New corrections without an explicit out time default to a closed
+                // 8h entry so we never collide with the one-open-punch unique index.
                 isOpen: false,
               },
             });

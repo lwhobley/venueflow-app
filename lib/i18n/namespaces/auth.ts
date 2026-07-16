@@ -108,7 +108,7 @@ export const en = {
   verifyEmail: {
     kicker: 'One more step',
     title: 'Verify your email',
-    subtitle: 'Enter the 6-digit code we sent to {email}.',
+    subtitle: 'Enter the 8-digit code we sent to {email}.',
     defaultEmail: 'your email',
     codeLabel: 'Verification code',
     verifyButton: 'Verify email',

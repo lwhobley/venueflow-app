@@ -116,7 +116,7 @@ export default function VerifyEmailScreen() {
               keyboardType="number-pad"
               autoCapitalize="none"
               mode="outlined"
-              maxLength={6}
+              maxLength={8}
               returnKeyType="go"
               onSubmitEditing={() => void verify()}
             />

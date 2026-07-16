@@ -28,6 +28,7 @@ import {
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { dayLabel, minutesToTime } from '../../common/mappers';
+import { ACTIVE_MEMBERSHIP } from '../../common/membership';
 import {
   addDays,
   DEFAULT_PAY_PERIOD_ANCHOR,
@@ -540,7 +541,10 @@ export class SchedulingController {
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
-      this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.profile.findMany({
+        where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
+        orderBy: { fullName: 'asc' },
+      }),
       this.payPeriodConfig(scope!.venueId),
     ]);
     const today = todayInZone(config.timezone);
@@ -625,7 +629,7 @@ export class SchedulingController {
         select: { startsAt: true, expectedGuests: true },
       }),
       this.prisma.profile.findMany({
-        where: { venueId: scope!.venueId },
+        where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, fullName: true },
       }),
     ]);
@@ -1135,7 +1139,10 @@ export class SchedulingController {
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
-      this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.profile.findMany({
+        where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
+        orderBy: { fullName: 'asc' },
+      }),
       this.prisma.availability.findMany({
         where: { venueId: scope!.venueId, weekStart: availabilityWeekStart },
         orderBy: [{ profileId: 'asc' }, { dayIndex: 'asc' }, { startMinutes: 'asc' }],
@@ -1256,7 +1263,10 @@ export class SchedulingController {
 
     const [shifts, staff, availability, reservations, venueEvents, memoryNotes] = await Promise.all([
       this.prisma.scheduleShift.findMany({ where: { venueId } }),
-      this.prisma.profile.findMany({ where: { venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.profile.findMany({
+        where: { venueId, OR: ACTIVE_MEMBERSHIP },
+        orderBy: { fullName: 'asc' },
+      }),
       this.prisma.availability.findMany({ where: { venueId, weekStart: availabilityWeekStart } }),
       this.prisma.reservation.findMany({
         where: {

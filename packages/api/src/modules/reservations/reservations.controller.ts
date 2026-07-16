@@ -289,12 +289,16 @@ export class ReservationsController {
 
       // 2) Process the reservation in a separate transaction.
       try {
+        const reservationTime = new Date(event.reservationTime);
+        if (isNaN(reservationTime.getTime())) {
+          throw new BadRequestException('Invalid reservationTime');
+        }
         const reservationId = await this.prisma.$transaction(async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-sync:${venueId}:${provider}:${event.externalId}`}))`;
           const fields: Prisma.ReservationUpdateInput = {
             guestName: event.guestName,
             partySize: event.partySize,
-            reservationTime: new Date(event.reservationTime),
+            reservationTime,
             durationMinutes: event.durationMinutes ?? 90,
             status: (event.status ?? 'confirmed') as ReservationStatus,
             guestPhone: event.phone?.trim() ?? null,
@@ -315,7 +319,7 @@ export class ReservationsController {
                   externalId: event.externalId,
                   guestName: event.guestName,
                   partySize: event.partySize,
-                  reservationTime: new Date(event.reservationTime),
+                  reservationTime,
                   durationMinutes: event.durationMinutes ?? 90,
                   status: (event.status ?? 'confirmed') as ReservationStatus,
                   guestPhone: event.phone?.trim() ?? null,

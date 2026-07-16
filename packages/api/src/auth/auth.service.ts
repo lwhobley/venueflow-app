@@ -29,7 +29,7 @@ export class AuthService {
   }
 
   generateOneTimeCode() {
-    return Array.from({ length: 6 }, () => randomInt(0, 10)).join('');
+    return Array.from({ length: 8 }, () => randomInt(0, 10)).join('');
   }
 
   hashOneTimeCode(code: string) {
