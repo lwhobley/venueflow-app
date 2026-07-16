@@ -10,6 +10,7 @@ import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatTime, errorMessage } from '../../lib/format';
 import { SectionHeader } from '../../components/AppCard';
 import { router } from 'expo-router';
+import { useI18n } from '../../lib/i18n';
 
 const sectionFilters = ['all', 'main', 'patio', 'bar', 'vip'] as const;
 const statusColors: Record<string, string> = {
@@ -135,6 +136,7 @@ export default function FloorScreenWrapper() {
 
 function FloorScreen() {
   const { venue, isReady, user, canManage: canEdit } = useVenueAuth();
+  const { t } = useI18n();
   const [section, setSection] = useState<(typeof sectionFilters)[number]>('all');
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
@@ -184,7 +186,7 @@ function FloorScreen() {
       setMergeSel([]);
       setMergeOpen(false);
     } catch (e) {
-      setActionError(errorMessage(e, 'Could not merge tables.'));
+      setActionError(errorMessage(e, t('floor.mergeError')));
     }
   };
 
@@ -210,7 +212,7 @@ function FloorScreen() {
         actorRole: user?.role ?? 'staff',
       });
     } catch (e) {
-      setActionError(errorMessage(e, 'Could not release assignment.'));
+      setActionError(errorMessage(e, t('floor.releaseError')));
     }
   };
 
@@ -219,7 +221,7 @@ function FloorScreen() {
     try {
       await markDirty({ tableId });
     } catch (e) {
-      setActionError(errorMessage(e, 'Could not mark table dirty.'));
+      setActionError(errorMessage(e, t('floor.markDirtyError')));
     }
   };
 
@@ -228,7 +230,7 @@ function FloorScreen() {
     try {
       await markClean({ tableId });
     } catch (e) {
-      setActionError(errorMessage(e, 'Could not mark table clean.'));
+      setActionError(errorMessage(e, t('floor.markCleanError')));
     }
   };
 
@@ -238,21 +240,21 @@ function FloorScreen() {
     try {
       await splitMergedTables({ venueId: venue.id, mergeGroupId });
     } catch (e) {
-      setActionError(errorMessage(e, 'Could not split merged tables.'));
+      setActionError(errorMessage(e, t('floor.splitError')));
     }
   };
 
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
-      <SectionHeader kicker="Service" title="Floor Plan" subtitle={`Live tables for ${venue?.name ?? 'your venue'}.`} />
+      <SectionHeader kicker={t('floor.kicker')} title={t('floor.title')} subtitle={t('floor.subtitle', { venue: venue?.name ?? t('common.yourVenue') })} />
       {actionError ? <Text style={{ color: colors.danger }}>{actionError}</Text> : null}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {([
-          { label: 'Occupied', value: stats?.occupiedCount ?? 0 },
-          { label: 'Avg turn', value: `${stats?.avgTurnTimeMinutes ?? 0}m` },
-          { label: 'Longest seated', value: `${stats?.longestSeatedDurationMinutes ?? 0}m` },
-          { label: 'Waitlist', value: stats?.waitlistSize ?? 0 },
+          { label: t('floor.statOccupied'), value: stats?.occupiedCount ?? 0 },
+          { label: t('floor.statAvgTurn'), value: `${stats?.avgTurnTimeMinutes ?? 0}m` },
+          { label: t('floor.statLongestSeated'), value: `${stats?.longestSeatedDurationMinutes ?? 0}m` },
+          { label: t('floor.statWaitlist'), value: stats?.waitlistSize ?? 0 },
         ] as StatCard[]).map((item) => (
           <Card key={item.label} style={{ backgroundColor: colors.surface, flexGrow: 1, minWidth: '46%' }}>
             <Card.Content style={{ gap: 4 }}>
@@ -267,8 +269,8 @@ function FloorScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
             <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 180 }}>
-              <Text variant="titleMedium">Needs assignment</Text>
-              <Text style={{ color: colors.muted }}>{needsAssignmentCount} reservations need a table</Text>
+              <Text variant="titleMedium">{t('floor.needsAssignmentTitle')}</Text>
+              <Text style={{ color: colors.muted }}>{t('floor.needsAssignmentDesc', { count: needsAssignmentCount })}</Text>
             </View>
             <Button
               mode="contained"
@@ -276,11 +278,11 @@ function FloorScreen() {
               style={{ alignSelf: 'flex-start', maxWidth: '100%' }}
               onPress={() => router.push('/reservations')}
             >
-              Open reservations
+              {t('floor.openReservations')}
             </Button>
           </View>
           <Text style={{ color: colors.muted }}>
-            Use the dedicated reservations screen to assign queue items to tables.
+            {t('floor.needsAssignmentHelp')}
           </Text>
         </Card.Content>
       </Card>
@@ -288,7 +290,7 @@ function FloorScreen() {
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {sectionFilters.map((filter) => (
           <Chip key={filter} selected={section === filter} onPress={() => setSection(filter)}>
-            {filter === 'all' ? 'All sections' : filter}
+            {filter === 'all' ? t('floor.allSections') : filter}
           </Chip>
         ))}
       </View>
@@ -296,12 +298,12 @@ function FloorScreen() {
       {!activeFloor ? (
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium">No active floor plan yet</Text>
-            <Text style={{ color: colors.muted }}>Build your own floor plan in the editor to start tracking live tables.</Text>
+            <Text variant="titleMedium">{t('floor.noFloorPlanTitle')}</Text>
+            <Text style={{ color: colors.muted }}>{t('floor.noFloorPlanDesc')}</Text>
             {canEdit ? (
               <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                 <Button mode="contained" buttonColor={colors.primary} icon="pencil" onPress={() => router.push('/floor/editor')}>
-                  Build floor plan
+                  {t('floor.buildFloorPlan')}
                 </Button>
               </View>
             ) : null}
@@ -314,7 +316,7 @@ function FloorScreen() {
               <Text variant="titleMedium">{activeFloor.floorPlan.name}</Text>
               {canEdit ? (
                 <Button compact mode="outlined" textColor={colors.primary} icon="pencil" onPress={() => router.push('/floor/editor')}>
-                  Edit
+                  {t('floor.edit')}
                 </Button>
               ) : null}
             </View>
@@ -377,14 +379,14 @@ function FloorScreen() {
                       );
                     })}
                     <Text style={{ color: colors.cream, fontWeight: '700' }}>{table.label}</Text>
-                    <Text style={{ color: colors.cream, fontSize: 12 }}>{table.seats} seats</Text>
+                    <Text style={{ color: colors.cream, fontSize: 12 }}>{t('floor.seatsLabel', { count: table.seats })}</Text>
                     {currentAssignment ? (
                       <View style={{ marginTop: 4, alignItems: 'center' }}>
                         <Text style={{ color: colors.cream, fontSize: 11, fontWeight: '700' }}>{currentAssignment.guestName}</Text>
                         <Text style={{ color: colors.cream, fontSize: 10 }}>{currentAssignment.partySize}p · {formatTime(currentAssignment.startsAt)}</Text>
                       </View>
                     ) : nextAssignment ? (
-                      <Text style={{ color: colors.cream, fontSize: 10, marginTop: 4 }}>Next · {nextAssignment.guestName}</Text>
+                      <Text style={{ color: colors.cream, fontSize: 10, marginTop: 4 }}>{t('floor.nextGuest', { name: nextAssignment.guestName })}</Text>
                     ) : null}
                   </Pressable>
                 );
@@ -423,11 +425,11 @@ function FloorScreen() {
           <Card.Content style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
               <View style={{ flex: 1 }}>
-                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Merge tables</Text>
-                <Text style={{ color: colors.muted }}>Combine available tables for larger parties, then split them when the party leaves.</Text>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('floor.mergeTablesTitle')}</Text>
+                <Text style={{ color: colors.muted }}>{t('floor.mergeTablesDesc')}</Text>
               </View>
               <Button mode={mergeOpen ? 'contained-tonal' : 'outlined'} onPress={() => setMergeOpen((value) => !value)}>
-                {mergeOpen ? 'Close' : 'Merge'}
+                {mergeOpen ? t('floor.close') : t('floor.merge')}
               </Button>
             </View>
 
@@ -439,7 +441,7 @@ function FloorScreen() {
                       {tables.map((table) => table.table.label).join(' + ')}
                     </Text>
                     <Button compact mode="outlined" onPress={() => void onSplitMerge(groupId)}>
-                      Split
+                      {t('floor.split')}
                     </Button>
                   </View>
                 ))}
@@ -449,7 +451,7 @@ function FloorScreen() {
             {mergeOpen ? (
               <View style={{ gap: spacing.sm }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                  <Text style={{ color: colors.muted, flex: 1 }}>Party size</Text>
+                  <Text style={{ color: colors.muted, flex: 1 }}>{t('floor.partySize')}</Text>
                   <Button compact mode="outlined" onPress={() => setMergeParty((value) => Math.max(2, value - 1))}>-</Button>
                   <Chip compact>{mergeParty}</Chip>
                   <Button compact mode="outlined" onPress={() => setMergeParty((value) => Math.min(50, value + 1))}>+</Button>
@@ -470,9 +472,9 @@ function FloorScreen() {
                     );
                   })}
                 </View>
-                {mergeableTables.length === 0 ? <Text style={{ color: colors.muted }}>No available tables to merge right now.</Text> : null}
+                {mergeableTables.length === 0 ? <Text style={{ color: colors.muted }}>{t('floor.noAvailableTables')}</Text> : null}
                 <Button mode="contained" buttonColor={colors.primary} disabled={mergeSel.length < 2} onPress={() => void doMerge()}>
-                  Merge selected
+                  {t('floor.mergeSelected')}
                 </Button>
               </View>
             ) : null}
@@ -486,14 +488,14 @@ function FloorScreen() {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
                 <Text variant="titleMedium">{selected.table.label}</Text>
-                <Text style={{ color: colors.muted }}>{selected.table.section === 'vip' ? 'VIP' : selected.table.section.charAt(0).toUpperCase() + selected.table.section.slice(1)} · {selected.table.seats} seats</Text>
+                <Text style={{ color: colors.muted }}>{selected.table.section === 'vip' ? 'VIP' : selected.table.section.charAt(0).toUpperCase() + selected.table.section.slice(1)} · {t('floor.seatsLabel', { count: selected.table.seats })}</Text>
               </View>
               <Chip selected style={{ backgroundColor: `${statusColors[selectedState?.status ?? 'available']}22` }}>
                 {statusLabels[selectedState?.status ?? 'available']}
               </Chip>
             </View>
             <Text style={{ color: colors.muted }}>
-              Party size {selectedState?.partySize ?? 0} · {selectedState?.notes ?? 'No notes'}
+              {t('floor.partySizeNotes', { size: selectedState?.partySize ?? 0, notes: selectedState?.notes ?? t('floor.noNotes') })}
             </Text>
 
             {selectedAssignments.length > 0 ? (
@@ -505,7 +507,7 @@ function FloorScreen() {
                       <Text style={{ color: colors.cream, fontSize: 12 }}>
                         {assignment.source} · {formatTime(assignment.startsAt)} - {formatTime(assignment.endsAt)}
                       </Text>
-                      <Text style={{ color: colors.cream, fontSize: 12 }}>Party of {assignment.partySize}</Text>
+                      <Text style={{ color: colors.cream, fontSize: 12 }}>{t('floor.partyOf', { size: assignment.partySize })}</Text>
                       {assignment.notes ? <Text style={{ color: colors.cream, fontSize: 12 }}>{assignment.notes}</Text> : null}
                       {assignment.tags.length > 0 ? (
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -518,7 +520,7 @@ function FloorScreen() {
                       ) : null}
                       {canEdit ? (
                         <Button mode="text" textColor={colors.primary} onPress={() => void onRelease(assignment.assignmentId)}>
-                          Release
+                          {t('floor.release')}
                         </Button>
                       ) : null}
                     </Card.Content>
@@ -526,21 +528,21 @@ function FloorScreen() {
                 ))}
               </View>
             ) : selectedNextAssignment ? (
-              <Text style={{ color: colors.muted }}>Next up: {selectedNextAssignment.guestName} · {formatTime(selectedNextAssignment.startsAt)}</Text>
+              <Text style={{ color: colors.muted }}>{t('floor.nextUp', { name: selectedNextAssignment.guestName, time: formatTime(selectedNextAssignment.startsAt) })}</Text>
             ) : null}
 
             {canEdit ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <Button mode="outlined" onPress={() => void onMarkDirty(selected.table._id as Id<'tables'>)}>
-                  Mark dirty
+                  {t('floor.markDirty')}
                 </Button>
                 <Button mode="outlined" onPress={() => void onMarkClean(selected.table._id as Id<'tables'>)}>
-                  Mark clean
+                  {t('floor.markClean')}
                 </Button>
               </View>
             ) : (
               <Text style={{ color: colors.muted }}>
-                Staff can view tables, but only admins and managers can change table state.
+                {t('floor.staffViewOnly')}
               </Text>
             )}
           </Card.Content>

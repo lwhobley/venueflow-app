@@ -9,8 +9,10 @@ import { colors, radius, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling, canManageVenue } from '../../lib/permissions';
+import { useI18n } from '../../lib/i18n';
 
 export default function ProfileScreen() {
+  const { t } = useI18n();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
@@ -49,7 +51,7 @@ export default function ProfileScreen() {
       clearSession();
       router.replace('/(auth)/welcome');
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not delete account. Try again.');
+      Alert.alert(t('profile.deleteError.title'), e instanceof Error ? e.message : t('profile.deleteError.default'));
     } finally {
       setDeleting(false);
     }
@@ -59,68 +61,68 @@ export default function ProfileScreen() {
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}>
       <Card style={{ backgroundColor: colors.surface, marginBottom: spacing.md, borderRadius: radius.soft }}>
         <Card.Content style={{ gap: 6 }}>
-          <Text variant="headlineSmall" style={{ fontWeight: '700' }}>Profile</Text>
+          <Text variant="headlineSmall" style={{ fontWeight: '700' }}>{t('profile.title')}</Text>
           <Text>{user?.full_name}</Text>
           <Text style={{ color: colors.muted }}>{user?.email}</Text>
           <Text style={{ color: colors.muted }}>{user?.job_title}</Text>
-          <Text style={{ color: colors.muted }}>{venue?.name ?? 'Individual account'}</Text>
+          <Text style={{ color: colors.muted }}>{venue?.name ?? t('profile.individualAccount')}</Text>
         </Card.Content>
       </Card>
 
       {canManage ? (
         <Button mode="contained" buttonColor={colors.primary} onPress={onOpenStaff} style={{ marginBottom: spacing.sm }}>
-          Manage staff
+          {t('profile.manageStaff')}
         </Button>
       ) : null}
 
       {canManage ? (
         <Button mode="outlined" textColor={colors.primary} icon="map-marker-radius" onPress={() => router.push('/venue/settings')} style={{ marginBottom: spacing.sm }}>
-          Venue location & geofence
+          {t('profile.venueLocation')}
         </Button>
       ) : null}
 
       {canViewBilling ? (
         <Button mode="outlined" textColor={colors.primary} onPress={onOpenBilling} style={{ marginBottom: spacing.sm }}>
-          Billing
+          {t('profile.billing')}
         </Button>
       ) : null}
 
       <Button mode="outlined" textColor={colors.primary} icon="notebook-outline" onPress={() => router.push('/logbook')} style={{ marginBottom: spacing.sm }}>
-        Shift logbook
+        {t('profile.shiftLogbook')}
       </Button>
 
       <Button mode="outlined" textColor={colors.primary} icon="clipboard-check-outline" onPress={() => router.push('/checklist')} style={{ marginBottom: spacing.sm }}>
-        Opening/closing checklist
+        {t('profile.checklist')}
       </Button>
 
       <Button mode="outlined" textColor={colors.primary} icon="help-circle-outline" onPress={() => router.push('/help')} style={{ marginBottom: spacing.sm }}>
-        Help & feature guide
+        {t('profile.helpGuide')}
       </Button>
 
       <Button mode="outlined" textColor={colors.primary} onPress={onLogout} style={{ marginBottom: spacing.sm }}>
-        Sign out
+        {t('profile.signOut')}
       </Button>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.soft, marginTop: spacing.md }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.danger }}>Account deletion</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.danger }}>{t('profile.accountDeletion.title')}</Text>
           <Text style={{ color: colors.muted }}>
-            Permanently delete your Venue Wrangler account, profile, availability, push tokens, and sign-in credentials. Assigned shifts are released back to the venue before deletion.
+            {t('profile.accountDeletion.description')}
           </Text>
           {!confirmDelete ? (
             <Button mode="outlined" textColor={colors.danger} icon="delete-outline" onPress={() => setConfirmDelete(true)}>
-              Start account deletion
+              {t('profile.accountDeletion.startButton')}
             </Button>
           ) : (
             <View style={{ gap: spacing.sm }}>
               <Text style={{ color: colors.danger, fontWeight: '700' }}>
-                This cannot be undone. You will be signed out after deletion is complete.
+                {t('profile.accountDeletion.confirmWarning')}
               </Text>
               <Button mode="contained" buttonColor={colors.danger} icon="delete-forever-outline" loading={deleting} disabled={deleting} onPress={() => void onDeleteAccount()}>
-                Permanently delete my account
+                {t('profile.accountDeletion.confirmButton')}
               </Button>
               <Button mode="text" textColor={colors.primary} disabled={deleting} onPress={() => setConfirmDelete(false)}>
-                Cancel
+                {t('profile.accountDeletion.cancelButton')}
               </Button>
             </View>
           )}

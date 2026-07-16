@@ -14,6 +14,7 @@ import { appApi, type InviteCheckResult } from '../../lib/api-client';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
 type Stage =
   | { kind: 'entry' }
@@ -23,6 +24,7 @@ type Stage =
   | { kind: 'used' };
 
 export default function InviteCheckScreen() {
+  const { t } = useI18n();
   const user = useAuthStore((s: AuthState) => s.user);
   const token = useAuthStore((s: AuthState) => s.token);
   const setSession = useAuthStore((s: AuthState) => s.setSession);
@@ -36,7 +38,7 @@ export default function InviteCheckScreen() {
   const check = async () => {
     const trimmed = contact.trim();
     if (!trimmed) {
-      Alert.alert('Enter a contact', 'Type the email or mobile number your manager used to invite you.');
+      Alert.alert(t('inviteCheck.contactRequiredTitle'), t('inviteCheck.contactRequiredMessage'));
       return;
     }
     setLoading(true);
@@ -52,7 +54,7 @@ export default function InviteCheckScreen() {
         setStage({ kind: result.status });
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong. Try again.');
+      Alert.alert(t('inviteCheck.errorTitle'), e instanceof Error ? e.message : t('inviteCheck.genericError'));
     } finally {
       setLoading(false);
     }
@@ -61,8 +63,8 @@ export default function InviteCheckScreen() {
   const continueWithInvite = async (invite: Extract<InviteCheckResult, { status: 'found' }>) => {
     if (!looksLikeEmail) {
       Alert.alert(
-        'Use your email invite',
-        'For security, team invites now attach only after email verification. Ask your manager to send the invite to your email address.',
+        t('inviteCheck.emailOnlyTitle'),
+        t('inviteCheck.emailOnlyMessage'),
       );
       return;
     }
@@ -100,10 +102,10 @@ export default function InviteCheckScreen() {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           router.replace('/(tabs)/home');
         } else {
-          Alert.alert('Could not join team', 'We could not attach your profile. Ask your manager to verify your invite details.');
+          Alert.alert(t('inviteCheck.joinFailedTitle'), t('inviteCheck.joinFailedMessage'));
         }
       } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong. Try again.');
+        Alert.alert(t('inviteCheck.errorTitle'), e instanceof Error ? e.message : t('inviteCheck.genericError'));
       } finally {
         setLoading(false);
       }
@@ -139,12 +141,12 @@ export default function InviteCheckScreen() {
         </View>
 
         <View style={{ gap: 6 }}>
-          <Kicker>Join a team</Kicker>
+          <Kicker>{t('inviteCheck.kicker')}</Kicker>
           <Text style={{ ...type.title, color: colors.text }}>
-            Find your invite
+            {t('inviteCheck.title')}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
-            Enter the email address or mobile number your manager used to invite you.
+            {t('inviteCheck.subtitle')}
           </Text>
         </View>
 
@@ -154,7 +156,7 @@ export default function InviteCheckScreen() {
               <>
                 <TextInput
                   {...inputProps}
-                  label="Email or mobile number"
+                  label={t('inviteCheck.contactLabel')}
                   value={contact}
                   onChangeText={(v) => {
                     setContact(v);
@@ -173,7 +175,7 @@ export default function InviteCheckScreen() {
                   loading={loading}
                   onPress={() => void check()}
                 >
-                  Check for invite
+                  {t('inviteCheck.checkButton')}
                 </Button>
               </>
             )}
@@ -181,7 +183,7 @@ export default function InviteCheckScreen() {
             {stage.kind === 'found' && (
               <View style={{ gap: spacing.sm }}>
                 <Text variant="labelMedium" style={{ color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
-                  Invite found
+                  {t('inviteCheck.found.label')}
                 </Text>
                 {stage.invite.venueName ? (
                   <Text style={{ ...type.heading, color: colors.text }}>
@@ -190,13 +192,13 @@ export default function InviteCheckScreen() {
                 ) : null}
                 {stage.invite.jobTitle ? (
                   <Text variant="bodyMedium" style={{ color: colors.muted }}>
-                    Role: {stage.invite.jobTitle}
+                    {t('inviteCheck.found.role', { jobTitle: stage.invite.jobTitle })}
                   </Text>
                 ) : null}
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
                   {user
-                    ? 'Confirm your invite to join the team automatically.'
-                    : 'Sign up with this invited email address, then verify your email to join the team automatically.'}
+                    ? t('inviteCheck.found.confirmNote')
+                    : t('inviteCheck.found.signUpNote')}
                 </Text>
                 <Button
                   mode="contained"
@@ -206,7 +208,7 @@ export default function InviteCheckScreen() {
                   onPress={() => continueWithInvite(stage.invite)}
                   style={{ marginTop: 4 }}
                 >
-                  {user ? 'Join Team' : 'Create account'}
+                  {user ? t('inviteCheck.found.joinTeamButton') : t('inviteCheck.found.createAccountButton')}
                 </Button>
                 <Button
                   mode="text"
@@ -216,7 +218,7 @@ export default function InviteCheckScreen() {
                     setStage({ kind: 'entry' });
                   }}
                 >
-                  Try a different contact
+                  {t('inviteCheck.found.tryDifferentContact')}
                 </Button>
               </View>
             )}
@@ -224,10 +226,10 @@ export default function InviteCheckScreen() {
             {stage.kind === 'not_found' && (
               <View style={{ gap: spacing.sm }}>
                 <Text variant="bodyMedium" style={{ color: colors.danger }}>
-                  No invite found for {contact.trim()}.
+                  {t('inviteCheck.notFound.message', { contact: contact.trim() })}
                 </Text>
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  Ask your manager to send an invite to your email address.
+                  {t('inviteCheck.notFound.hint')}
                 </Text>
                 <Button
                   mode="outlined"
@@ -237,7 +239,7 @@ export default function InviteCheckScreen() {
                     setStage({ kind: 'entry' });
                   }}
                 >
-                  Try again
+                  {t('inviteCheck.notFound.tryAgain')}
                 </Button>
               </View>
             )}
@@ -245,10 +247,10 @@ export default function InviteCheckScreen() {
             {stage.kind === 'expired' && (
               <View style={{ gap: spacing.sm }}>
                 <Text variant="bodyMedium" style={{ color: colors.danger }}>
-                  This invite has expired.
+                  {t('inviteCheck.expired.message')}
                 </Text>
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  Ask your manager to send a fresh invite link.
+                  {t('inviteCheck.expired.hint')}
                 </Text>
                 <Button
                   mode="outlined"
@@ -258,7 +260,7 @@ export default function InviteCheckScreen() {
                     setStage({ kind: 'entry' });
                   }}
                 >
-                  Try a different contact
+                  {t('inviteCheck.expired.tryDifferentContact')}
                 </Button>
               </View>
             )}
@@ -266,17 +268,17 @@ export default function InviteCheckScreen() {
             {stage.kind === 'used' && (
               <View style={{ gap: spacing.sm }}>
                 <Text variant="bodyMedium" style={{ color: colors.muted }}>
-                  This invite has already been used.
+                  {t('inviteCheck.used.message')}
                 </Text>
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  If you already signed up, go back and sign in to your account.
+                  {t('inviteCheck.used.hint')}
                 </Text>
                 <Button
                   mode="outlined"
                   textColor={colors.primary}
                   onPress={() => router.push('/(auth)/sign-in')}
                 >
-                  Sign in
+                  {t('inviteCheck.used.signIn')}
                 </Button>
                 <Button
                   mode="text"
@@ -286,7 +288,7 @@ export default function InviteCheckScreen() {
                     setStage({ kind: 'entry' });
                   }}
                 >
-                  Try a different contact
+                  {t('inviteCheck.used.tryDifferentContact')}
                 </Button>
               </View>
             )}
@@ -298,7 +300,7 @@ export default function InviteCheckScreen() {
           textColor={colors.muted}
           onPress={() => router.back()}
         >
-          Back
+          {t('inviteCheck.back')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>

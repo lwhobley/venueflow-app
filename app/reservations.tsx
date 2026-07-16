@@ -3,6 +3,7 @@ import { FlatList, View } from 'react-native';
 import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { router } from 'expo-router';
+import { useI18n } from '../lib/i18n';
 import { useMutation, useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import type { Id } from '../lib/ids';
@@ -79,6 +80,7 @@ export default function ReservationsScreenWrapper() {
 }
 
 function ReservationsScreen() {
+  const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
@@ -129,7 +131,7 @@ function ReservationsScreen() {
       await assignWaitlist({ venueId: venue.id, waitlistId: entryId as Id<'waitlist'>, tableIds: [tableId as Id<'tables'>], holdType: 'seated', startsAt, endsAt: startsAt + 120 * 60 * 1000 });
       setSeatingWaitlistId(null);
     } catch (e) {
-      setWaitlistError(errorMessage(e, 'Failed to seat guest'));
+      setWaitlistError(errorMessage(e, t('reservations.waitlist.errors.seatFailed')));
     }
   };
 
@@ -139,7 +141,7 @@ function ReservationsScreen() {
     try {
       await markWaitlistReady({ venueId: venue.id, waitlistId: waitlistId as Id<'waitlist'> });
     } catch (e) {
-      setWaitlistError(errorMessage(e, 'Failed to mark ready'));
+      setWaitlistError(errorMessage(e, t('reservations.waitlist.errors.markReadyFailed')));
     }
   };
 
@@ -149,7 +151,7 @@ function ReservationsScreen() {
     try {
       await removeFromWaitlist({ venueId: venue.id, waitlistId: waitlistId as Id<'waitlist'> });
     } catch (e) {
-      setWaitlistError(errorMessage(e, 'Failed to remove'));
+      setWaitlistError(errorMessage(e, t('reservations.waitlist.errors.removeFailed')));
     }
   };
 
@@ -223,7 +225,7 @@ function ReservationsScreen() {
 
   const submitHold = async () => {
     if (!venue?.id || !holdDate || !holdReason.trim()) {
-      setHoldError('Date and reason are required.');
+      setHoldError(t('reservations.holds.errors.required'));
       return;
     }
     try {
@@ -233,7 +235,7 @@ function ReservationsScreen() {
       setHoldReason('');
       setHoldError(null);
     } catch (err) {
-      setHoldError(errorMessage(err, 'Failed to create hold.'));
+      setHoldError(errorMessage(err, t('reservations.holds.errors.createFailed')));
     }
   };
 
@@ -253,7 +255,7 @@ function ReservationsScreen() {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
       const value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      const label = i === 0 ? `Today · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : i === 1 ? `Tomorrow · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const label = i === 0 ? t('reservations.form.dateToday', { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }) : i === 1 ? t('reservations.form.dateTomorrow', { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }) : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       return { value, label, dayOfWeek: d.getDay() };
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,12 +270,12 @@ function ReservationsScreen() {
     const lastName = guestLastName.trim();
     const fullName = [firstName, lastName].filter(Boolean).join(' ');
     if (!venue?.id || !firstName || !lastName) {
-      setError('Enter first and last name.');
+      setError(t('reservations.form.errors.nameRequired'));
       return;
     }
     const ts = new Date(`${date}T${time}:00`).getTime();
     if (Number.isNaN(ts)) {
-      setError('Enter a valid date (YYYY-MM-DD) and time (HH:MM).');
+      setError(t('reservations.form.errors.invalidDateTime'));
       return;
     }
     try {
@@ -328,7 +330,7 @@ function ReservationsScreen() {
       setShowForm(false);
       setShowPrivateEventForm(false);
     } catch (e) {
-      setError(errorMessage(e, 'Could not create reservation.'));
+      setError(errorMessage(e, t('reservations.form.errors.createFailed')));
     }
   };
 
@@ -353,18 +355,18 @@ function ReservationsScreen() {
     try {
       await removeReservation({ venueId: venue.id, reservationId: res.id as Id<'reservations'> });
     } catch (e) {
-      setDeleteError(errorMessage(e, 'Could not delete reservation.'));
+      setDeleteError(errorMessage(e, t('reservations.list.deleteFailed')));
     }
   };
 
   const statCards = useMemo(
     () => [
-      { label: 'Active', value: page?.activeCount ?? 0, a: accents[2] },
-      { label: 'Upcoming', value: page?.upcomingCount ?? 0, a: accents[0] },
-      { label: 'Private events', value: reservations.filter((item) => item.isPrivateEvent).length, a: accents[5] },
-      { label: 'Cancelled', value: page?.cancelledCount ?? 0, a: accents[1] },
+      { label: t('reservations.stats.active'), value: page?.activeCount ?? 0, a: accents[2] },
+      { label: t('reservations.stats.upcoming'), value: page?.upcomingCount ?? 0, a: accents[0] },
+      { label: t('reservations.stats.privateEvents'), value: reservations.filter((item) => item.isPrivateEvent).length, a: accents[5] },
+      { label: t('reservations.stats.cancelled'), value: page?.cancelledCount ?? 0, a: accents[1] },
     ],
-    [page, reservations],
+    [page, reservations, t],
   );
 
   return (
@@ -379,13 +381,13 @@ function ReservationsScreen() {
         <>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <View style={{ gap: 4, flex: 1 }}>
-          <Text style={{ ...type.title, color: colors.charcoal }}>Reservations</Text>
-          <Text style={{ color: colors.muted }}>Book guests and seat them on the floor at {venue?.name ?? 'your venue'}.</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>{t('reservations.header.title')}</Text>
+          <Text style={{ color: colors.muted }}>{t('reservations.header.subtitle', { venue: venue?.name ?? t('reservations.header.venueFallback') })}</Text>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }}>
-          <Button compact mode="text" textColor={colors.primary} icon="floor-plan" onPress={() => router.push('/floor')}>Floor</Button>
+          <Button compact mode="text" textColor={colors.primary} icon="floor-plan" onPress={() => router.push('/floor')}>{t('reservations.header.floorButton')}</Button>
           {canManage ? (
-            <Button compact mode="text" textColor={colors.primary} icon="account-heart-outline" onPress={() => router.push('/guests')}>Guests</Button>
+            <Button compact mode="text" textColor={colors.primary} icon="account-heart-outline" onPress={() => router.push('/guests')}>{t('reservations.header.guestsButton')}</Button>
           ) : null}
         </View>
       </View>
@@ -405,7 +407,7 @@ function ReservationsScreen() {
       {/* Cover pacing */}
       {pacing && pacing.buckets.length > 0 ? (
         <AppCard>
-            <SectionHeader title={`Cover pacing — ${pacing.date}`} subtitle={`Peak ${pacing.peakCovers} covers · ${pacing.totalReservations} bookings · seating capacity ${pacing.seatingCapacity || '—'}`} />
+            <SectionHeader title={t('reservations.pacing.title', { date: pacing.date })} subtitle={t('reservations.pacing.subtitle', { peak: pacing.peakCovers, total: pacing.totalReservations, capacity: pacing.seatingCapacity || '—' })} />
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 100 }}>
               {pacing.buckets.map((b, i) => {
                 const ratio = pacing.peakCovers > 0 ? b.covers / pacing.peakCovers : 0;
@@ -419,7 +421,7 @@ function ReservationsScreen() {
             </View>
             {pacing.seatingCapacity > 0 && pacing.peakCovers > pacing.seatingCapacity ? (
               <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '700', marginTop: spacing.sm }}>
-                Peak exceeds seating capacity — consider spreading bookings or pacing the kitchen.
+                {t('reservations.pacing.warning')}
               </Text>
             ) : null}
         </AppCard>
@@ -427,18 +429,18 @@ function ReservationsScreen() {
 
       {/* Reservation holds */}
       <AppCard>
-          <SectionHeader title="Holds & blocked time" subtitle="Block off windows (staff meeting, buyout, deep clean) so the booking form refuses overlapping reservations." />
+          <SectionHeader title={t('reservations.holds.title')} subtitle={t('reservations.holds.subtitle')} />
           <View style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-            <TextInput label="Date" value={holdDate} onChangeText={setHoldDate} mode="outlined" dense placeholder="YYYY-MM-DD" style={{ width: 150, backgroundColor: colors.surface }} />
-            <TextInput label="Start" value={holdStart} onChangeText={setHoldStart} mode="outlined" dense style={{ width: 90, backgroundColor: colors.surface }} />
-            <TextInput label="End" value={holdEnd} onChangeText={setHoldEnd} mode="outlined" dense style={{ width: 90, backgroundColor: colors.surface }} />
-            <TextInput label="Reason" value={holdReason} onChangeText={setHoldReason} mode="outlined" dense style={{ flex: 1, minWidth: 160, backgroundColor: colors.surface }} />
-            <Button mode="contained" buttonColor={colors.primary} onPress={() => void submitHold()} accessibilityLabel="Add reservation hold">Hold</Button>
+            <TextInput label={t('reservations.holds.dateLabel')} value={holdDate} onChangeText={setHoldDate} mode="outlined" dense placeholder="YYYY-MM-DD" style={{ width: 150, backgroundColor: colors.surface }} />
+            <TextInput label={t('reservations.holds.startLabel')} value={holdStart} onChangeText={setHoldStart} mode="outlined" dense style={{ width: 90, backgroundColor: colors.surface }} />
+            <TextInput label={t('reservations.holds.endLabel')} value={holdEnd} onChangeText={setHoldEnd} mode="outlined" dense style={{ width: 90, backgroundColor: colors.surface }} />
+            <TextInput label={t('reservations.holds.reasonLabel')} value={holdReason} onChangeText={setHoldReason} mode="outlined" dense style={{ flex: 1, minWidth: 160, backgroundColor: colors.surface }} />
+            <Button mode="contained" buttonColor={colors.primary} onPress={() => void submitHold()} accessibilityLabel={t('reservations.holds.addButton')}>{t('reservations.holds.addButton')}</Button>
           </View>
           {holdError ? <Text style={{ color: colors.danger, fontSize: 12 }}>{holdError}</Text> : null}
           {(holds ?? []).length === 0 ? (
-            <Text style={{ color: colors.muted }}>No upcoming holds.</Text>
+            <Text style={{ color: colors.muted }}>{t('reservations.holds.empty')}</Text>
           ) : (
             (holds ?? []).map((h) => (
               <View key={h.id} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -449,7 +451,7 @@ function ReservationsScreen() {
                   </Text>
                 </View>
                 <Button compact mode="text" textColor={colors.danger} onPress={() => void (venue?.id && deleteHold({ venueId: venue.id, holdId: h.id }))}>
-                  Remove
+                  {t('reservations.holds.remove')}
                 </Button>
               </View>
             ))
@@ -459,45 +461,45 @@ function ReservationsScreen() {
 
       {/* Waitlist */}
       <AppCard>
-          <SectionHeader title="Waitlist" />
+          <SectionHeader title={t('reservations.waitlist.title')} />
           <View style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-            <TextInput label="Walk-in name" value={wlName} onChangeText={setWlName} mode="outlined" dense style={{ flex: 1, backgroundColor: colors.surface }} />
+            <TextInput label={t('reservations.waitlist.nameLabel')} value={wlName} onChangeText={setWlName} mode="outlined" dense style={{ flex: 1, backgroundColor: colors.surface }} />
             <IconButton icon="minus" mode="outlined" size={16} onPress={() => setWlParty((p) => Math.max(1, p - 1))} />
             <Text style={{ minWidth: 20, textAlign: 'center' }}>{wlParty}</Text>
             <IconButton icon="plus" mode="outlined" size={16} onPress={() => setWlParty((p) => Math.min(30, p + 1))} />
           </View>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <TextInput label="Phone (optional)" value={wlPhone} onChangeText={setWlPhone} mode="outlined" dense keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <TextInput label="Email (auto-notify)" value={wlEmail} onChangeText={setWlEmail} mode="outlined" dense autoCapitalize="none" keyboardType="email-address" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <Button mode="contained" buttonColor={colors.primary} onPress={() => void addWalkIn()} accessibilityLabel="Add walk-in to waitlist">Add</Button>
+            <TextInput label={t('reservations.waitlist.phoneLabel')} value={wlPhone} onChangeText={setWlPhone} mode="outlined" dense keyboardType="phone-pad" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <TextInput label={t('reservations.waitlist.emailLabel')} value={wlEmail} onChangeText={setWlEmail} mode="outlined" dense autoCapitalize="none" keyboardType="email-address" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <Button mode="contained" buttonColor={colors.primary} onPress={() => void addWalkIn()} accessibilityLabel={t('reservations.waitlist.addButton')}>{t('reservations.waitlist.addButton')}</Button>
           </View>
           <Text style={{ color: colors.muted, fontSize: 11 }}>
-            Adding an email lets us auto-notify this guest when a fitting table opens up.
+            {t('reservations.waitlist.hint')}
           </Text>
           {waitlistError ? <Text style={{ color: colors.danger }}>{waitlistError}</Text> : null}
           {waitlist.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No one waiting.</Text>
+            <Text style={{ color: colors.muted }}>{t('reservations.waitlist.empty')}</Text>
           ) : (
             waitlist.map((w) => {
               const waitMins = Math.max(0, Math.round((Date.now() - w.requestedAt) / 60000));
               return (
                 <View key={w.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={{ fontWeight: '700' }}>{w.guestName} · party of {w.partySize}</Text>
-                    {w.readyAt ? <Chip compact style={{ backgroundColor: accents[2].bg }} textStyle={{ color: accents[2].fg }}>Ready</Chip> : <Text style={{ color: colors.muted }}>{waitMins}m waiting</Text>}
+                    <Text style={{ fontWeight: '700' }}>{t('reservations.waitlist.entryLine', { name: w.guestName, size: w.partySize })}</Text>
+                    {w.readyAt ? <Chip compact style={{ backgroundColor: accents[2].bg }} textStyle={{ color: accents[2].fg }}>{t('reservations.waitlist.ready')}</Chip> : <Text style={{ color: colors.muted }}>{t('reservations.waitlist.waitingMinutes', { minutes: waitMins })}</Text>}
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                    {!w.readyAt ? <Button compact mode="outlined" textColor={accents[2].fg} onPress={() => void handleMarkWaitlistReady(w.id)}>Mark ready</Button> : null}
+                    {!w.readyAt ? <Button compact mode="outlined" textColor={accents[2].fg} onPress={() => void handleMarkWaitlistReady(w.id)}>{t('reservations.waitlist.markReady')}</Button> : null}
                     <Button compact mode={seatingWaitlistId === w.id ? 'contained' : 'outlined'} buttonColor={seatingWaitlistId === w.id ? colors.primary : undefined} textColor={seatingWaitlistId === w.id ? '#fff' : colors.primary} onPress={() => setSeatingWaitlistId(seatingWaitlistId === w.id ? null : w.id)}>
-                      {seatingWaitlistId === w.id ? 'Pick a table…' : 'Seat'}
+                      {seatingWaitlistId === w.id ? t('reservations.waitlist.pickTable') : t('reservations.waitlist.seat')}
                     </Button>
-                    <Button compact mode="text" textColor={colors.danger} onPress={() => void handleRemoveFromWaitlist(w.id)}>Remove</Button>
+                    <Button compact mode="text" textColor={colors.danger} onPress={() => void handleRemoveFromWaitlist(w.id)}>{t('reservations.waitlist.remove')}</Button>
                   </View>
                   {seatingWaitlistId === w.id ? (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: colors.background, borderRadius: radius.sharp, padding: 10 }}>
                       {openTables.length === 0 ? (
-                        <Text style={{ color: colors.danger }}>No open tables.</Text>
+                        <Text style={{ color: colors.danger }}>{t('reservations.waitlist.noOpenTables')}</Text>
                       ) : (
                         openTables.map((t) => (
                           <Chip key={t.table._id} onPress={() => void seatWaitlist(w.id, t.table._id)}>{t.table.label} · {t.table.seats}</Chip>
@@ -516,7 +518,7 @@ function ReservationsScreen() {
       {canManage ? (
         <AppCard>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ ...type.heading, color: colors.charcoal }}>New reservation</Text>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>{t('reservations.form.title')}</Text>
               <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                 <Button compact mode={showPrivateEventForm ? 'contained' : 'outlined'} buttonColor={showPrivateEventForm ? colors.primary : undefined} textColor={showPrivateEventForm ? '#fff' : colors.primary} onPress={() => {
                   setShowForm(true);
@@ -524,50 +526,52 @@ function ReservationsScreen() {
                   setPartySize((value) => Math.max(value, 20));
                   setTags((value) => (value.includes('private_event') ? value : [value, 'private_event'].filter(Boolean).join(', ')));
                 }}>
-                  Private event
+                  {t('reservations.form.privateEventButton')}
                 </Button>
                 <Button compact mode={showForm ? 'text' : 'contained'} buttonColor={showForm ? undefined : colors.primary} onPress={() => setShowForm((v) => !v)}>
-                  {showForm ? 'Close' : 'Add'}
+                  {showForm ? t('reservations.form.closeButton') : t('reservations.form.addButton')}
                 </Button>
               </View>
             </View>
             {showForm ? (
               <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
                 <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                  <TextInput label="First name" value={guestFirstName} onChangeText={setGuestFirstName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
-                  <TextInput label="Last name" value={guestLastName} onChangeText={setGuestLastName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
+                  <TextInput label={t('reservations.form.firstName')} value={guestFirstName} onChangeText={setGuestFirstName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
+                  <TextInput label={t('reservations.form.lastName')} value={guestLastName} onChangeText={setGuestLastName} mode="outlined" style={{ flex: 1, minWidth: 140, backgroundColor: colors.surface }} />
                 </View>
                 <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                  <TextInput label="Phone number" value={guestPhone} onChangeText={setGuestPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
-                  <TextInput label="Email" value={guestEmail} onChangeText={setGuestEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                  <TextInput label={t('reservations.form.phone')} value={guestPhone} onChangeText={setGuestPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                  <TextInput label={t('reservations.form.email')} value={guestEmail} onChangeText={setGuestEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                 </View>
                 {autofill?.guest ? (
                   <Card style={{ backgroundColor: accents[2].bg, borderRadius: radius.sharp }}>
                     <Card.Content style={{ gap: 4, padding: spacing.sm }}>
-                      <Text style={{ color: accents[2].fg, fontWeight: '800' }}>Returning guest — {autofill.guest.fullName}</Text>
+                      <Text style={{ color: accents[2].fg, fontWeight: '800' }}>{t('reservations.form.returningGuest.title', { name: autofill.guest.fullName })}</Text>
                       <Text style={{ color: colors.muted, fontSize: 12 }}>
                         {autofill.guest.lastVisitAt
-                          ? `Last visit ${new Date(autofill.guest.lastVisitAt).toLocaleDateString()}${autofill.guest.lastPartySize ? ` · party of ${autofill.guest.lastPartySize}` : ''}`
-                          : 'No prior visits logged'}
+                          ? (autofill.guest.lastPartySize
+                              ? t('reservations.form.returningGuest.lastVisitWithParty', { date: new Date(autofill.guest.lastVisitAt).toLocaleDateString(), party: autofill.guest.lastPartySize })
+                              : t('reservations.form.returningGuest.lastVisit', { date: new Date(autofill.guest.lastVisitAt).toLocaleDateString() }))
+                          : t('reservations.form.returningGuest.noPriorVisits')}
                         {autofill.guest.lifecycleStage ? ` · ${autofill.guest.lifecycleStage}` : ''}
                       </Text>
-                      {autofill.guest.favoriteTable ? <Text style={{ color: colors.muted, fontSize: 12 }}>Favorite table: {autofill.guest.favoriteTable}</Text> : null}
-                      {autofill.guest.preferredServer ? <Text style={{ color: colors.muted, fontSize: 12 }}>Preferred server: {autofill.guest.preferredServer}</Text> : null}
-                      {autofill.guest.dietaryNotes ? <Text style={{ color: colors.danger, fontSize: 12 }}>Dietary: {autofill.guest.dietaryNotes}</Text> : null}
+                      {autofill.guest.favoriteTable ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('reservations.form.returningGuest.favoriteTable', { table: autofill.guest.favoriteTable })}</Text> : null}
+                      {autofill.guest.preferredServer ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('reservations.form.returningGuest.preferredServer', { server: autofill.guest.preferredServer })}</Text> : null}
+                      {autofill.guest.dietaryNotes ? <Text style={{ color: colors.danger, fontSize: 12 }}>{t('reservations.form.returningGuest.dietary', { notes: autofill.guest.dietaryNotes })}</Text> : null}
                       <Button compact mode="text" textColor={colors.primary} onPress={() => {
                         const [first, ...rest] = autofill.guest!.fullName.split(' ');
                         setGuestFirstName(first ?? '');
                         setGuestLastName(rest.join(' '));
-                      }}>Use this name</Button>
+                      }}>{t('reservations.form.returningGuest.useThisName')}</Button>
                     </Card.Content>
                   </Card>
                 ) : null}
                 <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                  <TextInput label="Company (optional)" value={guestCompany} onChangeText={setGuestCompany} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
-                  <TextInput label="Occasion" value={occasion} onChangeText={setOccasion} mode="outlined" placeholder="Birthday, anniversary, business dinner" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                  <TextInput label={t('reservations.form.companyLabel')} value={guestCompany} onChangeText={setGuestCompany} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                  <TextInput label={t('reservations.form.occasionLabel')} value={occasion} onChangeText={setOccasion} mode="outlined" placeholder={t('reservations.form.occasionPlaceholder')} style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ width: 64 }}>Party</Text>
+                  <Text style={{ width: 64 }}>{t('reservations.form.partyLabel')}</Text>
                   <IconButton icon="minus" mode="outlined" size={16} onPress={() => setPartySize((p) => Math.max(1, p - 1))} />
                   <Text style={{ minWidth: 28, textAlign: 'center' }}>{partySize}</Text>
                   <IconButton icon="plus" mode="outlined" size={16} onPress={() => setPartySize((p) => Math.min(30, p + 1))} />
@@ -644,26 +648,26 @@ function ReservationsScreen() {
                 {showPrivateEventForm ? (
                   <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                     <Card.Content style={{ gap: spacing.sm }}>
-                      <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>Private event booking</Text>
-                      <Text style={{ color: colors.muted }}>Capture event details needed to generate BEOs and contracts from CRM.</Text>
-                      <TextInput label="Event name" value={eventName} onChangeText={setEventName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                      <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>{t('reservations.privateEvent.title')}</Text>
+                      <Text style={{ color: colors.muted }}>{t('reservations.privateEvent.subtitle')}</Text>
+                      <TextInput label={t('reservations.privateEvent.eventNameLabel')} value={eventName} onChangeText={setEventName} mode="outlined" style={{ backgroundColor: colors.surface }} />
                       <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                        <TextInput label="Event space / room" value={eventSpace} onChangeText={setEventSpace} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
-                        <TextInput label="Setup style" value={setupStyle} onChangeText={setSetupStyle} mode="outlined" placeholder="Cocktail, seated dinner, classroom" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                        <TextInput label={t('reservations.privateEvent.eventSpaceLabel')} value={eventSpace} onChangeText={setEventSpace} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                        <TextInput label={t('reservations.privateEvent.setupStyleLabel')} value={setupStyle} onChangeText={setSetupStyle} mode="outlined" placeholder={t('reservations.privateEvent.setupStylePlaceholder')} style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                       </View>
                       <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                        <TextInput label="Estimated value" value={estimatedValue} onChangeText={setEstimatedValue} mode="outlined" keyboardType="decimal-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
-                        <TextInput label="Deposit due" value={depositDue} onChangeText={setDepositDue} mode="outlined" keyboardType="decimal-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                        <TextInput label={t('reservations.privateEvent.estimatedValueLabel')} value={estimatedValue} onChangeText={setEstimatedValue} mode="outlined" keyboardType="decimal-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
+                        <TextInput label={t('reservations.privateEvent.depositDueLabel')} value={depositDue} onChangeText={setDepositDue} mode="outlined" keyboardType="decimal-pad" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
                       </View>
-                      <TextInput label="Menu notes" value={menuNotes} onChangeText={setMenuNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
-                      <TextInput label="Beverage notes" value={beverageNotes} onChangeText={setBeverageNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
-                      <TextInput label="Billing / contract notes" value={billingNotes} onChangeText={setBillingNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                      <TextInput label={t('reservations.privateEvent.menuNotesLabel')} value={menuNotes} onChangeText={setMenuNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                      <TextInput label={t('reservations.privateEvent.beverageNotesLabel')} value={beverageNotes} onChangeText={setBeverageNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                      <TextInput label={t('reservations.privateEvent.billingNotesLabel')} value={billingNotes} onChangeText={setBillingNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                     </Card.Content>
                   </Card>
                 ) : null}
-                <TextInput label="Guest notes / requests" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                <TextInput label={t('reservations.form.notesLabel')} value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()} accessibilityLabel="Create reservation">Create reservation</Button>
+                <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()} accessibilityLabel={t('reservations.form.createButton')}>{t('reservations.form.createButton')}</Button>
               </View>
             ) : null}
         </AppCard>
@@ -672,14 +676,14 @@ function ReservationsScreen() {
       {/* Reservation list */}
       <AppCard>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Text style={{ ...type.heading, color: colors.charcoal }}>Bookings</Text>
+            <Text style={{ ...type.heading, color: colors.charcoal }}>{t('reservations.list.title')}</Text>
             <DateRangeBar selected={listDateRange} presets={listPresets} onSelect={setListDateRange} />
           </View>
           {deleteError ? <Text style={{ color: colors.danger, marginTop: spacing.sm }}>{deleteError}</Text> : null}
           {page === undefined ? (
-            <Text style={{ color: colors.muted, marginTop: spacing.sm }}>Loading…</Text>
+            <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.loading')}</Text>
           ) : sorted.length === 0 ? (
-            <Text style={{ color: colors.muted, marginTop: spacing.sm }}>No reservations for {listDateRange.shortLabel.toLowerCase()}.</Text>
+            <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.empty', { range: listDateRange.shortLabel.toLowerCase() })}</Text>
           ) : null}
       </AppCard>
         </>
@@ -697,16 +701,16 @@ function ReservationsScreen() {
                 </View>
                 <Chip compact style={{ backgroundColor: sc.bg }} textStyle={{ color: sc.fg }}>{res.status.replace('_', ' ')}</Chip>
               </View>
-              <Text>{res.guestName} · party of {res.partySize}</Text>
+              <Text>{t('reservations.item.partyOf', { name: res.guestName, size: res.partySize })}</Text>
               <Text style={{ color: colors.muted }}>{res.source.replace('_', ' ')}</Text>
               {res.guestCompany ? <Text style={{ color: colors.muted }}>{res.guestCompany}</Text> : null}
               {res.occasion ? <Chip compact style={{ alignSelf: 'flex-start' }}>{res.occasion}</Chip> : null}
               {res.isPrivateEvent ? (
                 <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                   <Card.Content style={{ gap: 4 }}>
-                    <Text style={{ color: accents[5].fg, fontWeight: '800' }}>{res.eventName || 'Private event'}</Text>
-                    <Text style={{ color: colors.muted }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || 'Event details pending'}</Text>
-                    {res.estimatedValueCents ? <Text style={{ color: colors.muted }}>Estimated value ${(res.estimatedValueCents / 100).toLocaleString()}</Text> : null}
+                    <Text style={{ color: accents[5].fg, fontWeight: '800' }}>{res.eventName || t('reservations.item.privateEventFallback')}</Text>
+                    <Text style={{ color: colors.muted }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || t('reservations.item.eventDetailsPending')}</Text>
+                    {res.estimatedValueCents ? <Text style={{ color: colors.muted }}>{t('reservations.item.estimatedValue', { amount: `$${(res.estimatedValueCents / 100).toLocaleString()}` })}</Text> : null}
                   </Card.Content>
                 </Card>
               ) : null}
@@ -724,26 +728,26 @@ function ReservationsScreen() {
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                   {!seated && !cancelled ? (
                     <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => setAssigningId(assigningId === res.id ? null : res.id)}>
-                      {assigningId === res.id ? 'Pick a table…' : 'Assign table'}
+                      {assigningId === res.id ? t('reservations.item.pickTable') : t('reservations.item.assignTable')}
                     </Button>
                   ) : null}
-                  <Button compact mode="text" textColor={colors.danger} icon="delete-outline" onPress={() => void deleteReservation(res)}>Delete</Button>
+                  <Button compact mode="text" textColor={colors.danger} icon="delete-outline" onPress={() => void deleteReservation(res)}>{t('reservations.item.deleteButton')}</Button>
                 </View>
               ) : null}
 
               {assigningId === res.id ? (
                 <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: radius.sharp, padding: 10 }}>
-                  <Text style={{ color: colors.muted }}>Tap an open table to reserve, or long-actions to seat now:</Text>
+                  <Text style={{ color: colors.muted }}>{t('reservations.item.tapInstructions')}</Text>
                   {openTables.length === 0 ? (
-                    <Text style={{ color: colors.danger }}>No open tables. Build a floor plan first.</Text>
+                    <Text style={{ color: colors.danger }}>{t('reservations.item.noOpenTablesBuild')}</Text>
                   ) : (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {openTables.map((t) => (
-                        <View key={t.table._id} style={{ gap: 4, alignItems: 'center' }}>
-                          <Chip onPress={() => void assignToTable(res, t.table._id, false)}>
-                            {t.table.label} · {t.table.seats}
+                      {openTables.map((tbl) => (
+                        <View key={tbl.table._id} style={{ gap: 4, alignItems: 'center' }}>
+                          <Chip onPress={() => void assignToTable(res, tbl.table._id, false)}>
+                            {tbl.table.label} · {tbl.table.seats}
                           </Chip>
-                          <Button compact mode="text" textColor={accents[2].fg} onPress={() => void assignToTable(res, t.table._id, true)}>Seat</Button>
+                          <Button compact mode="text" textColor={accents[2].fg} onPress={() => void assignToTable(res, tbl.table._id, true)}>{t('reservations.item.seat')}</Button>
                         </View>
                       ))}
                     </View>

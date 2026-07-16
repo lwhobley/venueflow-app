@@ -13,22 +13,13 @@ import { useVenueAuth } from '../../lib/useVenueAuth';
 import { errorMessage } from '../../lib/format';
 import type { Role } from '../../lib/types';
 import { SectionHeader } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
 type VenueRole = { _id: string; name: string };
 type ParsedStaffImportRow = { fullName: string; email: string; phone?: string; jobTitle: string; role: 'manager' | 'staff' };
 // Access level = the permission tier an admin/manager assigns when adding a
 // teammate. Roles are never self-selected — they are set here on the roster.
 type AccessRole = 'manager' | 'staff';
-
-const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'manager', label: 'Manager' },
-  { value: 'staff', label: 'Staff' },
-];
-const LINK_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
-  { value: 'manager', label: 'Manager' },
-  { value: 'staff', label: 'Staff' },
-];
 
 // Job titles / positions, selectable from a dropdown.
 const JOB_ROLES = [
@@ -145,6 +136,16 @@ export default function StaffScreenWrapper() {
 
 function StaffScreen() {
   const { venue, isReady, profileLoading, canManage } = useVenueAuth();
+  const { t } = useI18n();
+  const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
+    { value: 'admin', label: t('staff.roleAdmin') },
+    { value: 'manager', label: t('staff.roleManager') },
+    { value: 'staff', label: t('staff.roleStaff') },
+  ];
+  const LINK_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
+    { value: 'manager', label: t('staff.roleManager') },
+    { value: 'staff', label: t('staff.roleStaff') },
+  ];
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -200,10 +201,10 @@ function StaffScreen() {
         role: inviteLinkRole,
         jobTitle: inviteLinkPosition.trim() || 'Team Member',
       });
-      await Share.share({ message: `Join ${venue.name} on Venue Wrangler: ${inviteUrl}` });
-      setInviteLinkMsg('Invite link generated and ready to share. It expires in 7 days.');
+      await Share.share({ message: t('staff.shareMessage', { venue: venue.name, url: inviteUrl }) });
+      setInviteLinkMsg(t('staff.inviteLinkGenerated'));
     } catch (e) {
-      setInviteLinkErr(errorMessage(e, 'Could not generate link.'));
+      setInviteLinkErr(errorMessage(e, t('staff.inviteLinkError')));
     } finally {
       setGeneratingLink(false);
     }
@@ -229,10 +230,10 @@ function StaffScreen() {
       const items = (result.items ?? []) as ParsedStaffImportRow[];
       setImportRows(items);
       setImportMsg(items.length > 0
-        ? `Parsed ${items.length} ${items.length === 1 ? 'person' : 'people'}. Review below, then import.`
-        : 'No staff rows found in that text. Try pasting the full export.');
+        ? t('staff.parsedPeople', { count: items.length, personLabel: items.length === 1 ? t('staff.person') : t('staff.people') })
+        : t('staff.noStaffRowsFound'));
     } catch (e) {
-      setImportErr(errorMessage(e, 'Could not parse the staff list.'));
+      setImportErr(errorMessage(e, t('staff.importParseFailed')));
     } finally {
       setImportBusy(false);
     }
@@ -247,13 +248,13 @@ function StaffScreen() {
       const result = await commitStaffImport({ venueId: venue.id, items: importRows });
       const total = result.created + result.updated;
       setImportMsg(
-        `Added ${result.created} and updated ${result.updated} staff member${total === 1 ? '' : 's'}.` +
-          (result.failed.length > 0 ? ` ${result.failed.length} row${result.failed.length === 1 ? '' : 's'} failed.` : ''),
+        t('staff.addedUpdated', { created: result.created, updated: result.updated, plural: total === 1 ? '' : 's' }) +
+          (result.failed.length > 0 ? t('staff.rowsFailed', { count: result.failed.length, plural: result.failed.length === 1 ? '' : 's' }) : ''),
       );
       setImportRows([]);
       setImportText('');
     } catch (e) {
-      setImportErr(errorMessage(e, 'Could not import staff.'));
+      setImportErr(errorMessage(e, t('staff.importCommitFailed')));
     } finally {
       setImportBusy(false);
     }
@@ -270,9 +271,9 @@ function StaffScreen() {
       if (doc.canceled || !doc.assets[0]?.uri) return;
       const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
       setImportText(text);
-      setImportMsg(`Loaded ${doc.assets[0].name ?? 'upload'}. Tap Parse roster to continue.`);
+      setImportMsg(t('staff.csvLoaded', { name: doc.assets[0].name ?? 'upload' }));
     } catch (e) {
-      setImportErr(errorMessage(e, 'Could not load that file.'));
+      setImportErr(errorMessage(e, t('staff.csvLoadFailed')));
     } finally {
       setImportBusy(false);
     }
@@ -344,20 +345,20 @@ function StaffScreen() {
       });
       clearForm();
     } catch (e) {
-      Alert.alert('Error', errorMessage(e, 'Failed to save staff'));
+      Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.saveFailed')));
     }
   };
 
   const onDeactivate = async (member: StaffMember) => {
     if (!canManage) return;
-    Alert.alert('Deactivate Staff', `Are you sure you want to remove ${member.fullName}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Deactivate', style: 'destructive', onPress: async () => {
+    Alert.alert(t('staff.deactivateConfirmTitle'), t('staff.deactivateConfirmMessage', { name: member.fullName }), [
+      { text: t('staff.cancel'), style: 'cancel' },
+      { text: t('staff.deactivate'), style: 'destructive', onPress: async () => {
         try {
           await deactivateStaff({ staffId: member._id as Id<'profiles'> });
           if (selectedStaffId === member._id) clearForm();
         } catch (e) {
-          Alert.alert('Error', errorMessage(e, 'Action failed'));
+          Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.actionFailed')));
         }
       }}
     ]);
@@ -367,14 +368,14 @@ function StaffScreen() {
     try {
       await updateOnboardingTask({ taskId: task._id, status });
     } catch (e) {
-      Alert.alert('Error', errorMessage(e, 'Could not update onboarding task'));
+      Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.onboardingUpdateFailed')));
     }
   };
 
   if (profileLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
-        <Text style={{ color: colors.muted }}>Loading…</Text>
+        <Text style={{ color: colors.muted }}>{t('staff.loading')}</Text>
       </View>
     );
   }
@@ -383,8 +384,8 @@ function StaffScreen() {
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: 8 }}>
-            <Text variant="headlineSmall">Staff Management</Text>
-            <Text style={{ color: colors.muted }}>Only admins and managers can manage staff roles and access.</Text>
+            <Text variant="headlineSmall">{t('staff.managementTitle')}</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.managementRestricted')}</Text>
           </Card.Content>
         </Card>
       </View>
@@ -401,9 +402,9 @@ function StaffScreen() {
       ListHeaderComponent={(
         <>
       <SectionHeader
-        kicker="Team"
-        title="Staff Management"
-        subtitle={`Add staff to ${venue?.name ?? 'your venue'} and assign roles. Staff are scoped to this venue and can be promoted or updated without leaving the workspace.`}
+        kicker={t('staff.kicker')}
+        title={t('staff.managementTitle')}
+        subtitle={t('staff.subtitle', { venue: venue?.name ?? t('common.yourVenue') })}
         trailing={
           <Button
             mode="outlined"
@@ -411,7 +412,7 @@ function StaffScreen() {
             textColor={colors.primary}
             onPress={() => router.push('/join-requests')}
           >
-            Join requests
+            {t('staff.joinRequests')}
           </Button>
         }
       />
@@ -419,11 +420,11 @@ function StaffScreen() {
       {/* Roles / positions */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Roles & positions</Text>
-          <Text style={{ color: colors.muted }}>Add the positions used at your venue (e.g. Bartender, Sommelier, Line Cook).</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('staff.rolesTitle')}</Text>
+          <Text style={{ color: colors.muted }}>{t('staff.rolesSubtitle')}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {customRoles.length === 0 ? (
-              <Text style={{ color: colors.muted }}>No custom roles yet.</Text>
+              <Text style={{ color: colors.muted }}>{t('staff.noCustomRoles')}</Text>
             ) : (
               customRoles.map((r) => (
                 <Chip key={r._id} onClose={() => venue?.id && void removeVenueRole({ venueId: venue.id, roleId: r._id as Id<'venueRoles'> })}>
@@ -433,8 +434,8 @@ function StaffScreen() {
             )}
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <PaperTextInput placeholder="New role name" value={newRole} onChangeText={setNewRole} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <Button mode="contained" buttonColor={colors.primary} onPress={() => void onAddRole()}>Add role</Button>
+            <PaperTextInput placeholder={t('staff.newRolePlaceholder')} value={newRole} onChangeText={setNewRole} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <Button mode="contained" buttonColor={colors.primary} onPress={() => void onAddRole()}>{t('staff.addRole')}</Button>
           </View>
         </Card.Content>
       </Card>
@@ -442,56 +443,56 @@ function StaffScreen() {
       {/* Invite staff via link (primary) */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Invite staff via link</Text>
-          <Text style={{ color: colors.muted }}>Generate a 7-day invite link. Staff tap it, create an account or sign in, and are automatically added to {venue?.name ?? 'your venue'}.</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('staff.inviteLinkTitle')}</Text>
+          <Text style={{ color: colors.muted }}>{t('staff.inviteLinkSubtitle', { venue: venue?.name ?? t('common.yourVenue') })}</Text>
           <Dropdown
-            label="Access level"
+            label={t('staff.accessLevel')}
             value={inviteLinkRole}
             options={LINK_ACCESS_LEVELS}
             onSelect={(v) => setInviteLinkRole(v as 'manager' | 'staff')}
           />
           <Dropdown
-            label="Role / position"
+            label={t('staff.rolePosition')}
             value={inviteLinkPosition}
-            placeholder="Select a role"
+            placeholder={t('staff.selectRole')}
             options={jobRoleOptions}
             onSelect={setInviteLinkPosition}
           />
           {inviteLinkErr ? <Text style={{ color: colors.danger }}>{inviteLinkErr}</Text> : null}
           {inviteLinkMsg ? <Text style={{ color: accents[2].fg }}>{inviteLinkMsg}</Text> : null}
-          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel="Generate and share invite link">
-            Generate & share invite link
+          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel={t('staff.generateShareLink')}>
+            {t('staff.generateShareLink')}
           </Button>
         </Card.Content>
       </Card>
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Add staff by email</Text>
+          <Text variant="titleMedium">{t('staff.addByEmailTitle')}</Text>
           <Text style={{ color: colors.muted }}>
-            Add a teammate's email to your roster and assign their role. They sign in with their own email and password — once added, they gain access to {venue?.name ?? 'your venue'}.
+            {t('staff.addByEmailSubtitle', { venue: venue?.name ?? t('common.yourVenue') })}
           </Text>
-          <PaperTextInput placeholder="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.fullNamePlaceholder')} value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.emailPlaceholder')} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
           <Dropdown
-            label="Access level"
+            label={t('staff.accessLevel')}
             value={role}
             options={ACCESS_LEVELS}
             onSelect={(v) => setRole(v as Role)}
           />
           <Dropdown
-            label="Role"
+            label={t('staff.roleLabel')}
             value={jobTitle}
-            placeholder="Select a role"
+            placeholder={t('staff.selectRole')}
             options={jobRoleOptions}
             onSelect={setJobTitle}
           />
-          <PaperTextInput placeholder="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Alt phone" value={altPhone} onChangeText={setAltPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Address" value={address} onChangeText={setAddress} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Date of birth (YYYY-MM-DD)" value={dateOfBirth} onChangeText={setDateOfBirth} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.phonePlaceholder')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.altPhonePlaceholder')} value={altPhone} onChangeText={setAltPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.addressPlaceholder')} value={address} onChangeText={setAddress} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.dobPlaceholder')} value={dateOfBirth} onChangeText={setDateOfBirth} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <View style={{ gap: 4 }}>
-            <Text style={{ color: colors.muted }}>Certifications</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.certifications')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {CERTIFICATIONS.map((cert) => (
                 <Chip
@@ -508,12 +509,12 @@ function StaffScreen() {
               ))}
             </View>
           </View>
-          <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()} accessibilityLabel={selectedStaff ? 'Update staff member' : 'Add staff member'}>
-            {selectedStaff ? 'Update staff member' : 'Add staff member'}
+          <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()} accessibilityLabel={selectedStaff ? t('staff.updateStaffMember') : t('staff.addStaffMember')}>
+            {selectedStaff ? t('staff.updateStaffMember') : t('staff.addStaffMember')}
           </Button>
           {selectedStaff ? (
             <Button mode="text" textColor={colors.primary} onPress={clearForm}>
-              Clear selection
+              {t('staff.clearSelection')}
             </Button>
           ) : null}
         </Card.Content>
@@ -521,12 +522,12 @@ function StaffScreen() {
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Migrate staff from another platform</Text>
+          <Text variant="titleMedium">{t('staff.migrateTitle')}</Text>
           <Text style={{ color: colors.muted }}>
-            Paste your roster export from Homebase, When I Work, 7shifts, Deputy, Sling, or any spreadsheet — Venue Wrangler reads whatever format it's in.
+            {t('staff.migrateSubtitle')}
           </Text>
           <PaperTextInput
-            placeholder="Paste your staff list or CSV export here"
+            placeholder={t('staff.pasteRosterPlaceholder')}
             value={importText}
             onChangeText={setImportText}
             mode="outlined"
@@ -542,15 +543,15 @@ function StaffScreen() {
               disabled={importBusy || !importText.trim()}
               onPress={() => void onParseStaffImport()}
             >
-              Parse roster
+              {t('staff.parseRoster')}
             </Button>
             <Button mode="outlined" textColor={colors.primary} disabled={importBusy} onPress={() => void pickImportCsv()}>
-              Upload CSV
+              {t('staff.uploadCsv')}
             </Button>
           </View>
           {importRows.length > 0 ? (
             <View style={{ gap: spacing.sm }}>
-              <Text style={{ fontWeight: '700' }}>Review before importing ({importRows.length})</Text>
+              <Text style={{ fontWeight: '700' }}>{t('staff.reviewBeforeImport', { count: importRows.length })}</Text>
               {importRows.map((row, index) => (
                 <View
                   key={`${row.email}-${index}`}
@@ -561,12 +562,12 @@ function StaffScreen() {
                     <Text style={{ color: colors.muted }}>{row.email} · {row.jobTitle} · {row.role}</Text>
                   </View>
                   <Button mode="text" textColor={colors.muted} compact onPress={() => removeImportRow(index)}>
-                    Remove
+                    {t('staff.remove')}
                   </Button>
                 </View>
               ))}
               <Button mode="contained" buttonColor={colors.primary} loading={importBusy} onPress={() => void onCommitStaffImport()}>
-                Add {importRows.length} staff member{importRows.length === 1 ? '' : 's'}
+                {t('staff.addStaffCount', { count: importRows.length, plural: importRows.length === 1 ? '' : 's' })}
               </Button>
             </View>
           ) : null}
@@ -578,15 +579,15 @@ function StaffScreen() {
       {selectedStaff ? (
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium">Deactivate selected staff</Text>
+            <Text variant="titleMedium">{t('staff.deactivateTitle')}</Text>
             <Text style={{ color: colors.muted }}>
-              Deactivate removes this staff member's access to the venue.
+              {t('staff.deactivateDesc')}
             </Text>
             <Text style={{ fontWeight: '700' }}>{selectedStaff.fullName}</Text>
             <Text style={{ color: colors.muted }}>{selectedStaff.email}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Button mode="contained" buttonColor={colors.primary} onPress={() => void onDeactivate(selectedStaff)}>
-                Deactivate
+                {t('staff.deactivate')}
               </Button>
             </View>
           </Card.Content>
@@ -597,22 +598,22 @@ function StaffScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
             <View style={{ flex: 1, minWidth: 220 }}>
-              <Text variant="titleMedium">New staff onboarding</Text>
+              <Text variant="titleMedium">{t('staff.onboardingTitle')}</Text>
               <Text style={{ color: colors.muted }}>
-                Select a staff member to review required setup, training, and first-shift readiness tasks.
+                {t('staff.onboardingSubtitle')}
               </Text>
             </View>
             {selectedOnboarding ? (
               <Chip compact style={{ backgroundColor: onboardingProgress === 100 ? accents[2].bg : accents[1].bg }}>
-                {selectedOnboarding.completedCount}/{selectedOnboarding.totalCount} complete
+                {t('staff.onboardingProgress', { completed: selectedOnboarding.completedCount, total: selectedOnboarding.totalCount })}
               </Chip>
             ) : null}
           </View>
 
           {!selectedStaff ? (
-            <Text style={{ color: colors.muted }}>Choose Edit on a staff member below to open their onboarding checklist.</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.onboardingChooseStaff')}</Text>
           ) : !selectedOnboarding ? (
-            <Text style={{ color: colors.muted }}>Loading onboarding checklist...</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.onboardingLoading')}</Text>
           ) : (
             <View style={{ gap: spacing.sm }}>
               <Text style={{ fontWeight: '700' }}>{selectedOnboarding.fullName}</Text>
@@ -625,7 +626,11 @@ function StaffScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontWeight: '700', textDecorationLine: task.status === 'done' ? 'line-through' : 'none' }}>{task.title}</Text>
                       {task.details ? <Text style={{ color: colors.muted, fontSize: 12 }}>{task.details}</Text> : null}
-                      <Text style={{ color: colors.muted, fontSize: 12 }}>{task.category}{task.completedAt ? ` - completed ${new Date(task.completedAt).toLocaleDateString()}` : ''}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>
+                        {task.completedAt
+                          ? t('staff.taskCompleted', { category: task.category, date: new Date(task.completedAt).toLocaleDateString() })
+                          : task.category}
+                      </Text>
                     </View>
                     <Button
                       compact
@@ -634,7 +639,7 @@ function StaffScreen() {
                       textColor={task.status === 'done' ? colors.primary : undefined}
                       onPress={() => void setOnboardingStatus(task, task.status === 'done' ? 'open' : 'done')}
                     >
-                      {task.status === 'done' ? 'Reopen' : 'Done'}
+                      {task.status === 'done' ? t('staff.reopen') : t('staff.done')}
                     </Button>
                   </View>
                 </View>
@@ -646,12 +651,12 @@ function StaffScreen() {
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Role-based audit log</Text>
+          <Text variant="titleMedium">{t('staff.auditLogTitle')}</Text>
           <Text style={{ color: colors.muted }}>
-            Recent roster, role, deactivation, and onboarding changes with actor and target roles.
+            {t('staff.auditLogSubtitle')}
           </Text>
           {auditEntries.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No staff audit entries yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.noAuditEntries')}</Text>
           ) : (
             auditEntries.slice(0, 8).map((entry) => (
               <View key={entry._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
@@ -669,9 +674,9 @@ function StaffScreen() {
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Venue staff</Text>
+          <Text variant="titleMedium">{t('staff.venueStaffTitle')}</Text>
           {staff.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No staff added yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.noStaffYet')}</Text>
           ) : null}
         </Card.Content>
       </Card>
@@ -697,8 +702,8 @@ function StaffScreen() {
               <Chip compact>{member.role}</Chip>
             </View>
             <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
-            {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>Phone: {member.phone}</Text> : null}
-            {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>DOB: {member.dateOfBirth}</Text> : null}
+            {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('staff.phoneLabelValue', { phone: member.phone })}</Text> : null}
+            {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('staff.dobLabelValue', { dob: member.dateOfBirth })}</Text> : null}
             {member.certifications?.length > 0 ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
                 {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
@@ -706,14 +711,14 @@ function StaffScreen() {
             ) : null}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Button mode="outlined" onPress={() => fillFromStaff(member)}>
-                Edit
+                {t('staff.edit')}
               </Button>
               <Button mode="outlined" onPress={() => void onDeactivate(member)}>
-                Deactivate
+                {t('staff.deactivate')}
               </Button>
               {selectedStaffId === member._id ? (
                 <Button mode="text" textColor={colors.primary} onPress={clearForm}>
-                  Deselect
+                  {t('staff.deselect')}
                 </Button>
               ) : null}
             </View>

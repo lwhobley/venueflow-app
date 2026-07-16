@@ -5,8 +5,10 @@ import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
 export default function ResetPasswordScreen() {
+  const { t } = useI18n();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -15,15 +17,15 @@ export default function ResetPasswordScreen() {
 
   const requestCode = async () => {
     if (!email.trim().includes('@')) {
-      Alert.alert('Email', 'Enter the email address for your account.');
+      Alert.alert(t('resetPassword.emailRequiredTitle'), t('resetPassword.emailRequiredMessage'));
       return;
     }
     setRequesting(true);
     try {
       await appApi.forgotPassword({ email: email.trim() });
-      Alert.alert('Check your email', 'If that account exists, we sent a reset code.');
+      Alert.alert(t('resetPassword.codeSentTitle'), t('resetPassword.codeSentMessage'));
     } catch (error) {
-      Alert.alert('Could not send code', error instanceof Error ? error.message : 'Try again.');
+      Alert.alert(t('resetPassword.sendFailedTitle'), error instanceof Error ? error.message : t('resetPassword.tryAgain'));
     } finally {
       setRequesting(false);
     }
@@ -31,7 +33,7 @@ export default function ResetPasswordScreen() {
 
   const reset = async () => {
     if (!email.trim().includes('@') || !code.trim() || newPassword.length < 8) {
-      Alert.alert('Reset password', 'Enter your email, the reset code, and a new password of at least 8 characters.');
+      Alert.alert(t('resetPassword.resetRequiredTitle'), t('resetPassword.resetRequiredMessage'));
       return;
     }
     setResetting(true);
@@ -41,10 +43,10 @@ export default function ResetPasswordScreen() {
         code: code.trim(),
         newPassword,
       });
-      Alert.alert('Password updated', 'Your password has been reset. Sign in with the new password.');
+      Alert.alert(t('resetPassword.successTitle'), t('resetPassword.successMessage'));
       router.replace('/(auth)/welcome');
     } catch (error) {
-      Alert.alert('Could not reset password', error instanceof Error ? error.message : 'Try again.');
+      Alert.alert(t('resetPassword.resetFailedTitle'), error instanceof Error ? error.message : t('resetPassword.tryAgain'));
     } finally {
       setResetting(false);
     }
@@ -54,12 +56,12 @@ export default function ResetPasswordScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ gap: 6, alignItems: 'center' }}>
-          <Kicker>Account recovery</Kicker>
+          <Kicker>{t('resetPassword.kicker')}</Kicker>
           <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
-            Reset your password
+            {t('resetPassword.title')}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-            Request a code, then enter it here with your new password.
+            {t('resetPassword.subtitle')}
           </Text>
         </View>
 
@@ -67,7 +69,7 @@ export default function ResetPasswordScreen() {
           <Card.Content style={{ gap: spacing.md }}>
             <TextInput
               {...inputProps}
-              label="Email"
+              label={t('resetPassword.emailLabel')}
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
@@ -75,11 +77,11 @@ export default function ResetPasswordScreen() {
               mode="outlined"
             />
             <Button mode="outlined" textColor={colors.primary} loading={requesting} onPress={() => void requestCode()}>
-              Send reset code
+              {t('resetPassword.sendCodeButton')}
             </Button>
             <TextInput
               {...inputProps}
-              label="Reset code"
+              label={t('resetPassword.codeLabel')}
               value={code}
               onChangeText={setCode}
               keyboardType="number-pad"
@@ -88,7 +90,7 @@ export default function ResetPasswordScreen() {
             />
             <TextInput
               {...inputProps}
-              label="New password"
+              label={t('resetPassword.newPasswordLabel')}
               value={newPassword}
               onChangeText={setNewPassword}
               secureTextEntry
@@ -97,13 +99,13 @@ export default function ResetPasswordScreen() {
               onSubmitEditing={() => void reset()}
             />
             <Button mode="contained" buttonColor={colors.primary} textColor={colors.buttonText} loading={resetting} onPress={() => void reset()}>
-              Reset password
+              {t('resetPassword.resetButton')}
             </Button>
           </Card.Content>
         </Card>
 
         <Button mode="text" textColor={colors.muted} onPress={() => router.back()}>
-          Back
+          {t('resetPassword.back')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>

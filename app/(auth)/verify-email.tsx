@@ -6,8 +6,10 @@ import { appApi } from '../../lib/api-client';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
 export default function VerifyEmailScreen() {
+  const { t } = useI18n();
   const { invite } = useLocalSearchParams<{ invite?: string }>();
   const user = useAuthStore((state: AuthState) => state.user);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
@@ -20,7 +22,7 @@ export default function VerifyEmailScreen() {
 
   const verify = async () => {
     if (!code.trim()) {
-      Alert.alert('Verification code', 'Enter the code from your email.');
+      Alert.alert(t('verifyEmail.codeRequiredTitle'), t('verifyEmail.codeRequiredMessage'));
       return;
     }
     setSubmitting(true);
@@ -55,9 +57,9 @@ export default function VerifyEmailScreen() {
         const venueName = redemption.venue?.name;
         if (venueName) {
           Alert.alert(
-            'Welcome to the team! 🎉',
-            `You've successfully joined ${venueName} on Venue Wrangler. Your manager will be in touch with your schedule.`,
-            [{ text: 'Get Started', onPress: () => router.replace('/(tabs)/home') }],
+            t('verifyEmail.welcomeTitle'),
+            t('verifyEmail.welcomeMessage', { venueName }),
+            [{ text: t('verifyEmail.getStarted'), onPress: () => router.replace('/(tabs)/home') }],
           );
         } else {
           router.replace('/(tabs)/home');
@@ -73,7 +75,7 @@ export default function VerifyEmailScreen() {
       }
       router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
     } catch (error) {
-      Alert.alert('Could not verify email', error instanceof Error ? error.message : 'Try again.');
+      Alert.alert(t('verifyEmail.verifyFailedTitle'), error instanceof Error ? error.message : t('verifyEmail.tryAgain'));
     } finally {
       setSubmitting(false);
     }
@@ -83,9 +85,9 @@ export default function VerifyEmailScreen() {
     setResending(true);
     try {
       await appApi.resendVerification();
-      Alert.alert('Code sent', `We sent a new verification code to ${user?.email ?? 'your email'}.`);
+      Alert.alert(t('verifyEmail.resendSuccessTitle'), t('verifyEmail.resendSuccessMessage', { email: user?.email ?? t('verifyEmail.defaultEmail') }));
     } catch (error) {
-      Alert.alert('Could not resend code', error instanceof Error ? error.message : 'Try again.');
+      Alert.alert(t('verifyEmail.resendFailedTitle'), error instanceof Error ? error.message : t('verifyEmail.tryAgain'));
     } finally {
       setResending(false);
     }
@@ -95,12 +97,12 @@ export default function VerifyEmailScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ gap: 6, alignItems: 'center' }}>
-          <Kicker>One more step</Kicker>
+          <Kicker>{t('verifyEmail.kicker')}</Kicker>
           <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
-            Verify your email
+            {t('verifyEmail.title')}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-            Enter the 6-digit code we sent to {user?.email ?? 'your email'}.
+            {t('verifyEmail.subtitle', { email: user?.email ?? t('verifyEmail.defaultEmail') })}
           </Text>
         </View>
 
@@ -108,7 +110,7 @@ export default function VerifyEmailScreen() {
           <Card.Content style={{ gap: spacing.md }}>
             <TextInput
               {...inputProps}
-              label="Verification code"
+              label={t('verifyEmail.codeLabel')}
               value={code}
               onChangeText={setCode}
               keyboardType="number-pad"
@@ -120,10 +122,10 @@ export default function VerifyEmailScreen() {
             />
 
             <Button mode="contained" buttonColor={colors.primary} textColor={colors.buttonText} loading={submitting} onPress={() => void verify()}>
-              Verify email
+              {t('verifyEmail.verifyButton')}
             </Button>
             <Button mode="text" textColor={colors.primary} loading={resending} onPress={() => void resend()}>
-              Send a new code
+              {t('verifyEmail.resendButton')}
             </Button>
           </Card.Content>
         </Card>
@@ -136,7 +138,7 @@ export default function VerifyEmailScreen() {
             router.replace('/(auth)/welcome');
           }}
         >
-          Sign out
+          {t('verifyEmail.signOut')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>

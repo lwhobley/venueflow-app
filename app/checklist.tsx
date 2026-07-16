@@ -10,6 +10,7 @@ import { colors, spacing, radius, type } from '../lib/theme';
 import { AppCard, SectionHeader } from '../components/AppCard';
 import { errorMessage } from '../lib/format';
 import { useVenueAuth } from '../lib/useVenueAuth';
+import { useI18n } from '../lib/i18n';
 
 type ChecklistItem = {
   _id: string;
@@ -27,6 +28,7 @@ type ChecklistItem = {
 type ChecklistResponse = { date: string; kind: string; items: ChecklistItem[] };
 
 export default function ChecklistScreen() {
+  const { t } = useI18n();
   const { venue, isReady, canManage } = useVenueAuth();
   const [kind, setKind] = useState<'opening' | 'closing'>('opening');
   const [newTitle, setNewTitle] = useState('');
@@ -49,7 +51,7 @@ export default function ChecklistScreen() {
       setNewTitle('');
       setNewRequiresPhoto(false);
     } catch (e) {
-      setError(errorMessage(e, 'Could not add task.'));
+      setError(errorMessage(e, t('checklist.errorAdd')));
     }
   };
 
@@ -57,7 +59,7 @@ export default function ChecklistScreen() {
     try {
       await removeItem(id);
     } catch (e) {
-      setError(errorMessage(e, 'Could not remove task.'));
+      setError(errorMessage(e, t('checklist.errorRemove')));
     }
   };
 
@@ -68,7 +70,7 @@ export default function ChecklistScreen() {
     try {
       await completeItem({ completionId: item.completionId });
     } catch (e) {
-      setError(errorMessage(e, 'Could not complete task.'));
+      setError(errorMessage(e, t('checklist.errorComplete')));
     } finally {
       setBusyItemId(null);
     }
@@ -80,7 +82,7 @@ export default function ChecklistScreen() {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (permission.status !== 'granted') {
-        setError('Camera permission is required for photo proof.');
+        setError(t('checklist.cameraPermissionRequired'));
         return;
       }
       const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.6 });
@@ -92,7 +94,7 @@ export default function ChecklistScreen() {
         photoMimeType: result.assets[0].mimeType || 'image/jpeg',
       });
     } catch (e) {
-      setError(errorMessage(e, 'Could not upload photo.'));
+      setError(errorMessage(e, t('checklist.errorUpload')));
     } finally {
       setBusyItemId(null);
     }
@@ -109,35 +111,37 @@ export default function ChecklistScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
-          <Text style={{ ...type.title, color: colors.charcoal }}>Task checklist</Text>
-          <Text style={{ color: colors.muted }}>Opening and closing tasks, with photo proof where it matters.</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>{t('checklist.title')}</Text>
+          <Text style={{ color: colors.muted }}>{t('checklist.subtitle')}</Text>
         </View>
       </View>
 
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-        <Chip selected={kind === 'opening'} onPress={() => setKind('opening')}>Opening</Chip>
-        <Chip selected={kind === 'closing'} onPress={() => setKind('closing')}>Closing</Chip>
+        <Chip selected={kind === 'opening'} onPress={() => setKind('opening')}>{t('checklist.opening')}</Chip>
+        <Chip selected={kind === 'closing'} onPress={() => setKind('closing')}>{t('checklist.closing')}</Chip>
       </View>
 
-      <Text style={{ color: colors.muted }}>{doneCount}/{items.length} done today</Text>
+      <Text style={{ color: colors.muted }}>{t('checklist.progress', { done: doneCount, total: items.length })}</Text>
 
       {items.length === 0 ? (
-        <Text style={{ color: colors.muted }}>No {kind} tasks yet{canManage ? ' — add one below.' : '.'}</Text>
+        <Text style={{ color: colors.muted }}>
+          {t(canManage ? 'checklist.emptyWithManage' : 'checklist.emptyWithoutManage', { kind: kind === 'opening' ? t('checklist.opening').toLowerCase() : t('checklist.closing').toLowerCase() })}
+        </Text>
       ) : (
         items.map((item) => (
           <AppCard key={item._id}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: '700', textDecorationLine: item.status === 'done' ? 'line-through' : 'none' }}>{item.title}</Text>
-                  {item.requiresPhoto ? <Text style={{ color: colors.secondary, fontSize: 12 }}>📷 Photo required</Text> : null}
+                  {item.requiresPhoto ? <Text style={{ color: colors.secondary, fontSize: 12 }}>📷 {t('checklist.photoRequired')}</Text> : null}
                   {item.status === 'done' ? (
                     <Text style={{ color: colors.muted, fontSize: 12 }}>
-                      Done by {item.completedByName}{item.completedAt ? ` · ${new Date(item.completedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : ''}
+                      {t('checklist.doneBy', { name: item.completedByName ?? '' })}{item.completedAt ? ` · ${new Date(item.completedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : ''}
                     </Text>
                   ) : null}
                 </View>
                 {canManage ? (
-                  <IconButton icon="delete-outline" size={18} onPress={() => void onRemoveItem(item._id)} accessibilityLabel="Remove task" />
+                  <IconButton icon="delete-outline" size={18} onPress={() => void onRemoveItem(item._id)} accessibilityLabel={t('checklist.removeTaskLabel')} />
                 ) : null}
               </View>
 
@@ -152,11 +156,11 @@ export default function ChecklistScreen() {
               {item.status !== 'done' ? (
                 item.requiresPhoto ? (
                   <Button mode="contained" buttonColor={colors.primary} icon="camera" loading={busyItemId === item._id} onPress={() => void onCompleteWithPhoto(item)} style={{ marginTop: spacing.sm }}>
-                    Take photo & complete
+                    {t('checklist.takePhotoAndComplete')}
                   </Button>
                 ) : (
                   <Button mode="contained" buttonColor={colors.primary} loading={busyItemId === item._id} onPress={() => void onCompletePlain(item)} style={{ marginTop: spacing.sm }}>
-                    Mark done
+                    {t('checklist.markDone')}
                   </Button>
                 )
               ) : null}
@@ -166,14 +170,14 @@ export default function ChecklistScreen() {
 
       {canManage ? (
         <AppCard>
-            <SectionHeader title={`Add a ${kind} task`} />
+            <SectionHeader title={t('checklist.addTaskTitle', { kind: kind === 'opening' ? t('checklist.opening').toLowerCase() : t('checklist.closing').toLowerCase() })} />
             <View style={{ gap: spacing.sm }}>
-            <PaperTextInput placeholder="Task title" value={newTitle} onChangeText={setNewTitle} mode="outlined" style={{ backgroundColor: colors.surface }} />
+            <PaperTextInput placeholder={t('checklist.taskTitlePlaceholder')} value={newTitle} onChangeText={setNewTitle} mode="outlined" style={{ backgroundColor: colors.surface }} />
             <Chip selected={newRequiresPhoto} onPress={() => setNewRequiresPhoto((v) => !v)} icon="camera">
-              Require photo proof
+              {t('checklist.requirePhotoProof')}
             </Chip>
             <Button mode="outlined" textColor={colors.primary} disabled={!newTitle.trim()} onPress={() => void onAddItem()}>
-              Add task
+              {t('checklist.addTask')}
             </Button>
             </View>
         </AppCard>

@@ -10,6 +10,7 @@ import { canManageVenue } from '../../lib/permissions';
 import { formatTime, errorMessage } from '../../lib/format';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 import { appApi, useApiMutation, useApiQuery } from '../../lib/api-client';
+import { useI18n } from '../../lib/i18n';
 
 type ActiveClockEntry = {
   _id: string;
@@ -48,6 +49,7 @@ function fmtDate(d: Date) {
 }
 
 export default function ClockScreen() {
+  const { t } = useI18n();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady } = useAuthenticatedSession();
@@ -105,7 +107,7 @@ export default function ClockScreen() {
     getPreciseLocation()
       .then((next) => !cancelled && setLocation(next))
       .catch((error) => {
-        if (!cancelled) Alert.alert('Location needed', errorMessage(error, 'Unable to get your location.'));
+        if (!cancelled) Alert.alert(t('clock.locationNeededTitle'), errorMessage(error, t('clock.locationUnavailable')));
       })
       .finally(() => !cancelled && setLoadingLocation(false));
     return () => {
@@ -124,7 +126,7 @@ export default function ClockScreen() {
       else await clockIn.mutateAsync(args);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('Punch failed', errorMessage(error, 'Unable to record punch.'));
+      Alert.alert(t('clock.punchFailedTitle'), errorMessage(error, t('clock.punchFailedDefault')));
     } finally {
       setBusy(false);
     }
@@ -137,7 +139,7 @@ export default function ClockScreen() {
       await breakStart.mutateAsync({ type });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('Break failed', errorMessage(error, 'Unable to start break.'));
+      Alert.alert(t('clock.breakFailedTitle'), errorMessage(error, t('clock.breakFailedDefault')));
     } finally {
       setBusy(false);
     }
@@ -150,7 +152,7 @@ export default function ClockScreen() {
       await breakEnd.mutateAsync({});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert('End break failed', errorMessage(error, 'Unable to end break.'));
+      Alert.alert(t('clock.endBreakFailedTitle'), errorMessage(error, t('clock.endBreakFailedDefault')));
     } finally {
       setBusy(false);
     }
@@ -158,15 +160,15 @@ export default function ClockScreen() {
 
   const onSubmitCorrection = async () => {
     if (!correctionDate || !correctionInTime || !correctionOutTime || !correctionReason) {
-      Alert.alert('Error', 'Please fill in all fields.');
+      Alert.alert(t('clock.errorTitle'), t('clock.fillAllFields'));
       return;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(correctionDate)) {
-      Alert.alert('Error', 'Date must be in YYYY-MM-DD format.');
+      Alert.alert(t('clock.errorTitle'), t('clock.dateFormatError'));
       return;
     }
     if (!/^\d{2}:\d{2}$/.test(correctionInTime) || !/^\d{2}:\d{2}$/.test(correctionOutTime)) {
-      Alert.alert('Error', 'Times must be in 24-hour HH:MM format (e.g. 09:00, 17:30).');
+      Alert.alert(t('clock.errorTitle'), t('clock.timeFormatError'));
       return;
     }
     setBusy(true);
@@ -174,17 +176,17 @@ export default function ClockScreen() {
       const clockInAt = new Date(`${correctionDate}T${correctionInTime}:00`).getTime();
       const clockOutAt = new Date(`${correctionDate}T${correctionOutTime}:00`).getTime();
       if (isNaN(clockInAt) || isNaN(clockOutAt)) {
-        Alert.alert('Error', 'Invalid date or time values.');
+        Alert.alert(t('clock.errorTitle'), t('clock.invalidDateTime'));
         return;
       }
       if (clockOutAt <= clockInAt) {
-        Alert.alert('Error', 'Clock-out time must be after clock-in time.');
+        Alert.alert(t('clock.errorTitle'), t('clock.clockOutAfterClockIn'));
         return;
       }
       await createCorrectionRequest.mutateAsync({
         kind: 'time_correction',
-        title: `Timesheet correction request for ${correctionDate}`,
-        details: `Correct shift on ${correctionDate}: clock-in at ${correctionInTime}, clock-out at ${correctionOutTime}. Reason: ${correctionReason}`,
+        title: t('clock.correctionTitle', { date: correctionDate }),
+        details: t('clock.correctionDetails', { date: correctionDate, inTime: correctionInTime, outTime: correctionOutTime, reason: correctionReason }),
         timeCorrection: {
           timeEntryId: null,
           clockInAt,
@@ -192,14 +194,14 @@ export default function ClockScreen() {
           reason: correctionReason,
         },
       });
-      Alert.alert('Success', 'Correction request submitted to managers.');
+      Alert.alert(t('clock.successTitle'), t('clock.correctionSubmitted'));
       setShowCorrection(false);
       setCorrectionDate('');
       setCorrectionInTime('');
       setCorrectionOutTime('');
       setCorrectionReason('');
     } catch (error) {
-      Alert.alert('Submission failed', errorMessage(error, 'Unable to submit request.'));
+      Alert.alert(t('clock.submissionFailedTitle'), errorMessage(error, t('clock.submissionFailedDefault')));
     } finally {
       setBusy(false);
     }
@@ -216,23 +218,23 @@ export default function ClockScreen() {
     >
       {/* Header: live time + date + venue pill */}
       <View style={{ backgroundColor: colors.primary, borderRadius: radius.soft, padding: spacing.xl, alignItems: 'center', gap: 6 }}>
-        <Text style={{ color: 'rgba(255,255,255,0.85)', fontWeight: '700' }}>{user?.full_name ?? 'Time clock'}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.85)', fontWeight: '700' }}>{user?.full_name ?? t('clock.defaultUserName')}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
           <Text style={{ color: '#fff', fontSize: 56, fontWeight: '800', lineHeight: 60 }}>{time}</Text>
           <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 8, marginLeft: 4 }}>{ampm}</Text>
         </View>
         <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: '600' }}>{fmtDate(now)}</Text>
         <View style={{ marginTop: 8, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 999, paddingVertical: 8, paddingHorizontal: 18 }}>
-          <Text style={{ color: '#fff', fontWeight: '600' }}>{activeVenue?.name ?? 'No venue'}</Text>
+          <Text style={{ color: '#fff', fontWeight: '600' }}>{activeVenue?.name ?? t('clock.noVenue')}</Text>
         </View>
       </View>
 
       {salaried ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: 4 }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Salaried role</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('clock.salariedTitle')}</Text>
             <Text style={{ color: colors.muted }}>
-              {((r) => r.charAt(0).toUpperCase() + r.slice(1))(user?.role ?? 'manager')} positions are salaried — no clock-in required. Use the board below to see who's on the clock.
+              {t('clock.salariedDesc', { role: ((r: string) => r.charAt(0).toUpperCase() + r.slice(1))(user?.role ?? 'manager') })}
             </Text>
           </Card.Content>
         </Card>
@@ -254,7 +256,7 @@ export default function ClockScreen() {
               }}
             >
               <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800' }}>
-                {busy ? 'Working…' : `End ${breakType === 'paid' ? 'Paid' : 'Unpaid'} Break`}
+                {busy ? t('clock.working') : t('clock.endBreak', { type: breakType === 'paid' ? t('clock.paid') : t('clock.unpaid') })}
               </Text>
             </Pressable>
           ) : (
@@ -270,7 +272,7 @@ export default function ClockScreen() {
               }}
             >
               <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800' }}>
-                {busy ? 'Working…' : isClockedIn ? 'Punch Out' : 'Punch Now'}
+                {busy ? t('clock.working') : isClockedIn ? t('clock.punchOut') : t('clock.punchNow')}
               </Text>
             </Pressable>
           )}
@@ -279,12 +281,12 @@ export default function ClockScreen() {
             <Pressable
               onPress={() => {
                 Alert.alert(
-                  'Take a Break',
-                  'Select your break type:',
+                  t('clock.takeBreakTitle'),
+                  t('clock.takeBreakMessage'),
                   [
-                    { text: 'Paid Rest Break (15m)', onPress: () => void onStartBreak('paid') },
-                    { text: 'Unpaid Meal Break (30m)', onPress: () => void onStartBreak('unpaid') },
-                    { text: 'Cancel', style: 'cancel' }
+                    { text: t('clock.paidRestBreak'), onPress: () => void onStartBreak('paid') },
+                    { text: t('clock.unpaidMealBreak'), onPress: () => void onStartBreak('unpaid') },
+                    { text: t('clock.cancel'), style: 'cancel' }
                   ]
                 );
               }}
@@ -298,23 +300,23 @@ export default function ClockScreen() {
                 opacity: busy ? 0.7 : 1,
               }}
             >
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Take Break</Text>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{t('clock.takeBreak')}</Text>
             </Pressable>
           )}
 
           {!canClock ? (
             <Text style={{ color: colors.muted, textAlign: 'center', marginTop: -4 }}>
               {loadingLocation
-                ? 'Checking your location…'
+                ? t('clock.checkingLocation')
                 : !location
-                  ? 'Location unavailable — enable GPS to punch.'
+                  ? t('clock.locationUnavailableMsg')
                   : location.mocked
-                    ? 'Mocked location detected — punching is disabled.'
-                    : `You must be within ${activeVenue?.geofenceRadiusM ?? 120}m of ${activeVenue?.name ?? 'your venue'} to punch.`}
+                    ? t('clock.mockedLocation')
+                    : t('clock.mustBeWithin', { radius: activeVenue?.geofenceRadiusM ?? 120, venue: activeVenue?.name ?? t('common.yourVenue') })}
             </Text>
           ) : (
             <Text style={{ color: accents[2].fg, textAlign: 'center', marginTop: -4 }}>
-              ✓ You're inside the geofence{timeClock?.openSince ? ` · in since ${formatTime(timeClock.openSince)}` : ''}{isOnBreak ? ` · (On ${breakType === 'paid' ? 'Paid' : 'Unpaid'} Break)` : ''}
+              {t('clock.insideGeofence')}{timeClock?.openSince ? t('clock.inSince', { time: formatTime(timeClock.openSince) }) : ''}{isOnBreak ? t('clock.onBreakSuffix', { type: breakType === 'paid' ? t('clock.paid') : t('clock.unpaid') }) : ''}
             </Text>
           )}
 
@@ -322,22 +324,22 @@ export default function ClockScreen() {
           <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Period totals</Text>
-                <Text style={{ color: colors.primary, fontWeight: '800' }}>Total Worked: {timeClock?.totalHours ?? 0}h</Text>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('clock.periodTotals')}</Text>
+                <Text style={{ color: colors.primary, fontWeight: '800' }}>{t('clock.totalWorked', { hours: timeClock?.totalHours ?? 0 })}</Text>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 8 }}>
                 <View>
-                  <Text style={{ color: colors.muted }}>Regular Hours</Text>
+                  <Text style={{ color: colors.muted }}>{t('clock.regularHours')}</Text>
                   <Text style={{ fontWeight: '700' }}>{timeClock?.regularHours ?? 0}h</Text>
                 </View>
               </View>
               <View style={{ flexDirection: 'row', gap: spacing.lg, paddingTop: 4 }}>
                 <View>
-                  <Text style={{ color: colors.muted }}>Sick Balance</Text>
+                  <Text style={{ color: colors.muted }}>{t('clock.sickBalance')}</Text>
                   <Text style={{ fontWeight: '700', color: accents[1].fg }}>{timeClock?.sickHours ?? 0}h</Text>
                 </View>
                 <View>
-                  <Text style={{ color: colors.muted }}>PTO Accrued</Text>
+                  <Text style={{ color: colors.muted }}>{t('clock.ptoAccrued')}</Text>
                   <Text style={{ fontWeight: '700', color: accents[2].fg }}>{timeClock?.ptoHours ?? 0}h</Text>
                 </View>
               </View>
@@ -348,17 +350,17 @@ export default function ClockScreen() {
           <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Daily punches</Text>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('clock.dailyPunches')}</Text>
                 <Text style={{ color: colors.muted, fontSize: 12 }}>{fmtDate(now)}</Text>
               </View>
               {punches.length === 0 ? (
-                <Text style={{ color: colors.muted }}>No punches yet today.</Text>
+                <Text style={{ color: colors.muted }}>{t('clock.noPunchesYet')}</Text>
               ) : (
                 punches.map((p, i) => (
                   <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < punches.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <MaterialCommunityIcons name={p.type === 'in' ? 'login' : 'logout'} size={18} color={p.type === 'in' ? accents[2].fg : colors.danger} />
-                      <Text>{p.type === 'in' ? 'Clock In' : 'Clock Out'}</Text>
+                      <Text>{p.type === 'in' ? t('clock.clockIn') : t('clock.clockOut')}</Text>
                     </View>
                     <Text style={{ color: colors.primary, fontWeight: '700' }}>{formatTime(p.at)}</Text>
                   </View>
@@ -374,7 +376,7 @@ export default function ClockScreen() {
                 onPress={() => setShowCorrection(!showCorrection)}
                 style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
               >
-                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Request Time Correction</Text>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('clock.requestTimeCorrection')}</Text>
                 <MaterialCommunityIcons
                   name={showCorrection ? 'chevron-up' : 'chevron-down'}
                   size={20}
@@ -385,12 +387,12 @@ export default function ClockScreen() {
               {showCorrection && (
                 <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>
-                    Forgot to clock in or need to adjust clock times? Request a manual timesheet adjustment below.
+                    {t('clock.correctionHelp')}
                   </Text>
                   <View style={{ gap: spacing.xs }}>
-                    <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>Date (YYYY-MM-DD)</Text>
+                    <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>{t('clock.dateLabel')}</Text>
                     <TextInput
-                      placeholder="e.g. 2026-06-22"
+                      placeholder={t('clock.datePlaceholder')}
                       value={correctionDate}
                       onChangeText={setCorrectionDate}
                       placeholderTextColor={colors.muted}
@@ -406,9 +408,9 @@ export default function ClockScreen() {
                   </View>
                   <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                     <View style={{ flex: 1, gap: spacing.xs }}>
-                      <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>In Time (24h HH:MM)</Text>
+                      <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>{t('clock.inTimeLabel')}</Text>
                       <TextInput
-                        placeholder="e.g. 09:00"
+                        placeholder={t('clock.inTimePlaceholder')}
                         value={correctionInTime}
                         onChangeText={setCorrectionInTime}
                         placeholderTextColor={colors.muted}
@@ -423,9 +425,9 @@ export default function ClockScreen() {
                       />
                     </View>
                     <View style={{ flex: 1, gap: spacing.xs }}>
-                      <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>Out Time (24h HH:MM)</Text>
+                      <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>{t('clock.outTimeLabel')}</Text>
                       <TextInput
-                        placeholder="e.g. 17:00"
+                        placeholder={t('clock.outTimePlaceholder')}
                         value={correctionOutTime}
                         onChangeText={setCorrectionOutTime}
                         placeholderTextColor={colors.muted}
@@ -441,9 +443,9 @@ export default function ClockScreen() {
                     </View>
                   </View>
                   <View style={{ gap: spacing.xs }}>
-                    <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>Reason</Text>
+                    <Text style={{ fontWeight: '600', fontSize: 12, color: colors.charcoal }}>{t('clock.reasonLabel')}</Text>
                     <TextInput
-                      placeholder="e.g. Forgot to clock in"
+                      placeholder={t('clock.reasonPlaceholder')}
                       value={correctionReason}
                       onChangeText={setCorrectionReason}
                       placeholderTextColor={colors.muted}
@@ -469,7 +471,7 @@ export default function ClockScreen() {
                       opacity: busy ? 0.7 : 1,
                     }}
                   >
-                    <Text style={{ color: '#fff', fontWeight: '800' }}>Submit Correction Request</Text>
+                    <Text style={{ color: '#fff', fontWeight: '800' }}>{t('clock.submitCorrection')}</Text>
                   </Pressable>
                 </View>
               )}
@@ -483,9 +485,9 @@ export default function ClockScreen() {
         <>
           <Card style={{ backgroundColor: managerAlerts.length > 0 ? `${colors.danger}1A` : colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Manager alerts</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('clock.managerAlerts')}</Text>
               {managerAlerts.length === 0 ? (
-                <Text style={{ color: colors.muted }}>No late clock-ins or missed clock-outs right now.</Text>
+                <Text style={{ color: colors.muted }}>{t('clock.noAlerts')}</Text>
               ) : (
                 managerAlerts.map((alert) => (
                   <View key={`${alert.kind}-${alert.profileId}`} style={{ gap: 2, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -498,9 +500,9 @@ export default function ClockScreen() {
           </Card>
           <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Who's clocked in</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('clock.whosClockedIn')}</Text>
               {activeClockEntries.length === 0 ? (
-                <Text style={{ color: colors.muted }}>No one is clocked in right now.</Text>
+                <Text style={{ color: colors.muted }}>{t('clock.noOneClockedIn')}</Text>
               ) : (
                 activeClockEntries.map((e) => (
                   <View key={e._id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -509,19 +511,19 @@ export default function ClockScreen() {
                         <Text style={{ fontWeight: '600' }}>{e.memberName}</Text>
                         <Text style={{ color: colors.muted }}>{e.jobTitle}</Text>
                       </View>
-                      <Text style={{ color: colors.muted }}>in {formatTime(e.clockInAt)}</Text>
+                      <Text style={{ color: colors.muted }}>{t('clock.inTimeValue', { time: formatTime(e.clockInAt) })}</Text>
                     </View>
                     {e.clockInLat !== undefined && e.clockInLat !== 0 && (
                       <Pressable
                         onPress={() => {
                           const url = `https://www.google.com/maps/search/?api=1&query=${e.clockInLat},${e.clockInLng}`;
-                          Linking.openURL(url).catch(() => Alert.alert('Error', 'Unable to open maps.'));
+                          Linking.openURL(url).catch(() => Alert.alert(t('clock.errorTitle'), t('clock.mapError')));
                         }}
                         style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}
                       >
                         <MaterialCommunityIcons name="map-marker" size={14} color={colors.primary} />
                         <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '600' }}>
-                          Punch Location (Accuracy: ±{Math.round(e.clockInAccuracyM ?? 0)}m) · View Map
+                          {t('clock.punchLocation', { accuracy: Math.round(e.clockInAccuracyM ?? 0) })}
                         </Text>
                       </Pressable>
                     )}

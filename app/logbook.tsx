@@ -8,6 +8,7 @@ import { colors, spacing, type } from '../lib/theme';
 import { AppCard } from '../components/AppCard';
 import { errorMessage } from '../lib/format';
 import { useVenueAuth } from '../lib/useVenueAuth';
+import { useI18n } from '../lib/i18n';
 
 type LogbookEntry = {
   _id: string;
@@ -19,20 +20,20 @@ type LogbookEntry = {
   createdAt: number;
 };
 
-const CATEGORIES: Array<{ value: string; label: string }> = [
-  { value: 'handoff', label: 'Shift handoff' },
-  { value: 'incident', label: 'Incident' },
-  { value: 'maintenance', label: 'Maintenance' },
-  { value: 'general', label: 'General' },
-];
-
 function formatTimestamp(ms: number): string {
   const date = new Date(ms);
   return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 export default function LogbookScreen() {
+  const { t } = useI18n();
   const { venue, isReady, canManage, me } = useVenueAuth();
+  const CATEGORIES: Array<{ value: string; label: string }> = [
+    { value: 'handoff', label: t('logbook.categoryHandoff') },
+    { value: 'incident', label: t('logbook.categoryIncident') },
+    { value: 'maintenance', label: t('logbook.categoryMaintenance') },
+    { value: 'general', label: t('logbook.categoryGeneral') },
+  ];
   const myProfileId = me?.profile._id ?? null;
   const entriesQuery = useQuery(api.operations.listLogbook, isReady && venue?.id ? { limit: 100 } : 'skip') as { entries: LogbookEntry[] } | null | undefined;
   const entries = useMemo(() => entriesQuery?.entries ?? [], [entriesQuery]);
@@ -55,7 +56,7 @@ export default function LogbookScreen() {
       setBody('');
       setPinned(false);
     } catch (e) {
-      setError(errorMessage(e, 'Could not post entry.'));
+      setError(errorMessage(e, t('logbook.errorPost')));
     } finally {
       setBusy(false);
     }
@@ -65,7 +66,7 @@ export default function LogbookScreen() {
     try {
       await deleteEntry(id);
     } catch (e) {
-      setError(errorMessage(e, 'Could not remove entry.'));
+      setError(errorMessage(e, t('logbook.errorRemove')));
     }
   };
 
@@ -78,8 +79,8 @@ export default function LogbookScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
-          <Text style={{ ...type.title, color: colors.charcoal }}>Shift logbook</Text>
-          <Text style={{ color: colors.muted }}>What the next shift needs to know — visible to the whole team.</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>{t('logbook.title')}</Text>
+          <Text style={{ color: colors.muted }}>{t('logbook.subtitle')}</Text>
         </View>
       </View>
 
@@ -91,7 +92,7 @@ export default function LogbookScreen() {
             ))}
           </View>
           <PaperTextInput
-            placeholder="What should the next shift know?"
+            placeholder={t('logbook.bodyPlaceholder')}
             value={body}
             onChangeText={setBody}
             mode="outlined"
@@ -101,18 +102,18 @@ export default function LogbookScreen() {
           />
           {canManage ? (
             <Chip selected={pinned} onPress={() => setPinned((v) => !v)} icon="pin">
-              Pin to top
+              {t('logbook.pinToTop')}
             </Chip>
           ) : null}
           <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy || !body.trim()} onPress={() => void onPost()}>
-            Post entry
+            {t('logbook.postEntry')}
           </Button>
           {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
           </View>
       </AppCard>
 
       {entries.length === 0 ? (
-        <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.lg }}>No logbook entries yet.</Text>
+        <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.lg }}>{t('logbook.noEntries')}</Text>
       ) : (
         entries.map((entry) => {
           const categoryLabel = CATEGORIES.find((c) => c.value === entry.category)?.label ?? entry.category;
@@ -127,7 +128,7 @@ export default function LogbookScreen() {
                     <Chip compact>{categoryLabel}</Chip>
                   </View>
                   {canDelete ? (
-                    <IconButton icon="close" size={16} onPress={() => void onDelete(entry._id)} accessibilityLabel="Remove entry" />
+                    <IconButton icon="close" size={16} onPress={() => void onDelete(entry._id)} accessibilityLabel={t('logbook.removeEntryLabel')} />
                   ) : null}
                 </View>
                 <Text style={{ color: colors.charcoal, lineHeight: 20 }}>{entry.body}</Text>

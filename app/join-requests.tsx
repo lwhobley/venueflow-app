@@ -7,6 +7,7 @@ import { appApi } from '../lib/api-client';
 import { spacing, type, useDesignTheme } from '../lib/theme';
 import { AppCard } from '../components/AppCard';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
+import { useI18n } from '../lib/i18n';
 
 type JoinRequest = {
   id: string;
@@ -20,6 +21,7 @@ type JoinRequest = {
 };
 
 export default function JoinRequestsScreen() {
+  const { t } = useI18n();
   const token = useAuthStore((s: AuthState) => s.token);
   const queryClient = useQueryClient();
   const palette = useDesignTheme();
@@ -38,20 +40,20 @@ export default function JoinRequestsScreen() {
       await appApi.approveJoinRequest(req.id);
       await queryClient.invalidateQueries({ queryKey: ['manager-join-requests'] });
     } catch (e) {
-      Alert.alert('Could not approve', e instanceof Error ? e.message : 'Try again.');
+      Alert.alert(t('joinRequests.approveError'), e instanceof Error ? e.message : t('joinRequests.tryAgain'));
     } finally {
       setProcessingId(null);
     }
-  }, [queryClient]);
+  }, [queryClient, t]);
 
   const handleReject = useCallback((req: JoinRequest) => {
     Alert.alert(
-      'Decline request',
-      `Decline ${req.userName ?? req.userEmail ?? 'this person'}'s request to join ${req.venueName}?`,
+      t('joinRequests.declineTitle'),
+      t('joinRequests.declineMessage', { name: req.userName ?? req.userEmail ?? t('joinRequests.thisPerson'), venue: req.venueName }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('joinRequests.cancel'), style: 'cancel' },
         {
-          text: 'Decline',
+          text: t('joinRequests.decline'),
           style: 'destructive',
           onPress: async () => {
             setProcessingId(req.id);
@@ -59,7 +61,7 @@ export default function JoinRequestsScreen() {
               await appApi.rejectJoinRequest(req.id);
               await queryClient.invalidateQueries({ queryKey: ['manager-join-requests'] });
             } catch (e) {
-              Alert.alert('Could not decline', e instanceof Error ? e.message : 'Try again.');
+              Alert.alert(t('joinRequests.declineError'), e instanceof Error ? e.message : t('joinRequests.tryAgain'));
             } finally {
               setProcessingId(null);
             }
@@ -67,7 +69,7 @@ export default function JoinRequestsScreen() {
         },
       ],
     );
-  }, [queryClient]);
+  }, [queryClient, t]);
 
   const requests: JoinRequest[] = data?.requests ?? [];
 
@@ -80,10 +82,10 @@ export default function JoinRequestsScreen() {
           onPress={() => router.back()}
           compact
         >
-          Back
+          {t('joinRequests.back')}
         </Button>
         <Text style={{ ...type.heading, color: palette.charcoal, flex: 1 }}>
-          Join Requests
+          {t('joinRequests.title')}
         </Text>
         <Button icon="refresh" textColor={palette.muted} onPress={() => void refetch()} compact>
           {''}
@@ -98,9 +100,9 @@ export default function JoinRequestsScreen() {
 
       {!isLoading && error && (
         <View style={styles.center}>
-          <Text style={{ color: palette.danger }}>Failed to load requests.</Text>
+          <Text style={{ color: palette.danger }}>{t('joinRequests.failedToLoad')}</Text>
           <Button mode="text" textColor={palette.primary} onPress={() => void refetch()}>
-            Retry
+            {t('joinRequests.retry')}
           </Button>
         </View>
       )}
@@ -108,10 +110,10 @@ export default function JoinRequestsScreen() {
       {!isLoading && !error && requests.length === 0 && (
         <View style={styles.center}>
           <Text style={{ ...type.heading, color: palette.charcoal }}>
-            No pending requests
+            {t('joinRequests.noPendingTitle')}
           </Text>
           <Text style={{ color: palette.muted, marginTop: 4 }}>
-            Join requests from employees will appear here.
+            {t('joinRequests.noPendingSubtitle')}
           </Text>
         </View>
       )}
@@ -124,7 +126,7 @@ export default function JoinRequestsScreen() {
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
           renderItem={({ item }) => {
             const isProcessing = processingId === item.id;
-            const name = item.userName ?? item.userEmail ?? 'Unknown user';
+            const name = item.userName ?? item.userEmail ?? t('joinRequests.unknownUser');
             return (
               <AppCard>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -156,7 +158,7 @@ export default function JoinRequestsScreen() {
                         style={{ flex: 1 }}
                         compact
                       >
-                        Approve
+                        {t('joinRequests.approve')}
                       </Button>
                       <Button
                         mode="outlined"
@@ -165,7 +167,7 @@ export default function JoinRequestsScreen() {
                         style={{ flex: 1, borderColor: palette.danger }}
                         compact
                       >
-                        Decline
+                        {t('joinRequests.decline')}
                       </Button>
                     </View>
                   )}

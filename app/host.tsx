@@ -6,9 +6,11 @@ import { api } from '../lib/railway-api';
 import { colors, spacing, type } from '../lib/theme';
 import { AppCard, SectionHeader } from '../components/AppCard';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
+import { useI18n } from '../lib/i18n';
 
 export default function HostStandScreen() {
   const router = useRouter();
+  const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
   const floor = useQuery(api.floor.getActiveFloorPlan, venue?.id ? { venueId: venue.id } : 'skip');
   const stats = useQuery(api.floor.getFloorStats, venue?.id ? { venueId: venue.id } : 'skip');
@@ -17,39 +19,39 @@ export default function HostStandScreen() {
     <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
       <View style={{ gap: 4 }}>
         <Text style={{ ...type.title, color: colors.charcoal }}>
-          Host Stand
+          {t('host.title')}
         </Text>
         <Text style={{ color: colors.muted }}>
-          Tablet-sized live floor view for seating flow and current house load.
+          {t('host.subtitle')}
         </Text>
       </View>
 
       <AppCard>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <Chip>Occupied: {stats?.occupiedCount ?? 0}</Chip>
-          <Chip>Waitlist: {stats?.waitlistSize ?? 0}</Chip>
-          <Chip>Dirty: {stats?.dirtyCount ?? 0}</Chip>
-          <Chip>Available: {stats?.availableCount ?? 0}</Chip>
+          <Chip>{t('host.occupied', { count: stats?.occupiedCount ?? 0 })}</Chip>
+          <Chip>{t('host.waitlist', { count: stats?.waitlistSize ?? 0 })}</Chip>
+          <Chip>{t('host.dirty', { count: stats?.dirtyCount ?? 0 })}</Chip>
+          <Chip>{t('host.available', { count: stats?.availableCount ?? 0 })}</Chip>
           </View>
       </AppCard>
 
       {floor ? (
         <AppCard>
-            <SectionHeader title="Quick seat map" />
+            <SectionHeader title={t('host.quickSeatMap')} />
             {((floor.tables ?? []) as any[]).slice(0, 10).map(({ table, state }: { table: any; state: any }) => (
               <View key={table._id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ fontWeight: '700' }}>{table.label}</Text>
-                  <Chip compact>{state?.status ?? 'available'}</Chip>
+                  <Chip compact>{state?.status ?? t('host.statusAvailable')}</Chip>
                 </View>
-                <Text style={{ color: colors.muted }}>{table.section} · {table.seats} seats · party {state?.partySize ?? 0}</Text>
+                <Text style={{ color: colors.muted }}>{t('host.tableSummary', { section: table.section, seats: table.seats, party: state?.partySize ?? 0 })}</Text>
               </View>
             ))}
         </AppCard>
       ) : null}
 
       <Button mode="contained" onPress={() => router.back()}>
-        Back to floor
+        {t('host.backToFloor')}
       </Button>
     </ScrollView>
   );

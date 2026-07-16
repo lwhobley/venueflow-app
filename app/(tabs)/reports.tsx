@@ -10,6 +10,7 @@ import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
 import { ManagerGate } from '../../components/ManagerGate';
 import { SectionHeader } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
 // What we record as the export destination on /v1/payroll/record-export. The
 // server stores `provider` as a free-form string today, so this list is purely
@@ -44,6 +45,7 @@ type Insight = {
 };
 
 export default function ReportsScreen() {
+  const { t } = useI18n();
   const { venue, isReady, profileLoading, canManage } = useVenueAuth();
   const [showTimeCsv, setShowTimeCsv] = useState(false);
   const [showPayrollCsv, setShowPayrollCsv] = useState(false);
@@ -62,13 +64,13 @@ export default function ReportsScreen() {
 
 
   const metrics = [
-    { label: 'Scheduled shifts', value: insights?.scheduledShifts ?? 0, accent: accents[0] },
-    { label: 'Open shifts', value: insights?.openShifts ?? 0, accent: accents[1] },
-    { label: 'Clocked in', value: insights?.activeClocks ?? 0, accent: accents[2] },
-    { label: 'Clock alerts', value: insights?.lateOrMissedAlerts ?? 0, accent: accents[3] },
-    { label: 'Active reservations', value: insights?.activeReservations ?? 0, accent: accents[4] },
-    { label: 'Next 24h bookings', value: insights?.upcomingReservations ?? 0, accent: accents[0] },
-    { label: 'Pending requests', value: insights?.pendingRequests ?? 0, accent: accents[1] },
+    { label: t('reports.metrics.scheduledShifts'), value: insights?.scheduledShifts ?? 0, accent: accents[0] },
+    { label: t('reports.metrics.openShifts'), value: insights?.openShifts ?? 0, accent: accents[1] },
+    { label: t('reports.metrics.clockedIn'), value: insights?.activeClocks ?? 0, accent: accents[2] },
+    { label: t('reports.metrics.clockAlerts'), value: insights?.lateOrMissedAlerts ?? 0, accent: accents[3] },
+    { label: t('reports.metrics.activeReservations'), value: insights?.activeReservations ?? 0, accent: accents[4] },
+    { label: t('reports.metrics.next24hBookings'), value: insights?.upcomingReservations ?? 0, accent: accents[0] },
+    { label: t('reports.metrics.pendingRequests'), value: insights?.pendingRequests ?? 0, accent: accents[1] },
   ];
 
   const periodLabel = payroll?.periodStart && payroll?.periodEnd
@@ -76,25 +78,25 @@ export default function ReportsScreen() {
     : null;
 
   return (
-    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Reports">
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('reports.header.title')}>
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
       <SectionHeader
-        kicker="Insights"
-        title="Reports"
-        subtitle={`${venue?.name ?? 'Venue'} analytics and exports.`}
+        kicker={t('reports.header.kicker')}
+        title={t('reports.header.title')}
+        subtitle={t('reports.header.subtitle', { venue: venue?.name ?? t('reports.header.venueFallback') })}
         trailing={<DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />}
       />
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Integrations</Text>
-          <Text style={{ color: colors.muted }}>Manage POS, reservation sync, payroll, and provider connections from the reporting hub.</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('reports.integrations.title')}</Text>
+          <Text style={{ color: colors.muted }}>{t('reports.integrations.description')}</Text>
           <Button compact mode="contained" buttonColor={colors.primary} icon="connection" onPress={() => router.push('/integrations')}>
-            Open integrations
+            {t('reports.integrations.openButton')}
           </Button>
         </Card.Content>
       </Card>
@@ -103,9 +105,9 @@ export default function ReportsScreen() {
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Live snapshot</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('reports.snapshot.title')}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>
-              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · right now
+              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {t('reports.snapshot.rightNow')}
             </Text>
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
@@ -137,27 +139,27 @@ export default function ReportsScreen() {
         return (
           <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Labor efficiency</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>7-day rolling forecast vs. scheduled coverage.</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('reports.labor.title')}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>{t('reports.labor.subtitle')}</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
                 <View style={{ backgroundColor: accents[2].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                   <Text style={{ color: accents[2].fg, fontSize: 22, fontWeight: '800' }}>{scheduled}h</Text>
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>Scheduled this week</Text>
+                  <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.scheduledThisWeek')}</Text>
                 </View>
                 <View style={{ backgroundColor: accents[1].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                   <Text style={{ color: accents[1].fg, fontSize: 22, fontWeight: '800' }}>{suggested}h</Text>
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>Demand-suggested</Text>
+                  <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.demandSuggested')}</Text>
                 </View>
                 {utilizationPct !== null && (
                   <View style={{ backgroundColor: utilizationPct < 80 ? `${colors.danger}22` : utilizationPct > 120 ? `${colors.warning}22` : `${colors.success}22`, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                     <Text style={{ color: utilizationPct < 80 ? colors.danger : utilizationPct > 120 ? colors.warning : colors.success, fontSize: 22, fontWeight: '800' }}>{utilizationPct}%</Text>
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>Coverage utilization</Text>
+                    <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.coverageUtilization')}</Text>
                   </View>
                 )}
                 {budgetPct !== null && (
                   <View style={{ backgroundColor: accents[0].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                     <Text style={{ color: accents[0].fg, fontSize: 22, fontWeight: '800' }}>{budgetPct}%</Text>
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>Of {budgetHours}h budget</Text>
+                    <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.ofBudget', { budget: budgetHours })}</Text>
                   </View>
                 )}
               </View>
@@ -166,31 +168,31 @@ export default function ReportsScreen() {
                   {understaffedDays > 0 && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
                       <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger }} />
-                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{understaffedDays} day{understaffedDays === 1 ? '' : 's'} understaffed this week</Text>
+                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{t(understaffedDays === 1 ? 'reports.labor.understaffedSingular' : 'reports.labor.understaffedPlural', { count: understaffedDays })}</Text>
                     </View>
                   )}
                   {overstaffedDays > 0 && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
                       <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.warning }} />
-                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{overstaffedDays} day{overstaffedDays === 1 ? '' : 's'} overstaffed — early release opportunity</Text>
+                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{t(overstaffedDays === 1 ? 'reports.labor.overstaffedSingular' : 'reports.labor.overstaffedPlural', { count: overstaffedDays })}</Text>
                     </View>
                   )}
                   {otViolations > 0 && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
                       <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger }} />
-                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{otViolations} staff member{otViolations === 1 ? '' : 's'} over 40h — review now</Text>
+                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{t(otViolations === 1 ? 'reports.labor.otViolationsSingular' : 'reports.labor.otViolationsPlural', { count: otViolations })}</Text>
                     </View>
                   )}
                   {otApproaching > 0 && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
                       <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.warning }} />
-                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{otApproaching} staff member{otApproaching === 1 ? '' : 's'} approaching overtime — check Schedule → Forecast</Text>
+                      <Text style={{ color: colors.charcoal, fontSize: 13 }}>{t(otApproaching === 1 ? 'reports.labor.otApproachingSingular' : 'reports.labor.otApproachingPlural', { count: otApproaching })}</Text>
                     </View>
                   )}
                 </View>
               )}
               {understaffedDays === 0 && overstaffedDays === 0 && otViolations === 0 && otApproaching === 0 && (
-                <Text style={{ color: colors.success, fontSize: 13 }}>No labor efficiency issues this week.</Text>
+                <Text style={{ color: colors.success, fontSize: 13 }}>{t('reports.labor.noIssues')}</Text>
               )}
             </Card.Content>
           </Card>
@@ -200,15 +202,15 @@ export default function ReportsScreen() {
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Time entries CSV</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('reports.timeCsv.title')}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>{dateRange.shortLabel}</Text>
           </View>
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowTimeCsv((value) => !value)}>
-            {showTimeCsv ? 'Hide export' : 'Load export'}
+            {showTimeCsv ? t('reports.common.hideExport') : t('reports.common.loadExport')}
           </Button>
           {showTimeCsv ? (
             <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
-              {timeCsv ?? 'Loading export...'}
+              {timeCsv ?? t('reports.common.loadingExport')}
             </Text>
           ) : null}
         </Card.Content>
@@ -218,9 +220,9 @@ export default function ReportsScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <View style={{ flex: 1 }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Payroll integration</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('reports.payroll.title')}</Text>
               <Text style={{ color: colors.muted }}>
-                {payroll ? `${payroll.totalHours}h · ${payroll.openEntryCount} open entries${periodLabel ? ` · ${periodLabel}` : ''}` : 'Loading payroll summary...'}
+                {payroll ? t('reports.payroll.summary', { hours: payroll.totalHours, count: payroll.openEntryCount, period: periodLabel ? ` · ${periodLabel}` : '' }) : t('reports.payroll.loadingSummary')}
               </Text>
             </View>
             <Button
@@ -233,21 +235,21 @@ export default function ReportsScreen() {
                 }
               }}
             >
-              Record export
+              {t('reports.payroll.recordExport')}
             </Button>
           </View>
           <ProviderDropdown
-            label="Payroll provider"
+            label={t('reports.payroll.providerLabel')}
             value={payrollProvider}
             options={payrollProviderOptions}
             onChange={(next) => setPayrollProvider(next as PayrollProvider)}
           />
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowPayrollCsv((value) => !value)}>
-            {showPayrollCsv ? 'Hide payroll export' : 'Load payroll export'}
+            {showPayrollCsv ? t('reports.payroll.hidePayrollExport') : t('reports.payroll.loadPayrollExport')}
           </Button>
           {showPayrollCsv ? (
             <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
-              {payrollCsv ?? 'Loading payroll export...'}
+              {payrollCsv ?? t('reports.payroll.loadingPayrollExport')}
             </Text>
           ) : null}
         </Card.Content>
@@ -256,15 +258,15 @@ export default function ReportsScreen() {
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservations CSV</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('reports.reservationsCsv.title')}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>{dateRange.shortLabel}</Text>
           </View>
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowReservationCsv((value) => !value)}>
-            {showReservationCsv ? 'Hide export' : 'Load export'}
+            {showReservationCsv ? t('reports.common.hideExport') : t('reports.common.loadExport')}
           </Button>
           {showReservationCsv ? (
             <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
-              {reservationCsv ?? 'Loading export...'}
+              {reservationCsv ?? t('reports.common.loadingExport')}
             </Text>
           ) : null}
         </Card.Content>

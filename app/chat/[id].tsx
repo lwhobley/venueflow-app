@@ -12,6 +12,7 @@ import { accents, colors, radius, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { formatTime, errorMessage } from '../../lib/format';
+import { useI18n, type TranslationKey } from '../../lib/i18n';
 
 type ChatMessage = {
   _id: string;
@@ -31,13 +32,13 @@ type RenderItem =
   | { kind: 'message'; id: string; message: ChatMessage; showSender: boolean; compact: boolean };
 
 
-function fmtDay(at: number) {
+function fmtDay(at: number, t: (key: TranslationKey) => string) {
   const date = new Date(at);
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
-  if (date.toDateString() === today.toDateString()) return 'Today';
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  if (date.toDateString() === today.toDateString()) return t('chatThread.today');
+  if (date.toDateString() === yesterday.toDateString()) return t('chatThread.yesterday');
   return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
@@ -69,12 +70,12 @@ function parseSwapCard(text: string) {
   };
 }
 
-function groupMessages(messages: ChatMessage[]): RenderItem[] {
+function groupMessages(messages: ChatMessage[], t: (key: TranslationKey) => string): RenderItem[] {
   const items: RenderItem[] = [];
   messages.forEach((message, index) => {
     const previous = messages[index - 1];
     if (!previous || !isSameDay(previous.createdAt, message.createdAt)) {
-      items.push({ kind: 'day', id: `day-${message.createdAt}`, label: fmtDay(message.createdAt) });
+      items.push({ kind: 'day', id: `day-${message.createdAt}`, label: fmtDay(message.createdAt, t) });
     }
     const sameSender = previous?.senderName === message.senderName && previous?.mine === message.mine;
     const closeInTime = previous ? message.createdAt - previous.createdAt < 5 * 60 * 1000 : false;
@@ -176,6 +177,7 @@ function ActionCard({
 }
 
 export default function ConversationScreen() {
+  const { t } = useI18n();
   const params = useLocalSearchParams<{ id: string }>();
   const { isReady } = useAuthenticatedSession();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -207,7 +209,7 @@ export default function ConversationScreen() {
   const readReceipts = (data?.readReceipts ?? []) as Array<{ name: string; readAt: number }>;
   const mineShifts = myScheduleData?.mine ?? [];
   const openShifts = myScheduleData?.open ?? [];
-  const renderItems = useMemo(() => groupMessages(messages), [messages]);
+  const renderItems = useMemo(() => groupMessages(messages, t), [messages, t]);
 
   useEffect(() => {
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 70);
@@ -230,7 +232,7 @@ export default function ConversationScreen() {
       await sendMessage({ conversationId, text: trimmed });
     } catch (e) {
       setText(trimmed);
-      setError(errorMessage(e, 'Could not send message.'));
+      setError(errorMessage(e, t('chatThread.errorSend')));
     } finally {
       setSending(false);
     }
@@ -241,7 +243,7 @@ export default function ConversationScreen() {
     try {
       await toggleReaction({ messageId, emoji });
     } catch (e) {
-      setError(errorMessage(e, 'Could not add reaction.'));
+      setError(errorMessage(e, t('chatThread.errorReact')));
     }
   };
 
@@ -250,25 +252,25 @@ export default function ConversationScreen() {
     try {
       await editMessage({ messageId, text: newText });
     } catch (e) {
-      setError(errorMessage(e, 'Could not update checklist.'));
+      setError(errorMessage(e, t('chatThread.errorChecklist')));
     }
   };
 
   const onClaimShift = async (shiftId: string) => {
     try {
       await claimOpenShift({ shiftId });
-      setToast('Shift claimed');
+      setToast(t('chatThread.shiftClaimed'));
     } catch (e) {
-      setToast(errorMessage(e, 'Claim failed.'));
+      setToast(errorMessage(e, t('chatThread.errorClaim')));
     }
   };
 
   const onRespondSwap = async (swapId: string, accept: boolean) => {
     try {
       await respondToShiftSwap({ swapId, accept });
-      setToast(accept ? 'Swap accepted' : 'Swap declined');
+      setToast(accept ? t('chatThread.swapAccepted') : t('chatThread.swapDeclined'));
     } catch (e) {
-      setToast(errorMessage(e, 'Action failed.'));
+      setToast(errorMessage(e, t('chatThread.errorSwapAction')));
     }
   };
 
@@ -289,9 +291,9 @@ export default function ConversationScreen() {
         dataBase64: asset.base64,
         mimeType: asset.mimeType ?? 'image/jpeg',
       });
-      await sendMessage({ conversationId, text: 'Shared a photo', imageUrl });
+      await sendMessage({ conversationId, text: t('chatThread.sharedPhoto'), imageUrl });
     } catch (e) {
-      setError(errorMessage(e, 'Could not upload photo.'));
+      setError(errorMessage(e, t('chatThread.errorUpload')));
     } finally {
       setSending(false);
     }
@@ -305,7 +307,7 @@ export default function ConversationScreen() {
       await sendMessage({ conversationId, text: formatted });
       setShowShareDialog(false);
     } catch (e) {
-      setError(errorMessage(e, 'Could not share shift.'));
+      setError(errorMessage(e, t('chatThread.errorShare')));
     }
   };
 
@@ -316,7 +318,7 @@ export default function ConversationScreen() {
       await deleteConversation({ conversationId });
       router.back();
     } catch (e) {
-      setError(errorMessage(e, 'Could not delete chat.'));
+      setError(errorMessage(e, t('chatThread.errorDelete')));
     }
   };
 
@@ -421,16 +423,16 @@ export default function ConversationScreen() {
                 title={shift.jobTitle}
                 subtitle={`${shift.dayLabel} - ${shift.timeRange}`}
                 tone="shift"
-                primaryLabel="Claim"
+                primaryLabel={t('chatThread.claim')}
                 onPrimary={() => void onClaimShift(shift.shiftId)}
               />
             ) : swap ? (
               <ActionCard
-                title="Shift swap"
+                title={t('chatThread.shiftSwapTitle')}
                 subtitle={swap.description}
                 tone="swap"
-                primaryLabel="Accept"
-                secondaryLabel="Deny"
+                primaryLabel={t('chatThread.accept')}
+                secondaryLabel={t('chatThread.deny')}
                 onPrimary={() => void onRespondSwap(swap.swapId, true)}
                 onSecondary={() => void onRespondSwap(swap.swapId, false)}
               />
@@ -461,8 +463,8 @@ export default function ConversationScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.divider, backgroundColor: colors.surface }}>
           <IconButton icon="arrow-left" iconColor={colors.charcoal} onPress={() => router.back()} />
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ color: colors.charcoal, fontSize: 18, fontWeight: '900' }} numberOfLines={1}>{data?.title ?? 'Chat'}</Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>Team conversation</Text>
+            <Text style={{ color: colors.charcoal, fontSize: 18, fontWeight: '900' }} numberOfLines={1}>{data?.title ?? t('chatThread.headerFallback')}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{t('chatThread.teamConversation')}</Text>
           </View>
           <IconButton icon="delete-outline" iconColor={colors.danger} onPress={() => void onDeleteChat()} />
         </View>
@@ -480,8 +482,8 @@ export default function ConversationScreen() {
               <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.cream, alignItems: 'center', justifyContent: 'center' }}>
                 <MaterialCommunityIcons name="message-text-outline" size={28} color={colors.primary} />
               </View>
-              <Text style={{ ...type.heading, color: colors.charcoal }}>No messages yet</Text>
-              <Text style={{ color: colors.muted, textAlign: 'center' }}>Start the thread with a quick update.</Text>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>{t('chatThread.emptyTitle')}</Text>
+              <Text style={{ color: colors.muted, textAlign: 'center' }}>{t('chatThread.emptySubtitle')}</Text>
             </View>
           ) : (
             renderItems.map((item) => (
@@ -498,17 +500,17 @@ export default function ConversationScreen() {
 
         {latestReadNames ? (
           <View style={{ paddingHorizontal: spacing.md, paddingBottom: spacing.xs, backgroundColor: colors.background }}>
-            <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'right' }}>Read by {latestReadNames}</Text>
+            <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'right' }}>{t('chatThread.readBy', { names: latestReadNames })}</Text>
           </View>
         ) : null}
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', padding: spacing.sm, gap: spacing.xs, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface }}>
-          <IconButton icon="calendar-plus" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => setShowShareDialog(true)} accessibilityLabel="Share shift" />
-          <IconButton icon="image-outline" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => void pickImage()} accessibilityLabel="Add photo" />
+          <IconButton icon="calendar-plus" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => setShowShareDialog(true)} accessibilityLabel={t('chatThread.shareShiftLabel')} />
+          <IconButton icon="image-outline" iconColor={colors.primary} size={22} style={{ margin: 0 }} onPress={() => void pickImage()} accessibilityLabel={t('chatThread.addPhotoLabel')} />
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder="Message"
+            placeholder={t('chatThread.messagePlaceholder')}
             mode="outlined"
             dense
             multiline
@@ -527,13 +529,13 @@ export default function ConversationScreen() {
             disabled={!text.trim() || sending}
             style={{ margin: 0 }}
             onPress={() => void onSend()}
-            accessibilityLabel="Send message"
+            accessibilityLabel={t('chatThread.sendMessageLabel')}
           />
         </View>
 
         <Portal>
           <Dialog visible={Boolean(reactMsgId)} onDismiss={() => setReactMsgId(null)} style={{ backgroundColor: colors.surface }}>
-            <Dialog.Title style={{ fontSize: 16 }}>React</Dialog.Title>
+            <Dialog.Title style={{ fontSize: 16 }}>{t('chatThread.reactDialogTitle')}</Dialog.Title>
             <Dialog.Content style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: spacing.md }}>
               {['+1', 'heart', 'wow', 'haha', 'clap'].map((emoji) => (
                 <Button
@@ -552,21 +554,21 @@ export default function ConversationScreen() {
           </Dialog>
 
           <Dialog visible={showShareDialog} onDismiss={() => setShowShareDialog(false)} style={{ backgroundColor: colors.surface }}>
-            <Dialog.Title style={{ fontSize: 16 }}>Share Shift</Dialog.Title>
+            <Dialog.Title style={{ fontSize: 16 }}>{t('chatThread.shareShiftDialogTitle')}</Dialog.Title>
             <Dialog.ScrollArea style={{ maxHeight: 340, paddingHorizontal: 0 }}>
               <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: spacing.md }}>
-                <Kicker style={{ marginVertical: spacing.sm }}>My shifts</Kicker>
+                <Kicker style={{ marginVertical: spacing.sm }}>{t('chatThread.myShifts')}</Kicker>
                 {mineShifts.length === 0 ? (
-                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>No shifts scheduled.</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>{t('chatThread.noShiftsScheduled')}</Text>
                 ) : (
                   mineShifts.map((shift: any) => (
                     <ShiftShareRow key={shift._id} title={shift.jobTitle} subtitle={`${shift.dayLabel} - ${shift.startTime} - ${shift.endTime}`} onPress={() => void shareShift(shift)} />
                   ))
                 )}
 
-                <Kicker style={{ marginVertical: spacing.sm }}>Open shifts</Kicker>
+                <Kicker style={{ marginVertical: spacing.sm }}>{t('chatThread.openShifts')}</Kicker>
                 {openShifts.length === 0 ? (
-                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>No open shifts.</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>{t('chatThread.noOpenShifts')}</Text>
                 ) : (
                   openShifts.map((shift: any) => (
                     <ShiftShareRow key={shift._id} title={shift.jobTitle} subtitle={`${shift.dayLabel} - ${shift.startTime} - ${shift.endTime}`} onPress={() => void shareShift(shift)} />
@@ -575,7 +577,7 @@ export default function ConversationScreen() {
               </ScrollView>
             </Dialog.ScrollArea>
             <Dialog.Actions>
-              <Button onPress={() => setShowShareDialog(false)}>Cancel</Button>
+              <Button onPress={() => setShowShareDialog(false)}>{t('chatThread.cancel')}</Button>
             </Dialog.Actions>
           </Dialog>
         </Portal>

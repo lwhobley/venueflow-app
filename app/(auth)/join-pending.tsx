@@ -5,10 +5,12 @@ import { Button, Card, Text } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
 import { authCardStyle, authColors as colors, spacing, type } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useI18n } from '../../lib/i18n';
 
 type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'unknown';
 
 export default function JoinPendingScreen() {
+  const { t } = useI18n();
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
   const { venueName } = useLocalSearchParams<{ venueName?: string }>();
 
@@ -43,7 +45,7 @@ export default function JoinPendingScreen() {
     void checkStatus();
   }, [checkStatus]);
 
-  const displayName = checkedVenueName || venueName || 'your workplace';
+  const displayName = checkedVenueName || venueName || t('joinPending.defaultVenueName');
 
   return (
     <ScrollView
@@ -62,18 +64,18 @@ export default function JoinPendingScreen() {
           </View>
           <View style={{ gap: 6, alignItems: 'center' }}>
             <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
-              Waiting for approval
+              {t('joinPending.pending.title')}
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-              Your request to join{'\n'}
+              {t('joinPending.pending.bodyPrefix')}{'\n'}
               <Text style={{ fontWeight: '700', color: colors.text }}>{displayName}</Text>
-              {'\n'}has been submitted. A manager will review it shortly.
+              {'\n'}{t('joinPending.pending.bodySuffix')}
             </Text>
           </View>
           <Card style={styles.card}>
             <Card.Content style={{ gap: spacing.sm }}>
               <Text variant="bodySmall" style={{ color: colors.muted, textAlign: 'center' }}>
-                You'll be notified once your request is approved or declined.
+                {t('joinPending.pending.notifyNote')}
               </Text>
             </Card.Content>
           </Card>
@@ -84,14 +86,14 @@ export default function JoinPendingScreen() {
             loading={checking}
             onPress={() => void checkStatus()}
           >
-            Check status
+            {t('joinPending.pending.checkStatusButton')}
           </Button>
           <Button
             mode="outlined"
             textColor={colors.primary}
             onPress={() => router.replace('/(auth)/workplace-search')}
           >
-            Join a different workplace
+            {t('joinPending.pending.differentWorkplaceButton')}
           </Button>
         </>
       )}
@@ -103,10 +105,10 @@ export default function JoinPendingScreen() {
           </View>
           <View style={{ gap: 6, alignItems: 'center' }}>
             <Text style={{ ...type.title, color: colors.primary, textAlign: 'center' }}>
-              You're in!
+              {t('joinPending.approved.title')}
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-              Your request to join {displayName} has been approved.
+              {t('joinPending.approved.body', { venueName: displayName })}
             </Text>
           </View>
           <Button
@@ -115,7 +117,7 @@ export default function JoinPendingScreen() {
             textColor={colors.buttonText}
             onPress={() => router.replace('/(tabs)/home')}
           >
-            Go to the app
+            {t('joinPending.approved.goToAppButton')}
           </Button>
         </>
       )}
@@ -127,10 +129,10 @@ export default function JoinPendingScreen() {
           </View>
           <View style={{ gap: 6, alignItems: 'center' }}>
             <Text style={{ ...type.title, color: colors.danger, textAlign: 'center' }}>
-              Request declined
+              {t('joinPending.rejected.title')}
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-              Your request to join {displayName} was declined. Contact your manager if you think this is a mistake.
+              {t('joinPending.rejected.body', { venueName: displayName })}
             </Text>
           </View>
           <Button
@@ -139,7 +141,7 @@ export default function JoinPendingScreen() {
             textColor={colors.buttonText}
             onPress={() => router.replace('/(auth)/workplace-search')}
           >
-            Search for another workplace
+            {t('joinPending.rejected.searchAgainButton')}
           </Button>
         </>
       )}
@@ -148,10 +150,10 @@ export default function JoinPendingScreen() {
         <>
           <View style={{ gap: 6, alignItems: 'center' }}>
             <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
-              No active request
+              {t('joinPending.none.title')}
             </Text>
             <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-              You don't have an active join request. Search for a workplace to submit one.
+              {t('joinPending.none.body')}
             </Text>
           </View>
           <Button
@@ -160,7 +162,7 @@ export default function JoinPendingScreen() {
             textColor={colors.buttonText}
             onPress={() => router.replace('/(auth)/workplace-search')}
           >
-            Find a workplace
+            {t('joinPending.none.findWorkplaceButton')}
           </Button>
         </>
       )}
@@ -173,7 +175,7 @@ export default function JoinPendingScreen() {
           router.replace('/(auth)/welcome');
         }}
       >
-        Sign out
+        {t('joinPending.signOut')}
       </Button>
     </ScrollView>
   );
