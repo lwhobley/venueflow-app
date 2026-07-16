@@ -72,12 +72,17 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const token = useAuthStore.getState().token;
   const timeout = options.timeoutMs ?? 30_000;
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const signal = controller ?? options.signal ? controller?.signal ?? options.signal : undefined;
+  const signal = controller?.signal ?? options.signal;
+  let timedOut = false;
   const abortFromCaller = () => controller?.abort();
-  options.signal?.addEventListener('abort', abortFromCaller);
+  if (options.signal?.aborted) abortFromCaller();
+  else options.signal?.addEventListener('abort', abortFromCaller);
   const timer =
     controller && timeout > 0
-      ? setTimeout(() => controller.abort(), timeout)
+      ? setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, timeout)
       : null;
 
   let response: Response;
@@ -93,7 +98,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       ...(signal ? { signal } : {}),
     });
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (error instanceof Error && error.name === 'AbortError' && timedOut) {
       throw new ApiError('Request timed out. Check your connection and try again.', 408);
     }
     throw error;

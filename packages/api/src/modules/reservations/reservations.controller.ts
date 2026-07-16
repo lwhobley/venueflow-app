@@ -13,7 +13,7 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { IsArray, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import type { Request } from 'express';
@@ -102,6 +102,7 @@ class SaveReservationDto {
   occasion?: string;
 
   @IsOptional()
+  @IsBoolean()
   isPrivateEvent?: boolean;
 
   @IsString()
@@ -176,6 +177,7 @@ class ReservationSyncEventDto {
   reservationTime!: number;
 
   @IsInt()
+  @Min(1)
   @IsOptional()
   durationMinutes?: number;
 

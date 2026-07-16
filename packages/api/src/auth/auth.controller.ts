@@ -428,18 +428,24 @@ export class AuthController {
           passwordResetSentAt: new Date(),
         },
       });
-      await this.email.sendOrThrow({
-        to: account.email,
-        subject: 'Reset Your Venue Wrangler Password',
-        text:
-          `Hi ${account.profile?.fullName ?? 'there'},\n\n` +
-          `We received a request to reset the password for your Venue Wrangler account.\n\n` +
-          `To complete your password reset, enter the following code when prompted in the app:\n\n` +
-          `   ${code}\n\n` +
-          `Note: This code is valid for 60 minutes. If you did not request a password reset, you can safely ignore this email — your account remains secure.\n\n` +
-          `Questions? support@venuewrangler.com\n\n` +
-          `— The Venue Wrangler Team`,
-      });
+      try {
+        await this.email.sendOrThrow({
+          to: account.email,
+          subject: 'Reset Your Venue Wrangler Password',
+          text:
+            `Hi ${account.profile?.fullName ?? 'there'},\n\n` +
+            `We received a request to reset the password for your Venue Wrangler account.\n\n` +
+            `To complete your password reset, enter the following code when prompted in the app:\n\n` +
+            `   ${code}\n\n` +
+            `Note: This code is valid for 60 minutes. If you did not request a password reset, you can safely ignore this email — your account remains secure.\n\n` +
+            `Questions? support@venuewrangler.com\n\n` +
+            `— The Venue Wrangler Team`,
+        });
+      } catch (error: any) {
+        // Keep the public response identical for existing and unknown accounts;
+        // otherwise a provider outage becomes an account-enumeration oracle.
+        this.logger.error(`Password reset email failed for user ${account.id}: ${error?.message ?? String(error)}`);
+      }
     }
     return { ok: true };
   }
@@ -454,25 +460,29 @@ export class AuthController {
     await assertWithinSharedRateLimit(this.prisma, `reset-password:ip:${getClientIp(request)}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `reset-password:email:${email}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
 
-    const account = await this.prisma.user.findUnique({
-      where: { email },
-      select: {
-        id: true,
-        passwordResetCodeHash: true,
-        passwordResetExpiresAt: true,
-      },
-    });
-    if (
-      !account?.passwordResetCodeHash ||
-      !account.passwordResetExpiresAt ||
-      account.passwordResetExpiresAt.getTime() < Date.now() ||
-      !this.authService.oneTimeCodeHashesMatch(account.passwordResetCodeHash, this.authService.hashOneTimeCode(body.code))
-    ) {
-      throw new BadRequestException('That password reset code is invalid or expired.');
-    }
     const next = await this.authService.hashPassword(body.newPassword);
-    await this.prisma.$transaction([
-      this.prisma.passwordCredential.upsert({
+    await this.prisma.$transaction(async (tx) => {
+      // Serialize attempts for this account and validate only after acquiring
+      // the lock, so the same one-time code cannot win two concurrent resets.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`password-reset:${email}`}))`;
+      const account = await tx.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          passwordResetCodeHash: true,
+          passwordResetExpiresAt: true,
+        },
+      });
+      if (
+        !account?.passwordResetCodeHash ||
+        !account.passwordResetExpiresAt ||
+        account.passwordResetExpiresAt.getTime() < Date.now() ||
+        !this.authService.oneTimeCodeHashesMatch(account.passwordResetCodeHash, this.authService.hashOneTimeCode(body.code))
+      ) {
+        throw new BadRequestException('That password reset code is invalid or expired.');
+      }
+
+      await tx.passwordCredential.upsert({
         where: { userId: account.id },
         update: {
           salt: next.salt,
@@ -485,8 +495,8 @@ export class AuthController {
           passwordHash: next.hash,
           iterations: PASSWORD_ITERATIONS,
         },
-      }),
-      this.prisma.user.update({
+      });
+      await tx.user.update({
         where: { id: account.id },
         data: {
           passwordResetCodeHash: null,
@@ -495,9 +505,9 @@ export class AuthController {
           failedSignInCount: 0,
           lockedUntil: null,
         },
-      }),
-      this.prisma.session.deleteMany({ where: { userId: account.id } }),
-    ]);
+      });
+      await tx.session.deleteMany({ where: { userId: account.id } });
+    });
     return { ok: true };
   }
 
@@ -508,7 +518,9 @@ export class AuthController {
     if (user.sid) {
       await this.prisma.$transaction([
         this.prisma.session.delete({ where: { id: user.sid } }),
-        this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } }),
+        ...(user.profileId
+          ? [this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } })]
+          : []),
       ]);
     }
     return { ok: true };
@@ -519,7 +531,9 @@ export class AuthController {
   async logoutAll(@CurrentUser() user: AuthUser) {
     await this.prisma.$transaction([
       this.prisma.session.deleteMany({ where: { userId: user.sub } }),
-      this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } }),
+      ...(user.profileId
+        ? [this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } })]
+        : []),
     ]);
     return { ok: true };
   }

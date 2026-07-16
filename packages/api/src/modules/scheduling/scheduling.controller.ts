@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -367,6 +368,8 @@ function availabilityCovers(rows: AvailabilityWindow[] | undefined, shift: { day
 
 @Controller('v1/scheduling')
 export class SchedulingController {
+  private readonly logger = new Logger(SchedulingController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -1560,7 +1563,18 @@ export class SchedulingController {
         createdAt: swap.createdAt.getTime(),
       }));
   }
-  private async sendScheduleUpdateEmail(
+  private sendScheduleUpdateEmail(
+    profileId: string,
+    changeType: 'Added' | 'Edited' | 'Removed',
+    before?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
+    after?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
+  ) {
+    void this.sendScheduleUpdateEmailInBackground(profileId, changeType, before, after).catch((error) => {
+      this.logBackgroundFailure('schedule update email', error);
+    });
+  }
+
+  private async sendScheduleUpdateEmailInBackground(
     profileId: string,
     changeType: 'Added' | 'Edited' | 'Removed',
     before?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
@@ -1611,7 +1625,13 @@ export class SchedulingController {
     });
   }
 
-  private async sendManagerSwapApprovalEmail(venueId: string, swapId: string) {
+  private sendManagerSwapApprovalEmail(venueId: string, swapId: string) {
+    void this.sendManagerSwapApprovalEmailInBackground(venueId, swapId).catch((error) => {
+      this.logBackgroundFailure('manager swap approval email', error);
+    });
+  }
+
+  private async sendManagerSwapApprovalEmailInBackground(venueId: string, swapId: string) {
     const swap = await this.prisma.shiftSwap.findUnique({ where: { id: swapId } });
     if (!swap) return;
 
@@ -1689,7 +1709,13 @@ export class SchedulingController {
     }
   }
 
-  private async sendStaffSwapReviewedEmail(venueId: string, swapId: string, approve: boolean) {
+  private sendStaffSwapReviewedEmail(venueId: string, swapId: string, approve: boolean) {
+    void this.sendStaffSwapReviewedEmailInBackground(venueId, swapId, approve).catch((error) => {
+      this.logBackgroundFailure('staff swap review email', error);
+    });
+  }
+
+  private async sendStaffSwapReviewedEmailInBackground(venueId: string, swapId: string, approve: boolean) {
     const swap = await this.prisma.shiftSwap.findUnique({ where: { id: swapId } });
     if (!swap) return;
 
@@ -1754,5 +1780,12 @@ export class SchedulingController {
     // Send to both employees
     sendEmail(requester, target, true);
     sendEmail(target, requester, false);
+  }
+
+  private logBackgroundFailure(label: string, error: unknown) {
+    this.logger.error(
+      `${label} failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error.stack : undefined,
+    );
   }
 }

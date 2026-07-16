@@ -118,6 +118,21 @@ afterEach(() => {
 });
 
 describe('SchedulingController', () => {
+  it('logs detached email-query failures instead of leaking an unhandled rejection', async () => {
+    const { controller } = makeController();
+    const error = new Error('db down');
+    vi.spyOn(controller as any, 'sendManagerSwapApprovalEmailInBackground').mockRejectedValue(error);
+    const log = vi.spyOn((controller as any).logger, 'error').mockImplementation(() => undefined);
+
+    (controller as any).sendManagerSwapApprovalEmail('venue-1', 'swap-1');
+    await flush();
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('manager swap approval email failed: db down'),
+      error.stack,
+    );
+  });
+
   // ---------------------------------------------------------------------
   // 1. Authorization guards
   // ---------------------------------------------------------------------

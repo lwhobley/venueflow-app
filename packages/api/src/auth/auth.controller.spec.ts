@@ -163,3 +163,101 @@ describe('AuthController email invite signup', () => {
     expect(email.sendOrThrow).toHaveBeenCalled();
   });
 });
+
+describe('AuthController recovery and logout safety', () => {
+  it('returns the same success response when reset-email delivery fails', async () => {
+    const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'staff@example.com',
+          profile: { fullName: 'Test Staff' },
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const email = { sendOrThrow: vi.fn().mockRejectedValue(new Error('provider down')) };
+    const authService = {
+      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
+    };
+    const controller = new AuthController(prisma as any, {} as any, email as any, authService as any);
+
+    await expect(controller.forgotPassword(
+      { ip: '127.0.0.1' } as any,
+      { email: 'staff@example.com' },
+    )).resolves.toEqual({ ok: true });
+  });
+
+  it('consumes a password-reset code once across concurrent attempts', async () => {
+    let codeHash: string | null = 'hashed-code';
+    let transactionTail = Promise.resolve();
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      user: {
+        findUnique: vi.fn(async () => ({
+          id: 'user-1',
+          passwordResetCodeHash: codeHash,
+          passwordResetExpiresAt: new Date(Date.now() + 60_000),
+        })),
+        update: vi.fn(async () => {
+          codeHash = null;
+          return {};
+        }),
+      },
+      passwordCredential: { upsert: vi.fn().mockResolvedValue({}) },
+      session: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (db: typeof tx) => Promise<unknown>) => {
+        const previous = transactionTail;
+        let release!: () => void;
+        transactionTail = new Promise<void>((resolve) => { release = resolve; });
+        await previous;
+        try {
+          return await callback(tx);
+        } finally {
+          release();
+        }
+      }),
+    };
+    const authService = {
+      hashPassword: vi.fn().mockResolvedValue({ salt: 'salt', hash: 'new-hash' }),
+      hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
+      oneTimeCodeHashesMatch: vi.fn((stored: string, candidate: string) => stored === candidate),
+    };
+    const controller = new AuthController(prisma as any, {} as any, {} as any, authService as any);
+    const request = { ip: '127.0.0.1' } as any;
+    const body = { email: 'staff@example.com', code: '12345678', newPassword: 'password123' };
+
+    const results = await Promise.allSettled([
+      controller.resetPassword(request, body),
+      controller.resetPassword(request, body),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(tx.passwordCredential.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not issue an unfiltered push-token deletion without a profile id', async () => {
+    const prisma = {
+      session: {
+        delete: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      pushToken: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
+    };
+    const controller = new AuthController(prisma as any, {} as any, {} as any, {} as any);
+    const user = { sub: 'user-1', sid: 'session-1', profileId: undefined } as any;
+
+    await controller.logout(user);
+    await controller.logoutAll(user);
+
+    expect(prisma.pushToken.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.session.delete).toHaveBeenCalledWith({ where: { id: 'session-1' } });
+    expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
+  });
+});

@@ -479,7 +479,16 @@ export class WorkforceController {
     };
   }
 
-  private async emailJoinRequestDecision(id: string, decision: 'approved' | 'rejected', note?: string | null) {
+  private emailJoinRequestDecision(id: string, decision: 'approved' | 'rejected', note?: string | null) {
+    void this.emailJoinRequestDecisionInBackground(id, decision, note).catch((error) => {
+      this.logger.error(
+        `Join-request decision email failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    });
+  }
+
+  private async emailJoinRequestDecisionInBackground(id: string, decision: 'approved' | 'rejected', note?: string | null) {
     const request = await this.prisma.workplaceJoinRequest.findUnique({
       where: { id },
       include: {

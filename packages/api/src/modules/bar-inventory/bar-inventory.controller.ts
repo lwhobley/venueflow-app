@@ -4,6 +4,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -290,6 +291,8 @@ function mapPrepBoardItem(item: {
 @Controller('v1/bar-inventory')
 @UseGuards(AuthGuard)
 export class BarInventoryController {
+  private readonly logger = new Logger(BarInventoryController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -949,7 +952,23 @@ export class BarInventoryController {
     };
   }
 
-  private async fireInventoryAlerts(args: {
+  private fireInventoryAlerts(args: {
+    venueId: string;
+    item: { id: string; name: string; parLevel: number; unitCostCents: number | null };
+    previousOnHand: number;
+    nextOnHand: number;
+    movementType: string;
+    quantity: number;
+  }) {
+    void this.fireInventoryAlertsInBackground(args).catch((error) => {
+      this.logger.error(
+        `Inventory alert delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    });
+  }
+
+  private async fireInventoryAlertsInBackground(args: {
     venueId: string;
     item: { id: string; name: string; parLevel: number; unitCostCents: number | null };
     previousOnHand: number;
@@ -961,7 +980,7 @@ export class BarInventoryController {
 
     // Low-stock alert: just crossed below par
     if (previousOnHand >= item.parLevel && nextOnHand < item.parLevel) {
-      void this.notifications.notifyManagers({
+      await this.notifications.notifyManagers({
         venueId,
         kind: 'inventory_low_stock',
         title: `Low stock: ${item.name}`,
@@ -973,7 +992,7 @@ export class BarInventoryController {
     if ((movementType === 'waste' || movementType === 'comp') && item.unitCostCents != null) {
       const lossCents = Math.abs(quantity) * item.unitCostCents;
       if (lossCents >= 5000) {
-        void this.notifications.notifyManagers({
+        await this.notifications.notifyManagers({
           venueId,
           kind: 'inventory_large_loss',
           title: `Large ${movementType} recorded`,
