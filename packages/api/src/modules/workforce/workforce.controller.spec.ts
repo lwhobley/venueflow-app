@@ -7,12 +7,18 @@ vi.mock('../../common/rate-limit', () => ({
 
 describe('WorkforceController invite check email', () => {
   const findInvite = vi.fn();
+  const findInviteInTransaction = vi.fn();
   const createInvite = vi.fn();
+  const executeLock = vi.fn();
   const findProfile = vi.fn();
   const sendOrThrow = vi.fn();
   const prisma = {
     invite: { findFirst: findInvite, create: createInvite },
     profile: { findFirst: findProfile },
+    $transaction: vi.fn((callback: any) => callback({
+      $executeRaw: executeLock,
+      invite: { findFirst: findInviteInTransaction, create: createInvite },
+    })),
   };
   const email = { sendOrThrow };
   const config = {
@@ -46,6 +52,7 @@ describe('WorkforceController invite check email', () => {
 
   it('mints an invite token for a legacy unclaimed roster profile', async () => {
     findInvite.mockResolvedValue(null);
+    findInviteInTransaction.mockResolvedValue(null);
     findProfile.mockResolvedValue({
       id: 'profile-1',
       venueId: 'venue-1',
@@ -72,6 +79,35 @@ describe('WorkforceController invite check email', () => {
       }),
     }));
     expect(sendOrThrow).toHaveBeenCalledOnce();
+    expect(executeLock).toHaveBeenCalledOnce();
+  });
+
+  it('reuses an invite created by a simultaneous check', async () => {
+    findInvite.mockResolvedValue(null);
+    findProfile.mockResolvedValue({
+      id: 'profile-1',
+      venueId: 'venue-1',
+      role: 'staff',
+      jobTitle: 'Bartender',
+      venue: { name: 'Legacy Venue' },
+    });
+    findInviteInTransaction.mockResolvedValue({
+      id: 'invite-2',
+      email: 'legacy@example.com',
+      token: 'existing-token',
+      usedBy: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      jobTitle: 'Bartender',
+      venue: { name: 'Legacy Venue' },
+    });
+    const controller = new WorkforceController(prisma as any, email as any, config as any);
+
+    await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
+      .resolves.toEqual({ status: 'found', emailSent: true });
+    expect(createInvite).not.toHaveBeenCalled();
+    expect(sendOrThrow).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining('existing-token'),
+    }));
   });
 
   it('does not claim that an email was sent for phone-only roster matches', async () => {

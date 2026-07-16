@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -9,7 +10,7 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Button, Card, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
@@ -32,6 +33,7 @@ export default function InviteAcceptScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +42,7 @@ export default function InviteAcceptScreen() {
     if (!email.trim().includes('@')) return t('inviteAccept.errors.invalidEmail');
     if (password.length < 8) return t('inviteAccept.errors.passwordLength');
     if (password !== confirmPassword) return t('inviteAccept.errors.passwordMismatch');
+    if (!termsAccepted) return t('register.errors.termsRequired');
     return null;
   };
 
@@ -57,6 +60,7 @@ export default function InviteAcceptScreen() {
         flow: 'signUp',
         fullName: fullName.trim(),
         inviteToken: token,
+        termsAccepted,
       });
       const { profile, venue, token: authToken } = resp;
       setSession({
@@ -167,6 +171,18 @@ export default function InviteAcceptScreen() {
               returnKeyType="go"
               onSubmitEditing={() => void submit()}
             />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Checkbox status={termsAccepted ? 'checked' : 'unchecked'} onPress={() => setTermsAccepted((value) => !value)} color={colors.primary} />
+              <Text style={{ color: colors.muted, fontSize: 12, flex: 1 }}>
+                {t('register.termsPrefix')}{' '}
+                <Text style={{ color: colors.primary }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
+                  {t('register.termsOfService')}
+                </Text>{' '}{t('register.and')}{' '}
+                <Text style={{ color: colors.primary }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
+                  {t('register.privacyPolicy')}
+                </Text>
+              </Text>
+            </View>
 
             <Button
               mode="contained"

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Button, Card, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Checkbox, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
 import { authCardStyle, authColors, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
@@ -44,6 +44,7 @@ export default function SignInScreen() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -60,6 +61,7 @@ export default function SignInScreen() {
       flow,
       fullName: fullName.trim() || undefined,
       inviteToken: options?.inviteToken,
+      termsAccepted: flow === 'signUp' ? termsAccepted : undefined,
     });
 
     const { profile, venue, token } = last;
@@ -113,6 +115,10 @@ export default function SignInScreen() {
     }
     if (flow === 'signUp' && !fullName.trim()) {
       Alert.alert(t('signIn.nameRequiredTitle'), t('signIn.nameRequiredMessage'));
+      return;
+    }
+    if (flow === 'signUp' && !termsAccepted) {
+      Alert.alert(t('signIn.invalidDetailsTitle'), t('register.errors.termsRequired'));
       return;
     }
     setSubmitting(true);
@@ -194,16 +200,19 @@ export default function SignInScreen() {
                 : t('signIn.signInButton')}
             </Button>
 
-            {!inviteToken && flow === 'signUp' ? (
-              <Text style={{ color: authColors.muted, fontSize: 12, textAlign: 'center' }}>
-                {t('signIn.termsPrefix')}{' '}
-                <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
-                  {t('signIn.termsOfService')}
-                </Text>{' '}{t('signIn.and')}{' '}
-                <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
-                  {t('signIn.privacyPolicy')}
-                </Text>.
-              </Text>
+            {flow === 'signUp' ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Checkbox status={termsAccepted ? 'checked' : 'unchecked'} onPress={() => setTermsAccepted((value) => !value)} color={authColors.primary} />
+                <Text style={{ color: authColors.muted, fontSize: 12, flex: 1 }}>
+                  {t('signIn.termsPrefix')}{' '}
+                  <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
+                    {t('signIn.termsOfService')}
+                  </Text>{' '}{t('signIn.and')}{' '}
+                  <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
+                    {t('signIn.privacyPolicy')}
+                  </Text>.
+                </Text>
+              </View>
             ) : null}
           </Card.Content>
         </Card>

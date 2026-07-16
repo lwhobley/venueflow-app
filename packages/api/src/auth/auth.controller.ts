@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Logger, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
-import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import type { Request } from 'express';
 import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
@@ -63,6 +63,10 @@ class PasswordAuthDto {
   @IsString()
   @IsOptional()
   inviteToken?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  termsAccepted?: boolean;
 }
 
 class ChangePasswordDto {
@@ -161,6 +165,9 @@ export class AuthController {
     if (body.password.length < MIN_NEW_PASSWORD_LENGTH) {
       throw new BadRequestException(`Password must be at least ${MIN_NEW_PASSWORD_LENGTH} characters.`);
     }
+    if (body.termsAccepted !== true) {
+      throw new BadRequestException('Accept the Terms of Service and Privacy Policy to create an account.');
+    }
 
     // Build the display name from fullName (legacy) or firstName + lastName.
     const resolvedFullName = body.fullName?.trim()
@@ -197,10 +204,11 @@ export class AuthController {
               emailVerificationCodeHash: null,
               emailVerificationSentAt: null,
             } : {}),
+            termsAcceptedAt: new Date(),
             failedSignInCount: 0,
             lockedUntil: null,
           },
-          create: { email, phone, ...(emailInvite ? { emailVerifiedAt: new Date() } : {}) },
+          create: { email, phone, termsAcceptedAt: new Date(), ...(emailInvite ? { emailVerifiedAt: new Date() } : {}) },
         });
         await tx.passwordCredential.upsert({
           where: { userId: nextUser.id },

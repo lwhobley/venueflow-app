@@ -169,6 +169,7 @@ export const appApi = {
     fullName?: string;
     lastName?: string;
     inviteToken?: string;
+    termsAccepted?: boolean;
   }) =>
     apiRequest<AuthSessionResponse>('/v1/auth/password', { method: 'POST', body }),
   resendVerification: () => apiRequest<{ ok: true; alreadyVerified?: boolean }>('/v1/auth/verify-email/send', { method: 'POST' }),

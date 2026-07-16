@@ -59,6 +59,7 @@ export default function RegisterScreen() {
         password,
         flow: 'signUp',
         fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        termsAccepted,
       });
       const { profile, venue, token } = resp;
       setSession({
