@@ -93,12 +93,12 @@ export const authInputProps = {
 };
 
 export const accents = [
-  { bg: 'rgba(123, 199, 126, 0.14)', fg: '#7BC77E', icon: '#7BC77E' },
-  { bg: 'rgba(224, 168, 79, 0.16)', fg: '#E0A84F', icon: '#E0A84F' },
-  { bg: 'rgba(139, 185, 177, 0.14)', fg: '#8BB9B1', icon: '#8BB9B1' },
-  { bg: 'rgba(196, 123, 86, 0.14)', fg: '#D89261', icon: '#D89261' },
-  { bg: 'rgba(145, 159, 125, 0.14)', fg: '#A9B78E', icon: '#A9B78E' },
-  { bg: 'rgba(224, 111, 98, 0.14)', fg: '#E06F62', icon: '#E06F62' },
+  { bg: 'rgba(123, 199, 126, 0.14)', fg: '#000000', icon: '#7BC77E' },
+  { bg: 'rgba(224, 168, 79, 0.16)', fg: '#000000', icon: '#E0A84F' },
+  { bg: 'rgba(139, 185, 177, 0.14)', fg: '#000000', icon: '#8BB9B1' },
+  { bg: 'rgba(196, 123, 86, 0.14)', fg: '#000000', icon: '#D89261' },
+  { bg: 'rgba(145, 159, 125, 0.14)', fg: '#000000', icon: '#A9B78E' },
+  { bg: 'rgba(224, 111, 98, 0.14)', fg: '#000000', icon: '#E06F62' },
 ] as const;
 
 export const spacing = {

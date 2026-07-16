@@ -95,7 +95,7 @@ function StatTile({ label, value, accent }: { label: string; value: string | num
   return (
     <View style={{ flex: 1, minWidth: 80, backgroundColor: accent?.bg ?? colors.surface, borderRadius: 12, padding: spacing.sm, gap: 2 }}>
       <Text style={{ color: accent?.fg ?? colors.primary, fontSize: 22, fontWeight: '800' }}>{value}</Text>
-      <Text style={{ color: colors.muted, fontSize: 11 }}>{label}</Text>
+      <Text style={{ color: accent ? colors.charcoal : colors.muted, fontSize: 11 }}>{label}</Text>
     </View>
   );
 }

@@ -3,7 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, SegmentedButtons, Switch, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { accents, colors, spacing } from '../../lib/theme';
+import { colors, spacing } from '../../lib/theme';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -103,9 +103,9 @@ export function AvailabilityEditor() {
     <View style={{ gap: spacing.md }}>
       {canManage ? <AvailabilityManagerSettings /> : null}
 
-      <Card style={{ backgroundColor: accents[2].bg, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 16 }}>
         <Card.Content style={{ gap: 4 }}>
-          <Text variant="titleMedium" style={{ color: accents[2].fg, fontWeight: '700' }}>Set availability ahead</Text>
+          <Text variant="titleMedium" style={{ color: colors.charcoal, fontWeight: '700' }}>Set availability ahead</Text>
           <Text style={{ color: colors.charcoal }}>
             Set the hours you can work for each upcoming week. A week locks once its pay period starts — set it in advance. Ask a manager to unlock if you need a change.
           </Text>
@@ -125,7 +125,8 @@ export function AvailabilityEditor() {
                 selected={w.weekStart === selectedWeek}
                 onPress={() => setSelectedWeek(w.weekStart)}
                 icon={w.locked ? 'lock' : 'pencil'}
-                style={{ backgroundColor: w.weekStart === selectedWeek ? accents[2].bg : colors.surface }}
+                style={{ backgroundColor: w.weekStart === selectedWeek ? colors.surfaceSoft : colors.surface }}
+                textStyle={{ color: colors.charcoal }}
               >
                 {weekLabel(w.weekStart)}
               </Chip>
@@ -133,9 +134,9 @@ export function AvailabilityEditor() {
           </ScrollView>
 
           {locked ? (
-            <Card style={{ backgroundColor: '#FDE7E9', borderRadius: 16 }}>
+            <Card style={{ backgroundColor: colors.surfaceSoft, borderColor: colors.border, borderWidth: 1, borderRadius: 16 }}>
               <Card.Content style={{ gap: 4 }}>
-                <Text style={{ color: colors.danger, fontWeight: '700' }}>This week is locked</Text>
+                <Text style={{ color: colors.charcoal, fontWeight: '700' }}>This week is locked</Text>
                 <Text style={{ color: colors.charcoal }}>Its pay period has started. Ask a manager to unlock availability to make changes.</Text>
               </Card.Content>
             </Card>
@@ -154,7 +155,7 @@ export function AvailabilityEditor() {
                     ) : null}
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ color: d.available ? accents[2].fg : colors.muted }}>{d.available ? 'Available' : 'Off'}</Text>
+                    <Text style={{ color: colors.charcoal }}>{d.available ? 'Available' : 'Off'}</Text>
                     <Switch value={d.available} onValueChange={(v) => update(i, { available: v })} color={colors.primary} disabled={locked} />
                   </View>
                 </View>
@@ -174,7 +175,7 @@ export function AvailabilityEditor() {
             </Button>
           ) : null}
           {error ? <Text style={{ color: colors.danger, textAlign: 'center' }}>{error}</Text> : null}
-          {savedNote ? <Text style={{ color: accents[2].fg, textAlign: 'center' }}>Saved ✓</Text> : null}
+          {savedNote ? <Text style={{ color: colors.charcoal, textAlign: 'center' }}>Saved ✓</Text> : null}
         </>
       )}
     </View>
@@ -233,9 +234,9 @@ function AvailabilityManagerSettings() {
   };
 
   return (
-    <Card style={{ backgroundColor: accents[5].bg, borderRadius: 16 }}>
+    <Card style={{ backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 16 }}>
       <Card.Content style={{ gap: spacing.sm }}>
-        <Text variant="titleMedium" style={{ color: accents[5].fg, fontWeight: '800' }}>Manager: availability & pay periods</Text>
+        <Text variant="titleMedium" style={{ color: colors.charcoal, fontWeight: '800' }}>Manager: availability & pay periods</Text>
         <Text style={{ color: colors.charcoal }}>
           Set your pay period. Staff availability locks once a period starts. Unlock to let everyone edit locked weeks.
         </Text>
@@ -250,7 +251,7 @@ function AvailabilityManagerSettings() {
             { value: '4', label: '4 wks' },
           ]}
         />
-        <TextInput label="Start date (YYYY-MM-DD)" value={anchor} onChangeText={setAnchor} autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
+        <TextInput label="Start date" placeholder="YYYY-MM-DD" value={anchor} onChangeText={setAnchor} autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
         <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void savePeriod()}>
           Save pay period
         </Button>
@@ -258,7 +259,7 @@ function AvailabilityManagerSettings() {
           <Text style={{ color: colors.charcoal, flex: 1 }}>Unlock availability for the whole team</Text>
           <Switch value={unlocked} onValueChange={(v) => void toggleUnlock(v)} color={colors.primary} />
         </View>
-        {note ? <Text style={{ color: accents[2].fg }}>{note}</Text> : null}
+        {note ? <Text style={{ color: colors.charcoal }}>{note}</Text> : null}
         {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
       </Card.Content>
     </Card>

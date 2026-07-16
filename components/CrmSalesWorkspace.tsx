@@ -547,13 +547,13 @@ function PipelineView({
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.xs }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: column.accent.fg, fontWeight: '800' }}>{column.label}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{rows.length} deals - {formatMoneyWhole(total)}</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 12 }}>{rows.length} deals - {formatMoneyWhole(total)}</Text>
                 </View>
                 {canMoveSelectedHere ? (
                   <Button compact mode="text" textColor={colors.primary} onPress={() => onMove(selectedLead._id, column.status)}>Move here</Button>
                 ) : null}
               </View>
-              {rows.length === 0 ? <Text style={{ color: colors.muted, fontSize: 12 }}>No deals in this stage.</Text> : rows.map((lead) => (
+              {rows.length === 0 ? <Text style={{ color: colors.charcoal, fontSize: 12 }}>No deals in this stage.</Text> : rows.map((lead) => (
                 <View key={lead._id} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: colors.surface, borderWidth: selectedLeadId === lead._id ? 1 : 0, borderColor: column.accent.fg }}>
                   <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{lead.company ?? lead.source ?? 'No company'} - {formatMoneyWhole(lead.estimatedValueCents)}</Text>
@@ -743,7 +743,7 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
   return (
     <View style={{ minWidth: 145, flexGrow: 1, padding: spacing.md, borderRadius: 8, backgroundColor: accent.bg }}>
       <Text style={{ color: accent.fg, fontWeight: '800', fontSize: 22 }}>{value}</Text>
-      <Text style={{ color: colors.muted }}>{label}</Text>
+      <Text style={{ color: colors.charcoal }}>{label}</Text>
     </View>
   );
 }
@@ -885,7 +885,7 @@ function InsightsView({
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  <Text style={{ color: colors.charcoal, fontSize: 12 }}>
                     {lead.status.replace(/_/g, ' ')} · {lead.daysSinceActivity}d idle · {formatMoneyWhole(lead.estimatedValueCents)}
                   </Text>
                 </View>

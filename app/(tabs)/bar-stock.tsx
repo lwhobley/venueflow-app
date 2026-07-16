@@ -359,7 +359,7 @@ export default function BarStockScreen() {
                 <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: radius.sharp }}>
                   <Card.Content>
                     <Text style={{ color: metric.a.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
-                    <Text style={{ color: colors.muted }}>{metric.label}</Text>
+                    <Text style={{ color: colors.charcoal }}>{metric.label}</Text>
                   </Card.Content>
                 </Card>
               ))}
@@ -499,7 +499,7 @@ export default function BarStockScreen() {
           <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '31%', flexGrow: 1, borderRadius: radius.sharp }}>
             <Card.Content>
               <Text style={{ color: metric.a.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
-              <Text style={{ color: colors.muted }}>{metric.label}</Text>
+              <Text style={{ color: colors.charcoal }}>{metric.label}</Text>
             </Card.Content>
           </Card>
         ))}
@@ -638,7 +638,7 @@ export default function BarStockScreen() {
               <Text variant="titleMedium" style={{ color: accents[0].fg, fontWeight: '700' }}>{t('barStock.scan.scannedName', { name: scannedItem.name })}</Text>
               <Button compact mode="text" textColor={accents[0].fg} onPress={() => setScannedItem(null)}>✕</Button>
             </View>
-            <Text style={{ color: colors.muted }}>{scannedItem.category} · {scannedItem.area ?? t('barStock.list.unassigned')} · {money(scannedItem.unitCostCents)} / {scannedItem.unit}</Text>
+            <Text style={{ color: colors.charcoal }}>{scannedItem.category} · {scannedItem.area ?? t('barStock.list.unassigned')} · {money(scannedItem.unitCostCents)} / {scannedItem.unit}</Text>
             <Text style={{ color: colors.charcoal }}>{t('barStock.scan.onHandPar', { onHand: scannedItem.onHand, parLevel: scannedItem.parLevel })}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
               <Button compact mode="contained" buttonColor={colors.success} onPress={() => { void recordInventoryMovement(scannedItem._id, 'received', 1); }}>{t('barStock.scan.plusOneReceived')}</Button>

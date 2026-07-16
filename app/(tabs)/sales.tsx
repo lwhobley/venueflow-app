@@ -32,8 +32,8 @@ function KpiTile({ label, value, sub, accent }: { label: string; value: string; 
     <Card style={{ backgroundColor: accent.bg, borderRadius: radius.sharp, minWidth: '47%', flexGrow: 1 }}>
       <Card.Content style={{ gap: 2 }}>
         <Text style={{ fontSize: 22, fontWeight: '800', color: accent.fg }}>{value}</Text>
-        {sub ? <Text style={{ fontSize: 12, color: colors.muted }}>{sub}</Text> : null}
-        <Text style={{ fontSize: 12, color: colors.muted }}>{label}</Text>
+        {sub ? <Text style={{ fontSize: 12, color: colors.charcoal }}>{sub}</Text> : null}
+        <Text style={{ fontSize: 12, color: colors.charcoal }}>{label}</Text>
       </Card.Content>
     </Card>
   );

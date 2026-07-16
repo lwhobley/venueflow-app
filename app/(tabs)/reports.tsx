@@ -115,7 +115,7 @@ export default function ReportsScreen() {
               <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, minWidth: '47%', flexGrow: 1, borderRadius: radius.sharp }}>
                 <Card.Content style={{ gap: 4 }}>
                   <Text style={{ color: metric.accent.fg, fontSize: 26, fontWeight: '800' }}>{metric.value}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{metric.label}</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 12 }}>{metric.label}</Text>
                 </Card.Content>
               </Card>
             ))}
@@ -144,22 +144,22 @@ export default function ReportsScreen() {
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
                 <View style={{ backgroundColor: accents[2].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                   <Text style={{ color: accents[2].fg, fontSize: 22, fontWeight: '800' }}>{scheduled}h</Text>
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.scheduledThisWeek')}</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 11 }}>{t('reports.labor.scheduledThisWeek')}</Text>
                 </View>
                 <View style={{ backgroundColor: accents[1].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                   <Text style={{ color: accents[1].fg, fontSize: 22, fontWeight: '800' }}>{suggested}h</Text>
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.demandSuggested')}</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 11 }}>{t('reports.labor.demandSuggested')}</Text>
                 </View>
                 {utilizationPct !== null && (
                   <View style={{ backgroundColor: utilizationPct < 80 ? `${colors.danger}22` : utilizationPct > 120 ? `${colors.warning}22` : `${colors.success}22`, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
-                    <Text style={{ color: utilizationPct < 80 ? colors.danger : utilizationPct > 120 ? colors.warning : colors.success, fontSize: 22, fontWeight: '800' }}>{utilizationPct}%</Text>
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.coverageUtilization')}</Text>
+                    <Text style={{ color: colors.charcoal, fontSize: 22, fontWeight: '800' }}>{utilizationPct}%</Text>
+                    <Text style={{ color: colors.charcoal, fontSize: 11 }}>{t('reports.labor.coverageUtilization')}</Text>
                   </View>
                 )}
                 {budgetPct !== null && (
                   <View style={{ backgroundColor: accents[0].bg, borderRadius: radius.sharp, padding: spacing.sm, flex: 1, minWidth: 100, gap: 2 }}>
                     <Text style={{ color: accents[0].fg, fontSize: 22, fontWeight: '800' }}>{budgetPct}%</Text>
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>{t('reports.labor.ofBudget', { budget: budgetHours })}</Text>
+                    <Text style={{ color: colors.charcoal, fontSize: 11 }}>{t('reports.labor.ofBudget', { budget: budgetHours })}</Text>
                   </View>
                 )}
               </View>

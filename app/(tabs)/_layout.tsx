@@ -29,8 +29,7 @@ export default function TabsLayout() {
   const { width } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && width >= 900;
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const role = me?.profile.role ?? null;
-  const canManage = canManageVenue(role ?? localUser?.role, me?.profile.allAccess ?? localUser?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   // Enforce venue membership: a signed-in user without a venue can't use the
   // app and is sent to choose or join a team. <Redirect> is render-safe (no
