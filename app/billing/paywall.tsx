@@ -45,6 +45,7 @@ export default function PaywallScreen() {
   const trialEndsAt: number | null = me?.profile?.trialEndsAt ?? null;
   const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
   const ctaLabel = inTrial ? t('paywall.ctaUpgrade') : t('paywall.ctaSubscribe');
+  const livePackagesLoaded = packages.length > 0;
 
   useEffect(() => {
     let active = true;
@@ -118,8 +119,7 @@ export default function PaywallScreen() {
       ) : loading ? (
         <Text style={{ color: colors.muted }}>{t('paywall.loadingPricing')}</Text>
       ) : (
-        (packages.length ? packages : FALLBACK_TIERS).map((pkg) => {
-          const live = packages.length > 0;
+        (livePackagesLoaded ? packages : FALLBACK_TIERS).map((pkg) => {
           return (
             <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.soft, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
               <Card.Content style={{ gap: spacing.sm }}>
@@ -134,8 +134,8 @@ export default function PaywallScreen() {
                   mode="contained"
                   buttonColor={colors.primary}
                   loading={busy === pkg.id}
-                  disabled={!!busy}
-                  onPress={() => live ? void buy(pkg.id) : router.replace('/(tabs)/home')}
+                  disabled={!!busy || !livePackagesLoaded}
+                  onPress={() => void buy(pkg.id)}
                 >
                   {ctaLabel}
                 </Button>
