@@ -47,6 +47,7 @@ export class TimeClockController {
   @Get('board')
   async getClockBoard(@VenueScope() scope: Scope) {
     if (!scope) return null;
+    const managerView = isAdminRole(scope.role);
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) return null;
 
@@ -57,10 +58,18 @@ export class TimeClockController {
       include: { profile: true },
     });
 
-    const openEntries = entries
-      .flatMap((entry) => (entry.isOpen && entry.profile ? [mapClockEntry(entry, entry.profile, venue)] : []));
-
-    const myOpenEntry = openEntries.find((item) => item.memberId === scope.profileId) ?? null;
+    const myOpenEntry = entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile)
+      ? mapClockEntry(
+          entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile)!,
+          entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile)!.profile!,
+          venue,
+        )
+      : null;
+    const activeClockEntries = managerView
+      ? entries.flatMap((entry) => (entry.isOpen && entry.profile ? [mapClockEntry(entry, entry.profile, venue, { includeLocation: false })] : []))
+      : myOpenEntry
+        ? [myOpenEntry]
+        : [];
 
     const managerAlerts: Array<{
       kind: 'late_clock_in' | 'missed_clock_out';
@@ -123,12 +132,13 @@ export class TimeClockController {
         subscriptionStatus: venue.subscriptionStatus ?? null,
         subscriptionPlatform: venue.subscriptionPlatform ?? null,
       },
-      activeClockEntries: openEntries,
+      activeClockEntries,
       employeeEntry: myOpenEntry,
       managerAlerts: managerAlerts.slice(0, 8),
     };
   }
 
+  @RequireSubscription()
   @Get('me')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
     const profile = await this.prisma.profile.findUnique({
@@ -260,8 +270,8 @@ export class TimeClockController {
     if (!active) throw new BadRequestException('No active clock-in found');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const entry = await this.prisma.timeEntry.update({
-      where: { id: active.id },
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: active.id, isOpen: true, updatedAt: active.updatedAt },
       data: {
         clockOutAt: new Date(),
         clockOutLat: body.lat,
@@ -271,6 +281,8 @@ export class TimeClockController {
         isOpen: false,
       },
     });
+    if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');
+    const entry = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: active.id } });
     return mapClockEntry(entry, profile, venue);
   }
 
@@ -292,10 +304,12 @@ export class TimeClockController {
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
     const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
-    const updated = await this.prisma.timeEntry.update({
-      where: { id: entry.id },
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
       data: { breaks: newBreaks },
     });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
     return mapClockEntry(updated, profile, venue);
   }
 
@@ -322,10 +336,12 @@ export class TimeClockController {
       endAt: Date.now(),
     };
 
-    const updated = await this.prisma.timeEntry.update({
-      where: { id: entry.id },
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
       data: { breaks: newBreaks },
     });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
     return mapClockEntry(updated, profile, venue);
   }
 }

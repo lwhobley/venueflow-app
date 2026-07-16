@@ -206,6 +206,7 @@ model User {
   emailVerifiedAt           DateTime?
   emailVerificationCodeHash String?
   emailVerificationSentAt   DateTime?
+  termsAcceptedAt           DateTime?
   passwordResetCodeHash     String?
   passwordResetExpiresAt    DateTime?
   passwordResetSentAt       DateTime?
@@ -523,6 +524,10 @@ model Message {
   senderId       String?
   text           String
   createdAt      DateTime     @default(now())
+  // Used as an optimistic-concurrency guard for reaction toggles (read-modify
+  // -write on the reactions JSON column) so two simultaneous reactions can't
+  // silently drop one of them.
+  updatedAt      DateTime     @default(now()) @updatedAt
   shiftId        String?
   swapId         String?
   imageUrl       String?
@@ -1134,8 +1139,10 @@ model Subscription {
   planId                 String
   priceCents             Int
   currency               String
-  trialStartedAt         DateTime
-  trialEndsAt            DateTime
+  // Null for subscriptions that were never trial-based (e.g. a Stripe/Apple
+  // subscription applied directly at 'active' with no trial period).
+  trialStartedAt         DateTime?
+  trialEndsAt            DateTime?
   currentPeriodStart     DateTime?
   currentPeriodEnd       DateTime?
   cancelAtPeriodEnd      Boolean

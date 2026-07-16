@@ -9,7 +9,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { canManageRole, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapProfile } from '../../common/mappers';
@@ -101,9 +101,9 @@ export class StaffController {
       // Only apply the last-owner guard when the role is actually being
       // changed to a non-owner/admin value (i.e. a demotion).
       const isDemoting = isOwnerOrAdminRole(member.role) && !isOwnerOrAdminRole(body.role);
-      await this.assertCanManageTarget(scope, member, isDemoting);
       const roleChanged = member.role !== body.role;
       const updated = await this.prisma.$transaction(async (tx) => {
+        await this.assertCanManageTarget(scope, member, isDemoting, tx);
         const u = await tx.profile.update({
           where: { id: member.id },
           data: {
@@ -189,9 +189,9 @@ export class StaffController {
     if (staff.venueId !== scope.venueId) {
       throw new ForbiddenException('Staff member does not belong to this venue');
     }
-    await this.assertCanManageTarget(scope, staff, true);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertCanManageTarget(scope, staff, true, tx);
       const u = await tx.profile.update({
         where: { id: staff.id },
         data: { venueId: null },
@@ -209,6 +209,7 @@ export class StaffController {
     scope: NonNullable<Scope>,
     target: { id: string; role: Role; venueId: string | null },
     demotingOrRemoving = false,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
     // Editing your own profile is always allowed; the last-owner guard below
     // still prevents a sole owner from self-demoting out of access.
@@ -219,7 +220,10 @@ export class StaffController {
     // remove or demote the target. Harmless edits (name, phone, job title) on
     // the sole owner/admin are safe and should not be blocked.
     if (demotingOrRemoving && isOwnerOrAdminRole(target.role)) {
-      const ownerAdminCount = await this.prisma.profile.count({
+      // Advisory-lock the venue so two concurrent demotions/removals can't both
+      // read the same pre-write count and both pass the guard.
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${scope.venueId}`}))`;
+      const ownerAdminCount = await db.profile.count({
         where: { venueId: scope.venueId, role: { in: ['owner', 'admin'] } },
       });
       if (ownerAdminCount <= 1) {

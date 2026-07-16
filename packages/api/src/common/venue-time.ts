@@ -69,6 +69,20 @@ export function zonedIsoDate(timeZone: string | null | undefined, ts: number): s
   }).format(new Date(ts));
 }
 
+/** UTC instant range [start, end) for a specific local YYYY-MM-DD date. */
+export function zonedDateBounds(
+  timeZone: string | null | undefined,
+  isoDate: string,
+): { start: number; end: number } {
+  const tz = safeTimeZone(timeZone);
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const boundary = (dayOffset: number) => {
+    const utcGuess = Date.UTC(y, m - 1, d + dayOffset);
+    return utcGuess - tzOffsetMs(tz, new Date(utcGuess - tzOffsetMs(tz, new Date(utcGuess))));
+  };
+  return { start: boundary(0), end: boundary(1) };
+}
+
 /**
  * UTC instant range [start, end) of a venue-local calendar day, offset from
  * the venue's "today" by offsetDays. DST-safe (end is the next day's start).
@@ -80,9 +94,6 @@ export function zonedDayBounds(
   const tz = safeTimeZone(timeZone);
   const todayIso = zonedIsoDate(tz, Date.now());
   const [y, m, d] = todayIso.split('-').map(Number);
-  const startUtcGuess = Date.UTC(y, m - 1, d + offsetDays);
-  const start = startUtcGuess - tzOffsetMs(tz, new Date(startUtcGuess - tzOffsetMs(tz, new Date(startUtcGuess))));
-  const endUtcGuess = Date.UTC(y, m - 1, d + offsetDays + 1);
-  const end = endUtcGuess - tzOffsetMs(tz, new Date(endUtcGuess - tzOffsetMs(tz, new Date(endUtcGuess))));
-  return { start, end };
+  const targetIso = new Date(Date.UTC(y, m - 1, d + offsetDays)).toISOString().slice(0, 10);
+  return zonedDateBounds(tz, targetIso);
 }

@@ -2,11 +2,13 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
+import { createHash } from 'crypto';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { enterTenant } from '../prisma/tenant-context';
 
-const TENANT_ISOLATION_ENFORCED = process.env['TENANT_ISOLATION_ENFORCED'] === 'true';
+// Enforced by default (fail-closed); set to 'false' to roll back instantly.
+const TENANT_ISOLATION_ENFORCED = process.env['TENANT_ISOLATION_ENFORCED'] !== 'false';
 
 export type AuthUser = {
   sub: string;
@@ -73,21 +75,57 @@ export class AuthGuard implements CanActivate {
     const now = Date.now();
     const row = await this.prisma.session.findUnique({
       where: { id: payload.sid },
-      select: { userId: true, expiresAt: true },
+      select: { userId: true, expiresAt: true, tokenHash: true },
     });
-    const session = row ? { userId: row.userId, expiresAt: row.expiresAt.getTime() } : null;
+    const session = row
+      ? { userId: row.userId, expiresAt: row.expiresAt.getTime(), tokenHash: row.tokenHash }
+      : null;
 
     if (!session || session.userId !== payload.sub || session.expiresAt <= now) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
+    if (session.tokenHash && session.tokenHash !== createHash('sha256').update(token).digest('hex')) {
+      throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
+    }
 
-    request.user = payload;
+    const liveProfile = await this.prisma.profile.findUnique({
+      where: { userId: payload.sub },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        allAccess: true,
+        trialEndsAt: true,
+        venueId: true,
+        venue: {
+          select: {
+            name: true,
+            subscriptionStatus: true,
+          },
+        },
+      },
+    });
+    const resolvedUser: AuthUser = {
+      ...payload,
+      email: liveProfile?.email ?? payload.email,
+      name: liveProfile?.fullName ?? payload.name,
+      profileId: liveProfile?.id ?? payload.profileId,
+      role: liveProfile?.role ?? payload.role,
+      allAccess: liveProfile?.allAccess ?? payload.allAccess,
+      trialEndsAt: liveProfile?.trialEndsAt?.toISOString() ?? null,
+      venueId: liveProfile?.venueId ?? null,
+      venueName: liveProfile?.venue?.name ?? null,
+      venueStatus: liveProfile?.venue?.subscriptionStatus ?? null,
+    };
+
+    request.user = resolvedUser;
 
     // Bind tenant context for the rest of the request. Inert unless the env
     // flag is on AND the token carries a venueId (auth flows, webhooks, and
     // venueless system tasks legitimately have none and remain unscoped).
-    if (TENANT_ISOLATION_ENFORCED && payload.venueId) {
-      enterTenant(payload.venueId);
+    if (TENANT_ISOLATION_ENFORCED && resolvedUser.venueId) {
+      enterTenant(resolvedUser.venueId);
     }
 
     return true;

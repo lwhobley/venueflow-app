@@ -8,11 +8,12 @@ import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
-import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
+import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
@@ -228,6 +229,14 @@ export class AppController {
     if (!businessName) throw new BadRequestException('Enter your business name');
     if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new BadRequestException('Choose a staff size range');
 
+    // The intended client flow already routes signup through email
+    // verification before create-venue; enforce it server-side too so a
+    // direct API call can't create a venue (and start a trial) on an
+    // unverified account.
+    if (!(await this.isEmailVerified(user.sub))) {
+      throw new ForbiddenException('Verify your email before creating a venue.');
+    }
+
     const existingProfile = await this.getProfile(user);
     if (existingProfile?.venue) {
       const emailVerified = await this.isEmailVerified(user.sub);
@@ -241,6 +250,7 @@ export class AppController {
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
     const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`register-venue:${user.sub}`}))`;
       // Re-check inside the transaction so a double-submit doesn't create a
       // second venue + subscription for an owner who already has one.
       const current = await tx.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
@@ -310,16 +320,17 @@ export class AppController {
         ...(body.name?.trim() ? { name: body.name.trim() } : {}),
         ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
         ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
-        ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(20, Math.min(2000, body.geofenceRadiusM)) } : {}),
+        ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(25, Math.min(2000, body.geofenceRadiusM)) } : {}),
       },
     });
     return mapVenue(venue);
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('dashboard')
   async getDashboard(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
+    const profile = await this.requireVenueProfile(user);
     if (!profile?.venue) return null;
     const canManage = isAdminRole(profile.role);
     const shiftWhere = {
@@ -365,9 +376,10 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('manager-insights')
   async getManagerInsights(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
+    const profile = await this.requireVenueProfile(user);
     if (!profile?.venueId || !isAdminRole(profile.role)) return null;
     const venueId = profile.venueId;
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -417,13 +429,13 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('notifications')
   async getNotifications(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venueId) return [];
+    const profile = await this.requireVenueProfile(user);
     const rows = await this.prisma.notificationEvent.findMany({
       where: {
-        venueId: profile.venueId,
+        venueId: profile.venueId!,
         OR: [
           { audience: 'staff' },
           ...(isAdminRole(profile.role) ? [{ audience: 'managers' }] : []),
@@ -465,10 +477,10 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('clock-board')
   async getClockBoard(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venue) return null;
+    const profile = await this.requireVenueProfile(user);
     const entries = await this.prisma.timeEntry.findMany({
       where: { venueId: profile.venueId!, isOpen: true },
       include: { profile: true, venue: true },
@@ -477,7 +489,7 @@ export class AppController {
     });
     const openEntries = entries.map((entry) => mapClockEntry(entry, entry.profile, entry.venue));
     return {
-      venue: mapVenue(profile.venue),
+      venue: mapVenue(profile.venue!),
       activeClockEntries: isAdminRole(profile.role) ? openEntries : [],
       employeeEntry: openEntries.find((entry) => entry.memberId === profile.id) ?? null,
       managerAlerts: [],
@@ -485,18 +497,17 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('time-clock')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile) return null;
+    const profile = await this.requireVenueProfile(user);
     const entries = await this.prisma.timeEntry.findMany({
       where: { profileId: profile.id },
       orderBy: { clockInAt: 'desc' },
       take: 100,
     });
     const open = entries.find((entry) => entry.isOpen) ?? null;
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = new Date(zonedDayBounds(profile.venue?.timezone ?? null, 0).start);
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const punches = entries
       .flatMap((entry) => [
@@ -770,7 +781,12 @@ export class AppController {
   // Authenticated: lets a solo user (no venue yet) join a team later by code.
   @UseGuards(AuthGuard)
   @Post('join')
-  async joinByCode(@CurrentUser() user: AuthUser, @Body() body: JoinByCodeDto) {
+  async joinByCode(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: JoinByCodeDto) {
+    // Codes are short (6-char, ~30-symbol alphabet); without a per-user rate
+    // limit an authenticated attacker could brute-force one and join a
+    // stranger's venue.
+    await assertWithinSharedRateLimit(this.prisma, `join-code:${user.sub}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `join-code:ip:${getClientIp(request)}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
     const profile = await this.getProfile(user);
     if (!profile) throw new NotFoundException('Profile not found');
     if (profile.venueId) throw new BadRequestException('You are already part of a team.');
@@ -806,7 +822,10 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @Post('redeem-invite')
-  async redeemInvite(@CurrentUser() user: AuthUser, @Body() body: RedeemInviteDto) {
+  async redeemInvite(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: RedeemInviteDto) {
+    // Same brute-force concern as /join — this also accepts the short code.
+    await assertWithinSharedRateLimit(this.prisma, `redeem-invite:${user.sub}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `redeem-invite:ip:${getClientIp(request)}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
     return this.redeemInviteForUser(user.sub, body.codeOrToken);
   }
 
@@ -898,19 +917,22 @@ export class AppController {
     if (!profile) return { ok: true };
     const deletedAccountEmail = profile.email;
     const deletedAccountName = profile.fullName;
-    if (profile.venueId && isOwnerOrAdminRole(profile.role)) {
-      const [ownerAdminCount, memberCount] = await Promise.all([
-        this.prisma.profile.count({ where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } } }),
-        this.prisma.profile.count({ where: { venueId: profile.venueId } }),
-      ]);
-      // A sole remaining member may delete (orphaning an empty venue is fine,
-      // and App Store guideline 5.1.1(v) requires in-app account deletion).
-      // Block only when other staff remain but this is the last owner/admin.
-      if (ownerAdminCount <= 1 && memberCount > 1) {
-        throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
-      }
-    }
     await this.prisma.$transaction(async (tx) => {
+      if (profile.venueId && isOwnerOrAdminRole(profile.role)) {
+        // Advisory-lock the venue so two concurrent last-admin deletions can't
+        // both read the same pre-delete count and both pass the guard.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${profile.venueId}`}))`;
+        const [ownerAdminCount, memberCount] = await Promise.all([
+          tx.profile.count({ where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } } }),
+          tx.profile.count({ where: { venueId: profile.venueId } }),
+        ]);
+        // A sole remaining member may delete (orphaning an empty venue is fine,
+        // and App Store guideline 5.1.1(v) requires in-app account deletion).
+        // Block only when other staff remain but this is the last owner/admin.
+        if (ownerAdminCount <= 1 && memberCount > 1) {
+          throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
+        }
+      }
       await tx.pushToken.deleteMany({ where: { profileId: profile.id } });
       await tx.availability.deleteMany({ where: { profileId: profile.id } });
       // Time entries are employer wage records (FLSA retention) — keep them.

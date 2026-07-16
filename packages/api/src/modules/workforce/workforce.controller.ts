@@ -120,27 +120,31 @@ export class WorkforceController {
       }
 
       if (!email) {
-        return {
-          status: 'found',
-          emailSent: false,
-          venueName: unclaimedProfile.venue.name,
-          jobTitle: unclaimedProfile.jobTitle,
-          role: unclaimedProfile.role,
-          expiresAt: unclaimedProfile.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000,
-        };
+        return { status: 'found', emailSent: false };
       }
 
-      invite = await this.prisma.invite.create({
-        data: {
-          venueId: unclaimedProfile.venueId!,
-          email,
-          token: randomBytes(18).toString('base64url'),
-          role: unclaimedProfile.role,
-          jobTitle: unclaimedProfile.jobTitle,
-          createdBy: unclaimedProfile.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
-        include: { venue: { select: { name: true } } },
+      // A legacy roster row has no Invite yet. Serialize creation by email so
+      // simultaneous checks cannot mint multiple valid bearer tokens.
+      invite = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invite-check:${email}`}))`;
+        const existing = await tx.invite.findFirst({
+          where: { email: { equals: email, mode: 'insensitive' } },
+          include: { venue: { select: { name: true } } },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (existing) return existing;
+        return tx.invite.create({
+          data: {
+            venueId: unclaimedProfile.venueId!,
+            email,
+            token: randomBytes(18).toString('base64url'),
+            role: unclaimedProfile.role,
+            jobTitle: unclaimedProfile.jobTitle,
+            createdBy: unclaimedProfile.id,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          },
+          include: { venue: { select: { name: true } } },
+        });
       });
     }
     if (invite.usedBy) {
@@ -164,14 +168,7 @@ export class WorkforceController {
           `— The Venue Wrangler Team`,
       });
     }
-    return {
-      status: 'found',
-      emailSent: Boolean(email),
-      venueName: invite.venue.name,
-      jobTitle: invite.jobTitle,
-      role: invite.role,
-      expiresAt: invite.expiresAt.getTime(),
-    };
+    return { status: 'found', emailSent: Boolean(email) };
   }
 
   // ─── Public: venue search ──────────────────────────────────────────────────

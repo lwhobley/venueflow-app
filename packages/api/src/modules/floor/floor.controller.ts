@@ -79,6 +79,21 @@ class TableDto {
   @Min(1)
   capacity!: number;
 
+  @IsString()
+  @IsOptional()
+  seatLabelStyle?: string;
+
+  @IsNumber()
+  @IsOptional()
+  rotation?: number;
+
+  @IsInt()
+  @IsOptional()
+  minSpend?: number;
+
+  @IsOptional()
+  isReservable?: boolean;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => TableChairDto)
@@ -87,10 +102,32 @@ class TableDto {
 }
 
 class SaveFloorPlanDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsNumber()
+  @IsOptional()
+  width?: number;
+
+  @IsNumber()
+  @IsOptional()
+  height?: number;
+
+  @IsString()
+  @IsOptional()
+  backgroundImageUrl?: string | null;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => TableDto)
   tables!: TableDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TableChairDto)
+  @IsOptional()
+  chairs?: TableChairDto[];
 }
 
 class AddWaitlistDto {
@@ -188,7 +225,7 @@ export class FloorController {
   @Post()
   async saveFloorPlan(@VenueScope() scope: Scope, @Body() body: SaveFloorPlanDto) {
     requireManager(scope);
-    return this.floor.saveFloorPlan(scope.venueId, body.tables);
+    return this.floor.saveFloorPlan(scope.venueId, body);
   }
 
   @RequireSubscription('active')

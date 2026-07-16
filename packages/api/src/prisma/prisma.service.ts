@@ -5,14 +5,14 @@ import { tenantIsolationExtension } from './tenant-isolation.extension';
 /**
  * Returns true when the tenant-isolation Prisma extension should be applied.
  *
- * The extension is itself inert unless an AsyncLocalStorage tenant context is
- * bound per-request (see AuthGuard + tenant-context.ts), so this env flag is a
- * second safety: with TENANT_ISOLATION_ENFORCED unset, queries behave exactly
- * as they did before — no Proxy, no extension, no context binding. Flip the
- * flag (and deploy) to enable; unset to roll back instantly.
+ * Enforced by default (fail-closed): every venue-scoped query is AND-scoped to
+ * the request's tenant as a database-layer backstop to the manual
+ * `where: { venueId }` filters throughout the app. Set
+ * TENANT_ISOLATION_ENFORCED=false only to roll back instantly if the
+ * extension itself is suspected of causing a production issue.
  */
 function tenantIsolationEnforced(): boolean {
-  return process.env['TENANT_ISOLATION_ENFORCED'] === 'true';
+  return process.env['TENANT_ISOLATION_ENFORCED'] !== 'false';
 }
 
 @Injectable()

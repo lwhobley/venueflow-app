@@ -42,6 +42,7 @@ describe('PrismaService cutover (integration)', () => {
 
   afterAll(async () => {
     delete process.env.TENANT_ISOLATION_ENFORCED;
+    if (!prisma) return;
     await prisma.$disconnect();
     await teardown();
   });

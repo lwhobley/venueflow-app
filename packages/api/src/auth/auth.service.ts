@@ -1,4 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
@@ -32,6 +33,13 @@ export class AuthService {
 
   hashOneTimeCode(code: string) {
     return createHash('sha256').update(code.trim()).digest('hex');
+  }
+
+  /** Constant-time comparison of two one-time-code hashes (both fixed-length hex digests). */
+  oneTimeCodeHashesMatch(a: string, b: string): boolean {
+    const bufA = Buffer.from(a, 'hex');
+    const bufB = Buffer.from(b, 'hex');
+    return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
   }
 
   async issueSession(userId: string, email: string, fullName?: string, inviteToken?: string, rawPhone?: string) {
@@ -83,7 +91,7 @@ export class AuthService {
       });
       let result;
       if (existingByUser) {
-        const unclaimedProfile = emailVerified
+        const adoptableProfile = emailVerified
           ? await tx.profile.findFirst({
               where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
               orderBy: { createdAt: 'asc' },
@@ -91,13 +99,14 @@ export class AuthService {
             })
           : null;
 
-        if (unclaimedProfile && (!existingByUser.venueId || existingByUser.venueId === unclaimedProfile.venueId)) {
+        if (adoptableProfile && (!existingByUser.venueId || existingByUser.venueId === adoptableProfile.venueId)) {
           await tx.profile.delete({ where: { id: existingByUser.id } });
           result = await tx.profile.update({
-            where: { id: unclaimedProfile.id },
+            where: { id: adoptableProfile.id },
             data: { userId },
             include: { venue: true },
           });
+          await this.logProfileAdoption(tx, result);
         } else {
           result = await tx.profile.update({
             where: { id: existingByUser.id },
@@ -111,31 +120,34 @@ export class AuthService {
           });
         }
       } else {
-        const claimedProfile = (grant
-          ? await tx.profile.findFirst({
-              where: { userId: null, venueId: grant.venueId, email: { equals: email, mode: 'insensitive' } },
-              orderBy: { createdAt: 'asc' },
-              include: { venue: true },
-            })
-          : await tx.profile.findFirst({
-              where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
-              orderBy: { createdAt: 'asc' },
-              include: { venue: true },
-            })) || null;
-        if (claimedProfile) {
+        const adoptableProfile = emailVerified
+          ? (grant
+              ? await tx.profile.findFirst({
+                  where: { userId: null, venueId: grant.venueId, email: { equals: email, mode: 'insensitive' } },
+                  orderBy: { createdAt: 'asc' },
+                  include: { venue: true },
+                })
+              : await tx.profile.findFirst({
+                  where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
+                  orderBy: { createdAt: 'asc' },
+                  include: { venue: true },
+                }))
+          : null;
+        if (adoptableProfile) {
           result = await tx.profile.update({
-            where: { id: claimedProfile.id },
+            where: { id: adoptableProfile.id },
             data: {
               userId,
               email,
-              fullName: trimmedFullName || claimedProfile.fullName,
-              role: grant?.role ?? claimedProfile.role,
-              jobTitle: grant?.jobTitle ?? claimedProfile.jobTitle,
-              venueId: grant?.venueId ?? claimedProfile.venueId,
-              trialEndsAt: claimedProfile.trialEndsAt ?? trialEndsAt,
+              fullName: trimmedFullName || adoptableProfile.fullName,
+              role: grant?.role ?? adoptableProfile.role,
+              jobTitle: grant?.jobTitle ?? adoptableProfile.jobTitle,
+              venueId: grant?.venueId ?? adoptableProfile.venueId,
+              trialEndsAt: adoptableProfile.trialEndsAt ?? trialEndsAt,
             },
             include: { venue: true },
           });
+          await this.logProfileAdoption(tx, result);
         } else {
           result = await tx.profile.create({
             data: {
@@ -162,5 +174,33 @@ export class AuthService {
       data: { userId, expiresAt: new Date(Date.now() + SESSION_DURATION_MS) },
     });
     return { session, profile };
+  }
+
+  /**
+   * Adoption links a sign-in to a pre-existing venue-owned profile purely by
+   * verified-email match — there's no invite-token confirmation on this path.
+   * Record it so a manager reviewing the venue's audit log can catch a
+   * mis-typed roster email or a mis-bind, rather than it happening silently.
+   */
+  private async logProfileAdoption(
+    tx: Prisma.TransactionClient,
+    profile: { id: string; fullName: string; role: Role; venueId: string | null },
+  ) {
+    if (!profile.venueId) return;
+    await tx.auditLog.create({
+      data: {
+        venueId: profile.venueId,
+        actorProfileId: null,
+        actorName: profile.fullName,
+        actorRole: profile.role,
+        targetProfileId: profile.id,
+        targetName: profile.fullName,
+        targetRole: profile.role,
+        entityType: 'profile',
+        entityId: profile.id,
+        action: 'profile_adopted',
+        summary: `${profile.fullName} signed in and was linked to this venue by matching verified email.`,
+      },
+    });
   }
 }

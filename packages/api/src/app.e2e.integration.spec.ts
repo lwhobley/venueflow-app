@@ -20,8 +20,8 @@ describe('e2e smoke: auth, billing, scheduling', () => {
   let venueIds: string[] = [];
 
   // Subscribed venue/profile (happy path) + unsubscribed venue/profile (billing gate).
-  let subscribedSession: { userId: string; sid: string };
-  let unsubscribedSession: { userId: string; sid: string };
+  let subscribedSession: { userId: string; sid: string } | undefined;
+  let unsubscribedSession: { userId: string; sid: string } | undefined;
 
   beforeAll(async () => {
     const boot = await bootstrapE2eApp();
@@ -55,11 +55,14 @@ describe('e2e smoke: auth, billing, scheduling', () => {
   }, 60_000);
 
   afterAll(async () => {
-    const userIds = [subscribedSession.userId, unsubscribedSession.userId];
-    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
-    await prisma.profile.deleteMany({ where: { userId: { in: userIds } } });
-    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
-    await prisma.venue.deleteMany({ where: { id: { in: venueIds } } });
+    if (!prisma) return;
+    const userIds = [subscribedSession?.userId, unsubscribedSession?.userId].filter((id): id is string => Boolean(id));
+    if (userIds.length) {
+      await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.profile.deleteMany({ where: { userId: { in: userIds } } });
+      await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    }
+    if (venueIds.length) await prisma.venue.deleteMany({ where: { id: { in: venueIds } } });
     await teardown();
   });
 
@@ -84,7 +87,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     });
 
     it('accepts a valid token backed by a real Session row', async () => {
-      const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
+      const token = signTestToken(jwt, { sub: subscribedSession!.userId, sid: subscribedSession!.sid });
       const res = await request(app.getHttpServer())
         .get('/api/v1/app/me')
         .set('Authorization', `Bearer ${token}`)
@@ -96,7 +99,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
 
   describe('billing gate', () => {
     it('returns 402 for a venue without an active subscription', async () => {
-      const token = signTestToken(jwt, { sub: unsubscribedSession.userId, sid: unsubscribedSession.sid });
+      const token = signTestToken(jwt, { sub: unsubscribedSession!.userId, sid: unsubscribedSession!.sid });
       await request(app.getHttpServer())
         .get('/api/v1/scheduling/availability/me')
         .set('Authorization', `Bearer ${token}`)
@@ -104,7 +107,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     });
 
     it('allows the same route for a venue with an active subscription', async () => {
-      const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
+      const token = signTestToken(jwt, { sub: subscribedSession!.userId, sid: subscribedSession!.sid });
       await request(app.getHttpServer())
         .get('/api/v1/scheduling/availability/me')
         .set('Authorization', `Bearer ${token}`)
@@ -114,7 +117,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
 
   describe('validation', () => {
     it('rejects a request body with unknown fields (whitelist: true, forbidNonWhitelisted: true)', async () => {
-      const token = signTestToken(jwt, { sub: subscribedSession.userId, sid: subscribedSession.sid });
+      const token = signTestToken(jwt, { sub: subscribedSession!.userId, sid: subscribedSession!.sid });
       await request(app.getHttpServer())
         .patch('/api/v1/app/venue')
         .set('Authorization', `Bearer ${token}`)

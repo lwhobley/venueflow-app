@@ -43,6 +43,7 @@ describe('billing webhook idempotency (integration)', () => {
   });
 
   afterAll(async () => {
+    if (!prisma) return;
     await prisma.subscriptionEvent.deleteMany();
     await prisma.subscription.deleteMany();
     await prisma.venue.deleteMany();

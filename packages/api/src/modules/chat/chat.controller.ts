@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   ForbiddenException,
@@ -92,11 +93,29 @@ function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
 
 @Controller('v1/chat')
 export class ChatController {
+  // Per-process throttle so listConversations (called on every chat screen
+  // open/refresh) doesn't re-run the full role/crew sync — with its per-role
+  // and per-day create/update writes — on every single request. Roster and
+  // schedule changes aren't second-to-second, so a short debounce is enough;
+  // worst case each replica re-syncs independently on its own cadence, which
+  // is still far less write amplification than per-request.
+  private readonly lastContextualSyncAt = new Map<string, number>();
+  private static readonly CONTEXTUAL_SYNC_THROTTLE_MS = 5 * 60 * 1000;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
   ) {}
+
+  private async ensureContextualConversationsThrottled(venueId: string) {
+    const lastSync = this.lastContextualSyncAt.get(venueId);
+    if (lastSync && Date.now() - lastSync < ChatController.CONTEXTUAL_SYNC_THROTTLE_MS) {
+      return;
+    }
+    this.lastContextualSyncAt.set(venueId, Date.now());
+    await this.ensureContextualConversations(venueId);
+  }
 
   async ensureContextualConversations(venueId: string) {
     const [profiles, allShifts, existingConvs] = await Promise.all([
@@ -215,8 +234,8 @@ export class ChatController {
   async listConversations(@VenueScope() scope: Scope) {
     if (!scope) return { groups: [], dms: [], roles: [], shifts: [] };
 
-    // Automatically synchronize role & crew chats on list view
-    await this.ensureContextualConversations(scope.venueId);
+    // Automatically synchronize role & crew chats on list view (throttled).
+    await this.ensureContextualConversationsThrottled(scope.venueId);
 
     const all = await this.prisma.conversation.findMany({
       where: { venueId: scope.venueId },
@@ -385,6 +404,9 @@ export class ChatController {
       where: { id, venueId: scope.venueId },
     });
     if (!conv) throw new NotFoundException('Conversation not found');
+    if (!canDeleteConversation(conv.type, conv.name)) {
+      throw new ForbiddenException('Only custom group chats can be deleted');
+    }
 
     await this.prisma.$transaction([
       this.prisma.message.deleteMany({ where: { conversationId: id } }),
@@ -542,31 +564,44 @@ export class ChatController {
   @Post('messages/:id/react')
   async toggleReaction(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ReactDto) {
     if (!scope) throw new ForbiddenException('No venue profile found');
-    const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
-    if (!msg) throw new NotFoundException('Message not found');
-
-    const reactions = (msg.reactions as Record<string, string[]> | null) || {};
-    const emoji = body.emoji;
-    let users = reactions[emoji] || [];
-
-    if (users.includes(scope.profileId)) {
-      users = users.filter((uid) => uid !== scope.profileId);
-    } else {
-      users.push(scope.profileId);
-    }
-
-    if (users.length === 0) {
-      delete reactions[emoji];
-    } else {
-      reactions[emoji] = users;
-    }
-
-    await this.prisma.message.update({
-      where: { id },
-      data: { reactions },
+    const conv = await this.prisma.conversation.findFirst({
+      where: { venueId: scope.venueId, messages: { some: { id } } },
     });
+    if (!conv) throw new NotFoundException('Message not found');
+    if (!canAccessConversation(conv.memberIds, conv.type, scope.profileId)) {
+      throw new ForbiddenException('Not a participant');
+    }
 
-    return { ok: true, reactions };
+    // Read-modify-write on the reactions JSON column: retry on a lost race
+    // (guarded by updatedAt) instead of silently dropping one user's toggle.
+    const emoji = body.emoji;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
+      if (!msg) throw new NotFoundException('Message not found');
+
+      const reactions = { ...(msg.reactions as Record<string, string[]> | null) };
+      let users = reactions[emoji] || [];
+      if (users.includes(scope.profileId)) {
+        users = users.filter((uid) => uid !== scope.profileId);
+      } else {
+        users = [...users, scope.profileId];
+      }
+      if (users.length === 0) {
+        delete reactions[emoji];
+      } else {
+        reactions[emoji] = users;
+      }
+
+      const updated = await this.prisma.message.updateMany({
+        where: { id, updatedAt: msg.updatedAt },
+        data: { reactions },
+      });
+      if (updated.count > 0) {
+        return { ok: true, reactions };
+      }
+      // Someone else updated the row between our read and write — retry.
+    }
+    throw new ConflictException('This message changed while updating your reaction. Try again.');
   }
 
   @RequireSubscription('active')
@@ -575,6 +610,16 @@ export class ChatController {
     if (!scope) throw new ForbiddenException('No venue profile found');
     const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
     if (!msg) throw new NotFoundException('Message not found');
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: msg.conversationId, venueId: scope.venueId },
+    });
+    if (!conv) throw new NotFoundException('Conversation not found');
+    if (!canAccessConversation(conv.memberIds, conv.type, scope.profileId)) {
+      throw new ForbiddenException('Not a participant');
+    }
+    if (msg.senderId !== scope.profileId) {
+      throw new ForbiddenException('Only the sender can edit this message');
+    }
 
     const text = body.text.trim();
     if (!text) throw new BadRequestException('Text is required');
@@ -614,10 +659,8 @@ export class ChatController {
     return { imageUrl: await this.mediaAccess.createPath('chat-image', image.id, scope.venueId, path) };
   }
 
-  // React Native <Image> (and the web app's own <img>) can't attach the app's
-  // bearer token, so this endpoint accepts a short-lived token issued only in
-  // authenticated venue responses (see createPath above) instead of relying on
-  // the image id alone being unguessable.
+  // React Native <Image> cannot attach the app's bearer token, so this endpoint
+  // accepts a short-lived token issued only in authenticated venue responses.
   @Public()
   @SkipVenueScope()
   @Get('images/:id')
@@ -637,5 +680,13 @@ function canAccessConversation(memberIds: string[], type: string, profileId: str
   if ((type === 'group' || type === 'role' || type === 'shift') && memberIds.length > 0) {
     return memberIds.includes(profileId);
   }
+  // A memberless group/role/shift conversation (e.g. before the next
+  // ensureContextualConversations sync repopulates it) is visible to the rest
+  // of the caller's own venue — access is already scoped to venueId upstream
+  // (VenueScope), so this never crosses a tenant boundary.
   return true;
+}
+
+function canDeleteConversation(type: string, name: string | null) {
+  return type === 'group' && name !== GENERAL_GROUP_NAME;
 }

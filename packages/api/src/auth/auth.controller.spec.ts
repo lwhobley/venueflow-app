@@ -6,6 +6,20 @@ vi.mock('../common/rate-limit', () => ({
 }));
 
 describe('AuthController email invite signup', () => {
+  it('requires terms acceptance for every new account', async () => {
+    const controller = new AuthController(
+      { user: { findUnique: vi.fn().mockResolvedValue(null) } } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect((controller as any).password(
+      { ip: '127.0.0.1' },
+      { email: 'staff@example.com', password: 'password123', flow: 'signUp' },
+    )).rejects.toThrow('Accept the Terms of Service');
+  });
+
   it('treats the emailed token as verification and issues a venue session', async () => {
     const verifiedAt = new Date();
     const userFindUnique = vi.fn()
@@ -57,6 +71,7 @@ describe('AuthController email invite signup', () => {
         flow: 'signUp',
         fullName: 'Test Staff',
         inviteToken: 'emailed-token',
+        termsAccepted: true,
       },
     );
 

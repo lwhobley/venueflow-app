@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { jsonBodyLimitForPath } from './common/body-limit';
 import { initSentry } from './observability/sentry';
 
 const DEFAULT_CORS_ORIGINS = [
@@ -19,10 +20,19 @@ async function bootstrap() {
   initSentry();
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.enableShutdownHooks();
-  // Behind Railway's proxy: trust the first hop so req.ip and X-Forwarded-For
-  // reflect the real client (used for rate-limit keys), not the proxy.
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
   const config = app.get(ConfigService);
+  // Behind the platform's proxy: trust exactly as many hops as sit in front of
+  // this process so req.ip reflects the real client (used for rate-limit
+  // keys), not the proxy — and so a client-supplied X-Forwarded-For entry
+  // beyond that hop count can't be spoofed into req.ip. Configurable because
+  // the actual hop count depends on the deployment topology; verify it against
+  // the platform's proxy chain rather than assuming a single hop.
+  const rawTrustProxyHops = config.get<string>('TRUST_PROXY_HOPS', '1');
+  const trustProxyHops = Number(rawTrustProxyHops);
+  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
+    throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
+  }
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   // Only accept fully-qualified http(s) origins. Reject wildcards — the server
   // sends credentials (cookies), and a wildcard origin with credentials is both
   // spec-violating and dangerous if the middleware ever reflects the requester.
@@ -39,7 +49,7 @@ async function bootstrap() {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl ?? req.url ?? '';
     const path = url.split('?')[0].replace(/\/+$/, '');
-    const limit = path === '/api/v1/chat/images' ? config.get<string>('JSON_BODY_LIMIT', '8mb') : '1mb';
+    const limit = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '8mb'));
     json({
       limit,
       verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {

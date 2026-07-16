@@ -18,8 +18,7 @@ export class MediaAccessService {
     const token = await this.jwt.signAsync<MediaAccessClaims>(
       { purpose: 'media-access', kind, mediaId, venueId },
       // Short-lived: this token is the only gate on an otherwise-public image
-      // route (React Native <Image> can't send a bearer header, and the web
-      // app's own <img>/redirect flow reuses the same route). 15 minutes
+      // route (React Native <Image> can't send a bearer header). 15 minutes
       // comfortably covers a single viewing session while limiting exposure
       // if the URL leaks (logs, screenshots, shared links).
       { expiresIn: '15m' },

@@ -19,6 +19,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
@@ -75,7 +76,8 @@ class SaveLeadDto {
   @IsOptional()
   assignedToId?: string;
 
-  @IsNumber()
+  @IsInt()
+  @Min(0)
   @IsOptional()
   estimatedValueCents?: number;
 }
@@ -106,6 +108,7 @@ class SaveBeoDto {
   eventType?: string;
 
   @IsInt()
+  @Min(0)
   @IsOptional()
   guestCount?: number;
 
@@ -118,10 +121,12 @@ class SaveBeoDto {
   setupStyle?: string;
 
   @IsInt()
+  @Min(0)
   @IsOptional()
   fbMinimumCents?: number;
 
   @IsInt()
+  @Min(0)
   @IsOptional()
   depositCents?: number;
 
@@ -185,6 +190,7 @@ class SaveContractDto {
   eventDate?: number;
 
   @IsInt()
+  @Min(0)
   @IsOptional()
   guestCount?: number;
 
@@ -193,6 +199,7 @@ class SaveContractDto {
   venueSpace?: string;
 
   @IsInt()
+  @Min(0)
   @IsOptional()
   fbMinimumCents?: number;
 
