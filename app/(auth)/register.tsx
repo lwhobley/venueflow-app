@@ -32,7 +32,7 @@ export default function RegisterScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const hasInvite = params.inviteFound === '1' && Boolean(params.email) && Boolean(params.venueName);
+  const hasInvite = params.inviteFound === '1' && Boolean(params.email);
 
   if (!hasInvite) return <Redirect href="/(auth)/invite-check" />;
 
@@ -59,6 +59,7 @@ export default function RegisterScreen() {
         password,
         flow: 'signUp',
         fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        termsAccepted,
       });
       const { profile, venue, token } = resp;
       setSession({

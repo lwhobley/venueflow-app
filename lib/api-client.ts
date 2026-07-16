@@ -64,6 +64,7 @@ export function resolveMediaUrl(path: string): string {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
+  signal?: AbortSignal;
   timeoutMs?: number;
 };
 
@@ -71,6 +72,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const token = useAuthStore.getState().token;
   const timeout = options.timeoutMs ?? 30_000;
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const signal = controller ?? options.signal ? controller?.signal ?? options.signal : undefined;
+  const abortFromCaller = () => controller?.abort();
+  options.signal?.addEventListener('abort', abortFromCaller);
   const timer =
     controller && timeout > 0
       ? setTimeout(() => controller.abort(), timeout)
@@ -81,12 +85,12 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     response = await fetch(`${getApiBaseUrl()}${path}`, {
       method: options.method ?? 'GET',
       headers: {
-        Accept: 'application/json',
+        Accept: 'application/json, text/csv;q=0.9, text/plain;q=0.8',
         ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-      ...(controller ? { signal: controller.signal } : {}),
+      ...(signal ? { signal } : {}),
     });
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
@@ -94,11 +98,18 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     }
     throw error;
   } finally {
+    options.signal?.removeEventListener('abort', abortFromCaller);
     if (timer) clearTimeout(timer);
   }
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => null);
+    if (response.status === 401 && token) {
+      useAuthStore.getState().clearSession();
+    }
+    const errorBody = await response.json().catch(async () => {
+      const text = await response.text().catch(() => '');
+      return text ? { message: text } : null;
+    });
     const message =
       typeof errorBody?.message === 'string'
         ? errorBody.message
@@ -109,14 +120,21 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   if (response.status === 204) return null as T;
-  return response.json() as Promise<T>;
+  const contentType = response.headers.get('content-type') ?? '';
+  if (contentType.includes('application/json')) {
+    return response.json() as Promise<T>;
+  }
+  return response.text() as Promise<T>;
 }
 
 export function useApiQuery<T>(queryKey: QueryKey, path: string, enabled = true) {
+  const authEpoch = useAuthStore((state) => state.authEpoch);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const venueId = useAuthStore((state) => state.venue?.id ?? null);
   const token = useAuthStore((state) => state.token);
   return useQuery({
-    queryKey,
-    queryFn: () => apiRequest<T>(path),
+    queryKey: [...queryKey, authEpoch, userId, venueId],
+    queryFn: ({ signal }) => apiRequest<T>(path, { signal }),
     enabled: enabled && Boolean(token),
   });
 }
@@ -135,7 +153,7 @@ export function useApiMutation<TArgs, TResult>(
 }
 
 export type InviteCheckResult =
-  | { status: 'found'; emailSent?: boolean; venueName: string; jobTitle: string; role: string; expiresAt: number }
+  | { status: 'found'; emailSent?: boolean; venueName?: string; jobTitle?: string; role?: string; expiresAt?: number }
   | { status: 'not_found' | 'expired' | 'used' };
 
 export type JoinRequestResult = { requestId: string; status: 'pending'; venueName: string };
@@ -151,6 +169,7 @@ export const appApi = {
     fullName?: string;
     lastName?: string;
     inviteToken?: string;
+    termsAccepted?: boolean;
   }) =>
     apiRequest<AuthSessionResponse>('/v1/auth/password', { method: 'POST', body }),
   resendVerification: () => apiRequest<{ ok: true; alreadyVerified?: boolean }>('/v1/auth/verify-email/send', { method: 'POST' }),
@@ -172,20 +191,19 @@ export const appApi = {
     apiRequest<{ redeemed: boolean; profile?: ApiProfile; venue?: ApiVenue | null }>('/v1/app/redeem-my-invite', { method: 'POST' }),
   getMe: () => apiRequest<{ profile: ApiProfile; venue: ApiVenue | null } | null>('/v1/app/me'),
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
-  syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
-    apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),
-  // Web pays via Stripe; both return a URL to redirect the browser to.
   createStripeCheckout: () => apiRequest<{ url: string }>('/v1/app/billing/stripe/checkout', { method: 'POST' }),
   createStripePortal: () => apiRequest<{ url: string }>('/v1/app/billing/stripe/portal', { method: 'POST' }),
+  syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
+    apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),
   getNotifications: () => apiRequest<any[]>('/v1/app/notifications'),
   markNotificationRead: (notificationId: string) => apiRequest('/v1/app/notifications/' + notificationId + '/read', { method: 'POST' }),
-  getClockBoard: () => apiRequest<any | null>('/v1/app/clock-board'),
-  getMyTimeClock: () => apiRequest<any | null>('/v1/app/time-clock'),
-  clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-in', { method: 'POST', body }),
-  clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-out', { method: 'POST', body }),
-  breakStart: (body: { type: 'paid' | 'unpaid' }) => apiRequest('/v1/app/time-clock/break-start', { method: 'POST', body }),
-  breakEnd: () => apiRequest('/v1/app/time-clock/break-end', { method: 'POST' }),
+  getClockBoard: () => apiRequest<any | null>('/v1/time-clock/board'),
+  getMyTimeClock: () => apiRequest<any | null>('/v1/time-clock/me'),
+  clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-in', { method: 'POST', body }),
+  clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-out', { method: 'POST', body }),
+  breakStart: (body: { type: 'paid' | 'unpaid' }) => apiRequest('/v1/time-clock/break-start', { method: 'POST', body }),
+  breakEnd: () => apiRequest('/v1/time-clock/break-end', { method: 'POST' }),
   listVenueStaff: () => apiRequest<any[]>('/v1/app/staff'),
   upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string; phone?: string; altPhone?: string; address?: string; dateOfBirth?: string; certifications?: string[] }) =>
     apiRequest('/v1/app/staff', { method: 'POST', body }),
