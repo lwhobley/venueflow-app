@@ -12,7 +12,9 @@ import { RequireSubscription } from '../../billing/require-subscription.decorato
 import { assertWithinGeofence } from '../../common/geofence';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
+import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -712,13 +714,19 @@ export class AppController {
     const canElevate = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess;
     const inviteRole = body.role === 'manager' && canElevate ? 'manager' : 'staff';
     const email = body.email?.trim().toLowerCase() || null;
+    // The plaintext token is only ever needed for the instant it's embedded
+    // in the deep-link/response/email below — only its hash is persisted
+    // (Invite.tokenHash), so a DB dump/backup leak can't yield a usable
+    // signup link. Use this local variable everywhere below, never re-read
+    // `invite.token` from the DB.
     const token = randomBytes(18).toString('base64url');
+    const tokenHash = hashInviteToken(token);
     const code = await this.uniqueInviteCode();
     const invite = await this.prisma.invite.create({
       data: {
         venueId: profile.venueId!,
         email,
-        token,
+        tokenHash,
         code,
         role: inviteRole,
         jobTitle: body.jobTitle?.trim() || 'Team Member',
@@ -726,8 +734,8 @@ export class AppController {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-    const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(invite.token)}`;
-    const venueName = profile.venue?.name ?? 'your Venue Wrangler team';
+    const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(token)}`;
+    const venueName = sanitizeForEmail(profile.venue?.name ?? 'your Venue Wrangler team');
     if (email) {
       void this.email.send({
         to: email,
@@ -747,7 +755,7 @@ export class AppController {
       });
     }
     return {
-      token: invite.token,
+      token,
       code: invite.code,
       inviteUrl,
       expiresAt: invite.expiresAt.getTime(),
@@ -766,7 +774,7 @@ export class AppController {
       PUBLIC_INVITE_RATE_LIMIT_MAX,
       PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS,
     );
-    const invite = await this.findRedeemableInvite(rawCode);
+    const invite = await this.findRedeemableInvite({ codeOrToken: rawCode });
     if (!invite) throw new NotFoundException('That invite code is invalid, used, or expired.');
     const venue = await this.prisma.venue.findUnique({ where: { id: invite.venueId }, select: { name: true } });
     return {
@@ -793,7 +801,7 @@ export class AppController {
     const verifiedEmail = await this.getVerifiedAccountEmail(user.sub);
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const invite = await this.findRedeemableInvite(body.code, tx);
+      const invite = await this.findRedeemableInvite({ codeOrToken: body.code }, tx);
       if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
       if (invite.email && invite.email.toLowerCase() !== verifiedEmail.toLowerCase()) {
         throw new ForbiddenException('This invite was sent to a different email address.');
@@ -826,7 +834,7 @@ export class AppController {
     // Same brute-force concern as /join — this also accepts the short code.
     await assertWithinSharedRateLimit(this.prisma, `redeem-invite:${user.sub}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `redeem-invite:ip:${getClientIp(request)}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
-    return this.redeemInviteForUser(user.sub, body.codeOrToken);
+    return this.redeemInviteForUser(user.sub, { codeOrToken: body.codeOrToken });
   }
 
   @UseGuards(AuthGuard)
@@ -884,16 +892,28 @@ export class AppController {
     if (matches.length > 1) {
       throw new BadRequestException('Multiple pending invites were found for this email. Use the specific invite link from your manager.');
     }
-    return this.redeemInviteForUser(user.sub, matches[0].token);
+    return this.redeemInviteForUser(user.sub, { id: matches[0].id });
   }
 
-  // Resolve a redeemable invite by either the short code or the long token.
-  private findRedeemableInvite(codeOrToken: string, tx: Prisma.TransactionClient = this.prisma) {
-    const value = codeOrToken?.trim();
+  // Resolve a redeemable invite either by an already-known row id (the caller
+  // already looked it up some other way, e.g. by the redeemer's verified
+  // email — no plaintext token involved) or by a user-submitted short code /
+  // long token (the token is never stored in plaintext, so it's hashed
+  // before the lookup).
+  private findRedeemableInvite(
+    identifier: { id: string } | { codeOrToken: string },
+    tx: Prisma.TransactionClient = this.prisma,
+  ) {
+    if ('id' in identifier) {
+      return tx.invite.findFirst({
+        where: { id: identifier.id, usedBy: null, expiresAt: { gt: new Date() } },
+      });
+    }
+    const value = identifier.codeOrToken?.trim();
     if (!value) return Promise.resolve(null);
     return tx.invite.findFirst({
       where: {
-        OR: [{ code: { equals: value, mode: 'insensitive' } }, { token: value }],
+        OR: [{ code: { equals: value, mode: 'insensitive' } }, { tokenHash: hashInviteToken(value) }],
         usedBy: null,
         expiresAt: { gt: new Date() },
       },
@@ -994,7 +1014,7 @@ export class AppController {
     return this.profiles.isEmailVerified(userId);
   }
 
-  private async redeemInviteForUser(userId: string, codeOrToken: string) {
+  private async redeemInviteForUser(userId: string, identifier: { id: string } | { codeOrToken: string }) {
     const email = await this.getVerifiedAccountEmail(userId);
     const profile = await this.getProfile({ sub: userId });
     if (!profile) throw new NotFoundException('Profile not found');
@@ -1008,7 +1028,7 @@ export class AppController {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const invite = await this.findRedeemableInvite(codeOrToken, tx);
+      const invite = await this.findRedeemableInvite(identifier, tx);
       if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
       // Email-specific invites: enforce that the redeeming user's verified email
       // matches the invite's target. Link-based invites (no email on the invite)

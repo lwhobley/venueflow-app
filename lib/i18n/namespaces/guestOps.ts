@@ -77,6 +77,8 @@ export const en = {
       partyLabel: 'Party',
       dateToday: 'Today · {date}',
       dateTomorrow: 'Tomorrow · {date}',
+      timeLabel: 'Time',
+      mealHint: 'Meal sets a quick default time and course duration — edit Time directly for any other slot.',
       notesLabel: 'Guest notes / requests',
       createButton: 'Create reservation',
       returningGuest: {
@@ -125,6 +127,12 @@ export const en = {
       deleteButton: 'Delete',
       tapInstructions: 'Tap an open table to reserve, or long-actions to seat now:',
       noOpenTablesBuild: 'No open tables. Build a floor plan first.',
+    },
+    meals: {
+      breakfast: 'Breakfast',
+      brunch: 'Brunch',
+      lunch: 'Lunch',
+      dinner: 'Dinner',
     },
   },
   guests: {
@@ -802,6 +810,8 @@ export const es: GuestOpsDictionary = {
       partyLabel: 'Grupo',
       dateToday: 'Hoy · {date}',
       dateTomorrow: 'Mañana · {date}',
+      timeLabel: 'Hora',
+      mealHint: 'La comida establece una hora predeterminada y una duración de servicio — edita la Hora directamente para cualquier otro horario.',
       notesLabel: 'Notas / peticiones del huésped',
       createButton: 'Crear reserva',
       returningGuest: {
@@ -850,6 +860,12 @@ export const es: GuestOpsDictionary = {
       deleteButton: 'Eliminar',
       tapInstructions: 'Toca una mesa libre para reservar, o usa las acciones para sentar ahora:',
       noOpenTablesBuild: 'No hay mesas libres. Primero crea un plano de salón.',
+    },
+    meals: {
+      breakfast: 'Desayuno',
+      brunch: 'Brunch',
+      lunch: 'Almuerzo',
+      dinner: 'Cena',
     },
   },
   guests: {
@@ -1525,6 +1541,8 @@ export const fr: GuestOpsDictionary = {
       partyLabel: 'Groupe',
       dateToday: "Aujourd'hui · {date}",
       dateTomorrow: 'Demain · {date}',
+      timeLabel: 'Heure',
+      mealHint: "Le repas définit une heure par défaut et une durée de service — modifiez l'heure directement pour tout autre créneau.",
       notesLabel: "Notes / demandes de l'invité",
       createButton: 'Créer la réservation',
       returningGuest: {
@@ -1573,6 +1591,12 @@ export const fr: GuestOpsDictionary = {
       deleteButton: 'Supprimer',
       tapInstructions: 'Touchez une table libre pour réserver, ou utilisez les actions pour installer maintenant :',
       noOpenTablesBuild: "Aucune table libre. Créez d'abord un plan de salle.",
+    },
+    meals: {
+      breakfast: 'Petit-déjeuner',
+      brunch: 'Brunch',
+      lunch: 'Déjeuner',
+      dinner: 'Dîner',
     },
   },
   guests: {

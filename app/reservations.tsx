@@ -18,11 +18,13 @@ import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
 
-const MEAL_TIMES: Record<string, { label: string; time: string; duration: number }> = {
-  breakfast: { label: 'Breakfast', time: '08:00', duration: 60 },
-  brunch: { label: 'Brunch', time: '10:00', duration: 90 },
-  lunch: { label: 'Lunch', time: '12:00', duration: 90 },
-  dinner: { label: 'Dinner', time: '18:00', duration: 120 },
+type MealId = 'breakfast' | 'brunch' | 'lunch' | 'dinner';
+
+const MEAL_TIMES: Record<MealId, { id: MealId; time: string; duration: number }> = {
+  breakfast: { id: 'breakfast', time: '08:00', duration: 60 },
+  brunch: { id: 'brunch', time: '10:00', duration: 90 },
+  lunch: { id: 'lunch', time: '12:00', duration: 90 },
+  dinner: { id: 'dinner', time: '18:00', duration: 120 },
 };
 
 function getMealsForDayOfWeek(dow: number) {
@@ -177,7 +179,7 @@ function ReservationsScreen() {
   const [partySize, setPartySize] = useState(2);
   const [date, setDate] = useState(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`);
   const [time, setTime] = useState('18:00');
-  const [selectedMeal, setSelectedMeal] = useState('dinner');
+  const [selectedMeal, setSelectedMeal] = useState<MealId>('dinner');
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [mealMenuOpen, setMealMenuOpen] = useState(false);
   const [source, setSource] = useState<Source>('direct');
@@ -594,7 +596,7 @@ function ReservationsScreen() {
                           setDate(opt.value);
                           setDateMenuOpen(false);
                           const meals = getMealsForDayOfWeek(opt.dayOfWeek);
-                          const stillValid = meals.some((m) => m.label.toLowerCase() === selectedMeal);
+                          const stillValid = meals.some((m) => m.id === selectedMeal);
                           if (!stillValid) {
                             const fallback = opt.dayOfWeek === 0 || opt.dayOfWeek === 6 ? 'brunch' : 'dinner';
                             setSelectedMeal(fallback);
@@ -605,7 +607,7 @@ function ReservationsScreen() {
                     ))}
                   </Menu>
                   <TextInput
-                    label="Time"
+                    label={t('reservations.form.timeLabel')}
                     value={time}
                     onChangeText={setTime}
                     mode="outlined"
@@ -617,16 +619,16 @@ function ReservationsScreen() {
                     onDismiss={() => setMealMenuOpen(false)}
                     anchor={
                       <Button mode="outlined" onPress={() => setMealMenuOpen(true)} style={{ flex: 1, minWidth: 140 }} contentStyle={{ justifyContent: 'flex-start' }}>
-                        {MEAL_TIMES[selectedMeal]?.label ?? selectedMeal}
+                        {MEAL_TIMES[selectedMeal] ? t(`reservations.meals.${selectedMeal}`) : selectedMeal}
                       </Button>
                     }
                   >
                     {availableMeals.map((meal) => {
-                      const key = meal.label.toLowerCase();
+                      const key = meal.id;
                       return (
                         <Menu.Item
                           key={key}
-                          title={`${meal.label} · ${meal.time}`}
+                          title={`${t(`reservations.meals.${key}`)} · ${meal.time}`}
                           onPress={() => {
                             setSelectedMeal(key);
                             setTime(meal.time);
@@ -638,7 +640,7 @@ function ReservationsScreen() {
                   </Menu>
                 </View>
                 <Text style={{ color: colors.muted, fontSize: 12 }}>
-                  Meal sets a quick default time and course duration — edit Time directly for any other slot.
+                  {t('reservations.form.mealHint')}
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {reservationSources.map((s) => (

@@ -125,7 +125,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
                   <Text style={{ color: colors.charcoal }}>{t.tenderType}</Text>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{formatMoney(t.salesCents)} · {formatPct(t.salesCents, summary.salesCents)}</Text>
                 </View>
-                <MiniBar value={t.salesCents} max={summary.salesCents} color={accents[i % accents.length].fg} />
+                <MiniBar value={t.salesCents} max={summary.salesCents} color={accents[i % accents.length].icon} />
               </View>
             ))}
           </Card.Content>
@@ -143,7 +143,7 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
                   <Text style={{ color: colors.charcoal }}>{r.revenueCenter}</Text>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{formatMoney(r.salesCents)} · {t('sales.summary.revenueCenters.checksCount', { count: r.checkCount })}</Text>
                 </View>
-                <MiniBar value={r.salesCents} max={summary.salesCents} color={accents[i % accents.length].fg} />
+                <MiniBar value={r.salesCents} max={summary.salesCents} color={accents[i % accents.length].icon} />
               </View>
             ))}
           </Card.Content>
@@ -189,7 +189,7 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
               <Text style={{ fontWeight: '700', flex: 1 }} numberOfLines={1}>{r.serverName}</Text>
               <Text style={{ fontSize: 16, fontWeight: '800', color: colors.primary }}>{formatMoney(r.salesCents)}</Text>
             </View>
-            <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].fg} />
+            <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].icon} />
             <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
               <Chip compact style={{ backgroundColor: accents[0].bg }}>
                 <Text style={{ fontSize: 11, color: accents[0].fg }}>{t('sales.servers.checksCount', { count: r.checkCount })}</Text>
@@ -262,7 +262,7 @@ function ItemRow({ r, i, maxSales }: { r: { name: string; category: string | nul
         <Text style={{ flex: 1, color: colors.charcoal }} numberOfLines={1}>{r.name}</Text>
         <Text style={{ fontSize: 13, fontWeight: '700' }}>{formatMoney(r.salesCents)}</Text>
       </View>
-      <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].fg} />
+      <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].icon} />
       <Text style={{ color: colors.muted, fontSize: 11 }}>{t('sales.items.qtyAvg', { qty: r.quantity, amount: formatMoney(Math.round(r.salesCents / r.quantity)) })}</Text>
     </View>
   );

@@ -5,6 +5,7 @@ import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class
 import type { Request } from 'express';
 import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
+import { hashInviteToken } from '../common/invite-token';
 
 const pbkdf2Async = promisify(pbkdf2);
 import { Public } from './public.decorator';
@@ -177,15 +178,21 @@ export class AuthController {
     const phone = body.phone?.trim().replace(/[\s\-().+]/g, '') || undefined;
 
     // Possession of the long, single-use token delivered to this exact inbox
-    // proves control of the invited email. This lets account creation redeem
-    // the invite immediately without making the employee enter a second code.
+    // proves control of the invited email — but only for invites that are
+    // NEVER handed back to a human in an API response (workforce.controller's
+    // legacy-roster mint, which always leaves `code: null`). Manager-created
+    // invites (app.controller's createInvite) always set `code` and return the
+    // raw token/inviteUrl to the manager, who could forward it to someone
+    // other than the invited address; auto-verifying those would let that
+    // person claim the invited email without ever controlling the inbox.
     const emailInvite = body.inviteToken?.trim()
       ? await this.prisma.invite.findFirst({
           where: {
-            token: body.inviteToken.trim(),
+            tokenHash: hashInviteToken(body.inviteToken.trim()),
             email: { equals: email, mode: 'insensitive' },
             usedBy: null,
             expiresAt: { gt: new Date() },
+            code: null,
           },
           select: { id: true },
         })
