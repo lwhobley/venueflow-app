@@ -773,7 +773,7 @@ export class SchedulingController {
       shiftId: id,
       profileId: body.profileId,
     });
-    if (nextProfileId) {
+    if (nextProfileId && shift.profileId !== nextProfileId) {
       void this.sendScheduleUpdateEmail(nextProfileId, 'Added', undefined, {
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,

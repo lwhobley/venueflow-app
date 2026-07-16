@@ -86,22 +86,25 @@ export class StaffController {
       throw new ForbiddenException('Not authorized');
     }
 
-    // Managers cannot grant roles at or above their own level.
-    const viewerIsOwnerOrAdmin =
-      scope.role === 'owner' || scope.role === 'admin' || scope.allAccess;
-    if (!viewerIsOwnerOrAdmin && ELEVATED_ROLES.includes(body.role)) {
-      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
-    }
-
     const existing = await this.prisma.profile.findMany({ where: { venueId: scope.venueId } });
     const member =
       existing.find((item) => item.email.toLowerCase() === body.email.toLowerCase()) ?? null;
+
+    // Managers cannot grant roles at or above their own level. Only applies
+    // when the role is actually changing — resubmitting a member's existing
+    // role (e.g. a manager editing their own phone number) is not a grant and
+    // must not be blocked here.
+    const viewerIsOwnerOrAdmin =
+      scope.role === 'owner' || scope.role === 'admin' || scope.allAccess;
+    const roleChanged = !member || member.role !== body.role;
+    if (!viewerIsOwnerOrAdmin && roleChanged && ELEVATED_ROLES.includes(body.role)) {
+      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
+    }
 
     if (member) {
       // Only apply the last-owner guard when the role is actually being
       // changed to a non-owner/admin value (i.e. a demotion).
       const isDemoting = isOwnerOrAdminRole(member.role) && !isOwnerOrAdminRole(body.role);
-      const roleChanged = member.role !== body.role;
       const updated = await this.prisma.$transaction(async (tx) => {
         await this.assertCanManageTarget(scope, member, isDemoting, tx);
         const u = await tx.profile.update({
