@@ -476,7 +476,7 @@ function GuestsScreenInner() {
               <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, width: '31%', minWidth: 105, flexGrow: 1, borderRadius: radius.sharp }}>
                 <Card.Content>
                   <Text style={{ color: metric.accent.fg, fontSize: 22, fontWeight: '800' }}>{metric.value}</Text>
-                  <Text style={{ color: colors.muted }}>{metric.label}</Text>
+                  <Text style={{ color: colors.charcoal }}>{metric.label}</Text>
                 </Card.Content>
               </Card>
             ))}
@@ -512,7 +512,7 @@ function GuestsScreenInner() {
                 <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                   <Card.Content style={{ gap: spacing.sm }}>
                     <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>{t('guests.leadImport.title')}</Text>
-                    <Text style={{ color: colors.muted }}>
+                    <Text style={{ color: colors.charcoal }}>
                       {t('guests.leadImport.description')}
                     </Text>
                     <TextInput label={t('guests.leadImport.defaultSourceLabel')} value={leadSource} onChangeText={setLeadSource} mode="outlined" style={{ backgroundColor: colors.surface }} />
@@ -617,11 +617,11 @@ const GuestListItem = memo(function GuestListItem({ guest, isSelected, onOpen, o
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
           <View style={{ flex: 1 }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>{guest.fullName}</Text>
-            <Text style={{ color: colors.muted }}>{guest.company ? `${guest.company} · ` : ''}{guest.phone || guest.email || t('guests.list.noContact')}</Text>
+            <Text style={{ color: colors.charcoal }}>{guest.company ? `${guest.company} · ` : ''}{guest.phone || guest.email || t('guests.list.noContact')}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ fontWeight: '800', color: colors.primary }}>{scoreGuest(guest)}</Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>{t('guests.list.score')}</Text>
+            <Text style={{ fontWeight: '800', color: colors.charcoal }}>{scoreGuest(guest)}</Text>
+            <Text style={{ color: colors.charcoal, fontSize: 12 }}>{t('guests.list.score')}</Text>
           </View>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -630,10 +630,10 @@ const GuestListItem = memo(function GuestListItem({ guest, isSelected, onOpen, o
           {guest.tags.slice(0, 4).map((tag) => <Chip compact key={tag}>{tag}</Chip>)}
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-          <Text style={{ color: colors.muted }}>{t('guests.list.visits', { count: guest.visitCount })}</Text>
-          <Text style={{ color: colors.muted }}>{formatMoney(guest.totalSpendCents)}</Text>
-          <Text style={{ color: colors.muted }}>{t('guests.list.last', { date: formatShortDate(guest.lastVisitAt) })}</Text>
-          <Text style={{ color: colors.muted }}>{t('guests.list.next', { date: formatShortDate(guest.upcomingReservationAt) })}</Text>
+          <Text style={{ color: colors.charcoal }}>{t('guests.list.visits', { count: guest.visitCount })}</Text>
+          <Text style={{ color: colors.charcoal }}>{formatMoney(guest.totalSpendCents)}</Text>
+          <Text style={{ color: colors.charcoal }}>{t('guests.list.last', { date: formatShortDate(guest.lastVisitAt) })}</Text>
+          <Text style={{ color: colors.charcoal }}>{t('guests.list.next', { date: formatShortDate(guest.upcomingReservationAt) })}</Text>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
           <Button compact mode="outlined" textColor={colors.primary} onPress={() => onOpen(guest._id)}>{t('guests.list.openProfile')}</Button>
@@ -719,7 +719,7 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
         <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium" style={{ color: accents[5].fg, fontWeight: '800' }}>{t('guests.detail.generatedDocument')}</Text>
-            <Text style={{ color: colors.muted }}>{t('guests.detail.generatedDocumentHint')}</Text>
+            <Text style={{ color: colors.charcoal }}>{t('guests.detail.generatedDocumentHint')}</Text>
             <TextInput value={generatedDocument} onChangeText={setGeneratedDocument} mode="outlined" multiline numberOfLines={12} style={{ backgroundColor: colors.surface, minHeight: 220 }} />
             <Button compact mode="text" textColor={colors.primary} onPress={() => setGeneratedDocument('')}>{t('guests.detail.clearDraft')}</Button>
           </Card.Content>
@@ -789,7 +789,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ minWidth: 135, flexGrow: 1, padding: spacing.sm, borderRadius: radius.sharp, backgroundColor: accents[0].bg }}>
       <Text style={{ color: accents[0].fg, fontSize: 18, fontWeight: '800' }}>{value}</Text>
-      <Text style={{ color: colors.muted, fontSize: 12 }}>{label}</Text>
+      <Text style={{ color: colors.charcoal, fontSize: 12 }}>{label}</Text>
     </View>
   );
 }

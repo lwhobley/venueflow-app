@@ -398,7 +398,7 @@ function ReservationsScreen() {
           <Card key={s.label} style={{ flex: 1, backgroundColor: s.a.bg, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: 2 }}>
               <Text style={{ color: s.a.fg, fontSize: 24, fontWeight: '800' }}>{s.value}</Text>
-              <Text style={{ color: colors.muted }}>{s.label}</Text>
+              <Text style={{ color: colors.charcoal }}>{s.label}</Text>
             </Card.Content>
           </Card>
         ))}
@@ -547,7 +547,7 @@ function ReservationsScreen() {
                   <Card style={{ backgroundColor: accents[2].bg, borderRadius: radius.sharp }}>
                     <Card.Content style={{ gap: 4, padding: spacing.sm }}>
                       <Text style={{ color: accents[2].fg, fontWeight: '800' }}>{t('reservations.form.returningGuest.title', { name: autofill.guest.fullName })}</Text>
-                      <Text style={{ color: colors.muted, fontSize: 12 }}>
+                      <Text style={{ color: colors.charcoal, fontSize: 12 }}>
                         {autofill.guest.lastVisitAt
                           ? (autofill.guest.lastPartySize
                               ? t('reservations.form.returningGuest.lastVisitWithParty', { date: new Date(autofill.guest.lastVisitAt).toLocaleDateString(), party: autofill.guest.lastPartySize })
@@ -555,9 +555,9 @@ function ReservationsScreen() {
                           : t('reservations.form.returningGuest.noPriorVisits')}
                         {autofill.guest.lifecycleStage ? ` · ${autofill.guest.lifecycleStage}` : ''}
                       </Text>
-                      {autofill.guest.favoriteTable ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('reservations.form.returningGuest.favoriteTable', { table: autofill.guest.favoriteTable })}</Text> : null}
-                      {autofill.guest.preferredServer ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('reservations.form.returningGuest.preferredServer', { server: autofill.guest.preferredServer })}</Text> : null}
-                      {autofill.guest.dietaryNotes ? <Text style={{ color: colors.danger, fontSize: 12 }}>{t('reservations.form.returningGuest.dietary', { notes: autofill.guest.dietaryNotes })}</Text> : null}
+                      {autofill.guest.favoriteTable ? <Text style={{ color: colors.charcoal, fontSize: 12 }}>{t('reservations.form.returningGuest.favoriteTable', { table: autofill.guest.favoriteTable })}</Text> : null}
+                      {autofill.guest.preferredServer ? <Text style={{ color: colors.charcoal, fontSize: 12 }}>{t('reservations.form.returningGuest.preferredServer', { server: autofill.guest.preferredServer })}</Text> : null}
+                      {autofill.guest.dietaryNotes ? <Text style={{ color: colors.charcoal, fontSize: 12 }}>{t('reservations.form.returningGuest.dietary', { notes: autofill.guest.dietaryNotes })}</Text> : null}
                       <Button compact mode="text" textColor={colors.primary} onPress={() => {
                         const [first, ...rest] = autofill.guest!.fullName.split(' ');
                         setGuestFirstName(first ?? '');
@@ -649,7 +649,7 @@ function ReservationsScreen() {
                   <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                     <Card.Content style={{ gap: spacing.sm }}>
                       <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>{t('reservations.privateEvent.title')}</Text>
-                      <Text style={{ color: colors.muted }}>{t('reservations.privateEvent.subtitle')}</Text>
+                      <Text style={{ color: colors.charcoal }}>{t('reservations.privateEvent.subtitle')}</Text>
                       <TextInput label={t('reservations.privateEvent.eventNameLabel')} value={eventName} onChangeText={setEventName} mode="outlined" style={{ backgroundColor: colors.surface }} />
                       <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                         <TextInput label={t('reservations.privateEvent.eventSpaceLabel')} value={eventSpace} onChangeText={setEventSpace} mode="outlined" style={{ flex: 1, minWidth: 145, backgroundColor: colors.surface }} />
@@ -709,8 +709,8 @@ function ReservationsScreen() {
                 <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                   <Card.Content style={{ gap: 4 }}>
                     <Text style={{ color: accents[5].fg, fontWeight: '800' }}>{res.eventName || t('reservations.item.privateEventFallback')}</Text>
-                    <Text style={{ color: colors.muted }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || t('reservations.item.eventDetailsPending')}</Text>
-                    {res.estimatedValueCents ? <Text style={{ color: colors.muted }}>{t('reservations.item.estimatedValue', { amount: `$${(res.estimatedValueCents / 100).toLocaleString()}` })}</Text> : null}
+                    <Text style={{ color: colors.charcoal }}>{[res.eventSpace, res.setupStyle, res.eventStatus?.replace('_', ' ')].filter(Boolean).join(' ? ') || t('reservations.item.eventDetailsPending')}</Text>
+                    {res.estimatedValueCents ? <Text style={{ color: colors.charcoal }}>{t('reservations.item.estimatedValue', { amount: `$${(res.estimatedValueCents / 100).toLocaleString()}` })}</Text> : null}
                   </Card.Content>
                 </Card>
               ) : null}

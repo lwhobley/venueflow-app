@@ -504,7 +504,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
 
       {actionMsg ? (
         <Card style={{ backgroundColor: '#E1FBF3', padding: 4 }}>
-          <Text style={{ color: colors.success, fontWeight: '800', textAlign: 'center' }}>{actionMsg}</Text>
+          <Text style={{ color: colors.charcoal, fontWeight: '800', textAlign: 'center' }}>{actionMsg}</Text>
         </Card>
       ) : null}
 
@@ -927,8 +927,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
 
               {selectedShift?.conflict ? (
                 <View style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: '#FDE7E9' }}>
-                  <Text style={{ color: colors.danger, fontWeight: '800' }}>Availability conflict</Text>
-                  <Text style={{ color: colors.danger, fontSize: 12 }}>This employee is unavailable or not fully available for the selected shift.</Text>
+                  <Text style={{ color: colors.charcoal, fontWeight: '800' }}>Availability conflict</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 12 }}>This employee is unavailable or not fully available for the selected shift.</Text>
                 </View>
               ) : null}
 

@@ -162,7 +162,7 @@ function IntegrationsScreenInner() {
           <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: radius.sharp }}>
             <Card.Content>
               <Text style={{ color: metric.a.fg, fontSize: 24, fontWeight: '800' }}>{metric.value}</Text>
-              <Text style={{ color: colors.muted }}>{metric.label}</Text>
+                  <Text style={{ color: colors.charcoal }}>{metric.label}</Text>
             </Card.Content>
           </Card>
         ))}

@@ -187,10 +187,10 @@ export function MyShifts() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                   <View>
                     <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
+                    <Text style={{ color: colors.charcoal, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    {s.conflict ? <Text style={{ color: colors.danger, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
+                    {s.conflict ? <Text style={{ color: colors.charcoal, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
                     {(() => {
                       const coworkers = coworkersPerDay.get(s.dayIndex) ?? 0;
                       const label = coworkers >= 6 ? '🔥 High volume' : coworkers >= 3 ? 'Moderate' : coworkers > 0 ? 'Light day' : null;
@@ -214,7 +214,7 @@ export function MyShifts() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                     {coworkerShiftOptions.length > 0 ? (
                       <>
-                        <Text style={{ width: '100%', color: colors.muted, fontSize: 12 }}>
+                        <Text style={{ width: '100%', color: colors.charcoal, fontSize: 12 }}>
                           Optional: pick a coworker shift to request back.
                         </Text>
                         {coworkerShiftOptions.map((target) => {
@@ -242,7 +242,7 @@ export function MyShifts() {
                       </Button>
                     ) : null}
                     {teammates.length === 0 ? (
-                      <Text style={{ color: colors.muted }}>No teammates to offer to.</Text>
+                      <Text style={{ color: colors.charcoal }}>No teammates to offer to.</Text>
                     ) : (
                       teammates.map((t) => (
                         <Chip key={t._id} onPress={() => void offerSwap(s._id, t._id)}>Ask {t.fullName} to cover</Chip>
@@ -335,7 +335,7 @@ export function MyShifts() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <View>
                     <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
+                    <Text style={{ color: colors.charcoal, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
                   </View>
                   {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Outside your availability</Chip> : null}
                 </View>

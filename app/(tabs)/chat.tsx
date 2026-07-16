@@ -79,9 +79,9 @@ const ConversationListRow = memo(function ConversationListRow({
       >
         <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: accent, alignItems: 'center', justifyContent: 'center' }}>
           {icon ? (
-            <MaterialCommunityIcons name={icon} size={22} color="#fff" />
+            <MaterialCommunityIcons name={icon} size={22} color="#000000" />
           ) : (
-            <Text style={{ color: '#fff', fontWeight: '900' }}>{initials(row.title)}</Text>
+            <Text style={{ color: '#000000', fontWeight: '900' }}>{initials(row.title)}</Text>
           )}
         </View>
         <View style={{ flex: 1, minWidth: 0, borderBottomWidth: 1, borderBottomColor: colors.divider, paddingBottom: spacing.md }}>
