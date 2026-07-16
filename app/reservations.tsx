@@ -112,17 +112,22 @@ function ReservationsScreen() {
 
   const addWalkIn = async () => {
     if (!venue?.id || !wlName.trim()) return;
-    await addToWaitlist({
-      venueId: venue.id,
-      guestName: wlName.trim(),
-      partySize: wlParty,
-      guestPhone: wlPhone.trim() || undefined,
-      email: wlEmail.trim() || undefined,
-    });
-    setWlName('');
-    setWlPhone('');
-    setWlEmail('');
-    setWlParty(2);
+    setWaitlistError(null);
+    try {
+      await addToWaitlist({
+        venueId: venue.id,
+        guestName: wlName.trim(),
+        partySize: wlParty,
+        guestPhone: wlPhone.trim() || undefined,
+        email: wlEmail.trim() || undefined,
+      });
+      setWlName('');
+      setWlPhone('');
+      setWlEmail('');
+      setWlParty(2);
+    } catch (e) {
+      setWaitlistError(errorMessage(e, t('reservations.waitlist.errors.addFailed')));
+    }
   };
 
   const seatWaitlist = async (entryId: string, tableId: string) => {
@@ -197,6 +202,7 @@ function ReservationsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
@@ -338,17 +344,22 @@ function ReservationsScreen() {
 
   const assignToTable = async (res: ReservationRow, tableId: string, seat: boolean) => {
     if (!venue?.id) return;
-    const startsAt = res.reservationTime;
-    const endsAt = startsAt + (res.durationMinutes || 120) * 60 * 1000;
-    await assignReservation({
-      venueId: venue.id,
-      reservationId: res.id as Id<'reservations'>,
-      tableIds: [tableId as Id<'tables'>],
-      holdType: seat ? 'seated' : 'reserved',
-      startsAt,
-      endsAt,
-    });
-    setAssigningId(null);
+    setAssignError(null);
+    try {
+      const startsAt = res.reservationTime;
+      const endsAt = startsAt + (res.durationMinutes || 120) * 60 * 1000;
+      await assignReservation({
+        venueId: venue.id,
+        reservationId: res.id as Id<'reservations'>,
+        tableIds: [tableId as Id<'tables'>],
+        holdType: seat ? 'seated' : 'reserved',
+        startsAt,
+        endsAt,
+      });
+      setAssigningId(null);
+    } catch (e) {
+      setAssignError(errorMessage(e, t('reservations.item.assignFailed')));
+    }
   };
 
   const deleteReservation = async (res: ReservationRow) => {
@@ -729,7 +740,7 @@ function ReservationsScreen() {
               {canManage ? (
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                   {!seated && !cancelled ? (
-                    <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => setAssigningId(assigningId === res.id ? null : res.id)}>
+                    <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => { setAssignError(null); setAssigningId(assigningId === res.id ? null : res.id); }}>
                       {assigningId === res.id ? t('reservations.item.pickTable') : t('reservations.item.assignTable')}
                     </Button>
                   ) : null}
@@ -740,6 +751,7 @@ function ReservationsScreen() {
               {assigningId === res.id ? (
                 <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: radius.sharp, padding: 10 }}>
                   <Text style={{ color: colors.muted }}>{t('reservations.item.tapInstructions')}</Text>
+                  {assignError ? <Text style={{ color: colors.danger }}>{assignError}</Text> : null}
                   {openTables.length === 0 ? (
                     <Text style={{ color: colors.danger }}>{t('reservations.item.noOpenTablesBuild')}</Text>
                   ) : (

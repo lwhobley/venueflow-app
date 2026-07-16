@@ -60,6 +60,7 @@ export const en = {
         seatFailed: 'Failed to seat guest',
         markReadyFailed: 'Failed to mark ready',
         removeFailed: 'Failed to remove',
+        addFailed: 'Failed to add to waitlist',
       },
     },
     form: {
@@ -127,6 +128,7 @@ export const en = {
       deleteButton: 'Delete',
       tapInstructions: 'Tap an open table to reserve, or long-actions to seat now:',
       noOpenTablesBuild: 'No open tables. Build a floor plan first.',
+      assignFailed: 'Could not assign table.',
     },
     meals: {
       breakfast: 'Breakfast',
@@ -793,6 +795,7 @@ export const es: GuestOpsDictionary = {
         seatFailed: 'No se pudo sentar al huésped',
         markReadyFailed: 'No se pudo marcar como listo',
         removeFailed: 'No se pudo quitar',
+        addFailed: 'No se pudo añadir a la lista de espera',
       },
     },
     form: {
@@ -860,6 +863,7 @@ export const es: GuestOpsDictionary = {
       deleteButton: 'Eliminar',
       tapInstructions: 'Toca una mesa libre para reservar, o usa las acciones para sentar ahora:',
       noOpenTablesBuild: 'No hay mesas libres. Primero crea un plano de salón.',
+      assignFailed: 'No se pudo asignar la mesa.',
     },
     meals: {
       breakfast: 'Desayuno',
@@ -1524,6 +1528,7 @@ export const fr: GuestOpsDictionary = {
         seatFailed: "Impossible d'installer l'invité",
         markReadyFailed: 'Impossible de marquer comme prêt',
         removeFailed: 'Impossible de retirer',
+        addFailed: "Impossible d'ajouter à la liste d'attente",
       },
     },
     form: {
@@ -1591,6 +1596,7 @@ export const fr: GuestOpsDictionary = {
       deleteButton: 'Supprimer',
       tapInstructions: 'Touchez une table libre pour réserver, ou utilisez les actions pour installer maintenant :',
       noOpenTablesBuild: "Aucune table libre. Créez d'abord un plan de salle.",
+      assignFailed: "Impossible d'attribuer la table.",
     },
     meals: {
       breakfast: 'Petit-déjeuner',

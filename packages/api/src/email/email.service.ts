@@ -9,9 +9,10 @@ type EmailArgs = {
   text: string;
   html?: string;
   replyTo?: string;
+  bcc?: string[];
 };
 
-type EmailMessage = Omit<EmailArgs, 'to'>;
+type EmailMessage = Omit<EmailArgs, 'to' | 'bcc'>;
 
 type ProfileEmailTarget = {
   id: string;
@@ -41,7 +42,8 @@ export class EmailService {
 
   async sendOrThrow(args: EmailArgs) {
     const to = this.normalizeRecipients(args.to);
-    if (to.length === 0) return;
+    const bcc = args.bcc ? this.normalizeRecipients(args.bcc) : [];
+    if (to.length === 0 && bcc.length === 0) return;
 
     const apiKey = this.config.get<string>('RESEND_API_KEY') ?? this.config.get<string>('EMAIL_API_KEY');
     if (!apiKey) {
@@ -57,6 +59,7 @@ export class EmailService {
       body: JSON.stringify({
         from: this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>',
         to,
+        ...(bcc.length ? { bcc } : {}),
         subject: args.subject,
         text: args.text,
         html: args.html ?? this.textToHtml(args.text),
@@ -116,7 +119,13 @@ export class EmailService {
 
   async sendToProfiles(profiles: ProfileEmailTarget[], message: EmailMessage) {
     const recipients = profiles.map((profile) => profile.email);
-    return this.send({ to: recipients, ...message });
+    if (recipients.length === 0) return;
+    // Resend's "to" is a visible recipient list, not a blind list — putting
+    // every staff/manager email there would let each recipient see everyone
+    // else's address. Broadcast via bcc instead; "to" still needs a
+    // non-empty value, so it points at our own from-address as a placeholder.
+    const from = this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>';
+    return this.send({ to: from, bcc: recipients, ...message });
   }
 
   private normalizeRecipients(input: string | string[]) {

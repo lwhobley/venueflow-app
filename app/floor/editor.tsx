@@ -10,6 +10,7 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { useI18n } from '../../lib/i18n';
+import { errorMessage } from '../../lib/format';
 
 type Shape = 'round' | 'square' | 'rect' | 'booth';
 type Section = 'main' | 'patio' | 'bar' | 'vip';
@@ -405,6 +406,8 @@ export default function FloorEditorScreen() {
   const [name, setName] = useState('Main Floor');
   const [saved, setSaved] = useState(false);
   const [clearMessage, setClearMessage] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [clearError, setClearError] = useState<string | null>(null);
   const counter = useRef(0);
   const chairCounter = useRef(0);
 
@@ -516,30 +519,35 @@ export default function FloorEditorScreen() {
 
   const onPublish = async () => {
     if (!venue?.id) return;
-    await saveFloorPlan({
-      venueId: venue.id,
-      name: name.trim() || 'Main Floor',
-      width: venueW,
-      height: venueH,
-      backgroundImageUrl: null,
-      tables: tables.map((t) => ({
-        label: t.label,
-        shape: t.shape,
-        seats: t.seats,
-        seatLabelStyle: t.seatLabelStyle,
-        x: t.x,
-        y: t.y,
-        width: t.width,
-        height: t.height,
-        rotation: t.rotation,
-        section: t.section,
-        minSpend: t.minSpend,
-        isReservable: t.isReservable,
-      })),
-      chairs: chairs.map((c) => ({ x: c.x, y: c.y, rotation: c.rotation, label: c.label || undefined })),
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    setPublishError(null);
+    try {
+      await saveFloorPlan({
+        venueId: venue.id,
+        name: name.trim() || 'Main Floor',
+        width: venueW,
+        height: venueH,
+        backgroundImageUrl: null,
+        tables: tables.map((t) => ({
+          label: t.label,
+          shape: t.shape,
+          seats: t.seats,
+          seatLabelStyle: t.seatLabelStyle,
+          x: t.x,
+          y: t.y,
+          width: t.width,
+          height: t.height,
+          rotation: t.rotation,
+          section: t.section,
+          minSpend: t.minSpend,
+          isReservable: t.isReservable,
+        })),
+        chairs: chairs.map((c) => ({ x: c.x, y: c.y, rotation: c.rotation, label: c.label || undefined })),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setPublishError(errorMessage(e, t('floorEditor.publishFailed')));
+    }
   };
 
   const loadSampleLayout = () => {
@@ -556,14 +564,23 @@ export default function FloorEditorScreen() {
 
   const onClearFloorPlan = async () => {
     if (!venue?.id) return;
+    const previousTables = tables;
+    const previousChairs = chairs;
     setTables([]);
     setChairs([]);
     setSelectedKey(null);
     setSelectedChairKey(null);
     setClearMessage(null);
-    const result = await clearActiveFloorPlan({ venueId: venue.id });
-    setClearMessage(t('floorEditor.clearedMessage', { tables: result.deletedTables, chairs: result.deletedChairs }));
-    setTimeout(() => setClearMessage(null), 3000);
+    setClearError(null);
+    try {
+      const result = await clearActiveFloorPlan({ venueId: venue.id });
+      setClearMessage(t('floorEditor.clearedMessage', { tables: result.deletedTables, chairs: result.deletedChairs }));
+      setTimeout(() => setClearMessage(null), 3000);
+    } catch (e) {
+      setTables(previousTables);
+      setChairs(previousChairs);
+      setClearError(errorMessage(e, t('floorEditor.clearFailed')));
+    }
   };
 
   if (!canEdit) {
@@ -601,6 +618,7 @@ export default function FloorEditorScreen() {
             <Button mode="outlined" textColor={colors.danger} icon="delete-sweep-outline" onPress={() => void onClearFloorPlan()}>{t('floorEditor.clearFloorPlan')}</Button>
           </View>
           {clearMessage ? <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{clearMessage}</Text> : null}
+          {clearError ? <Text style={{ color: colors.danger, marginTop: spacing.sm }}>{clearError}</Text> : null}
       </AppCard>
 
       {/* Venue size */}
@@ -775,6 +793,7 @@ export default function FloorEditorScreen() {
         {t('floorEditor.savePublish')}
       </Button>
       {saved ? <Text style={{ color: colors.success, textAlign: 'center' }}>{t('floorEditor.saved')}</Text> : null}
+      {publishError ? <Text style={{ color: colors.danger, textAlign: 'center' }}>{publishError}</Text> : null}
     </ScrollView>
   );
 }

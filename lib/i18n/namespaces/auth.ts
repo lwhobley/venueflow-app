@@ -331,7 +331,7 @@ export const es: AuthDictionary = {
   verifyEmail: {
     kicker: 'Un paso más',
     title: 'Verifica tu correo electrónico',
-    subtitle: 'Ingresa el código de 6 dígitos que enviamos a {email}.',
+    subtitle: 'Ingresa el código de 8 dígitos que enviamos a {email}.',
     defaultEmail: 'tu correo electrónico',
     codeLabel: 'Código de verificación',
     verifyButton: 'Verificar correo',
@@ -552,7 +552,7 @@ export const fr: AuthDictionary = {
   verifyEmail: {
     kicker: 'Encore une étape',
     title: 'Vérifiez votre e-mail',
-    subtitle: 'Saisissez le code à 6 chiffres que nous avons envoyé à {email}.',
+    subtitle: 'Saisissez le code à 8 chiffres que nous avons envoyé à {email}.',
     defaultEmail: 'votre e-mail',
     codeLabel: 'Code de vérification',
     verifyButton: 'Vérifier l\'e-mail',
