@@ -15,8 +15,10 @@ import { appApi } from '../../lib/api-client';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useI18n } from '../../lib/i18n';
 
 export default function RegisterScreen() {
+  const { t } = useI18n();
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
   const params = useLocalSearchParams<{ email?: string; venueName?: string; inviteFound?: string; mobile?: string }>();
@@ -36,12 +38,12 @@ export default function RegisterScreen() {
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
-    if (!firstName.trim()) next.firstName = 'Required';
-    if (!lastName.trim()) next.lastName = 'Required';
-    if (!email.trim().includes('@')) next.email = 'Enter a valid email address.';
-    if (password.length < 8) next.password = 'At least 8 characters required.';
-    if (password !== confirmPassword) next.confirmPassword = 'Passwords do not match.';
-    if (!termsAccepted) next.terms = 'You must accept the terms to continue.';
+    if (!firstName.trim()) next.firstName = t('register.errors.required');
+    if (!lastName.trim()) next.lastName = t('register.errors.required');
+    if (!email.trim().includes('@')) next.email = t('register.errors.invalidEmail');
+    if (password.length < 8) next.password = t('register.errors.passwordLength');
+    if (password !== confirmPassword) next.confirmPassword = t('register.errors.passwordMismatch');
+    if (!termsAccepted) next.terms = t('register.errors.termsRequired');
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -93,8 +95,8 @@ export default function RegisterScreen() {
         router.replace('/(auth)/team-choice');
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
-      Alert.alert('Could not create account', msg);
+      const msg = e instanceof Error ? e.message : t('register.genericError');
+      Alert.alert(t('register.createAccountFailedTitle'), msg);
     } finally {
       setSubmitting(false);
     }
@@ -120,14 +122,14 @@ export default function RegisterScreen() {
         </View>
 
         <View style={{ gap: 4 }}>
-          <Kicker>Get started</Kicker>
+          <Kicker>{t('register.kicker')}</Kicker>
           <Text style={{ ...type.title, color: colors.text }}>
-            Create your account
+            {t('register.title')}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
             {params.inviteFound === '1' && params.venueName
-              ? `Create your account with the invited email address, then verify it to join ${params.venueName} automatically.`
-              : 'Create your account from your manager invite.'}
+              ? t('register.subtitleInvite', { venueName: params.venueName })
+              : t('register.subtitleDefault')}
           </Text>
         </View>
 
@@ -137,7 +139,7 @@ export default function RegisterScreen() {
               <View style={{ flex: 1 }}>
                 <TextInput
                   {...inputProps}
-                  label="First name"
+                  label={t('register.firstNameLabel')}
                   value={firstName}
                   onChangeText={setFirstName}
                   mode="outlined"
@@ -150,7 +152,7 @@ export default function RegisterScreen() {
               <View style={{ flex: 1 }}>
                 <TextInput
                   {...inputProps}
-                  label="Last name"
+                  label={t('register.lastNameLabel')}
                   value={lastName}
                   onChangeText={setLastName}
                   mode="outlined"
@@ -165,7 +167,7 @@ export default function RegisterScreen() {
             <View>
               <TextInput
                 {...inputProps}
-                label="Email"
+                label={t('register.emailLabel')}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -180,7 +182,7 @@ export default function RegisterScreen() {
 
             <TextInput
               {...inputProps}
-              label="Mobile number (optional)"
+              label={t('register.mobileLabel')}
               value={mobile}
               onChangeText={setMobile}
               keyboardType="phone-pad"
@@ -190,7 +192,7 @@ export default function RegisterScreen() {
             <View>
               <TextInput
                 {...inputProps}
-                label="Password"
+                label={t('register.passwordLabel')}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -205,7 +207,7 @@ export default function RegisterScreen() {
             <View>
               <TextInput
                 {...inputProps}
-                label="Confirm password"
+                label={t('register.confirmPasswordLabel')}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 secureTextEntry
@@ -226,19 +228,19 @@ export default function RegisterScreen() {
                 color={colors.primary}
               />
               <Text variant="bodySmall" style={{ flex: 1, color: colors.muted }}>
-                I agree to the{' '}
+                {t('register.termsPrefix')}{' '}
                 <Text
                   style={{ color: colors.primary }}
                   onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}
                 >
-                  Terms of Service
+                  {t('register.termsOfService')}
                 </Text>{' '}
-                and{' '}
+                {t('register.and')}{' '}
                 <Text
                   style={{ color: colors.primary }}
                   onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}
                 >
-                  Privacy Policy
+                  {t('register.privacyPolicy')}
                 </Text>
               </Text>
             </View>
@@ -254,13 +256,13 @@ export default function RegisterScreen() {
               onPress={() => void submit()}
               style={{ marginTop: spacing.sm }}
             >
-              Create account
+              {t('register.createAccountButton')}
             </Button>
           </Card.Content>
         </Card>
 
         <Button mode="text" textColor={colors.muted} onPress={() => router.back()}>
-          Back
+          {t('register.back')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>

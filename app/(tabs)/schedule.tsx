@@ -3,6 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { Button, Card, SegmentedButtons, Snackbar, Text } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { AnimatedTab, SectionHeader } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -27,6 +28,7 @@ type StaffRequest = {
 type SwapRow = { _id: Id<'shiftSwaps'>; status: string; requesterName: string; targetName: string; requesterShift: string; targetShift: string | null };
 
 function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
+  const { t } = useI18n();
   const queueQuery = useQuery(api.app.listStaffRequests, { venueId });
   const reviewRequest = useMutation(api.app.reviewStaffRequest);
   const queue = useMemo(() => (queueQuery ?? []) as StaffRequest[], [queueQuery]);
@@ -40,7 +42,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
       await action();
       if (ok) setToast(ok);
     } catch (e) {
-      setToast(errorMessage(e, 'Action failed.'));
+      setToast(errorMessage(e, t('schedule.actionFailed')));
     }
   };
 
@@ -48,17 +50,17 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
     <>
     <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, marginBottom: spacing.md }}>
       <Card.Content style={{ gap: spacing.sm }}>
-        <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shift swaps</Text>
+        <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('schedule.swapsTitle')}</Text>
         {swaps.length === 0 ? (
-          <Text style={{ color: colors.muted }}>No swaps awaiting approval.</Text>
+          <Text style={{ color: colors.muted }}>{t('schedule.noSwaps')}</Text>
         ) : (
           swaps.map((sw) => (
             <View key={sw._id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
               <Text>{sw.requesterName} → {sw.targetName}</Text>
-              <Text style={{ color: colors.muted }}>{sw.requesterShift}{sw.targetShift ? ` ⇄ ${sw.targetShift}` : ' (give-away)'} · {sw.status}</Text>
+              <Text style={{ color: colors.muted }}>{sw.requesterShift}{sw.targetShift ? ` ⇄ ${sw.targetShift}` : ` ${t('schedule.giveAway')}`} · {sw.status}</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: true }), 'Swap approved.')} accessibilityLabel="Approve swap">Approve</Button>
-                <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: false }), 'Swap denied.')}>Deny</Button>
+                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: true }), t('schedule.swapApproved'))} accessibilityLabel={t('schedule.approveSwap')}>{t('schedule.approve')}</Button>
+                <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: false }), t('schedule.swapDenied'))}>{t('schedule.deny')}</Button>
               </View>
             </View>
           ))
@@ -67,9 +69,9 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
     </Card>
     <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.sm }}>
-        <Text variant="titleMedium" style={{ fontWeight: '700' }}>Request review queue</Text>
+        <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('schedule.requestQueueTitle')}</Text>
         {queue.length === 0 ? (
-          <Text style={{ color: colors.muted }}>No pending requests.</Text>
+          <Text style={{ color: colors.muted }}>{t('schedule.noPendingRequests')}</Text>
         ) : (
           queue.map((request) => (
             <View key={request._id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 }}>
@@ -78,8 +80,8 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
               <Text>{request.details}</Text>
               {request.status === 'pending' ? (
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' }), 'Request approved.')} accessibilityLabel="Approve request">Approve</Button>
-                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' }), 'Request denied.')}>Deny</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' }), t('schedule.requestApproved'))} accessibilityLabel={t('schedule.approveRequest')}>{t('schedule.approve')}</Button>
+                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' }), t('schedule.requestDenied'))}>{t('schedule.deny')}</Button>
                 </View>
               ) : null}
             </View>
@@ -87,7 +89,7 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
         )}
       </Card.Content>
     </Card>
-    <Snackbar visible={Boolean(toast)} onDismiss={() => setToast(null)} duration={3000} action={{ label: 'Dismiss', onPress: () => setToast(null) }}>
+    <Snackbar visible={Boolean(toast)} onDismiss={() => setToast(null)} duration={3000} action={{ label: t('schedule.dismiss'), onPress: () => setToast(null) }}>
       {toast ?? ''}
     </Snackbar>
     </>
@@ -100,6 +102,7 @@ export default function ScheduleScreenWrapper() {
 
 function ScheduleScreen() {
   const { venue, canManage } = useVenueAuth();
+  const { t } = useI18n();
 
   const [managerTab, setManagerTab] = useState<'calendar' | 'forecast' | 'requests' | 'blackouts'>('calendar');
   const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');
@@ -112,15 +115,15 @@ function ScheduleScreen() {
       showsVerticalScrollIndicator={false}
     >
       <SectionHeader
-        kicker="Team"
-        title="Schedule"
-        subtitle={canManage ? 'Build the schedule, assign staff, and review requests.' : 'See your shifts, pick up open ones, and set your availability.'}
+        kicker={t('schedule.kicker')}
+        title={t('schedule.title')}
+        subtitle={canManage ? t('schedule.subtitleManager') : t('schedule.subtitleStaff')}
       />
 
       {!venue?.id ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content>
-            <Text style={{ color: colors.muted }}>No venue assigned to your account yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('schedule.noVenue')}</Text>
           </Card.Content>
         </Card>
       ) : canManage ? (
@@ -129,10 +132,10 @@ function ScheduleScreen() {
             value={managerTab}
             onValueChange={(v) => setManagerTab(v as 'calendar' | 'forecast' | 'requests' | 'blackouts')}
             buttons={[
-              { value: 'calendar', label: 'Calendar' },
-              { value: 'forecast', label: 'Forecast' },
-              { value: 'requests', label: 'Requests' },
-              { value: 'blackouts', label: 'Blackouts' },
+              { value: 'calendar', label: t('schedule.tabCalendar') },
+              { value: 'forecast', label: t('schedule.tabForecast') },
+              { value: 'requests', label: t('schedule.tabRequests') },
+              { value: 'blackouts', label: t('schedule.tabBlackouts') },
             ]}
           />
           <AnimatedTab tabKey={managerTab}>
@@ -153,8 +156,8 @@ function ScheduleScreen() {
             value={staffTab}
             onValueChange={(v) => setStaffTab(v as 'shifts' | 'availability')}
             buttons={[
-              { value: 'shifts', label: 'My shifts' },
-              { value: 'availability', label: 'Availability' },
+              { value: 'shifts', label: t('schedule.tabMyShifts') },
+              { value: 'availability', label: t('schedule.tabAvailability') },
             ]}
           />
           <AnimatedTab tabKey={staffTab}>

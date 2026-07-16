@@ -108,11 +108,11 @@ export default function SignInScreen() {
     const trimmed = email.trim();
     const minPasswordLength = flow === 'signUp' ? 8 : 6;
     if (!trimmed.includes('@') || password.trim().length < minPasswordLength) {
-      Alert.alert('Check your details', `Enter a valid email and a password with at least ${minPasswordLength} characters.`);
+      Alert.alert(t('signIn.invalidDetailsTitle'), t('signIn.invalidDetailsMessage', { count: minPasswordLength }));
       return;
     }
     if (flow === 'signUp' && !fullName.trim()) {
-      Alert.alert('Your name', 'Enter your name so your team can recognize you.');
+      Alert.alert(t('signIn.nameRequiredTitle'), t('signIn.nameRequiredMessage'));
       return;
     }
     setSubmitting(true);
@@ -121,7 +121,10 @@ export default function SignInScreen() {
       resetExistingSession();
       await finishSession({ inviteToken });
     } catch (e) {
-      showError(flow === 'signUp' ? 'Could not create account' : 'Sign in failed', e instanceof Error ? e.message : 'Try again.');
+      showError(
+        flow === 'signUp' ? t('signIn.createAccountFailedTitle') : t('signIn.signInFailedTitle'),
+        e instanceof Error ? e.message : t('signIn.tryAgain'),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -130,7 +133,7 @@ export default function SignInScreen() {
   const inviteBanner = inviteToken && invitePreview && !invitePreview.expired ? (
     <View style={{ alignItems: 'center', gap: 6, marginBottom: spacing.sm }}>
       <Text variant="titleMedium" style={{ fontWeight: '700', color: authColors.primary, textAlign: 'center' }}>
-        You're invited to join
+        {t('signIn.inviteBannerTitle')}
       </Text>
       <Text variant="titleLarge" style={{ fontWeight: '800', textAlign: 'center', color: authColors.text }}>
         {invitePreview.venueName}
@@ -144,11 +147,11 @@ export default function SignInScreen() {
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
           <Image source={logoSource} style={styles.logo} />
-          <Kicker>{flow === 'signUp' ? 'Get started' : 'Welcome back'}</Kicker>
-          <Text style={{ ...type.title, color: authColors.text }}>Venue Wrangler</Text>
+          <Kicker>{flow === 'signUp' ? t('signIn.kickerSignUp') : t('signIn.kickerSignIn')}</Kicker>
+          <Text style={{ ...type.title, color: authColors.text }}>{t('signIn.brand')}</Text>
           {!inviteToken ? (
             <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>
-              Time tracking, scheduling, reservations, and team chat for teams that already use Venue Wrangler.
+              {t('signIn.subtitle')}
             </Text>
           ) : null}
         </View>
@@ -158,7 +161,7 @@ export default function SignInScreen() {
             {inviteBanner}
             {inviteToken ? (
               <Text style={{ color: authColors.muted, textAlign: 'center', marginBottom: spacing.sm }}>
-                Create or sign in to your account and this invite will attach you to the venue.
+                {t('signIn.inviteInstructions')}
               </Text>
             ) : null}
             {formError ? (
@@ -170,35 +173,35 @@ export default function SignInScreen() {
                 theme={authControlTheme}
                 value={flow}
                 onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
-                buttons={[{ value: 'signUp', label: 'Create account' }, { value: 'signIn', label: 'Sign in' }]}
+                buttons={[{ value: 'signUp', label: t('signIn.tabCreateAccount') }, { value: 'signIn', label: t('signIn.tabSignIn') }]}
               />
             ) : null}
 
             {flow === 'signUp' ? (
-              <TextInput {...authInputProps} label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
+              <TextInput {...authInputProps} label={t('signIn.nameLabel')} value={fullName} onChangeText={setFullName} mode="outlined" />
             ) : null}
-            <TextInput {...authInputProps} label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
-            <TextInput {...authInputProps} label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
+            <TextInput {...authInputProps} label={t('signIn.emailLabel')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
+            <TextInput {...authInputProps} label={t('signIn.passwordLabel')} value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
             {flow === 'signIn' ? (
               <Button mode="text" compact textColor={authColors.primary} onPress={() => router.push('/(auth)/reset-password')}>
-                Forgot password?
+                {t('signIn.forgotPassword')}
               </Button>
             ) : null}
 
             <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
-                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Create account')
-                : 'Sign in'}
+                ? (inviteToken && invitePreview && !invitePreview.expired ? t('signIn.joinVenueButton', { venueName: invitePreview.venueName ?? '' }) : t('signIn.createAccountButton'))
+                : t('signIn.signInButton')}
             </Button>
 
             {!inviteToken && flow === 'signUp' ? (
               <Text style={{ color: authColors.muted, fontSize: 12, textAlign: 'center' }}>
-                By creating an account, you agree to our{' '}
+                {t('signIn.termsPrefix')}{' '}
                 <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
-                  Terms of Service
-                </Text>{' '}and{' '}
+                  {t('signIn.termsOfService')}
+                </Text>{' '}{t('signIn.and')}{' '}
                 <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
-                  Privacy Policy
+                  {t('signIn.privacyPolicy')}
                 </Text>.
               </Text>
             ) : null}
@@ -211,13 +214,13 @@ export default function SignInScreen() {
             textColor={authColors.primary}
             onPress={() => router.push('/(auth)/invite-check')}
           >
-            I have an invite from my manager
+            {t('signIn.haveInviteButton')}
           </Button>
         ) : null}
 
         <View style={{ alignItems: 'center', marginTop: spacing.sm, gap: 6 }}>
           <Text style={{ color: authColors.muted, fontSize: 13, textAlign: 'center' }}>
-            Sign in with your Venue Wrangler team account
+            {t('signIn.footerNote')}
           </Text>
           <Text style={{ color: authColors.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
           <Text style={{ color: authColors.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>

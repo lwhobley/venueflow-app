@@ -10,6 +10,7 @@ import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatRelativeTime, errorMessage } from '../../lib/format';
 import { SectionHeader } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
 type MaterialIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 type FilterKey = 'all' | 'direct' | 'groups' | 'shifts';
@@ -23,11 +24,11 @@ type ConversationRow = {
 };
 type DirectoryEntry = { _id: string; fullName: string; role: string; jobTitle: string };
 
-const FILTERS: Array<{ key: FilterKey; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'direct', label: 'Direct' },
-  { key: 'groups', label: 'Groups' },
-  { key: 'shifts', label: 'Shifts' },
+const FILTERS: Array<{ key: FilterKey; labelKey: 'chat.filterAll' | 'chat.filterDirect' | 'chat.filterGroups' | 'chat.filterShifts' }> = [
+  { key: 'all', labelKey: 'chat.filterAll' },
+  { key: 'direct', labelKey: 'chat.filterDirect' },
+  { key: 'groups', labelKey: 'chat.filterGroups' },
+  { key: 'shifts', labelKey: 'chat.filterShifts' },
 ];
 
 function initials(name: string) {
@@ -61,6 +62,7 @@ const ConversationListRow = memo(function ConversationListRow({
   onPress: () => void;
   onDelete?: () => void;
 }) {
+  const { t } = useI18n();
   const accent = colorFor(index);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
@@ -95,7 +97,7 @@ const ConversationListRow = memo(function ConversationListRow({
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 }}>
             <Text numberOfLines={1} style={{ flex: 1, color: row.unread ? colors.primary : colors.muted, fontSize: 13, fontWeight: row.unread ? '700' : '400' }}>
-              {subtitle ?? row.lastMessageText ?? 'No messages yet'}
+              {subtitle ?? row.lastMessageText ?? t('chat.noMessagesYet')}
             </Text>
             {row.unread ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }} /> : null}
           </View>
@@ -119,6 +121,7 @@ function Section({ title, children, action }: { title: string; children: ReactNo
 }
 
 export default function ChatScreen() {
+  const { t } = useI18n();
   const { venue, isReady, me, canManage } = useVenueAuth();
   const ensureSetup = useMutation(api.chat.ensureChatSetup);
   const openDm = useMutation(api.chat.openDm);
@@ -137,7 +140,7 @@ export default function ChatScreen() {
     if (!isReady || !venue?.id) return;
     setError(null);
     void ensureSetup({ venueId: venue.id }).catch((e: unknown) => {
-      setError(errorMessage(e, 'Could not prepare chat.'));
+      setError(errorMessage(e, t('chat.errorPrepareChat')));
     });
   }, [ensureSetup, isReady, venue?.id]);
 
@@ -152,13 +155,13 @@ export default function ChatScreen() {
   const byPosition = useMemo(() => {
     const map = new Map<string, DirectoryEntry[]>();
     for (const person of (directory ?? []) as DirectoryEntry[]) {
-      const key = person.jobTitle?.trim() || 'Team';
+      const key = person.jobTitle?.trim() || t('chat.teamFallback');
       const list = map.get(key) ?? [];
       list.push(person);
       map.set(key, list);
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [directory]);
+  }, [directory, t]);
 
   const startDm = async (otherId: string) => {
     if (!venue?.id) return;
@@ -167,7 +170,7 @@ export default function ChatScreen() {
       const result = await openDm({ venueId: venue.id, targetProfileId: otherId as Id<'profiles'> });
       router.push(`/chat/${result?.conversationId ?? result}`);
     } catch (e) {
-      setError(errorMessage(e, 'Could not open direct message.'));
+      setError(errorMessage(e, t('chat.errorOpenDm')));
     }
   };
 
@@ -181,7 +184,7 @@ export default function ChatScreen() {
       setShowNewGroup(false);
       router.push(`/chat/${result?.conversationId ?? result}`);
     } catch (e) {
-      setError(errorMessage(e, 'Could not create group.'));
+      setError(errorMessage(e, t('chat.errorCreateGroup')));
     } finally {
       setCreating(false);
     }
@@ -192,15 +195,15 @@ export default function ChatScreen() {
     try {
       await deleteConversation({ conversationId: conversationId as Id<'conversations'> });
     } catch (e) {
-      setError(errorMessage(e, 'Could not delete chat.'));
+      setError(errorMessage(e, t('chat.errorDeleteChat')));
     }
   };
 
   if (!venue?.id) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
-        <Text style={{ color: colors.charcoal, fontSize: 18, fontWeight: '900', textAlign: 'center' }}>Chat unlocks after you join a venue</Text>
-        <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.sm }}>Ask an admin or manager to add your email to their team.</Text>
+        <Text style={{ color: colors.charcoal, fontSize: 18, fontWeight: '900', textAlign: 'center' }}>{t('chat.unlockTitle')}</Text>
+        <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.sm }}>{t('chat.unlockSubtitle')}</Text>
       </View>
     );
   }
@@ -216,9 +219,15 @@ export default function ChatScreen() {
       showsVerticalScrollIndicator={false}
     >
       <SectionHeader
-        kicker="Team"
-        title="Chat"
-        subtitle={unreadCount ? `${unreadCount} unread conversation${unreadCount === 1 ? '' : 's'}` : 'All caught up'}
+        kicker={t('chat.headerKicker')}
+        title={t('chat.header')}
+        subtitle={
+          unreadCount
+            ? unreadCount === 1
+              ? t('chat.unreadSingular', { count: unreadCount })
+              : t('chat.unreadPlural', { count: unreadCount })
+            : t('chat.allCaughtUp')
+        }
         rule={false}
       />
 
@@ -240,7 +249,7 @@ export default function ChatScreen() {
                 borderColor: colors.border,
               }}
             >
-              <Text style={{ color: active ? colors.primary : colors.muted, fontWeight: '800', fontSize: 12 }}>{filter.label}</Text>
+              <Text style={{ color: active ? colors.primary : colors.muted, fontWeight: '800', fontSize: 12 }}>{t(filter.labelKey)}</Text>
             </Pressable>
           );
         })}
@@ -249,14 +258,14 @@ export default function ChatScreen() {
       {error ? <HelperText type="error" visible>{error}</HelperText> : null}
 
       {showShifts && roles.length + shifts.length > 0 ? (
-        <Section title="Operations channels">
+        <Section title={t('chat.operationsChannels')}>
           {roles.map((row, index) => (
             <ConversationListRow
               key={row._id}
               row={row}
               index={index}
               icon="pound"
-              subtitle={row.lastMessageText ?? 'Role updates and quick handoffs'}
+              subtitle={row.lastMessageText ?? t('chat.roleUpdatesSubtitle')}
               onPress={() => router.push(`/chat/${row._id}`)}
             />
           ))}
@@ -266,7 +275,7 @@ export default function ChatScreen() {
               row={row}
               index={index + 3}
               icon="clock-outline"
-              subtitle={row.lastMessageText ?? "Today's shift crew"}
+              subtitle={row.lastMessageText ?? t('chat.todayShiftCrew')}
               onPress={() => router.push(`/chat/${row._id}`)}
             />
           ))}
@@ -275,17 +284,17 @@ export default function ChatScreen() {
 
       {showGroups ? (
         <Section
-          title="Group chats"
+          title={t('chat.groupChats')}
           action={
             <Button compact mode="text" textColor={colors.primary} icon="plus" onPress={() => setShowNewGroup((value) => !value)}>
-              New
+              {t('chat.newButton')}
             </Button>
           }
         >
           {showNewGroup ? (
             <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingVertical: spacing.xs }}>
               <TextInput
-                placeholder="Group name"
+                placeholder={t('chat.groupNamePlaceholder')}
                 value={groupName}
                 onChangeText={setGroupName}
                 mode="outlined"
@@ -310,19 +319,19 @@ export default function ChatScreen() {
                 row={row}
                 index={index + 1}
                 icon="account-group"
-                subtitle={row.lastMessageText ?? 'Tap to open the group chat'}
+                subtitle={row.lastMessageText ?? t('chat.tapToOpenGroup')}
                 onPress={() => router.push(`/chat/${row._id}`)}
                 onDelete={canManage ? () => void onDeleteConversation(row._id) : undefined}
               />
             ))
           ) : (
-            <Text style={{ color: colors.muted }}>No group chats yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('chat.noGroupChats')}</Text>
           )}
         </Section>
       ) : null}
 
       {showDirect && dms.length > 0 ? (
-        <Section title="Direct messages">
+        <Section title={t('chat.directMessages')}>
           {dms.map((row, index) => (
             <ConversationListRow
               key={row._id}
@@ -336,11 +345,11 @@ export default function ChatScreen() {
       ) : null}
 
       {showDirect ? (
-        <Section title="Team directory">
+        <Section title={t('chat.teamDirectory')}>
           {directory === undefined ? (
-            <Text style={{ color: colors.muted }}>Loading teammates...</Text>
+            <Text style={{ color: colors.muted }}>{t('chat.loadingTeammates')}</Text>
           ) : byPosition.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No teammates yet. Add staff from the Staff tab.</Text>
+            <Text style={{ color: colors.muted }}>{t('chat.noTeammates')}</Text>
           ) : (
             byPosition.map(([position, people], groupIndex) => (
               <View key={position} style={{ gap: spacing.xs }}>

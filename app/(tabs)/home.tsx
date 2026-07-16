@@ -50,7 +50,7 @@ export default function HomeScreen() {
   const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? '';
   const role = dashboard?.profile.role ?? 'staff';
   const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
-  const venueName = dashboard?.venue.name ?? venue?.name ?? 'Individual account';
+  const venueName = dashboard?.venue.name ?? venue?.name ?? t('dashboard.individualAccountTitle');
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
   const canManage = Boolean(dashboard && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
@@ -136,16 +136,16 @@ export default function HomeScreen() {
               {unreadNotifications.length ? `${t('command.alerts')} ${unreadNotifications.length}` : t('command.alerts')}
             </CommandButton>
             <CommandButton palette={palette} icon="creation" selected={copilotOpen} onPress={() => setCopilotOpen((value) => !value)}>
-              {copilotOpen ? 'Copilot Active' : t('command.ai')}
+              {copilotOpen ? t('dashboard.copilotActive') : t('command.ai')}
             </CommandButton>
           </View>
         </View>
 
         {!venue?.id ? (
           <CommandSurface palette={palette} style={{ gap: spacing.xs }}>
-            <CommandText palette={palette} variant="title">Individual account</CommandText>
+            <CommandText palette={palette} variant="title">{t('dashboard.individualAccountTitle')}</CommandText>
             <CommandText palette={palette} variant="caption">
-              You can keep this account ready for your next team invite. When a venue owner invites you, sign in with this same email to join their workspace.
+              {t('dashboard.individualAccountBody')}
             </CommandText>
           </CommandSurface>
         ) : null}
@@ -226,15 +226,15 @@ export default function HomeScreen() {
         <CommandSurface palette={palette} style={{ gap: spacing.md }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
             <View style={{ flex: 1, minWidth: 220 }}>
-              <CommandText palette={palette} variant="title">Manager daily brief</CommandText>
+              <CommandText palette={palette} variant="title">{t('dashboard.managerDailyBrief')}</CommandText>
               <CommandText palette={palette} variant="caption">
-                {dailyBrief.date} service snapshot for {venueName}
+                {t('dashboard.serviceSnapshot', { date: dailyBrief.date, venue: venueName })}
               </CommandText>
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'flex-end' }}>
-              <StatusPill palette={palette}>{formatNumber(dailyBrief.covers ?? 0)} covers</StatusPill>
+              <StatusPill palette={palette}>{t('dashboard.coversCount', { count: formatNumber(dailyBrief.covers ?? 0) })}</StatusPill>
               <StatusPill palette={palette} tone={(dailyBrief.openShiftCount ?? 0) > 0 ? 'warn' : 'good'}>
-                {formatNumber(dailyBrief.scheduledCount ?? 0)} scheduled
+                {t('dashboard.scheduledCount', { count: formatNumber(dailyBrief.scheduledCount ?? 0) })}
               </StatusPill>
               <StatusPill palette={palette} tone={(dailyBrief.eightySixCount ?? 0) > 0 ? 'warn' : 'neutral'}>
                 {formatNumber(dailyBrief.eightySixCount ?? 0)} 86
@@ -244,10 +244,10 @@ export default function HomeScreen() {
 
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
             {[
-              { label: 'POS sales', value: formatCurrency(dailyBrief.salesCents ?? 0) },
-              { label: 'Clocked in', value: formatNumber(dailyBrief.clockedInCount ?? 0) },
-              { label: 'Prep open', value: formatNumber(dailyBrief.prepOpenCount ?? 0) },
-              { label: 'Low stock', value: formatNumber(dailyBrief.lowStockCount ?? 0) },
+              { label: t('dashboard.posSales'), value: formatCurrency(dailyBrief.salesCents ?? 0) },
+              { label: t('dashboard.clockedInMetric'), value: formatNumber(dailyBrief.clockedInCount ?? 0) },
+              { label: t('dashboard.prepOpen'), value: formatNumber(dailyBrief.prepOpenCount ?? 0) },
+              { label: t('dashboard.lowStock'), value: formatNumber(dailyBrief.lowStockCount ?? 0) },
             ].map((item) => (
               <View key={item.label} style={{ flexGrow: 1, flexBasis: 120, gap: 2, padding: spacing.sm, borderWidth: 1, borderColor: palette.divider, borderRadius: 8 }}>
                 <CommandText palette={palette} variant="metric">{item.value}</CommandText>
@@ -266,18 +266,18 @@ export default function HomeScreen() {
               ))}
             </View>
           ) : (
-            <CommandText palette={palette} variant="caption">No urgent coverage, stock, or prep alerts yet.</CommandText>
+            <CommandText palette={palette} variant="caption">{t('dashboard.noUrgentAlerts')}</CommandText>
           )}
 
           {(dailyBrief.reservations ?? []).length > 0 ? (
             <View style={{ gap: spacing.xs }}>
-              <CommandText palette={palette} variant="label">Next arrivals</CommandText>
+              <CommandText palette={palette} variant="label">{t('dashboard.nextArrivals')}</CommandText>
               {(dailyBrief.reservations ?? []).slice(0, 3).map((reservation: any) => (
                 <View key={reservation._id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, borderTopWidth: 1, borderTopColor: palette.divider, paddingTop: spacing.xs }}>
                   <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>
                     {formatDate(reservation.reservationTime, { hour: 'numeric', minute: '2-digit' })} - {reservation.guestName}
                   </CommandText>
-                  <StatusPill palette={palette}>{formatNumber(reservation.partySize)} top</StatusPill>
+                  <StatusPill palette={palette}>{t('dashboard.partySizeTop', { count: formatNumber(reservation.partySize) })}</StatusPill>
                 </View>
               ))}
             </View>
@@ -377,7 +377,7 @@ export default function HomeScreen() {
 
       <CollapsibleSection
         title={t('dashboard.staffing')}
-        subtitle={weeklyHighlights.length ? `${weeklyHighlights.length} upcoming shifts` : t('dashboard.noShifts')}
+        subtitle={weeklyHighlights.length ? t('dashboard.upcomingShifts', { count: weeklyHighlights.length }) : t('dashboard.noShifts')}
       >
         {loading ? (
           <Skeleton height={64} />
@@ -397,7 +397,7 @@ export default function HomeScreen() {
       {canManage && (managerDashboard?.events ?? []).length > 0 ? (
         <CollapsibleSection
           title={t('dashboard.eventRun')}
-          subtitle={`${(managerDashboard?.events ?? []).length} upcoming`}
+          subtitle={t('dashboard.upcomingEvents', { count: (managerDashboard?.events ?? []).length })}
         >
           {(managerDashboard?.events ?? []).slice(0, 4).map((event: any) => (
             <View key={event._id} style={{ borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm, gap: 2 }}>
@@ -411,7 +411,7 @@ export default function HomeScreen() {
       {recentNotifications.length > 0 ? (
         <CollapsibleSection
           title={t('dashboard.notifications')}
-          subtitle={unreadNotifications.length ? `${unreadNotifications.length} unread` : 'All caught up'}
+          subtitle={unreadNotifications.length ? t('dashboard.unreadCount', { count: unreadNotifications.length }) : t('dashboard.allCaughtUp')}
           defaultOpen={unreadNotifications.length > 0}
         >
           {recentNotifications.slice(0, 4).map((item) => (
@@ -431,7 +431,7 @@ export default function HomeScreen() {
       {canManage && reservations.length > 0 ? (
         <CollapsibleSection
           title={t('dashboard.vipInsights')}
-          subtitle={`${reservations.length} VIP / large bookings`}
+          subtitle={t('dashboard.vipBookings', { count: reservations.length })}
         >
           {reservations.slice(0, 3).map((reservation: any) => (
             <View key={reservation._id} style={{ gap: 2, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
@@ -446,7 +446,7 @@ export default function HomeScreen() {
       {canManage && liveStaff.length > 0 ? (
         <CollapsibleSection
           title={t('dashboard.clockedIn')}
-          subtitle={`${liveStaff.length} on shift`}
+          subtitle={t('dashboard.onShiftCount', { count: liveStaff.length })}
         >
           {liveStaff.map((person: any) => (
             <View key={person.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>

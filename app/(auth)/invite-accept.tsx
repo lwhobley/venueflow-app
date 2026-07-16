@@ -14,8 +14,10 @@ import { appApi } from '../../lib/api-client';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useI18n } from '../../lib/i18n';
 
 export default function InviteAcceptScreen() {
+  const { t } = useI18n();
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
 
@@ -34,10 +36,10 @@ export default function InviteAcceptScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const validate = (): string | null => {
-    if (!fullName.trim()) return 'Enter your name.';
-    if (!email.trim().includes('@')) return 'Enter a valid email address.';
-    if (password.length < 8) return 'Password must be at least 8 characters.';
-    if (password !== confirmPassword) return 'Passwords do not match.';
+    if (!fullName.trim()) return t('inviteAccept.errors.nameRequired');
+    if (!email.trim().includes('@')) return t('inviteAccept.errors.invalidEmail');
+    if (password.length < 8) return t('inviteAccept.errors.passwordLength');
+    if (password !== confirmPassword) return t('inviteAccept.errors.passwordMismatch');
     return null;
   };
 
@@ -88,9 +90,9 @@ export default function InviteAcceptScreen() {
         router.replace('/(tabs)/home');
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
+      const msg = e instanceof Error ? e.message : t('inviteAccept.genericError');
       setError(msg);
-      Alert.alert('Could not create account', msg);
+      Alert.alert(t('inviteAccept.createAccountFailedTitle'), msg);
     } finally {
       setSubmitting(false);
     }
@@ -116,12 +118,12 @@ export default function InviteAcceptScreen() {
         </View>
 
         <View style={{ gap: 6 }}>
-          <Kicker>You're invited to join</Kicker>
+          <Kicker>{t('inviteAccept.kicker')}</Kicker>
           <Text style={{ ...type.title, color: colors.text }}>
             {venueName}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
-            as {jobTitle} — create your account to accept.
+            {t('inviteAccept.roleLine', { jobTitle })}
           </Text>
         </View>
 
@@ -133,14 +135,14 @@ export default function InviteAcceptScreen() {
 
             <TextInput
               {...inputProps}
-              label="Your name"
+              label={t('inviteAccept.nameLabel')}
               value={fullName}
               onChangeText={setFullName}
               mode="outlined"
             />
             <TextInput
               {...inputProps}
-              label="Email"
+              label={t('inviteAccept.emailLabel')}
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
@@ -149,7 +151,7 @@ export default function InviteAcceptScreen() {
             />
             <TextInput
               {...inputProps}
-              label="Password"
+              label={t('inviteAccept.passwordLabel')}
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -157,7 +159,7 @@ export default function InviteAcceptScreen() {
             />
             <TextInput
               {...inputProps}
-              label="Confirm password"
+              label={t('inviteAccept.confirmPasswordLabel')}
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               secureTextEntry
@@ -173,11 +175,11 @@ export default function InviteAcceptScreen() {
               loading={submitting}
               onPress={() => void submit()}
             >
-              Accept invite &amp; create account
+              {t('inviteAccept.acceptButton')}
             </Button>
 
             <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-              Already have an account?{' '}
+              {t('inviteAccept.alreadyHaveAccount')}{' '}
               <Text
                 style={{ color: colors.primary, fontWeight: '600' }}
                 onPress={() =>
@@ -187,14 +189,14 @@ export default function InviteAcceptScreen() {
                   })
                 }
               >
-                Sign in instead
+                {t('inviteAccept.signInInstead')}
               </Text>
             </Text>
           </Card.Content>
         </Card>
 
         <Button mode="text" textColor={colors.muted} onPress={() => router.back()}>
-          Back
+          {t('inviteAccept.back')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>

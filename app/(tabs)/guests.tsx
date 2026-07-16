@@ -11,6 +11,7 @@ import { formatMoney, formatShortDate, formatShortDateTime, formatFullDateTime, 
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 import { SectionHeader } from '../../components/AppCard';
 import { CrmSalesWorkspace } from '../../components/CrmSalesWorkspace';
+import { useI18n } from '../../lib/i18n';
 
 type LifecycleStage = 'lead' | 'regular' | 'vip' | 'lapsed';
 type Segment = 'all' | LifecycleStage | 'upcoming' | 'needs_follow_up';
@@ -86,19 +87,21 @@ type CheckEvent = {
 type GuestProfile = { guest: GuestRow; reservations: ReservationEvent[]; checks: CheckEvent[] };
 type GuestListResponse = { guests: GuestRow[]; totalCount: number; page: number; limit: number };
 
-const segmentOptions: Array<{ value: Segment; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'vip', label: 'VIP' },
-  { value: 'regular', label: 'Regulars' },
-  { value: 'upcoming', label: 'Upcoming' },
-  { value: 'needs_follow_up', label: 'Follow-up' },
+type I18nT = ReturnType<typeof useI18n>['t'];
+
+const segmentDefs: Array<{ value: Segment; key: 'all' | 'vip' | 'regulars' | 'upcoming' | 'followUp' }> = [
+  { value: 'all', key: 'all' },
+  { value: 'vip', key: 'vip' },
+  { value: 'regular', key: 'regulars' },
+  { value: 'upcoming', key: 'upcoming' },
+  { value: 'needs_follow_up', key: 'followUp' },
 ];
 
-const lifecycleOptions: Array<{ value: LifecycleStage; label: string }> = [
-  { value: 'lead', label: 'Lead' },
-  { value: 'regular', label: 'Regular' },
-  { value: 'vip', label: 'VIP' },
-  { value: 'lapsed', label: 'Lapsed' },
+const lifecycleDefs: Array<{ value: LifecycleStage; key: 'lead' | 'regular' | 'vip' | 'lapsed' }> = [
+  { value: 'lead', key: 'lead' },
+  { value: 'regular', key: 'regular' },
+  { value: 'vip', key: 'vip' },
+  { value: 'lapsed', key: 'lapsed' },
 ];
 
 
@@ -119,46 +122,48 @@ function latestEventReservation(profile: GuestProfile | null | undefined) {
     .sort((a, b) => b.reservationTime - a.reservationTime)[0] ?? profile?.reservations?.[0] ?? null;
 }
 
-function generateBeo(guest: GuestRow, profile: GuestProfile | null | undefined) {
+function generateBeo(guest: GuestRow, profile: GuestProfile | null | undefined, t: I18nT) {
   const event = latestEventReservation(profile);
   const topItems = new Map<string, number>();
   for (const check of profile?.checks ?? []) {
     for (const item of check.menuItems) topItems.set(item.name, (topItems.get(item.name) ?? 0) + item.quantity);
   }
-  const favorites = Array.from(topItems.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, quantity]) => `${name} (${quantity})`).join(', ') || 'Review with client';
+  const tbd = t('guests.documents.common.tbd');
+  const favorites = Array.from(topItems.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, quantity]) => `${name} (${quantity})`).join(', ') || t('guests.documents.common.reviewWithClient');
   return [
-    'BANQUET EVENT ORDER',
-    `Client: ${guest.fullName}`,
-    `Company / Group: ${guest.company ?? event?.eventName ?? 'TBD'}`,
-    `Contact: ${guest.phone ?? 'No phone'} · ${guest.email ?? 'No email'}`,
-    `Event: ${event?.eventName ?? 'Private event'}`,
-    `Date / Time: ${event ? formatFullDateTime(event.reservationTime) : 'TBD'}`,
-    `Guest Count: ${event?.partySize ?? 'TBD'}`,
-    `Room / Space: ${event?.eventSpace ?? 'TBD'}`,
-    `Setup: ${event?.setupStyle ?? 'TBD'}`,
-    `Menu: ${event?.menuNotes ?? favorites}`,
-    `Beverage: ${event?.beverageNotes ?? 'TBD'}`,
-    `Dietary / Allergies: ${guest.dietaryNotes ?? 'None captured'}`,
-    `Service Notes: ${event?.notes ?? guest.notes ?? 'TBD'}`,
-    `Billing Notes: ${event?.billingNotes ?? 'TBD'}`,
+    t('guests.documents.beo.title'),
+    t('guests.documents.beo.client', { name: guest.fullName }),
+    t('guests.documents.beo.companyGroup', { value: guest.company ?? event?.eventName ?? tbd }),
+    t('guests.documents.beo.contact', { phone: guest.phone ?? t('guests.documents.common.noPhone'), email: guest.email ?? t('guests.documents.common.noEmail') }),
+    t('guests.documents.beo.event', { name: event?.eventName ?? t('guests.documents.common.privateEvent') }),
+    t('guests.documents.beo.dateTime', { value: event ? formatFullDateTime(event.reservationTime) : tbd }),
+    t('guests.documents.beo.guestCount', { value: event?.partySize ?? tbd }),
+    t('guests.documents.beo.roomSpace', { value: event?.eventSpace ?? tbd }),
+    t('guests.documents.beo.setup', { value: event?.setupStyle ?? tbd }),
+    t('guests.documents.beo.menu', { value: event?.menuNotes ?? favorites }),
+    t('guests.documents.beo.beverage', { value: event?.beverageNotes ?? tbd }),
+    t('guests.documents.beo.dietary', { value: guest.dietaryNotes ?? t('guests.documents.common.noneCaptured') }),
+    t('guests.documents.beo.serviceNotes', { value: event?.notes ?? guest.notes ?? tbd }),
+    t('guests.documents.beo.billingNotes', { value: event?.billingNotes ?? tbd }),
   ].join('\n');
 }
 
-function generateContract(guest: GuestRow, profile: GuestProfile | null | undefined) {
+function generateContract(guest: GuestRow, profile: GuestProfile | null | undefined, t: I18nT) {
   const event = latestEventReservation(profile);
+  const tbd = t('guests.documents.common.tbd');
   return [
-    'PRIVATE EVENT CONTRACT DRAFT',
-    `Client: ${guest.fullName}`,
-    `Contact: ${guest.phone ?? 'No phone'} · ${guest.email ?? 'No email'}`,
-    `Event: ${event?.eventName ?? 'Private event'} at ${event?.eventSpace ?? 'TBD'}`,
-    `Date / Time: ${event ? formatFullDateTime(event.reservationTime) : 'TBD'}`,
-    `Guest Count: ${event?.partySize ?? 'TBD'}`,
-    `Estimated Event Value: ${event?.estimatedValueCents ? formatMoney(event.estimatedValueCents) : 'TBD'}`,
-    `Deposit Due: ${event?.depositDueCents ? formatMoney(event.depositDueCents) : 'TBD'}`,
-    'Included Services: Food, beverage, staffing, and room setup as described in the attached BEO.',
-    'Payment Terms: Deposit due at signing. Final balance due per venue policy.',
-    'Cancellation Terms: Subject to venue cancellation policy and signed agreement.',
-    `Special Terms: ${event?.billingNotes ?? guest.notes ?? 'TBD'}`,
+    t('guests.documents.contract.title'),
+    t('guests.documents.beo.client', { name: guest.fullName }),
+    t('guests.documents.beo.contact', { phone: guest.phone ?? t('guests.documents.common.noPhone'), email: guest.email ?? t('guests.documents.common.noEmail') }),
+    t('guests.documents.contract.eventAt', { name: event?.eventName ?? t('guests.documents.common.privateEvent'), space: event?.eventSpace ?? tbd }),
+    t('guests.documents.beo.dateTime', { value: event ? formatFullDateTime(event.reservationTime) : tbd }),
+    t('guests.documents.beo.guestCount', { value: event?.partySize ?? tbd }),
+    t('guests.documents.contract.estimatedValue', { value: event?.estimatedValueCents ? formatMoney(event.estimatedValueCents) : tbd }),
+    t('guests.documents.contract.depositDue', { value: event?.depositDueCents ? formatMoney(event.depositDueCents) : tbd }),
+    t('guests.documents.contract.includedServices'),
+    t('guests.documents.contract.paymentTerms'),
+    t('guests.documents.contract.cancellationTerms'),
+    t('guests.documents.contract.specialTerms', { value: event?.billingNotes ?? guest.notes ?? tbd }),
   ].join('\n');
 }
 
@@ -228,6 +233,7 @@ function GuestsScreen() {
 }
 
 function GuestsScreenInner() {
+  const { t } = useI18n();
   const { venue, isReady, canManage } = useVenueAuth();
   const guestList = useQuery(api.guests.listGuests, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as GuestListResponse | undefined;
   const guests = guestList?.guests;
@@ -260,6 +266,16 @@ function GuestsScreenInner() {
   const [leadText, setLeadText] = useState('');
   const [leadBusy, setLeadBusy] = useState(false);
   const [leadMessage, setLeadMessage] = useState<string | null>(null);
+  const [leadMessageIsError, setLeadMessageIsError] = useState(false);
+
+  const segmentOptions = useMemo(
+    () => segmentDefs.map((option) => ({ value: option.value, label: t(`guests.segments.${option.key}`) })),
+    [t],
+  );
+  const lifecycleOptions = useMemo(
+    () => lifecycleDefs.map((option) => ({ value: option.value, label: t(`guests.lifecycle.${option.key}`) })),
+    [t],
+  );
 
   const selectedGuest = useMemo(() => guests?.find((guest) => guest._id === selectedGuestId) ?? guests?.[0] ?? null, [guests, selectedGuestId]);
   const profile = useQuery(
@@ -336,7 +352,7 @@ function GuestsScreenInner() {
 
   const saveGuest = async () => {
     if (!venue?.id || !fullName.trim()) {
-      setError('Guest name is required.');
+      setError(t('guests.form.nameRequired'));
       return;
     }
     setError(null);
@@ -362,7 +378,7 @@ function GuestsScreenInner() {
       setShowForm(false);
       resetForm();
     } catch (e) {
-      setError(errorMessage(e, 'Could not save guest.'));
+      setError(errorMessage(e, t('guests.form.saveError')));
     }
   };
 
@@ -373,7 +389,7 @@ function GuestsScreenInner() {
       await removeGuest({ venueId: venue.id, guestId });
       if (selectedGuestId === guestId) setSelectedGuestId(null);
     } catch (e) {
-      setDeleteError(errorMessage(e, 'Could not delete guest.'));
+      setDeleteError(errorMessage(e, t('guests.detail.deleteError')));
     }
   };
 
@@ -381,19 +397,30 @@ function GuestsScreenInner() {
     if (!venue?.id) return;
     const leads = parseLeadLines(leadText, leadSource);
     if (leads.length === 0) {
-      setLeadMessage('Paste at least one lead: name,email,phone,source,company,tags,notes.');
+      setLeadMessage(t('guests.leadImport.pasteAtLeastOne'));
+      setLeadMessageIsError(true);
       return;
     }
     setLeadBusy(true);
     setLeadMessage(null);
+    setLeadMessageIsError(false);
     try {
       const result = await ingestLeads({ venueId: venue.id, leads });
       setLeadText('');
       setSegment('lead');
-      setLeadMessage(`Imported ${result.created} new lead${result.created === 1 ? '' : 's'} and updated ${result.updated}. ${result.skipped ? `${result.skipped} skipped.` : ''}`);
+      setLeadMessage(
+        t('guests.leadImport.imported', {
+          created: result.created,
+          leadWord: result.created === 1 ? t('guests.leadImport.leadSingular') : t('guests.leadImport.leadPlural'),
+          updated: result.updated,
+          skipped: result.skipped ? t('guests.leadImport.skippedCount', { skipped: result.skipped }) : '',
+        }),
+      );
+      setLeadMessageIsError(false);
       if (result.guestIds[0]) setSelectedGuestId(result.guestIds[0]);
     } catch (e) {
-      setLeadMessage(errorMessage(e, 'Could not import leads.'));
+      setLeadMessage(errorMessage(e, t('guests.leadImport.couldNotImport')));
+      setLeadMessageIsError(true);
     } finally {
       setLeadBusy(false);
     }
@@ -411,7 +438,7 @@ function GuestsScreenInner() {
   if (!canManage) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Guest CRM is available to managers and admins.</Text>
+        <Text style={{ color: colors.muted }}>{t('guests.header.managerOnly')}</Text>
       </ScrollView>
     );
   }
@@ -429,22 +456,22 @@ function GuestsScreenInner() {
       ListHeaderComponent={
         <View style={{ gap: spacing.md, marginBottom: spacing.sm }}>
           <SectionHeader
-            kicker="Relationships"
-            title="CRM"
-            subtitle={`Sales pipeline, event docs, guest intelligence, and follow-up cues for ${venue?.name ?? 'your venue'}.`}
+            kicker={t('guests.header.kicker')}
+            title={t('guests.header.title')}
+            subtitle={t('guests.header.subtitle', { venue: venue?.name ?? t('guests.header.yourVenue') })}
           />
 
           <CrmSalesWorkspace venueId={venue?.id} enabled={isReady && canManage} />
 
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
             {[
-              { label: 'Guests', value: String(crmStats.totalGuests), accent: accents[0] },
-              { label: 'Leads', value: String(crmStats.leads), accent: accents[5] },
-              { label: 'VIPs', value: String(crmStats.vipGuests), accent: accents[1] },
-              { label: 'Upcoming', value: String(crmStats.upcomingGuests), accent: accents[2] },
-              { label: 'Revenue', value: formatMoney(crmStats.totalSpend), accent: accents[3] },
-              { label: 'Opted in', value: String(crmStats.optedIn), accent: accents[4] },
-              { label: 'Follow-up', value: String(crmStats.needsFollowUp), accent: accents[5] },
+              { label: t('guests.stats.guests'), value: String(crmStats.totalGuests), accent: accents[0] },
+              { label: t('guests.stats.leads'), value: String(crmStats.leads), accent: accents[5] },
+              { label: t('guests.stats.vips'), value: String(crmStats.vipGuests), accent: accents[1] },
+              { label: t('guests.stats.upcoming'), value: String(crmStats.upcomingGuests), accent: accents[2] },
+              { label: t('guests.stats.revenue'), value: formatMoney(crmStats.totalSpend), accent: accents[3] },
+              { label: t('guests.stats.optedIn'), value: String(crmStats.optedIn), accent: accents[4] },
+              { label: t('guests.stats.followUp'), value: String(crmStats.needsFollowUp), accent: accents[5] },
             ].map((metric) => (
               <Card key={metric.label} style={{ backgroundColor: metric.accent.bg, width: '31%', minWidth: 105, flexGrow: 1, borderRadius: radius.sharp }}>
                 <Card.Content>
@@ -458,20 +485,20 @@ function GuestsScreenInner() {
           <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
-                <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest directory</Text>
+                <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('guests.directory.title')}</Text>
                 <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowLeadImport((value) => !value)} accessibilityLabel={showLeadImport ? 'Close lead import' : 'Import leads'}>
-                    {showLeadImport ? 'Close leads' : 'Import leads'}
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowLeadImport((value) => !value)} accessibilityLabel={showLeadImport ? t('guests.directory.closeLeadImportA11y') : t('guests.directory.importLeadsA11y')}>
+                    {showLeadImport ? t('guests.directory.closeLeads') : t('guests.directory.importLeads')}
                   </Button>
                   <Button compact mode={showForm ? 'text' : 'contained'} buttonColor={showForm ? undefined : colors.primary} onPress={() => {
                     if (showForm) resetForm();
                     setShowForm((value) => !value);
                   }}>
-                    {showForm ? 'Close' : 'Add guest'}
+                    {showForm ? t('guests.directory.close') : t('guests.directory.addGuest')}
                   </Button>
                 </View>
               </View>
-              <TextInput label="Search name, company, phone, email, or tags" value={query} onChangeText={setQuery} mode="outlined" style={{ backgroundColor: colors.surface }} />
+              <TextInput label={t('guests.directory.searchLabel')} value={query} onChangeText={setQuery} mode="outlined" style={{ backgroundColor: colors.surface }} />
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <SegmentedButtons
                   value={segment}
@@ -484,35 +511,35 @@ function GuestsScreenInner() {
               {showLeadImport ? (
                 <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
                   <Card.Content style={{ gap: spacing.sm }}>
-                    <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>Lead intake</Text>
+                    <Text variant="titleSmall" style={{ color: accents[5].fg, fontWeight: '800' }}>{t('guests.leadImport.title')}</Text>
                     <Text style={{ color: colors.muted }}>
-                      Manual entry and CSV paste use name,email,phone,source,company,tags,notes. API/webhooks, web forms, Zapier/Make, and email parsers can POST to /crm/leads.
+                      {t('guests.leadImport.description')}
                     </Text>
-                    <TextInput label="Default source" value={leadSource} onChangeText={setLeadSource} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.leadImport.defaultSourceLabel')} value={leadSource} onChangeText={setLeadSource} mode="outlined" style={{ backgroundColor: colors.surface }} />
                     <TextInput
-                      label="Leads"
+                      label={t('guests.leadImport.leadsLabel')}
                       value={leadText}
                       onChangeText={setLeadText}
                       mode="outlined"
                       multiline
                       numberOfLines={6}
-                      placeholder={'name,email,phone,source,company,tags,notes\nJane Doe,jane@example.com,555-0101,Web form,Private Events,VIP|birthday,Asked about April party\nMarco Lee,,555-0102,Instagram,Catering,lead,Needs follow-up'}
+                      placeholder={t('guests.leadImport.leadsPlaceholder')}
                       style={{ backgroundColor: colors.surface, minHeight: 130 }}
                     />
-                    {leadMessage ? <Text style={{ color: leadMessage.startsWith('Could') || leadMessage.startsWith('Paste') ? colors.danger : colors.charcoal }}>{leadMessage}</Text> : null}
-                    <Button mode="contained" buttonColor={colors.primary} loading={leadBusy} disabled={leadBusy} onPress={() => void importLeads()} accessibilityLabel="Ingest leads">
-                      Ingest leads
+                    {leadMessage ? <Text style={{ color: leadMessageIsError ? colors.danger : colors.charcoal }}>{leadMessage}</Text> : null}
+                    <Button mode="contained" buttonColor={colors.primary} loading={leadBusy} disabled={leadBusy} onPress={() => void importLeads()} accessibilityLabel={t('guests.leadImport.ingestA11y')}>
+                      {t('guests.leadImport.ingestButton')}
                     </Button>
                   </Card.Content>
                 </Card>
               ) : null}
               {showForm ? (
                 <View style={{ gap: spacing.sm }}>
-                  <Text variant="titleSmall" style={{ fontWeight: '700' }}>{editingGuestId ? 'Edit guest profile' : 'Add guest profile'}</Text>
-                  <TextInput label="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                  <Text variant="titleSmall" style={{ fontWeight: '700' }}>{editingGuestId ? t('guests.form.editTitle') : t('guests.form.addTitle')}</Text>
+                  <TextInput label={t('guests.form.fullName')} value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
                   <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                    <TextInput label="Phone" value={phone} onChangeText={setPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
-                    <TextInput label="Email" value={email} onChangeText={setEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.form.phone')} value={phone} onChangeText={setPhone} mode="outlined" keyboardType="phone-pad" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.form.email')} value={email} onChangeText={setEmail} mode="outlined" keyboardType="email-address" autoCapitalize="none" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
                   </View>
                   <SegmentedButtons
                     value={lifecycleStage}
@@ -520,45 +547,45 @@ function GuestsScreenInner() {
                     buttons={lifecycleOptions}
                   />
                   <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                    <TextInput label="Source" value={source} onChangeText={setSource} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-                    <TextInput label="Company / group" value={company} onChangeText={setCompany} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-                    <TextInput label="Birthday (MM-DD)" value={birthday} onChangeText={setBirthday} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.form.source')} value={source} onChangeText={setSource} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.form.company')} value={company} onChangeText={setCompany} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.form.birthday')} value={birthday} onChangeText={setBirthday} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
                   </View>
                   <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-                    <TextInput label="Favorite table" value={favoriteTable} onChangeText={setFavoriteTable} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
-                    <TextInput label="Preferred server" value={preferredServer} onChangeText={setPreferredServer} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.form.favoriteTable')} value={favoriteTable} onChangeText={setFavoriteTable} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
+                    <TextInput label={t('guests.form.preferredServer')} value={preferredServer} onChangeText={setPreferredServer} mode="outlined" style={{ flex: 1, minWidth: 135, backgroundColor: colors.surface }} />
                   </View>
-                  <TextInput label="Dietary notes / allergies" value={dietaryNotes} onChangeText={setDietaryNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
-                  <TextInput label="Tags (comma-separated)" value={tags} onChangeText={setTags} mode="outlined" style={{ backgroundColor: colors.surface }} />
-                  <TextInput label="Internal notes" value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                  <TextInput label={t('guests.form.dietaryNotes')} value={dietaryNotes} onChangeText={setDietaryNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                  <TextInput label={t('guests.form.tags')} value={tags} onChangeText={setTags} mode="outlined" style={{ backgroundColor: colors.surface }} />
+                  <TextInput label={t('guests.form.notes')} value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
-                    <Text style={{ color: colors.charcoal, flex: 1 }}>Marketing opt-in</Text>
+                    <Text style={{ color: colors.charcoal, flex: 1 }}>{t('guests.form.marketingOptIn')}</Text>
                     <Switch value={marketingOptIn} onValueChange={setMarketingOptIn} color={colors.primary} />
                   </View>
                   {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                  <Button mode="contained" buttonColor={colors.primary} onPress={() => void saveGuest()}>{editingGuestId ? 'Update guest' : 'Save guest'}</Button>
+                  <Button mode="contained" buttonColor={colors.primary} onPress={() => void saveGuest()}>{editingGuestId ? t('guests.form.updateButton') : t('guests.form.saveButton')}</Button>
                 </View>
               ) : null}
             </Card.Content>
           </Card>
 
           <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>
-            Guests ({guestList?.totalCount ?? filtered.length})
+            {t('guests.list.guestsCount', { count: guestList?.totalCount ?? filtered.length })}
           </Text>
         </View>
       }
       ListEmptyComponent={
         guests === undefined ? (
-          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>Loading guests…</Text></Card.Content></Card>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>{t('guests.list.loading')}</Text></Card.Content></Card>
         ) : (
-          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>No guests match this segment yet.</Text></Card.Content></Card>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>{t('guests.list.empty')}</Text></Card.Content></Card>
         )
       }
       ListFooterComponent={
         <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>CRM profile</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.charcoal }}>{t('guests.detail.profileTitle')}</Text>
           {!selectedGuest ? (
-            <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>Select a guest to view their relationship profile.</Text></Card.Content></Card>
+            <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}><Card.Content><Text style={{ color: colors.muted }}>{t('guests.detail.selectPrompt')}</Text></Card.Content></Card>
           ) : (
             <GuestProfilePanel
               guest={profile?.guest ?? selectedGuest}
@@ -583,33 +610,34 @@ type GuestListItemProps = {
 };
 
 const GuestListItem = memo(function GuestListItem({ guest, isSelected, onOpen, onEdit }: GuestListItemProps) {
+  const { t } = useI18n();
   return (
     <Card style={{ backgroundColor: isSelected ? accents[2].bg : colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.sm }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
           <View style={{ flex: 1 }}>
             <Text variant="titleMedium" style={{ fontWeight: '700' }}>{guest.fullName}</Text>
-            <Text style={{ color: colors.muted }}>{guest.company ? `${guest.company} · ` : ''}{guest.phone || guest.email || 'No contact on file'}</Text>
+            <Text style={{ color: colors.muted }}>{guest.company ? `${guest.company} · ` : ''}{guest.phone || guest.email || t('guests.list.noContact')}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={{ fontWeight: '800', color: colors.primary }}>{scoreGuest(guest)}</Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>score</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{t('guests.list.score')}</Text>
           </View>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
           <Chip compact>{guest.lifecycleStage.toUpperCase()}</Chip>
-          {guest.marketingOptIn ? <Chip compact>Opted in</Chip> : null}
+          {guest.marketingOptIn ? <Chip compact>{t('guests.list.optedIn')}</Chip> : null}
           {guest.tags.slice(0, 4).map((tag) => <Chip compact key={tag}>{tag}</Chip>)}
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-          <Text style={{ color: colors.muted }}>{guest.visitCount} visits</Text>
+          <Text style={{ color: colors.muted }}>{t('guests.list.visits', { count: guest.visitCount })}</Text>
           <Text style={{ color: colors.muted }}>{formatMoney(guest.totalSpendCents)}</Text>
-          <Text style={{ color: colors.muted }}>Last {formatShortDate(guest.lastVisitAt)}</Text>
-          <Text style={{ color: colors.muted }}>Next {formatShortDate(guest.upcomingReservationAt)}</Text>
+          <Text style={{ color: colors.muted }}>{t('guests.list.last', { date: formatShortDate(guest.lastVisitAt) })}</Text>
+          <Text style={{ color: colors.muted }}>{t('guests.list.next', { date: formatShortDate(guest.upcomingReservationAt) })}</Text>
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-          <Button compact mode="outlined" textColor={colors.primary} onPress={() => onOpen(guest._id)}>Open profile</Button>
-          <Button compact mode="text" textColor={colors.primary} onPress={() => onEdit(guest)}>Edit</Button>
+          <Button compact mode="outlined" textColor={colors.primary} onPress={() => onOpen(guest._id)}>{t('guests.list.openProfile')}</Button>
+          <Button compact mode="text" textColor={colors.primary} onPress={() => onEdit(guest)}>{t('guests.list.edit')}</Button>
         </View>
       </Card.Content>
     </Card>
@@ -617,24 +645,32 @@ const GuestListItem = memo(function GuestListItem({ guest, isSelected, onOpen, o
 });
 
 function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestRow; profile: GuestProfile | null | undefined; onEdit: () => void; onDelete: () => void }) {
+  const { t } = useI18n();
   const [generatedDocument, setGeneratedDocument] = useState('');
   const timeline = useMemo(() => {
     const reservations = (profile?.reservations ?? []).map((reservation) => ({
       id: reservation._id,
       at: reservation.reservationTime,
-      title: `${reservation.status} reservation`,
-      body: `Party of ${reservation.partySize}${reservation.notes ? ` · ${reservation.notes}` : ''}`,
+      title: t('guests.timeline.reservationTitle', { status: reservation.status }),
+      body: reservation.notes
+        ? t('guests.timeline.partyOfWithNotes', { party: reservation.partySize, notes: reservation.notes })
+        : t('guests.timeline.partyOf', { party: reservation.partySize }),
       tags: reservation.tags,
     }));
-    const checks = (profile?.checks ?? []).map((check) => ({
-      id: check._id,
-      at: check.closedAt ?? check.openedAt,
-      title: `${formatMoney(check.totalCents)} ${check.status} check`,
-      body: `${check.revenueCenter ?? check.provider}${check.guestCount ? ` · ${check.guestCount} guests` : ''}${check.tenderType ? ` · ${check.tenderType}` : ''}`,
-      tags: check.menuItems.slice(0, 3).map((item) => `${item.quantity}× ${item.name}`),
-    }));
+    const checks = (profile?.checks ?? []).map((check) => {
+      let body = check.revenueCenter ?? check.provider;
+      if (check.guestCount) body += ` · ${t('guests.timeline.guestsCount', { count: check.guestCount })}`;
+      if (check.tenderType) body += ` · ${check.tenderType}`;
+      return {
+        id: check._id,
+        at: check.closedAt ?? check.openedAt,
+        title: t('guests.timeline.checkTitle', { amount: formatMoney(check.totalCents), status: check.status }),
+        body,
+        tags: check.menuItems.slice(0, 3).map((item) => `${item.quantity}× ${item.name}`),
+      };
+    });
     return [...reservations, ...checks].sort((a, b) => b.at - a.at).slice(0, 12);
-  }, [profile]);
+  }, [profile, t]);
 
   const topItems = useMemo(() => {
     const byName = new Map<string, { name: string; quantity: number; spendCents: number }>();
@@ -656,25 +692,25 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
             <View style={{ flex: 1 }}>
               <Text variant="headlineSmall" style={{ fontWeight: '800', color: colors.primary }}>{guest.fullName}</Text>
-              <Text style={{ color: colors.muted }}>{guest.phone || 'No phone'} · {guest.email || 'No email'}</Text>
+              <Text style={{ color: colors.muted }}>{guest.phone || t('guests.detail.noPhone')} · {guest.email || t('guests.detail.noEmail')}</Text>
               {guest.company ? <Text style={{ color: colors.muted }}>{guest.company}</Text> : null}
             </View>
             <Chip>{guest.lifecycleStage.toUpperCase()}</Chip>
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Metric label="Relationship score" value={String(scoreGuest(guest))} />
-            <Metric label="Lifetime spend" value={formatMoney(guest.totalSpendCents)} />
-            <Metric label="Avg check" value={formatMoney(guest.averageSpendCents)} />
-            <Metric label="Visits" value={String(guest.visitCount)} />
+            <Metric label={t('guests.detail.relationshipScore')} value={String(scoreGuest(guest))} />
+            <Metric label={t('guests.detail.lifetimeSpend')} value={formatMoney(guest.totalSpendCents)} />
+            <Metric label={t('guests.detail.avgCheck')} value={formatMoney(guest.averageSpendCents)} />
+            <Metric label={t('guests.detail.visits')} value={String(guest.visitCount)} />
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {guest.tags.length > 0 ? guest.tags.map((tag) => <Chip compact key={tag}>{tag}</Chip>) : <Chip compact>No tags</Chip>}
+            {guest.tags.length > 0 ? guest.tags.map((tag) => <Chip compact key={tag}>{tag}</Chip>) : <Chip compact>{t('guests.detail.noTags')}</Chip>}
           </View>
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm }}>
-            <Button compact mode="outlined" textColor={colors.primary} onPress={() => setGeneratedDocument(generateBeo(guest, profile))}>Generate BEO</Button>
-            <Button compact mode="outlined" textColor={colors.primary} onPress={() => setGeneratedDocument(generateContract(guest, profile))}>Generate contract</Button>
-            <Button compact mode="outlined" textColor={colors.primary} onPress={onEdit}>Edit profile</Button>
-            <Button compact mode="text" textColor={colors.danger} onPress={onDelete}>Delete</Button>
+            <Button compact mode="outlined" textColor={colors.primary} onPress={() => setGeneratedDocument(generateBeo(guest, profile, t))}>{t('guests.detail.generateBeo')}</Button>
+            <Button compact mode="outlined" textColor={colors.primary} onPress={() => setGeneratedDocument(generateContract(guest, profile, t))}>{t('guests.detail.generateContract')}</Button>
+            <Button compact mode="outlined" textColor={colors.primary} onPress={onEdit}>{t('guests.detail.editProfile')}</Button>
+            <Button compact mode="text" textColor={colors.danger} onPress={onDelete}>{t('guests.detail.delete')}</Button>
           </View>
         </Card.Content>
       </Card>
@@ -682,43 +718,43 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
       {generatedDocument ? (
         <Card style={{ backgroundColor: accents[5].bg, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ color: accents[5].fg, fontWeight: '800' }}>Generated document</Text>
-            <Text style={{ color: colors.muted }}>Copy this draft into your BEO or contract template and tighten legal/payment terms before sending.</Text>
+            <Text variant="titleMedium" style={{ color: accents[5].fg, fontWeight: '800' }}>{t('guests.detail.generatedDocument')}</Text>
+            <Text style={{ color: colors.muted }}>{t('guests.detail.generatedDocumentHint')}</Text>
             <TextInput value={generatedDocument} onChangeText={setGeneratedDocument} mode="outlined" multiline numberOfLines={12} style={{ backgroundColor: colors.surface, minHeight: 220 }} />
-            <Button compact mode="text" textColor={colors.primary} onPress={() => setGeneratedDocument('')}>Clear draft</Button>
+            <Button compact mode="text" textColor={colors.primary} onPress={() => setGeneratedDocument('')}>{t('guests.detail.clearDraft')}</Button>
           </Card.Content>
         </Card>
       ) : null}
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Preferences</Text>
-          <Preference label="Favorite table" value={guest.favoriteTable} />
-          <Preference label="Preferred server" value={guest.preferredServer} />
-          <Preference label="Birthday" value={guest.birthday} />
-          <Preference label="Source" value={guest.source} />
-          <Preference label="Dietary notes" value={guest.dietaryNotes} />
-          <Preference label="Marketing" value={guest.marketingOptIn ? 'Opted in' : 'Not opted in'} />
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('guests.preferences.title')}</Text>
+          <Preference label={t('guests.preferences.favoriteTable')} value={guest.favoriteTable} />
+          <Preference label={t('guests.preferences.preferredServer')} value={guest.preferredServer} />
+          <Preference label={t('guests.preferences.birthday')} value={guest.birthday} />
+          <Preference label={t('guests.preferences.source')} value={guest.source} />
+          <Preference label={t('guests.preferences.dietaryNotes')} value={guest.dietaryNotes} />
+          <Preference label={t('guests.preferences.marketing')} value={guest.marketingOptIn ? t('guests.preferences.optedIn') : t('guests.preferences.notOptedIn')} />
           {guest.notes ? <Text style={{ color: colors.charcoal }}>{guest.notes}</Text> : null}
         </Card.Content>
       </Card>
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Guest intelligence</Text>
-          <Text style={{ color: colors.muted }}>Last visit: {formatShortDate(guest.lastVisitAt)} · Next reservation: {formatShortDate(guest.upcomingReservationAt)}</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('guests.intelligence.title')}</Text>
+          <Text style={{ color: colors.muted }}>{t('guests.intelligence.lastNext', { last: formatShortDate(guest.lastVisitAt), next: formatShortDate(guest.upcomingReservationAt) })}</Text>
           {guest.daysSinceLastVisit == null ? (
-            <Text style={{ color: colors.muted }}>New guest — capture preferences after their first visit.</Text>
+            <Text style={{ color: colors.muted }}>{t('guests.intelligence.newGuest')}</Text>
           ) : guest.daysSinceLastVisit >= 30 && !guest.upcomingReservationAt ? (
-            <Text style={{ color: colors.danger }}>No visit in {guest.daysSinceLastVisit} days. Good follow-up candidate.</Text>
+            <Text style={{ color: colors.danger }}>{t('guests.intelligence.followUpCandidate', { days: guest.daysSinceLastVisit })}</Text>
           ) : (
-            <Text style={{ color: colors.muted }}>Engaged guest. Keep preferences current before the next service.</Text>
+            <Text style={{ color: colors.muted }}>{t('guests.intelligence.engaged')}</Text>
           )}
           {topItems.length > 0 ? (
             <View style={{ gap: 4 }}>
-              <Text style={{ fontWeight: '700' }}>Favorite items</Text>
+              <Text style={{ fontWeight: '700' }}>{t('guests.intelligence.favoriteItems')}</Text>
               {topItems.map((item) => (
-                <Text key={item.name} style={{ color: colors.muted }}>{item.name} · {item.quantity} ordered · {formatMoney(item.spendCents)}</Text>
+                <Text key={item.name} style={{ color: colors.muted }}>{t('guests.intelligence.itemLine', { name: item.name, quantity: item.quantity, spend: formatMoney(item.spendCents) })}</Text>
               ))}
             </View>
           ) : null}
@@ -727,11 +763,11 @@ function GuestProfilePanel({ guest, profile, onEdit, onDelete }: { guest: GuestR
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Timeline</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('guests.timeline.title')}</Text>
           {profile === undefined ? (
-            <Text style={{ color: colors.muted }}>Loading relationship history…</Text>
+            <Text style={{ color: colors.muted }}>{t('guests.timeline.loading')}</Text>
           ) : timeline.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No reservations or POS checks linked yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('guests.timeline.empty')}</Text>
           ) : timeline.map((item) => (
             <View key={String(item.id)} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
               <Text style={{ fontWeight: '700' }}>{item.title}</Text>
@@ -759,10 +795,11 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 function Preference({ label, value }: { label: string; value: string | null }) {
+  const { t } = useI18n();
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
       <Text style={{ color: colors.muted, flex: 1 }}>{label}</Text>
-      <Text style={{ color: colors.charcoal, fontWeight: value ? '700' : '400', flex: 1, textAlign: 'right' }}>{value || 'Not set'}</Text>
+      <Text style={{ color: colors.charcoal, fontWeight: value ? '700' : '400', flex: 1, textAlign: 'right' }}>{value || t('guests.preferences.notSet')}</Text>
     </View>
   );
 }

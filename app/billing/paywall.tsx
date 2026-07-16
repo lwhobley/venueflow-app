@@ -13,6 +13,7 @@ import {
   restorePurchases,
   type PurchasePackage,
 } from '../../lib/purchases';
+import { useI18n } from '../../lib/i18n';
 
 const TERMS_URL = 'https://www.venuewrangler.com/terms';
 const PRIVACY_URL = 'https://www.venuewrangler.com/privacy';
@@ -32,6 +33,7 @@ const FALLBACK_TIERS: PurchasePackage[] = [
 ];
 
 export default function PaywallScreen() {
+  const { t } = useI18n();
   const { me } = useAuthenticatedSession();
   const [packages, setPackages] = useState<PurchasePackage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +44,7 @@ export default function PaywallScreen() {
   // (action = upgrade to paid) or past it (action = subscribe).
   const trialEndsAt: number | null = me?.profile?.trialEndsAt ?? null;
   const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
-  const ctaLabel = inTrial ? 'Upgrade' : 'Subscribe';
+  const ctaLabel = inTrial ? t('paywall.ctaUpgrade') : t('paywall.ctaSubscribe');
 
   useEffect(() => {
     let active = true;
@@ -74,7 +76,7 @@ export default function PaywallScreen() {
         router.replace('/(tabs)/home');
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Purchase failed.';
+      const msg = e instanceof Error ? e.message : t('paywall.purchaseFailed');
       // Swallow the user-cancelled case quietly.
       if (!/cancel/i.test(msg)) setError(msg);
     } finally {
@@ -91,9 +93,9 @@ export default function PaywallScreen() {
         await appApi.syncAppleSubscription({ productId: 'com.venuewrangler.monthly', entitlementId: 'pro' });
         router.replace('/(tabs)/home');
       }
-      else setError('No active subscription found to restore.');
+      else setError(t('paywall.restoreNoneFound'));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Restore failed.');
+      setError(e instanceof Error ? e.message : t('paywall.restoreFailed'));
     } finally {
       setBusy(null);
     }
@@ -102,19 +104,19 @@ export default function PaywallScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
-        <Kicker>Subscription required</Kicker>
-        <Text style={{ ...type.display, color: colors.charcoal }}>Add your team</Text>
-        <Text style={{ color: colors.muted }}>Venue Wrangler is free to use on your own. Upgrade to one flat monthly plan for teams of 1-50 people to share scheduling, the live floor, time clock, and team chat.</Text>
+        <Kicker>{t('paywall.kicker')}</Kicker>
+        <Text style={{ ...type.display, color: colors.charcoal }}>{t('paywall.title')}</Text>
+        <Text style={{ color: colors.muted }}>{t('paywall.subtitle')}</Text>
       </View>
 
       {!PURCHASES_SUPPORTED ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
           <Card.Content>
-            <Text style={{ color: colors.muted }}>Subscriptions are managed in the mobile app.</Text>
+            <Text style={{ color: colors.muted }}>{t('paywall.managedInApp')}</Text>
           </Card.Content>
         </Card>
       ) : loading ? (
-        <Text style={{ color: colors.muted }}>Loading pricing…</Text>
+        <Text style={{ color: colors.muted }}>{t('paywall.loadingPricing')}</Text>
       ) : (
         (packages.length ? packages : FALLBACK_TIERS).map((pkg) => {
           const live = packages.length > 0;
@@ -123,11 +125,11 @@ export default function PaywallScreen() {
               <Card.Content style={{ gap: spacing.sm }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{MONTHLY_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-                <Text style={{ color: colors.muted, fontWeight: '600' }}>For teams of 1-50 people</Text>
+                <Text style={{ color: colors.muted, fontWeight: '600' }}>{t('paywall.forTeamSize')}</Text>
                 <Text style={{ color: colors.success, fontWeight: '600' }}>
-                  {inTrial ? 'Intro access is active' : 'Monthly App Store subscription'}
+                  {inTrial ? t('paywall.introActive') : t('paywall.monthlySubscription')}
                 </Text>
-                <Text style={{ color: colors.muted }}>Solo use is free. Upgrade to unlock team scheduling, reservations, the live floor, and team chat.</Text>
+                <Text style={{ color: colors.muted }}>{t('paywall.soloFreeUpgrade')}</Text>
                 <Button
                   mode="contained"
                   buttonColor={colors.primary}
@@ -145,24 +147,24 @@ export default function PaywallScreen() {
 
       {!loading && PURCHASES_SUPPORTED && packages.length === 0 ? (
         <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-          App Store purchasing appears here once the subscription is available.
+          {t('paywall.appStorePendingNotice')}
         </Text>
       ) : null}
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
 
       <Button mode="text" textColor={colors.primary} loading={busy === 'restore'} disabled={!!busy || !PURCHASES_SUPPORTED} onPress={() => void restore()}>
-        Restore purchases
+        {t('paywall.restorePurchases')}
       </Button>
 
       <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-        Subscriptions auto-renew monthly until cancelled. Payment is charged to your Apple ID; manage or cancel in Settings → Apple ID → Subscriptions.
+        {t('paywall.autoRenewNotice')}
       </Text>
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: spacing.md }}>
-        <Button mode="text" compact textColor={colors.muted} onPress={() => void Linking.openURL(TERMS_URL)}>Terms (EULA)</Button>
-        <Button mode="text" compact textColor={colors.muted} onPress={() => void Linking.openURL(PRIVACY_URL)}>Privacy</Button>
+        <Button mode="text" compact textColor={colors.muted} onPress={() => void Linking.openURL(TERMS_URL)}>{t('paywall.terms')}</Button>
+        <Button mode="text" compact textColor={colors.muted} onPress={() => void Linking.openURL(PRIVACY_URL)}>{t('paywall.privacy')}</Button>
       </View>
-      <Button mode="text" textColor={colors.primary} onPress={() => router.back()}>Back</Button>
+      <Button mode="text" textColor={colors.primary} onPress={() => router.back()}>{t('paywall.back')}</Button>
     </ScrollView>
   );
 }

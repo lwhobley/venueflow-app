@@ -12,6 +12,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { useWebBilling } from '../../lib/web-billing';
 import { canManageBilling } from '../../lib/permissions';
 import { appApi } from '../../lib/api-client';
+import { useI18n } from '../../lib/i18n';
 
 const isWeb = Platform.OS === 'web';
 
@@ -19,6 +20,7 @@ const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 const MONTHLY_PLAN_LABEL = '$99.99 / month';
 
 export default function BillingScreen() {
+  const { t } = useI18n();
   const params = useLocalSearchParams<{ status?: string }>();
   const queryClient = useQueryClient();
   const user = useAuthStore((state: AuthState) => state.user);
@@ -38,7 +40,7 @@ export default function BillingScreen() {
   const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
   const isPaid = billing?.status === 'active';
   const trialDaysLeft = inTrial ? Math.max(0, Math.ceil((trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
-  const upgradeLabel = inTrial ? 'Upgrade' : 'Subscribe';
+  const upgradeLabel = inTrial ? t('settingsBilling.upgrade') : t('settingsBilling.subscribe');
   const canEditBilling = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
 
   const refreshBillingQueries = useMemo(
@@ -62,13 +64,13 @@ export default function BillingScreen() {
     const check = async () => {
       attempts += 1;
       setConfirmingPayment(true);
-      setConfirmMessage('Confirming your subscription with Stripe...');
+      setConfirmMessage(t('settingsBilling.confirmingSubscription'));
       try {
         const latest = await appApi.getBilling();
         await refreshBillingQueries();
         if (cancelled) return;
         if (latest?.status === 'active') {
-          setConfirmMessage('Subscription confirmed. Opening your workspace...');
+          setConfirmMessage(t('settingsBilling.subscriptionConfirmed'));
           setTimeout(() => {
             if (!cancelled) router.replace('/(tabs)/home');
           }, 500);
@@ -76,7 +78,7 @@ export default function BillingScreen() {
         }
         if (attempts >= maxAttempts) {
           setConfirmingPayment(false);
-          setConfirmMessage('Payment is still processing. Refresh this page in a moment if access has not updated.');
+          setConfirmMessage(t('settingsBilling.paymentStillProcessing'));
           return;
         }
         setTimeout(check, 2000);
@@ -84,7 +86,7 @@ export default function BillingScreen() {
         if (cancelled) return;
         if (attempts >= maxAttempts) {
           setConfirmingPayment(false);
-          setConfirmMessage('Could not confirm the subscription yet. Refresh this page in a moment.');
+          setConfirmMessage(t('settingsBilling.couldNotConfirm'));
           return;
         }
         setTimeout(check, 2000);
@@ -100,7 +102,7 @@ export default function BillingScreen() {
   if (me === undefined) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Loading billing access...</Text>
+        <Text style={{ color: colors.muted }}>{t('settingsBilling.loadingAccess')}</Text>
       </View>
     );
   }
@@ -108,7 +110,7 @@ export default function BillingScreen() {
   if (!canEditBilling) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Billing is available to venue owners and admins.</Text>
+        <Text style={{ color: colors.muted }}>{t('settingsBilling.ownerAdminOnly')}</Text>
       </View>
     );
   }
@@ -116,14 +118,14 @@ export default function BillingScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
       <AppCard>
-          <SectionHeader kicker="Account" title="Billing" />
+          <SectionHeader kicker={t('settingsBilling.kicker')} title={t('settingsBilling.title')} />
           <View style={{ gap: spacing.sm }}>
-          <Text style={{ color: colors.muted }}>{venue?.name ?? 'No venue selected'}</Text>
-          <Text style={{ color: colors.muted }}>Status: {billing?.status ?? 'Not configured'}</Text>
-          {inTrial ? <Text style={{ color: colors.muted }}>{trialDaysLeft} days left in intro access</Text> : null}
-          <Text style={{ color: colors.muted }}>The paid plan renews monthly and unlocks the full app for teams of 1-50 people.</Text>
-          <Text style={{ color: colors.muted }}>Current plan: {isPaid ? MONTHLY_PLAN_LABEL : inTrial ? 'Intro access' : 'Not subscribed'}</Text>
-          <Text style={{ color: colors.muted }}>Logged in as {user?.email ?? 'unknown'}</Text>
+          <Text style={{ color: colors.muted }}>{venue?.name ?? t('settingsBilling.noVenueSelected')}</Text>
+          <Text style={{ color: colors.muted }}>{t('settingsBilling.statusLabel', { status: billing?.status ?? t('settingsBilling.notConfigured') })}</Text>
+          {inTrial ? <Text style={{ color: colors.muted }}>{t('settingsBilling.daysLeftIntro', { days: trialDaysLeft })}</Text> : null}
+          <Text style={{ color: colors.muted }}>{t('settingsBilling.renewsMonthlyNotice')}</Text>
+          <Text style={{ color: colors.muted }}>{t('settingsBilling.currentPlan', { plan: isPaid ? MONTHLY_PLAN_LABEL : inTrial ? t('settingsBilling.introAccess') : t('settingsBilling.notSubscribed') })}</Text>
+          <Text style={{ color: colors.muted }}>{t('settingsBilling.loggedInAs', { email: user?.email ?? t('settingsBilling.unknownEmail') })}</Text>
           {confirmMessage ? <Text style={{ color: confirmingPayment ? colors.primary : colors.muted }}>{confirmMessage}</Text> : null}
 
           {!isPaid ? (
@@ -144,11 +146,11 @@ export default function BillingScreen() {
             disabled={confirmingPayment}
             onPress={() => (isWeb ? void openPortal() : void Linking.openURL(APPLE_SUBSCRIPTIONS_URL))}
           >
-            Manage subscription
+            {t('settingsBilling.manageSubscription')}
           </Button>
           {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
           <Button mode="text" textColor={colors.primary} onPress={() => router.push('/(tabs)/profile')}>
-            Back to profile
+            {t('settingsBilling.backToProfile')}
           </Button>
           </View>
       </AppCard>

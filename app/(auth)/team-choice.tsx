@@ -4,8 +4,10 @@ import { Button, Card, Text } from 'react-native-paper';
 import { authCardStyle, authColors as colors, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useI18n } from '../../lib/i18n';
 
 export default function TeamChoiceScreen() {
+  const { t } = useI18n();
   const venue = useAuthStore((s: AuthState) => s.venue);
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
 
@@ -30,20 +32,20 @@ export default function TeamChoiceScreen() {
         }}
       >
         <View style={{ gap: 6, alignItems: 'center' }}>
-          <Kicker>Get started</Kicker>
+          <Kicker>{t('teamChoice.kicker')}</Kicker>
           <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
-            Join your team
+            {t('teamChoice.title')}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-            Use the invite your manager sent to your email address.
+            {t('teamChoice.subtitle')}
           </Text>
         </View>
 
         <Card style={styles.card}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700', color: colors.text }}>I have an invite</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '700', color: colors.text }}>{t('teamChoice.cardTitle')}</Text>
             <Text style={{ color: colors.muted }}>
-              Your manager already set up the workspace. Find your invite to finish joining the team.
+              {t('teamChoice.cardBody')}
             </Text>
             <Button
               mode="contained"
@@ -52,17 +54,17 @@ export default function TeamChoiceScreen() {
               icon="account-group-outline"
               onPress={() => router.push('/(auth)/invite-check')}
             >
-              Find my invite
+              {t('teamChoice.findInviteButton')}
             </Button>
           </Card.Content>
         </Card>
 
         <View style={{ alignItems: 'center', gap: 2, marginTop: spacing.sm }}>
           <Text style={{ color: colors.muted, textAlign: 'center' }}>
-            Already have an account on a different login?
+            {t('teamChoice.differentLoginQuestion')}
           </Text>
           <Button mode="text" textColor={colors.primary} onPress={useDifferentAccount}>
-            Sign in to a different account
+            {t('teamChoice.signInDifferentAccount')}
           </Button>
         </View>
       </ScrollView>
