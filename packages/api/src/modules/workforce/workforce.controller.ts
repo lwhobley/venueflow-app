@@ -12,6 +12,8 @@ import {
   Req,
 } from '@nestjs/common';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { ConfigService } from '@nestjs/config';
+import { createHash, randomBytes } from 'crypto';
 import type { Request } from 'express';
 import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -24,6 +26,8 @@ import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 
 const INVITE_CHECK_LIMIT_MAX = 10;
 const INVITE_CHECK_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const INVITE_EMAIL_LIMIT_MAX = 3;
+const INVITE_EMAIL_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const JOIN_REQUEST_LIMIT_MAX = 5;
 const JOIN_REQUEST_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const APPROVE_LIMIT_MAX = 60;
@@ -64,6 +68,7 @@ export class WorkforceController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
+    private readonly config: ConfigService,
   ) {}
 
   // ─── Public: invite check ──────────────────────────────────────────────────
@@ -79,8 +84,15 @@ export class WorkforceController {
     if (!email && !phone) {
       throw new BadRequestException('Provide an email address or mobile number.');
     }
+    const contactHash = createHash('sha256').update(email ?? phone!).digest('hex');
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `invite-check:contact:${contactHash}`,
+      INVITE_EMAIL_LIMIT_MAX,
+      INVITE_EMAIL_LIMIT_WINDOW_MS,
+    );
 
-    const invite = await this.prisma.invite.findFirst({
+    let invite = await this.prisma.invite.findFirst({
       where: {
         ...(email
           ? { email: { equals: email, mode: 'insensitive' } }
@@ -107,7 +119,22 @@ export class WorkforceController {
         return { status: 'not_found' };
       }
 
-      return { status: 'found' };
+      if (!email) {
+        return { status: 'found', emailSent: false };
+      }
+
+      invite = await this.prisma.invite.create({
+        data: {
+          venueId: unclaimedProfile.venueId!,
+          email,
+          token: randomBytes(18).toString('base64url'),
+          role: unclaimedProfile.role,
+          jobTitle: unclaimedProfile.jobTitle,
+          createdBy: unclaimedProfile.id,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+        include: { venue: { select: { name: true } } },
+      });
     }
     if (invite.usedBy) {
       return { status: 'used' };
@@ -115,7 +142,22 @@ export class WorkforceController {
     if (invite.expiresAt.getTime() < Date.now()) {
       return { status: 'expired' };
     }
-    return { status: 'found' };
+    if (email) {
+      const appUrl = (this.config.get<string>('APP_WEB_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
+      const signupUrl = `${appUrl}/join?invite=${encodeURIComponent(invite.token)}`;
+      await this.email.sendOrThrow({
+        to: email,
+        subject: `Create your Venue Wrangler account for ${invite.venue.name}`,
+        text:
+          `Your email address has been invited to join ${invite.venue.name} on Venue Wrangler as ${invite.jobTitle}.\n\n` +
+          `Create your account using this secure link:\n${signupUrl}\n\n` +
+          `Create your account with this invited email address and you will automatically join ${invite.venue.name}.\n\n` +
+          `This link expires on ${invite.expiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
+      });
+    }
+    return { status: 'found', emailSent: Boolean(email) };
   }
 
   // ─── Public: venue search ──────────────────────────────────────────────────

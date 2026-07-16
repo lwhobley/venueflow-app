@@ -169,6 +169,21 @@ export class AuthController {
 
     const phone = body.phone?.trim().replace(/[\s\-().+]/g, '') || undefined;
 
+    // Possession of the long, single-use token delivered to this exact inbox
+    // proves control of the invited email. This lets account creation redeem
+    // the invite immediately without making the employee enter a second code.
+    const emailInvite = body.inviteToken?.trim()
+      ? await this.prisma.invite.findFirst({
+          where: {
+            token: body.inviteToken.trim(),
+            email: { equals: email, mode: 'insensitive' },
+            usedBy: null,
+            expiresAt: { gt: new Date() },
+          },
+          select: { id: true },
+        })
+      : null;
+
     const result = await this.authService.hashPassword(body.password);
     let nextUserId: string;
     try {
@@ -177,10 +192,15 @@ export class AuthController {
           where: { email },
           update: {
             ...(phone ? { phone } : {}),
+            ...(emailInvite ? {
+              emailVerifiedAt: new Date(),
+              emailVerificationCodeHash: null,
+              emailVerificationSentAt: null,
+            } : {}),
             failedSignInCount: 0,
             lockedUntil: null,
           },
-          create: { email, phone },
+          create: { email, phone, ...(emailInvite ? { emailVerifiedAt: new Date() } : {}) },
         });
         await tx.passwordCredential.upsert({
           where: { userId: nextUser.id },
@@ -209,10 +229,12 @@ export class AuthController {
     // Swallow delivery errors: the account is already created and the session
     // token is ready to return. The user can request a new code from the
     // verify-email screen if the email didn't arrive.
-    try {
-      await this.sendVerificationEmail(nextUserId, email, session.profile.fullName);
-    } catch (err: any) {
-      this.logger.error(`Verification email failed for ${email}: ${err?.message ?? String(err)}`);
+    if (!emailInvite) {
+      try {
+        await this.sendVerificationEmail(nextUserId, email, session.profile.fullName);
+      } catch (err: any) {
+        this.logger.error(`Verification email failed for ${email}: ${err?.message ?? String(err)}`);
+      }
     }
     const isElevated =
       session.profile.role === 'admin' ||
