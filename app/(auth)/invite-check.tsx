@@ -196,20 +196,24 @@ export default function InviteCheckScreen() {
                   </Text>
                 ) : null}
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  {user
+                  {!user && stage.invite.emailSent
+                    ? t('inviteCheck.found.emailSentNote', { email: contact.trim() })
+                    : user
                     ? t('inviteCheck.found.confirmNote')
                     : t('inviteCheck.found.signUpNote')}
                 </Text>
-                <Button
-                  mode="contained"
-                  buttonColor={colors.primary}
-                  textColor={colors.buttonText}
-                  loading={loading}
-                  onPress={() => continueWithInvite(stage.invite)}
-                  style={{ marginTop: 4 }}
-                >
-                  {user ? t('inviteCheck.found.joinTeamButton') : t('inviteCheck.found.createAccountButton')}
-                </Button>
+                {user || !stage.invite.emailSent ? (
+                  <Button
+                    mode="contained"
+                    buttonColor={colors.primary}
+                    textColor={colors.buttonText}
+                    loading={loading}
+                    onPress={() => continueWithInvite(stage.invite)}
+                    style={{ marginTop: 4 }}
+                  >
+                    {user ? t('inviteCheck.found.joinTeamButton') : t('inviteCheck.found.createAccountButton')}
+                  </Button>
+                ) : null}
                 <Button
                   mode="text"
                   textColor={colors.muted}

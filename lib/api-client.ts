@@ -135,7 +135,7 @@ export function useApiMutation<TArgs, TResult>(
 }
 
 export type InviteCheckResult =
-  | { status: 'found'; venueName: string; jobTitle: string; role: string; expiresAt: number }
+  | { status: 'found'; emailSent?: boolean; venueName: string; jobTitle: string; role: string; expiresAt: number }
   | { status: 'not_found' | 'expired' | 'used' };
 
 export type JoinRequestResult = { requestId: string; status: 'pending'; venueName: string };
