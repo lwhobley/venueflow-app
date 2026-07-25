@@ -483,8 +483,8 @@
       </div>
       <div class="actions">
         <a class="btn secondary" href="https://apps.apple.com/app/id6772533789">Log in on iOS</a>
-        <a class="btn secondary" href="/app/sign-in">Log in on web</a>
-        <a class="btn" href="#pricing">Start workspace</a>
+        <a class="btn secondary" href="/app/sign-in">Login</a>
+        <a class="btn" href="#pricing">Add Venue</a>
       </div>
     </div>
   </nav>
@@ -496,7 +496,8 @@
           <h1>Venue Wrangler</h1>
           <p class="hero-copy">The operating system for restaurants, bars, lounges, event venues, and hotels. Schedule staff, manage reservations, track floors in real time, monitor inventory, record hours with a geofenced time clock, run CRM for events, generate reports, and keep your team connected — all in one mobile app and web workspace.</p>
           <div class="actions">
-            <a class="btn" href="#pricing">Start workspace</a>
+            <a class="btn" href="#pricing">Add Venue</a>
+            <a class="btn secondary" href="/app/sign-in">Login</a>
             <button class="btn secondary" type="button" data-open-demo>Watch intro</button>
           </div>
           <p class="hero-note">Start on the web, then log in on mobile with the same email. Owners, managers, and staff stay connected in one Venue Wrangler workspace.</p>
@@ -756,10 +757,10 @@
             <li>Reservations, floor, CRM, inventory, reports</li>
             <li>One login across web signup and mobile app</li>
           </ul>
-          <p>Create your workspace here, then use the same login in the mobile app. Your team can be invited as soon as the workspace is ready.</p>
+          <p>Add your venue here, then use the same login in the mobile app. Your team can be invited as soon as the workspace is ready.</p>
         </aside>
         <section class="signup" aria-labelledby="signup-title">
-          <h3 id="signup-title">Create your workspace</h3>
+          <h3 id="signup-title">Add Venue</h3>
           <p>Start on the web, then log in with the same email in the iOS app. Your business, owner profile, and venue workspace stay in sync.</p>
           <form id="signupForm">
             <div class="form-grid">
@@ -777,11 +778,11 @@
               <span>I agree to the <a href="terms/" style="color:var(--green);">Terms of Service</a> and <a href="privacy/" style="color:var(--green);">Privacy Policy</a>.</span>
             </label>
             <div style="height:16px"></div>
-            <button class="btn" type="submit" id="signupButton">Start workspace</button>
+            <button class="btn" type="submit" id="signupButton">Add Venue</button>
             <div id="verificationStep" hidden style="margin-top:16px;">
               <label>Email verification code<input id="verificationCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" /></label>
               <div style="height:12px"></div>
-              <button class="btn" type="button" id="verifyButton">Verify email &amp; create workspace</button>
+              <button class="btn" type="button" id="verifyButton">Verify email &amp; add venue</button>
             </div>
             <div class="status" id="signupStatus" role="status" aria-live="polite"></div>
           </form>
@@ -814,7 +815,7 @@
         <h2>Service moves fast. The app should keep up.</h2>
         <p>Venue Wrangler connects the operational pieces that usually live in separate tools: schedules, staff, tables, guests, inventory, reporting, and billing.</p>
         <p>Use the signup form to create the venue workspace. Then open the app and log in with the same email and password.</p>
-        <a class="btn" href="#pricing" data-close-demo>Start workspace</a>
+        <a class="btn" href="#pricing" data-close-demo>Add Venue</a>
       </div>
     </div>
   </div>
@@ -880,7 +881,7 @@
       window.localStorage.setItem("venuewrangler_token", pendingSession.token);
       window.localStorage.setItem("venuewrangler_workspace", JSON.stringify(result.venue));
       statusEl.className = "status success";
-      statusEl.textContent = `Workspace created for ${result.venue?.name || pendingWorkspace.businessName}. Opening your workspace...`;
+      statusEl.textContent = `Venue added for ${result.venue?.name || pendingWorkspace.businessName}. Opening your workspace...`;
       form.reset();
       verificationStep.hidden = true;
       pendingSession = null;
@@ -891,7 +892,7 @@
       event.preventDefault();
       const data = Object.fromEntries(new FormData(form).entries());
       statusEl.className = "status";
-      statusEl.textContent = "Creating your Venue Wrangler workspace...";
+      statusEl.textContent = "Adding your venue...";
       button.disabled = true;
       try {
         let session;
@@ -935,11 +936,11 @@
           return;
         }
         verificationStep.hidden = false;
-        statusEl.textContent = "We sent a 6-digit verification code to your email. Enter it below to create your workspace.";
+        statusEl.textContent = "We sent a 6-digit verification code to your email. Enter it below to add your venue.";
         verificationCode.focus();
       } catch (error) {
         statusEl.className = "status error";
-        statusEl.textContent = error.message || "Could not create the workspace.";
+        statusEl.textContent = error.message || "Could not add the venue.";
       } finally {
         button.disabled = false;
       }
