@@ -31,19 +31,14 @@ const shouldIgnoreWebError = (message: string) =>
 export default function RootLayout() {
   const themeMode = useAppearanceStore((state) => state.mode);
   const palette = designPalettes[themeMode];
-  // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
-  // and the nav use it). We hold the first paint until it's loaded, otherwise
-  // web shows blank "tofu" squares. A load error still lets the app through.
-  const [fontsLoaded, fontError] = useFonts({
+  // Preload application fonts, but never block the web shell on them. A CDN or
+  // hosting font failure must not leave authentication routes permanently blank.
+  useFonts({
     ...MaterialCommunityIcons.font,
     Fraunces_500Medium,
     Fraunces_600SemiBold,
     Fraunces_600SemiBold_Italic,
   });
-  // Only block the first paint on web (where an unloaded glyph font shows tofu
-  // squares). On native the icon font is bundled and renders fine, so never
-  // gate there — a gate could leave a blank screen if loading misbehaves.
-  const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
   const queryClient = useMemo(
     () =>
       new QueryClient({
@@ -122,7 +117,7 @@ export default function RootLayout() {
     };
   }, []);
 
-  if (!fontsReady || !handoffChecked) {
+  if (!handoffChecked) {
     return <View style={{ flex: 1, backgroundColor: palette.background }} />;
   }
 
