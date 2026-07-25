@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Post,
@@ -19,7 +20,9 @@ import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { getClientIp } from '../../common/http';
+import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
@@ -65,6 +68,8 @@ class ReviewDecisionDto {
 @SkipVenueScope()
 @Controller('v1/workforce')
 export class WorkforceController {
+  private readonly logger = new Logger(WorkforceController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
@@ -92,83 +97,123 @@ export class WorkforceController {
       INVITE_EMAIL_LIMIT_WINDOW_MS,
     );
 
-    let invite = await this.prisma.invite.findFirst({
-      where: {
-        ...(email
-          ? { email: { equals: email, mode: 'insensitive' } }
-          : { phone }),
-      },
-      include: { venue: { select: { name: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!invite) {
+    // Phone-only contacts never get emailed, so there's no token to mint or
+    // rotate — just report presence, matching the email path's fallback and
+    // stale-status logic below without ever touching the token machinery.
+    if (!email) {
+      const invite = await this.prisma.invite.findFirst({
+        where: { phone, usedBy: null, expiresAt: { gt: new Date() } },
+      });
+      if (invite) return { status: 'found', emailSent: false };
       const unclaimedProfile = await this.prisma.profile.findFirst({
-        where: {
-          userId: null,
-          venueId: { not: null },
-          ...(email
-            ? { email: { equals: email, mode: 'insensitive' } }
-            : { phone: phone ? { equals: phone } : undefined }),
-        },
+        where: { userId: null, venueId: { not: null }, phone: phone ? { equals: phone } : undefined },
+        include: { venue: { select: { name: true } } },
+      });
+      if (unclaimedProfile?.venue) return { status: 'found', emailSent: false };
+      return this.reportStaleInviteStatus(undefined, phone);
+    }
+
+    // The plaintext token is only ever needed for the instant it's embedded
+    // in the outgoing email — it's generated fresh here and never read back
+    // from a previously stored row (Invite.tokenHash is the only thing
+    // persisted), so a rotate happens on every check that has something to
+    // email, not just on first mint. Concurrent checks for the same email
+    // are serialized by the advisory lock below; a later one's rotation
+    // supersedes an earlier one's already-sent link, which is an acceptable
+    // trade-off for never persisting the plaintext.
+    const freshToken = randomBytes(18).toString('base64url');
+    const tokenHash = hashInviteToken(freshToken);
+    const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invite-check:${email}`}))`;
+
+      const redeemable = await tx.invite.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' }, usedBy: null, expiresAt: { gt: new Date() } },
         include: { venue: { select: { name: true } } },
         orderBy: { createdAt: 'desc' },
       });
 
-      if (!unclaimedProfile || !unclaimedProfile.venue) {
-        return { status: 'not_found' };
-      }
-
-      if (!email) {
-        return { status: 'found', emailSent: false };
-      }
-
-      // A legacy roster row has no Invite yet. Serialize creation by email so
-      // simultaneous checks cannot mint multiple valid bearer tokens.
-      invite = await this.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`invite-check:${email}`}))`;
-        const existing = await tx.invite.findFirst({
-          where: { email: { equals: email, mode: 'insensitive' } },
-          include: { venue: { select: { name: true } } },
-          orderBy: { createdAt: 'desc' },
-        });
-        if (existing) return existing;
-        return tx.invite.create({
-          data: {
-            venueId: unclaimedProfile.venueId!,
-            email,
-            token: randomBytes(18).toString('base64url'),
-            role: unclaimedProfile.role,
-            jobTitle: unclaimedProfile.jobTitle,
-            createdBy: unclaimedProfile.id,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-          },
+      if (redeemable) {
+        const rotated = await tx.invite.update({
+          where: { id: redeemable.id },
+          data: { tokenHash, expiresAt: newExpiresAt },
           include: { venue: { select: { name: true } } },
         });
+        return { venueName: rotated.venue.name, jobTitle: rotated.jobTitle } as const;
+      }
+
+      const unclaimedProfile = await tx.profile.findFirst({
+        where: { userId: null, venueId: { not: null }, email: { equals: email, mode: 'insensitive' } },
+        include: { venue: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
       });
+      if (!unclaimedProfile || !unclaimedProfile.venue) {
+        return null;
+      }
+
+      const created = await tx.invite.create({
+        data: {
+          venueId: unclaimedProfile.venueId!,
+          email,
+          tokenHash,
+          role: unclaimedProfile.role,
+          jobTitle: unclaimedProfile.jobTitle,
+          createdBy: unclaimedProfile.id,
+          expiresAt: newExpiresAt,
+        },
+        include: { venue: { select: { name: true } } },
+      });
+      return { venueName: created.venue.name, jobTitle: created.jobTitle } as const;
+    });
+
+    if (!outcome) {
+      return this.reportStaleInviteStatus(email, undefined);
     }
-    if (invite.usedBy) {
-      return { status: 'used' };
-    }
-    if (invite.expiresAt.getTime() < Date.now()) {
-      return { status: 'expired' };
-    }
-    if (email) {
-      const appUrl = (this.config.get<string>('APP_WEB_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
-      const signupUrl = `${appUrl}/join?invite=${encodeURIComponent(invite.token)}`;
-      await this.email.sendOrThrow({
+
+    const appUrl = (this.config.get<string>('APP_WEB_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
+    // A URL fragment (not a query string) so the token never reaches
+    // server/CDN access logs — fragments aren't sent in the HTTP request at
+    // all. site/join/index.html reads from the fragment first.
+    const signupUrl = `${appUrl}/join#invite=${encodeURIComponent(freshToken)}`;
+    const venueName = sanitizeForEmail(outcome.venueName);
+    // Fire-and-forget: awaiting the send here would (a) make `found`
+    // responses measurably slower than `not_found` ones (a timing side
+    // channel for the enumeration check above) and (b) turn a transient
+    // email-provider outage into a 500 that still confirms "found" via the
+    // error shape. The invite itself is already durable in the DB, so a
+    // failed send just means the user can retry the check.
+    void this.email
+      .sendOrThrow({
         to: email,
-        subject: `Create your Venue Wrangler account for ${invite.venue.name}`,
+        subject: `Create your Venue Wrangler account for ${venueName}`,
         text:
-          `Your email address has been invited to join ${invite.venue.name} on Venue Wrangler as ${invite.jobTitle}.\n\n` +
+          `Your email address has been invited to join ${venueName} on Venue Wrangler as ${outcome.jobTitle}.\n\n` +
           `Create your account using this secure link:\n${signupUrl}\n\n` +
-          `Create your account with this invited email address and you will automatically join ${invite.venue.name}.\n\n` +
-          `This link expires on ${invite.expiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
+          `Create your account with this invited email address and you will automatically join ${venueName}.\n\n` +
+          `This link expires on ${newExpiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
           `Questions? support@venuewrangler.com\n\n` +
           `— The Venue Wrangler Team`,
+      })
+      .catch((err: unknown) => {
+        this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
       });
-    }
-    return { status: 'found', emailSent: Boolean(email) };
+    return { status: 'found', emailSent: true };
+  }
+
+  // No redeemable invite and no roster row to fall back to — report the most
+  // specific status we can from invite history (used/expired), so e.g.
+  // someone reusing an old link still gets a helpful message instead of a
+  // generic "not found".
+  private async reportStaleInviteStatus(email: string | undefined, phone: string | undefined) {
+    const staleInvite = await this.prisma.invite.findFirst({
+      where: email ? { email: { equals: email, mode: 'insensitive' } } : { phone },
+      orderBy: { createdAt: 'desc' },
+      select: { usedBy: true, expiresAt: true },
+    });
+    if (staleInvite?.usedBy) return { status: 'used' };
+    if (staleInvite && staleInvite.expiresAt.getTime() < Date.now()) return { status: 'expired' };
+    return { status: 'not_found' };
   }
 
   // ─── Public: venue search ──────────────────────────────────────────────────
@@ -434,7 +479,16 @@ export class WorkforceController {
     };
   }
 
-  private async emailJoinRequestDecision(id: string, decision: 'approved' | 'rejected', note?: string | null) {
+  private emailJoinRequestDecision(id: string, decision: 'approved' | 'rejected', note?: string | null) {
+    void this.emailJoinRequestDecisionInBackground(id, decision, note).catch((error) => {
+      this.logger.error(
+        `Join-request decision email failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    });
+  }
+
+  private async emailJoinRequestDecisionInBackground(id: string, decision: 'approved' | 'rejected', note?: string | null) {
     const request = await this.prisma.workplaceJoinRequest.findUnique({
       where: { id },
       include: {

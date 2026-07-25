@@ -173,7 +173,7 @@ describe('SchedulingAssignmentService', () => {
       notes: '  Swap approved ',
     });
 
-    expect(result).toBe(shift);
+    expect(result).toEqual(shift);
     expect(lockSpy).toHaveBeenCalled();
     expect(overlapSpy).toHaveBeenCalledWith(
       expect.anything(),
@@ -196,6 +196,66 @@ describe('SchedulingAssignmentService', () => {
       },
     });
     expect(prisma.venue.update).toHaveBeenCalled();
+  });
+
+  it('re-reads the shift inside the transaction so a concurrent reassignment is checked against the current assignee', async () => {
+    const staleShift = {
+      id: 'shift-5',
+      venueId: 'venue-1',
+      profileId: 'profile-1',
+      dayIndex: 1,
+      startMinutes: 480,
+      endMinutes: 720,
+      jobTitle: 'Barback',
+      station: 'Main',
+      status: 'scheduled',
+    };
+    // Simulates a concurrent assignShift reassigning shift-5 from profile-1 to
+    // profile-2 between the initial getVenueShift read and this transaction.
+    const reassignedShift = { ...staleShift, profileId: 'profile-2' };
+    const prisma = {
+      scheduleShift: {
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(staleShift)
+          .mockResolvedValueOnce(reassignedShift),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      venue: {
+        update: vi.fn().mockResolvedValue({}),
+      },
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma as unknown)),
+    };
+    const service = new SchedulingAssignmentService(prisma as any);
+    const lockSpy = vi.spyOn(service, 'lockAssignmentKeys').mockResolvedValue(undefined);
+    const overlapSpy = vi.spyOn(service, 'assertNoDoubleBookTx').mockResolvedValue(undefined);
+
+    const result = await service.updateShift({
+      venueId: 'venue-1',
+      shiftId: 'shift-5',
+      dayIndex: 2,
+      startMinutes: 540,
+      endMinutes: 780,
+      jobTitle: 'Lead Server',
+      station: 'Roof',
+    });
+
+    // Locking and the double-book check must use the freshly-read assignee
+    // (profile-2), not the stale one captured before the transaction.
+    expect(lockSpy).toHaveBeenCalledWith(expect.anything(), [
+      expect.objectContaining({ profileId: 'profile-2' }),
+    ]);
+    expect(overlapSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      'venue-1',
+      'profile-2',
+      2,
+      540,
+      780,
+      'shift-5',
+    );
+    // The returned profileId reflects the current assignee too, so the
+    // caller's edit-notification email goes to profile-2, not profile-1.
+    expect(result.profileId).toBe('profile-2');
   });
 
   it('deletes a venue shift and marks the schedule edited', async () => {
@@ -280,7 +340,11 @@ describe('SchedulingAssignmentService', () => {
 
     expect(result).toEqual({ restored: 2 });
     expect(prisma.profile.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ['profile-1', 'missing-member'] }, venueId: 'venue-1' },
+      where: {
+        id: { in: ['profile-1', 'missing-member'] },
+        venueId: 'venue-1',
+        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+      },
       select: { id: true },
     });
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(1, {

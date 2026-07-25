@@ -4,6 +4,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -19,6 +20,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell } from '../../common/csv';
+import { htmlEscape } from '../../common/html-escape';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
@@ -289,6 +291,8 @@ function mapPrepBoardItem(item: {
 @Controller('v1/bar-inventory')
 @UseGuards(AuthGuard)
 export class BarInventoryController {
+  private readonly logger = new Logger(BarInventoryController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -818,14 +822,14 @@ export class BarInventoryController {
         const qty = Math.ceil(item.parLevel - item.onHand);
         const lineTotal = item.unitCostCents != null ? qty * item.unitCostCents : null;
         if (lineTotal != null) grandTotal += lineTotal;
-        return `<tr><td>${item.name}</td><td>${item.sku ?? '—'}</td><td>${item.unit}</td><td>${item.onHand}</td><td>${item.parLevel}</td><td><strong>${qty}</strong></td><td>${lineTotal != null ? '$' + (lineTotal / 100).toFixed(2) : '—'}</td></tr>`;
+        return `<tr><td>${htmlEscape(item.name)}</td><td>${htmlEscape(item.sku ?? '—')}</td><td>${htmlEscape(item.unit)}</td><td>${item.onHand}</td><td>${item.parLevel}</td><td><strong>${qty}</strong></td><td>${lineTotal != null ? '$' + (lineTotal / 100).toFixed(2) : '—'}</td></tr>`;
       }).join('');
-      return `<h3>${supplier}</h3><table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><th>Item</th><th>SKU</th><th>Unit</th><th>On Hand</th><th>Par</th><th>Order Qty</th><th>Est. Cost</th></tr>${rows}</table>`;
+      return `<h3>${htmlEscape(supplier)}</h3><table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><th>Item</th><th>SKU</th><th>Unit</th><th>On Hand</th><th>Par</th><th>Order Qty</th><th>Est. Cost</th></tr>${rows}</table>`;
     }).join('<br>');
 
     const venueName = profile.venue?.name ?? 'Your venue';
     const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-    const html = `<h2>Purchase Order — ${venueName}</h2><p>Generated ${date} · ${belowPar.length} items below par</p>${supplierSections}${grandTotal > 0 ? `<p><strong>Estimated total: $${(grandTotal / 100).toFixed(2)}</strong></p>` : ''}`;
+    const html = `<h2>Purchase Order — ${htmlEscape(venueName)}</h2><p>Generated ${date} · ${belowPar.length} items below par</p>${supplierSections}${grandTotal > 0 ? `<p><strong>Estimated total: $${(grandTotal / 100).toFixed(2)}</strong></p>` : ''}`;
     const text = `Purchase Order — ${venueName}\n${date} · ${belowPar.length} items below par\n\n${belowPar.map((i) => `${i.supplier ?? 'Unspecified'}: ${i.name} — order ${Math.ceil(i.parLevel - i.onHand)} ${i.unit}`).join('\n')}${grandTotal > 0 ? `\n\nEst. total: $${(grandTotal / 100).toFixed(2)}` : ''}`;
 
     await this.email.sendToVenueManagers(venueId, {
@@ -884,10 +888,10 @@ export class BarInventoryController {
     ].join('\n');
 
     const html = `
-      <h2>Inventory Digest — ${venueName}</h2>
+      <h2>Inventory Digest — ${htmlEscape(venueName)}</h2>
       <p>${date}</p>
       <h3>Below par (${belowPar.length} items)</h3>
-      ${belowPar.length === 0 ? '<p>All items at or above par.</p>' : `<ul>${belowPar.slice(0, 20).map((i) => `<li>${i.name}: ${i.onHand} ${i.unit} (par ${i.parLevel})</li>`).join('')}${belowPar.length > 20 ? `<li>…and ${belowPar.length - 20} more</li>` : ''}</ul>`}
+      ${belowPar.length === 0 ? '<p>All items at or above par.</p>' : `<ul>${belowPar.slice(0, 20).map((i) => `<li>${htmlEscape(i.name)}: ${i.onHand} ${htmlEscape(i.unit)} (par ${i.parLevel})</li>`).join('')}${belowPar.length > 20 ? `<li>…and ${belowPar.length - 20} more</li>` : ''}</ul>`}
       <h3>30-day shrinkage</h3>
       <p>Waste: <strong>$${(wasteCents / 100).toFixed(2)}</strong> · Comp: <strong>$${(compCents / 100).toFixed(2)}</strong> · Total: <strong>$${((wasteCents + compCents) / 100).toFixed(2)}</strong></p>
       <h3>Inventory health</h3>
@@ -948,7 +952,23 @@ export class BarInventoryController {
     };
   }
 
-  private async fireInventoryAlerts(args: {
+  private fireInventoryAlerts(args: {
+    venueId: string;
+    item: { id: string; name: string; parLevel: number; unitCostCents: number | null };
+    previousOnHand: number;
+    nextOnHand: number;
+    movementType: string;
+    quantity: number;
+  }) {
+    void this.fireInventoryAlertsInBackground(args).catch((error) => {
+      this.logger.error(
+        `Inventory alert delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    });
+  }
+
+  private async fireInventoryAlertsInBackground(args: {
     venueId: string;
     item: { id: string; name: string; parLevel: number; unitCostCents: number | null };
     previousOnHand: number;
@@ -960,7 +980,7 @@ export class BarInventoryController {
 
     // Low-stock alert: just crossed below par
     if (previousOnHand >= item.parLevel && nextOnHand < item.parLevel) {
-      void this.notifications.notifyManagers({
+      await this.notifications.notifyManagers({
         venueId,
         kind: 'inventory_low_stock',
         title: `Low stock: ${item.name}`,
@@ -972,7 +992,7 @@ export class BarInventoryController {
     if ((movementType === 'waste' || movementType === 'comp') && item.unitCostCents != null) {
       const lossCents = Math.abs(quantity) * item.unitCostCents;
       if (lossCents >= 5000) {
-        void this.notifications.notifyManagers({
+        await this.notifications.notifyManagers({
           venueId,
           kind: 'inventory_large_loss',
           title: `Large ${movementType} recorded`,

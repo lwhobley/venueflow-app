@@ -3,6 +3,7 @@ import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
+import { hashInviteToken } from '../common/invite-token';
 
 const pbkdf2Async = promisify(pbkdf2);
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -28,7 +29,7 @@ export class AuthService {
   }
 
   generateOneTimeCode() {
-    return Array.from({ length: 6 }, () => randomInt(0, 10)).join('');
+    return Array.from({ length: 8 }, () => randomInt(0, 10)).join('');
   }
 
   hashOneTimeCode(code: string) {
@@ -55,7 +56,7 @@ export class AuthService {
       ? emailVerified
       ? await this.prisma.invite.findFirst({
           where: {
-            OR: [{ token: inviteValue }, { code: { equals: inviteValue, mode: 'insensitive' } }],
+            OR: [{ tokenHash: hashInviteToken(inviteValue) }, { code: { equals: inviteValue, mode: 'insensitive' } }],
             usedBy: null,
             expiresAt: { gt: new Date() },
           },

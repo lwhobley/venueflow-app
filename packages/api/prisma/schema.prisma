@@ -1536,9 +1536,15 @@ model Invite {
   venueId   String
   email     String?
   phone     String?
-  token     String   @unique
+  // The bearer token itself is never stored — only its sha256 hash, so a DB
+  // dump/backup leak can't yield usable signup links for pending invites
+  // (mirrors Session.tokenHash). The plaintext lives only in memory for the
+  // request that mints/rotates it, long enough to embed in the outgoing
+  // email/deep-link.
+  tokenHash String   @unique
   // Short, human-typeable join code (e.g. "VW-7K2Q9"); employees enter this to
-  // join a team. The long `token` backs the venuewrangler://join deep link.
+  // join a team. The long token (hashed above) backs the venuewrangler://join
+  // deep link.
   code      String?  @unique
   role      Role
   jobTitle  String

@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -28,6 +29,7 @@ import {
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { dayLabel, minutesToTime } from '../../common/mappers';
+import { ACTIVE_MEMBERSHIP } from '../../common/membership';
 import {
   addDays,
   DEFAULT_PAY_PERIOD_ANCHOR,
@@ -366,6 +368,8 @@ function availabilityCovers(rows: AvailabilityWindow[] | undefined, shift: { day
 
 @Controller('v1/scheduling')
 export class SchedulingController {
+  private readonly logger = new Logger(SchedulingController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -540,7 +544,10 @@ export class SchedulingController {
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
-      this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.profile.findMany({
+        where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
+        orderBy: { fullName: 'asc' },
+      }),
       this.payPeriodConfig(scope!.venueId),
     ]);
     const today = todayInZone(config.timezone);
@@ -625,7 +632,7 @@ export class SchedulingController {
         select: { startsAt: true, expectedGuests: true },
       }),
       this.prisma.profile.findMany({
-        where: { venueId: scope!.venueId },
+        where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, fullName: true },
       }),
     ]);
@@ -769,7 +776,7 @@ export class SchedulingController {
       shiftId: id,
       profileId: body.profileId,
     });
-    if (nextProfileId) {
+    if (nextProfileId && shift.profileId !== nextProfileId) {
       void this.sendScheduleUpdateEmail(nextProfileId, 'Added', undefined, {
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,
@@ -1135,7 +1142,10 @@ export class SchedulingController {
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
-      this.prisma.profile.findMany({ where: { venueId: scope!.venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.profile.findMany({
+        where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
+        orderBy: { fullName: 'asc' },
+      }),
       this.prisma.availability.findMany({
         where: { venueId: scope!.venueId, weekStart: availabilityWeekStart },
         orderBy: [{ profileId: 'asc' }, { dayIndex: 'asc' }, { startMinutes: 'asc' }],
@@ -1256,7 +1266,10 @@ export class SchedulingController {
 
     const [shifts, staff, availability, reservations, venueEvents, memoryNotes] = await Promise.all([
       this.prisma.scheduleShift.findMany({ where: { venueId } }),
-      this.prisma.profile.findMany({ where: { venueId }, orderBy: { fullName: 'asc' } }),
+      this.prisma.profile.findMany({
+        where: { venueId, OR: ACTIVE_MEMBERSHIP },
+        orderBy: { fullName: 'asc' },
+      }),
       this.prisma.availability.findMany({ where: { venueId, weekStart: availabilityWeekStart } }),
       this.prisma.reservation.findMany({
         where: {
@@ -1550,7 +1563,18 @@ export class SchedulingController {
         createdAt: swap.createdAt.getTime(),
       }));
   }
-  private async sendScheduleUpdateEmail(
+  private sendScheduleUpdateEmail(
+    profileId: string,
+    changeType: 'Added' | 'Edited' | 'Removed',
+    before?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
+    after?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
+  ) {
+    void this.sendScheduleUpdateEmailInBackground(profileId, changeType, before, after).catch((error) => {
+      this.logBackgroundFailure('schedule update email', error);
+    });
+  }
+
+  private async sendScheduleUpdateEmailInBackground(
     profileId: string,
     changeType: 'Added' | 'Edited' | 'Removed',
     before?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
@@ -1601,7 +1625,13 @@ export class SchedulingController {
     });
   }
 
-  private async sendManagerSwapApprovalEmail(venueId: string, swapId: string) {
+  private sendManagerSwapApprovalEmail(venueId: string, swapId: string) {
+    void this.sendManagerSwapApprovalEmailInBackground(venueId, swapId).catch((error) => {
+      this.logBackgroundFailure('manager swap approval email', error);
+    });
+  }
+
+  private async sendManagerSwapApprovalEmailInBackground(venueId: string, swapId: string) {
     const swap = await this.prisma.shiftSwap.findUnique({ where: { id: swapId } });
     if (!swap) return;
 
@@ -1679,7 +1709,13 @@ export class SchedulingController {
     }
   }
 
-  private async sendStaffSwapReviewedEmail(venueId: string, swapId: string, approve: boolean) {
+  private sendStaffSwapReviewedEmail(venueId: string, swapId: string, approve: boolean) {
+    void this.sendStaffSwapReviewedEmailInBackground(venueId, swapId, approve).catch((error) => {
+      this.logBackgroundFailure('staff swap review email', error);
+    });
+  }
+
+  private async sendStaffSwapReviewedEmailInBackground(venueId: string, swapId: string, approve: boolean) {
     const swap = await this.prisma.shiftSwap.findUnique({ where: { id: swapId } });
     if (!swap) return;
 
@@ -1744,5 +1780,12 @@ export class SchedulingController {
     // Send to both employees
     sendEmail(requester, target, true);
     sendEmail(target, requester, false);
+  }
+
+  private logBackgroundFailure(label: string, error: unknown) {
+    this.logger.error(
+      `${label} failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error.stack : undefined,
+    );
   }
 }

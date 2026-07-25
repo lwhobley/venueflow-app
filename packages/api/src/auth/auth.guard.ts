@@ -106,13 +106,16 @@ export class AuthGuard implements CanActivate {
         },
       },
     });
+    // Privilege claims come only from the live profile. When the profile row is
+    // gone, clear role/allAccess/profileId rather than trusting stale JWT fields
+    // (venueId already cleared to null in that case).
     const resolvedUser: AuthUser = {
       ...payload,
       email: liveProfile?.email ?? payload.email,
       name: liveProfile?.fullName ?? payload.name,
-      profileId: liveProfile?.id ?? payload.profileId,
-      role: liveProfile?.role ?? payload.role,
-      allAccess: liveProfile?.allAccess ?? payload.allAccess,
+      profileId: liveProfile?.id,
+      role: liveProfile?.role,
+      allAccess: liveProfile?.allAccess ?? false,
       trialEndsAt: liveProfile?.trialEndsAt?.toISOString() ?? null,
       venueId: liveProfile?.venueId ?? null,
       venueName: liveProfile?.venue?.name ?? null,

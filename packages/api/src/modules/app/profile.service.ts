@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { isAdminRole } from '../../auth/roles';
 import type { AuthUser } from '../../auth/auth.guard';
+import { isActiveMembership } from '../../common/membership';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -74,8 +75,4 @@ export class ProfileService {
     });
     return Boolean(account?.emailVerifiedAt);
   }
-}
-
-function isActiveMembership(status: string | null): boolean {
-  return status === null || status === 'active';
 }

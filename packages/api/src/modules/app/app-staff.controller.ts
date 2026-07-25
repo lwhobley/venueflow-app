@@ -279,16 +279,21 @@ export class AppStaffController {
     viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null; fullName: string; venue?: { name: string } | null },
     body: Pick<StaffDto, 'venueId' | 'staffId' | 'email' | 'fullName' | 'role' | 'jobTitle' | 'phone' | 'altPhone' | 'address' | 'dateOfBirth' | 'certifications'>,
   ) {
-    const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess;
-    if (!viewerIsOwnerOrAdmin && ['admin', 'owner', 'manager'].includes(body.role)) {
-      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
-    }
     let existing;
     if (body.staffId) {
       existing = await this.prisma.profile.findFirst({ where: { id: body.staffId, venueId: body.venueId } });
       if (!existing) throw new NotFoundException('Staff member not found');
     } else {
       existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
+    }
+    // Managers cannot grant roles at or above their own level. Only applies
+    // when the role is actually changing — resubmitting a member's existing
+    // role (e.g. a manager editing their own phone number) is not a grant and
+    // must not be blocked here.
+    const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess;
+    const roleChanged = !existing || existing.role !== body.role;
+    if (!viewerIsOwnerOrAdmin && roleChanged && ['admin', 'owner', 'manager'].includes(body.role)) {
+      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
     }
     const employeeFields = {
       phone: body.phone?.trim() || null,

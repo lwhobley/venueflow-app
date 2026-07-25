@@ -31,8 +31,13 @@ export type ParsedInventoryResult = {
 @Injectable()
 export class BarInventoryParserService {
   async parse(input: ParseInput): Promise<ParsedInventoryResult> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new BadRequestException('AI parsing requires OPENAI_API_KEY configuration');
+    // Prefer AI_API_KEY (the current standard, shared with the scheduler and
+    // staff-import AI features) but keep OPENAI_API_KEY as a fallback for
+    // either provider shape — unlike ai-json-parse.ts's resolveAiApiKey(),
+    // this service genuinely supports real OpenAI keys (see parseWithOpenAi
+    // below), so it can't discard non-OpenRouter-shaped legacy keys.
+    const apiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new BadRequestException('AI parsing requires AI_API_KEY configuration');
 
     const inputText = input.text?.trim() ?? '';
     if (!inputText && !input.imageBase64) {

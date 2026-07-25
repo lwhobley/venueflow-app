@@ -84,8 +84,9 @@ async function buildPayrollRows(
       const breaks = (e.breaks as any[]) || [];
       for (const b of breaks) {
         if (b.type !== 'unpaid' || !b.startAt || !b.endAt) continue;
-        const breakStart = Math.max(start, b.startAt);
-        const breakEnd = Math.min(end, b.endAt);
+        const breakStart = Math.max(start, Number(b.startAt));
+        const breakEnd = Math.min(end, Number(b.endAt));
+        if (!Number.isFinite(breakStart) || !Number.isFinite(breakEnd)) continue;
         durationMs -= Math.max(0, breakEnd - breakStart);
       }
       return sum + Math.max(0, durationMs) / 3600000;

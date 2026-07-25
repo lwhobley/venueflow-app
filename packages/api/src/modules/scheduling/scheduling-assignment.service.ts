@@ -79,29 +79,40 @@ export class SchedulingAssignmentService {
     notes?: string;
   }) {
     const shift = await this.getVenueShift(args.venueId, args.shiftId);
+    let currentProfileId = shift.profileId;
 
     await withSerializableRetry(this.prisma, async (tx) => {
-      if (shift.profileId) {
+      // Re-read inside the transaction: the shift's assignment may have
+      // changed (e.g. a concurrent assignShift/reviewSwap) since the initial
+      // read above, and the double-book check below must validate against
+      // whoever actually holds the shift right now, not a stale snapshot.
+      const current = await tx.scheduleShift.findFirst({
+        where: { id: shift.id, venueId: args.venueId },
+      });
+      if (!current) throw new NotFoundException('Shift not found');
+      currentProfileId = current.profileId;
+
+      if (current.profileId) {
         await this.lockAssignmentKeys(tx, [
           {
             venueId: args.venueId,
-            profileId: shift.profileId,
+            profileId: current.profileId,
             dayIndex: args.dayIndex,
           },
         ]);
         await this.assertNoDoubleBookTx(
           tx,
           args.venueId,
-          shift.profileId,
+          current.profileId,
           args.dayIndex,
           args.startMinutes,
           args.endMinutes,
-          shift.id,
+          current.id,
         );
       }
 
       await tx.scheduleShift.update({
-        where: { id: shift.id },
+        where: { id: current.id },
         data: {
           dayIndex: args.dayIndex,
           startMinutes: args.startMinutes,
@@ -117,7 +128,11 @@ export class SchedulingAssignmentService {
       });
     });
 
-    return shift;
+    // dayIndex/startMinutes/endMinutes/station intentionally reflect the
+    // pre-update values (the controller uses them as the "before" side of
+    // the edit-notification email diff); profileId reflects the up-to-date
+    // assignee so that email goes to whoever actually holds the shift.
+    return { ...shift, profileId: currentProfileId };
   }
 
   async assignShift(args: {
@@ -200,7 +215,11 @@ export class SchedulingAssignmentService {
     );
     const members = referencedIds.length
       ? await this.prisma.profile.findMany({
-          where: { id: { in: referencedIds }, venueId: args.venueId },
+          where: {
+            id: { in: referencedIds },
+            venueId: args.venueId,
+            OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+          },
           select: { id: true },
         })
       : [];
@@ -612,7 +631,13 @@ export class SchedulingAssignmentService {
   }
 
   async assertVenueMember(venueId: string, profileId: string) {
-    const member = await this.prisma.profile.findFirst({ where: { id: profileId, venueId } });
+    const member = await this.prisma.profile.findFirst({
+      where: {
+        id: profileId,
+        venueId,
+        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+      },
+    });
     if (!member) throw new BadRequestException('Staff member is not in this venue');
     return member;
   }

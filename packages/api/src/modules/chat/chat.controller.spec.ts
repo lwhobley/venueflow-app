@@ -149,7 +149,7 @@ describe('ChatController', () => {
       { id: 'group-1', venueId: 'venue-1', type: 'group', name: 'Closing Crew', memberIds: ['staff-1'], lastMessageText: 'Wrap up', lastMessageAt: recent },
       { id: 'group-2', venueId: 'venue-1', type: 'group', name: 'Hidden', memberIds: ['staff-2'], lastMessageText: 'Private', lastMessageAt: recent },
       { id: 'role-1', venueId: 'venue-1', type: 'role', name: '#Role - Server', memberIds: ['staff-1'], lastMessageText: 'Prep', lastMessageAt: old },
-      { id: 'shift-1', venueId: 'venue-1', type: 'shift', name: '#Crew - Wednesday', memberIds: [], lastMessageText: 'Open', lastMessageAt: old },
+      { id: 'shift-1', venueId: 'venue-1', type: 'shift', name: '#Crew - Wednesday', memberIds: ['staff-1'], lastMessageText: 'Open', lastMessageAt: old },
       { id: 'dm-1', venueId: 'venue-1', type: 'dm', name: null, memberIds: ['staff-1', 'staff-2'], lastMessageText: 'Hey', lastMessageAt: recent },
       { id: 'dm-2', venueId: 'venue-1', type: 'dm', name: null, memberIds: ['staff-2', 'staff-3'], lastMessageText: 'Nope', lastMessageAt: recent },
     ]);
@@ -420,7 +420,7 @@ describe('ChatController', () => {
       venueId: 'venue-1',
       type: 'group',
       name: 'All Staff',
-      memberIds: [],
+      memberIds: ['staff-1'],
     });
 
     await expect(controller.toggleReaction(staffScope, 'msg-1', { emoji: 'fire' })).resolves.toEqual({
@@ -542,9 +542,10 @@ describe('ChatController', () => {
 
     prisma.chatImage.create.mockResolvedValue({ id: 'img-1' });
     s3ImageService.upload.mockResolvedValue('uploads/img-1.png');
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
     await expect(controller.uploadImage(staffScope, {
-      dataBase64: Buffer.from('hello').toString('base64'),
+      dataBase64: pngBytes.toString('base64'),
       mimeType: 'image/png',
     })).resolves.toEqual({ imageUrl: 'signed:/v1/chat/images/img-1' });
     expect(mediaAccess.createPath).toHaveBeenCalledWith('chat-image', 'img-1', 'venue-1', '/v1/chat/images/img-1');
@@ -558,7 +559,7 @@ describe('ChatController', () => {
       s3Key: 'uploads/img-1.png',
     });
     s3ImageService.getPresignedUrl.mockResolvedValue('https://signed.example/img-1.png');
-    const res = { redirect: vi.fn().mockReturnValue('redirected') } as any;
+    const res = { redirect: vi.fn().mockReturnValue('redirected'), setHeader: vi.fn() } as any;
 
     await expect(controller.getImage('img-1', 'token-1', res)).resolves.toBe('redirected');
     expect(mediaAccess.assertToken).toHaveBeenCalledWith('token-1', 'chat-image', 'img-1', 'venue-1');
