@@ -517,7 +517,7 @@ export class AuthController {
   async logout(@CurrentUser() user: AuthUser) {
     if (user.sid) {
       await this.prisma.$transaction([
-        this.prisma.session.delete({ where: { id: user.sid } }),
+        this.prisma.session.deleteMany({ where: { id: user.sid } }),
         ...(user.profileId
           ? [this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } })]
           : []),

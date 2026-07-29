@@ -309,7 +309,7 @@ export class AppController {
       return { profile, venue };
     });
 
-    return { profile: mapProfile(result.profile), venue: mapVenue(result.venue) };
+    return { profile: mapProfile(result.profile, true), venue: mapVenue(result.venue) };
   }
 
   @UseGuards(AuthGuard)
@@ -362,8 +362,9 @@ export class AppController {
     ]);
     const countByStatus = (status: string) => shiftCounts.find((c) => c.status === status)?._count._all ?? 0;
 
+    const emailVerified = await this.isEmailVerified(user.sub);
     return {
-      profile: mapProfile(profile),
+      profile: mapProfile(profile, emailVerified),
       venue: mapVenue(profile.venue),
       analytics: {
         teamCount,
