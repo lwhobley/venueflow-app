@@ -582,6 +582,38 @@ export class OperationsController {
       take: 100,
     });
 
+    const executionSources = [
+      ...events.map((event) => ({ sourceType: 'venue-event', sourceId: event.id })),
+      ...reservations.filter((reservation) => reservation.isPrivateEvent).map((reservation) => ({ sourceType: 'reservation', sourceId: reservation.id })),
+      ...beos.map((beo) => ({ sourceType: 'beo', sourceId: beo.id })),
+    ];
+    const executionWorkspaces = executionSources.length === 0 ? [] : await this.prisma.eventExecutionWorkspace.findMany({
+      where: { venueId, OR: executionSources },
+      include: {
+        tasks: true,
+        timeline: true,
+        vendors: true,
+        incidents: true,
+      },
+      take: 150,
+    });
+    const dueExecutionTimeline = executionWorkspaces.flatMap((workspace) => workspace.timeline).filter((item) => item.status !== 'done' && item.startsAt <= now);
+    const openExecutionTasks = executionWorkspaces.flatMap((workspace) => workspace.tasks).filter((task) => task.status !== 'done');
+    const unreadyExecutionVendors = executionWorkspaces.flatMap((workspace) => workspace.vendors).filter((vendor) => vendor.status !== 'arrived');
+    const blockingExecutionIncidents = executionWorkspaces.flatMap((workspace) => workspace.incidents).filter((incident) => incident.status === 'open' && incident.blocksReadiness);
+    const executionItemCount = executionWorkspaces.reduce((total, workspace) => total
+      + workspace.tasks.length
+      + workspace.timeline.filter((item) => item.startsAt <= now).length
+      + workspace.vendors.length
+      + workspace.incidents.filter((incident) => incident.blocksReadiness).length, 0);
+    const openExecutionItemCount = openExecutionTasks.length + dueExecutionTimeline.length + unreadyExecutionVendors.length + blockingExecutionIncidents.length;
+    const executionScore = executionItemCount === 0 ? 1 : Math.max(0, 1 - openExecutionItemCount / executionItemCount);
+    const workspaceBySource = new Map(executionWorkspaces.map((workspace) => [`${workspace.sourceType}:${workspace.sourceId}`, workspace]));
+    const workspaceHasBlockers = (workspace: (typeof executionWorkspaces)[number] | undefined) => workspace ? workspace.tasks.some((task) => task.status !== 'done')
+      || workspace.timeline.some((item) => item.status !== 'done' && item.startsAt <= now)
+      || workspace.vendors.some((vendor) => vendor.status !== 'arrived')
+      || workspace.incidents.some((incident) => incident.status === 'open' && incident.blocksReadiness) : false;
+
     const openShifts = shifts.filter((shift) => shift.status === 'open');
     const incompleteChecklist = checklistItems.filter((item) => checklistCompletions.find((completion) => completion.templateItemId === item.id)?.status !== 'done');
     const unassignedReservations = reservations.filter((reservation) => reservation.tableAssignments.length === 0);
@@ -592,24 +624,32 @@ export class OperationsController {
     const setupScore = setupOpen === 0 ? 1 : Math.max(0, 1 - setupOpen / Math.max(1, setupTotal));
     const floorScore = reservations.length === 0 ? 1 : (reservations.length - unassignedReservations.length) / reservations.length;
     const approvalScore = beos.length === 0 ? 1 : (beos.length - unconfirmedBeos.length) / beos.length;
-    const score = Math.round(staffingScore * 30 + setupScore * 25 + floorScore * 20 + approvalScore * 15 + 10);
+    const score = Math.round(staffingScore * 25 + setupScore * 20 + floorScore * 15 + approvalScore * 10 + executionScore * 30);
     const blockers = [
       ...openShifts.slice(0, 8).map((shift) => ({ code: 'OPEN_SHIFT', severity: 'blocker', title: `${shift.jobTitle} shift is uncovered`, detail: `${shift.station || 'Service'} needs coverage.`, targetId: shift.id })),
       ...prepItems.slice(0, 8).map((item) => ({ code: 'OPEN_PREP', severity: 'blocker', title: item.title, detail: `${item.station || 'Operations'} prep is still open.`, targetId: item.id })),
       ...incompleteChecklist.slice(0, 8).map((item) => ({ code: 'OPEN_CHECKLIST', severity: 'blocker', title: item.title, detail: 'Opening checklist item is incomplete.', targetId: item.id })),
       ...unassignedReservations.slice(0, 8).map((reservation) => ({ code: 'UNASSIGNED_TABLE', severity: 'warning', title: `${reservation.guestName} needs a table`, detail: `${reservation.partySize} covers are not assigned on the floor plan.`, targetId: reservation.id })),
       ...unconfirmedBeos.slice(0, 8).map((beo) => ({ code: 'BEO_NOT_CONFIRMED', severity: 'warning', title: `${beo.eventName} is not confirmed`, detail: 'Review the CRM event brief before service.', targetId: beo.id })),
+      ...openExecutionTasks.slice(0, 8).map((task) => ({ code: 'OPEN_EXECUTION_TASK', severity: 'blocker', title: task.title, detail: `${task.department || 'Operations'} task is incomplete.`, targetId: task.id })),
+      ...dueExecutionTimeline.slice(0, 8).map((item) => ({ code: 'TIMELINE_LATE', severity: 'blocker', title: item.title, detail: 'Run-of-show milestone is behind.', targetId: item.id })),
+      ...unreadyExecutionVendors.slice(0, 8).map((vendor) => ({ code: 'VENDOR_NOT_READY', severity: 'blocker', title: `${vendor.name} is not ready`, detail: 'Confirm and mark the vendor arrived.', targetId: vendor.id })),
+      ...blockingExecutionIncidents.slice(0, 8).map((incident) => ({ code: 'BLOCKING_INCIDENT', severity: 'blocker', title: incident.title, detail: 'Resolve the blocking incident.', targetId: incident.id })),
     ];
     const status = blockers.some((item) => item.severity === 'blocker') ? 'blocked' : blockers.length ? 'at-risk' : 'on-track';
     const reservationById = new Map(reservations.map((reservation) => [reservation.id, reservation]));
     const eventRows = [
-      ...events.map((event) => ({ _id: event.id, title: event.title, startsAt: event.startsAt.getTime(), endsAt: toMs(event.endsAt), expectedGuests: event.expectedGuests, reservationId: event.reservationId, readiness: event.reservationId && reservationById.get(event.reservationId)?.tableAssignments.length ? 'ready' : 'watch' })),
-      ...reservations.filter((reservation) => reservation.isPrivateEvent && !events.some((event) => event.reservationId === reservation.id)).map((reservation) => ({ _id: reservation.id, title: reservation.eventName || 'Private event', startsAt: reservation.reservationTime.getTime(), endsAt: reservation.reservationTime.getTime() + reservation.durationMinutes * 60_000, expectedGuests: reservation.partySize, reservationId: reservation.id, readiness: reservation.tableAssignments.length ? 'ready' : 'watch' })),
+      ...events.map((event) => {
+        const workspace = workspaceBySource.get(`venue-event:${event.id}`) ?? (event.reservationId ? workspaceBySource.get(`reservation:${event.reservationId}`) : undefined);
+        const floorReady = Boolean(event.reservationId && reservationById.get(event.reservationId)?.tableAssignments.length);
+        return { _id: event.id, title: event.title, startsAt: event.startsAt.getTime(), endsAt: toMs(event.endsAt), expectedGuests: event.expectedGuests, reservationId: event.reservationId, readiness: workspace ? (!workspaceHasBlockers(workspace) && (!event.reservationId || floorReady) ? 'ready' : 'watch') : (floorReady ? 'ready' : 'watch') };
+      }),
+      ...reservations.filter((reservation) => reservation.isPrivateEvent && !events.some((event) => event.reservationId === reservation.id)).map((reservation) => ({ _id: reservation.id, title: reservation.eventName || 'Private event', startsAt: reservation.reservationTime.getTime(), endsAt: reservation.reservationTime.getTime() + reservation.durationMinutes * 60_000, expectedGuests: reservation.partySize, reservationId: reservation.id, readiness: reservation.tableAssignments.length && !workspaceHasBlockers(workspaceBySource.get(`reservation:${reservation.id}`)) ? 'ready' : 'watch' })),
     ];
 
     return {
       date: today,
-      readiness: { score, status, categories: { staffing: Math.round(staffingScore * 100), setup: Math.round(setupScore * 100), floor: Math.round(floorScore * 100), approvals: Math.round(approvalScore * 100) } },
+      readiness: { score, status, categories: { staffing: Math.round(staffingScore * 100), setup: Math.round(setupScore * 100), floor: Math.round(floorScore * 100), approvals: Math.round(approvalScore * 100), execution: Math.round(executionScore * 100) } },
       blockers,
       events: eventRows,
       staffing: { scheduled: shifts.length, open: openShifts.length, covered: shifts.length - openShifts.length },
@@ -784,7 +824,7 @@ export class OperationsController {
     return mapGoal(created);
   }
 
-  // ─── Manager logbook: shift handoff notes shared across the whole team ────
+  // Manager logbook: shift handoff notes shared across the whole team
 
   @RequireSubscription('active')
   @Get('logbook')
@@ -835,7 +875,7 @@ export class OperationsController {
     return { ok: true };
   }
 
-  // ─── Opening/closing task checklists with photo proof ─────────────────────
+  // Opening/closing task checklists with photo proof
 
   @RequireSubscription('active')
   @Get('checklist')
