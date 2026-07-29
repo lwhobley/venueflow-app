@@ -2,6 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { ReservationMutationService } from './reservation-mutation.service';
 
+function withTransaction<T extends Record<string, any>>(prisma: T) {
+  return Object.assign(prisma, { $transaction: vi.fn((callback: (transaction: T) => unknown) => callback(prisma)) });
+}
+
 describe('ReservationMutationService', () => {
   it('creates a reservation after normalizing fields', async () => {
     const reservation = {
@@ -9,14 +13,14 @@ describe('ReservationMutationService', () => {
       status: 'confirmed',
       guestEmail: 'guest@example.com',
     };
-    const prisma = {
+    const prisma = withTransaction({
       reservationHold: {
         findFirst: vi.fn().mockResolvedValue(null),
       },
       reservation: {
         create: vi.fn().mockResolvedValue(reservation),
       },
-    };
+    });
     const service = new ReservationMutationService(prisma as any);
 
     const result = await service.saveReservation({
@@ -53,10 +57,10 @@ describe('ReservationMutationService', () => {
       eventName: 'Launch Party', guestName: 'Alex Guest', reservationTime: new Date('2026-08-01T18:00:00Z'),
       durationMinutes: 240, setupStyle: 'cocktail', eventSpace: 'Main Room',
     };
-    const prisma = {
+    const prisma = withTransaction({
       reservationHold: { findFirst: vi.fn().mockResolvedValue(null) },
       reservation: { create: vi.fn().mockResolvedValue(reservation) },
-    };
+    });
     const autopilot = { ensureWorkspace: vi.fn().mockResolvedValue({ id: 'workspace-1' }) };
     const service = new ReservationMutationService(prisma as any, autopilot as any);
 
@@ -66,17 +70,40 @@ describe('ReservationMutationService', () => {
       isPrivateEvent: true, eventName: 'Launch Party', setupStyle: 'cocktail',
     });
 
-    expect(autopilot.ensureWorkspace).toHaveBeenCalledWith(expect.objectContaining({
-      venueId: 'venue-1', sourceType: 'reservation', sourceId: 'reservation-private', title: 'Launch Party',
-    }));
+    expect(autopilot.ensureWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ venueId: 'venue-1', sourceType: 'reservation', sourceId: 'reservation-private', title: 'Launch Party' }),
+      prisma,
+    );
+  });
+
+  it('surfaces workspace failures from the reservation transaction', async () => {
+    const reservation = {
+      id: 'reservation-private', venueId: 'venue-1', status: 'confirmed', isPrivateEvent: true,
+      eventName: 'Launch Party', guestName: 'Alex Guest', reservationTime: new Date('2026-08-01T18:00:00Z'),
+      durationMinutes: 240, setupStyle: null, eventSpace: 'Main Room',
+    };
+    const prisma = withTransaction({
+      reservationHold: { findFirst: vi.fn().mockResolvedValue(null) },
+      reservation: { create: vi.fn().mockResolvedValue(reservation) },
+    });
+    const autopilot = { ensureWorkspace: vi.fn().mockRejectedValue(new Error('workspace failed')) };
+    const service = new ReservationMutationService(prisma as any, autopilot as any);
+
+    await expect(service.saveReservation({
+      venueId: 'venue-1', guestName: 'Alex Guest', partySize: 50,
+      reservationTime: '2026-08-01T18:00:00Z', isPrivateEvent: true,
+    })).rejects.toThrow('workspace failed');
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(autopilot.ensureWorkspace).toHaveBeenCalledWith(expect.any(Object), prisma);
   });
 
   it('rejects reservations that overlap a hold', async () => {
-    const prisma = {
+    const prisma = withTransaction({
       reservationHold: {
         findFirst: vi.fn().mockResolvedValue({ reason: 'Private event buyout' }),
       },
-    };
+    });
     const service = new ReservationMutationService(prisma as any);
 
     await expect(
@@ -92,7 +119,7 @@ describe('ReservationMutationService', () => {
   it('updates an existing reservation and returns previous status', async () => {
     const existing = { id: 'reservation-2', status: 'requested' };
     const updated = { id: 'reservation-2', status: 'confirmed', guestEmail: 'guest@example.com' };
-    const prisma = {
+    const prisma = withTransaction({
       reservationHold: {
         findFirst: vi.fn().mockResolvedValue(null),
       },
@@ -100,7 +127,7 @@ describe('ReservationMutationService', () => {
         findFirst: vi.fn().mockResolvedValue(existing),
         update: vi.fn().mockResolvedValue(updated),
       },
-    };
+    });
     const service = new ReservationMutationService(prisma as any);
 
     const result = await service.saveReservation({

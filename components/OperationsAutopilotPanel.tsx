@@ -76,7 +76,7 @@ export function OperationsAutopilotPanel({
             <View key={`${blocker.code}-${blocker.title}`} style={{ padding: spacing.sm, borderRadius: 10, backgroundColor: blocker.severity === 'blocker' ? '#FDE7E9' : palette.surfaceSoft }}>
               <CommandText palette={palette} variant="body">{blocker.title}</CommandText>
               <CommandText palette={palette} variant="caption">{blocker.detail}</CommandText>
-              {blocker.code === 'OPEN_PREP' && blocker.targetId && onResolveBlocker ? (
+              {blocker.code === 'OPEN_EXECUTION_TASK' && blocker.targetId && onResolveBlocker ? (
                 <CommandButton palette={palette} icon="check" onPress={() => onResolveBlocker(blocker)} style={{ alignSelf: 'flex-start' }}>
                   Mark complete
                 </CommandButton>

@@ -36,33 +36,40 @@ export class ExecutionAutopilotService {
       },
     });
     const setup = input.setupStyle?.trim() || 'event space';
-    await db.eventExecutionTask.createMany({
-      data: [
-        { venueId: input.venueId, workspaceId: workspace.id, templateKey: 'event-brief', title: `Review ${input.title} event brief`, department: 'approvals', dueAt: input.startsAt },
-        { venueId: input.venueId, workspaceId: workspace.id, templateKey: 'room-setup', title: `Complete ${setup} setup`, department: 'setup', dueAt: new Date(input.startsAt.getTime() - 2 * 60 * 60_000) },
-        { venueId: input.venueId, workspaceId: workspace.id, templateKey: 'staffing-coverage', title: `Confirm staffing coverage for ${input.title}`, department: 'staffing', dueAt: new Date(input.startsAt.getTime() - 60 * 60_000) },
-      ],
-      skipDuplicates: true,
-    });
-    await db.eventExecutionTimelineItem.createMany({
-      data: [
-        { venueId: input.venueId, workspaceId: workspace.id, templateKey: 'room-ready', title: 'Room setup complete', startsAt: new Date(input.startsAt.getTime() - 2 * 60 * 60_000) },
-        { venueId: input.venueId, workspaceId: workspace.id, templateKey: 'doors', title: 'Doors / guest arrival', startsAt: input.startsAt },
-        { venueId: input.venueId, workspaceId: workspace.id, templateKey: 'breakdown', title: 'Breakdown complete', startsAt: input.endsAt },
-      ],
-      skipDuplicates: true,
-    });
+    const tasks = [
+      { templateKey: 'event-brief', title: `Review ${input.title} event brief`, department: 'approvals', dueAt: input.startsAt },
+      { templateKey: 'room-setup', title: `Complete ${setup} setup`, department: 'setup', dueAt: new Date(input.startsAt.getTime() - 2 * 60 * 60_000) },
+      { templateKey: 'staffing-coverage', title: `Confirm staffing coverage for ${input.title}`, department: 'staffing', dueAt: new Date(input.startsAt.getTime() - 60 * 60_000) },
+    ];
+    await Promise.all(tasks.map((task) => db.eventExecutionTask.upsert({
+      where: { workspaceId_templateKey: { workspaceId: workspace.id, templateKey: task.templateKey } },
+      update: { title: task.title, department: task.department, dueAt: task.dueAt },
+      create: { venueId: input.venueId, workspaceId: workspace.id, ...task },
+    })));
+    const timeline = [
+      { templateKey: 'room-ready', title: 'Room setup complete', startsAt: new Date(input.startsAt.getTime() - 2 * 60 * 60_000) },
+      { templateKey: 'doors', title: 'Doors / guest arrival', startsAt: input.startsAt },
+      { templateKey: 'breakdown', title: 'Breakdown complete', startsAt: input.endsAt },
+    ];
+    await Promise.all(timeline.map((item) => db.eventExecutionTimelineItem.upsert({
+      where: { workspaceId_templateKey: { workspaceId: workspace.id, templateKey: item.templateKey } },
+      update: { title: item.title, startsAt: item.startsAt },
+      create: { venueId: input.venueId, workspaceId: workspace.id, ...item },
+    })));
     const vendorNames = [...new Set((input.vendorNames ?? []).map((name) => name.trim()).filter(Boolean))];
-    if (vendorNames.length > 0) {
-      await db.eventExecutionVendor.createMany({
-        data: vendorNames.map((name, index) => ({
-          venueId: input.venueId,
-          workspaceId: workspace.id,
-          templateKey: `vendor-${index}`,
-          name,
-          dueAt: new Date(input.startsAt.getTime() - 90 * 60_000),
-        })),
-        skipDuplicates: true,
+    if (input.vendorNames !== undefined) {
+      const vendors = vendorNames.map((name, index) => ({
+        templateKey: `vendor-${index}`,
+        name,
+        dueAt: new Date(input.startsAt.getTime() - 90 * 60_000),
+      }));
+      await Promise.all(vendors.map((vendor) => db.eventExecutionVendor.upsert({
+        where: { workspaceId_templateKey: { workspaceId: workspace.id, templateKey: vendor.templateKey } },
+        update: { name: vendor.name, dueAt: vendor.dueAt },
+        create: { venueId: input.venueId, workspaceId: workspace.id, ...vendor },
+      })));
+      await db.eventExecutionVendor.deleteMany({
+        where: { workspaceId: workspace.id, templateKey: { startsWith: 'vendor-', notIn: vendors.map((vendor) => vendor.templateKey) } },
       });
     }
     return workspace;

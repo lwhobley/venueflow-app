@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { ExecutionAutopilotService } from './execution-autopilot.service';
 
 describe('ExecutionAutopilotService', () => {
-  it('uses stable template keys and duplicate-safe inserts', async () => {
+  it('reconciles stable template rows without resetting user state', async () => {
     const prisma = {
       eventExecutionWorkspace: { upsert: vi.fn().mockResolvedValue({ id: 'workspace-1' }) },
-      eventExecutionTask: { createMany: vi.fn().mockResolvedValue({ count: 3 }) },
-      eventExecutionTimelineItem: { createMany: vi.fn().mockResolvedValue({ count: 3 }) },
-      eventExecutionVendor: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      eventExecutionTask: { upsert: vi.fn().mockResolvedValue({}) },
+      eventExecutionTimelineItem: { upsert: vi.fn().mockResolvedValue({}) },
+      eventExecutionVendor: { upsert: vi.fn().mockResolvedValue({}), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     } as any;
     const service = new ExecutionAutopilotService(prisma);
     const input = {
@@ -21,30 +21,29 @@ describe('ExecutionAutopilotService', () => {
       vendorNames: ['Production Co', 'Production Co'],
     };
 
-    await Promise.all([service.ensureWorkspace(input), service.ensureWorkspace(input)]);
+    await service.ensureWorkspace(input);
 
-    expect(prisma.eventExecutionWorkspace.upsert).toHaveBeenCalledTimes(2);
-    expect(prisma.eventExecutionTask.createMany).toHaveBeenCalledWith(expect.objectContaining({
-      skipDuplicates: true,
-      data: expect.arrayContaining([
-        expect.objectContaining({ templateKey: 'event-brief' }),
-        expect.objectContaining({ templateKey: 'room-setup' }),
-        expect.objectContaining({ templateKey: 'staffing-coverage' }),
-      ]),
+    expect(prisma.eventExecutionTask.upsert).toHaveBeenCalledTimes(3);
+    expect(prisma.eventExecutionTask.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { workspaceId_templateKey: { workspaceId: 'workspace-1', templateKey: 'event-brief' } },
+      update: { title: 'Review Launch Party event brief', department: 'approvals', dueAt: input.startsAt },
     }));
-    expect(prisma.eventExecutionTimelineItem.createMany).toHaveBeenCalledWith(expect.objectContaining({ skipDuplicates: true }));
-    expect(prisma.eventExecutionVendor.createMany).toHaveBeenCalledWith(expect.objectContaining({
-      skipDuplicates: true,
-      data: [expect.objectContaining({ name: 'Production Co', templateKey: 'vendor-0' })],
+    expect(prisma.eventExecutionTimelineItem.upsert).toHaveBeenCalledTimes(3);
+    expect(prisma.eventExecutionVendor.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { workspaceId_templateKey: { workspaceId: 'workspace-1', templateKey: 'vendor-0' } },
+      update: expect.objectContaining({ name: 'Production Co' }),
     }));
+    expect(prisma.eventExecutionVendor.deleteMany).toHaveBeenCalledWith({
+      where: { workspaceId: 'workspace-1', templateKey: { startsWith: 'vendor-', notIn: ['vendor-0'] } },
+    });
   });
 
   it('does not create a synthetic vendor when no vendor data exists', async () => {
     const prisma = {
       eventExecutionWorkspace: { upsert: vi.fn().mockResolvedValue({ id: 'workspace-1' }) },
-      eventExecutionTask: { createMany: vi.fn() },
-      eventExecutionTimelineItem: { createMany: vi.fn() },
-      eventExecutionVendor: { createMany: vi.fn() },
+      eventExecutionTask: { upsert: vi.fn().mockResolvedValue({}) },
+      eventExecutionTimelineItem: { upsert: vi.fn().mockResolvedValue({}) },
+      eventExecutionVendor: { upsert: vi.fn(), deleteMany: vi.fn() },
     } as any;
     const service = new ExecutionAutopilotService(prisma);
 
@@ -53,6 +52,7 @@ describe('ExecutionAutopilotService', () => {
       startsAt: new Date('2026-08-01T18:00:00Z'), endsAt: new Date('2026-08-01T22:00:00Z'),
     });
 
-    expect(prisma.eventExecutionVendor.createMany).not.toHaveBeenCalled();
+    expect(prisma.eventExecutionVendor.upsert).not.toHaveBeenCalled();
+    expect(prisma.eventExecutionVendor.deleteMany).not.toHaveBeenCalled();
   });
 });

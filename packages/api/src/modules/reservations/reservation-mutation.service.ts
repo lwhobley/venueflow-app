@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Optional } from '@nestjs/common';
-import { ReservationSource, ReservationStatus } from '@prisma/client';
+import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
 
@@ -80,23 +80,25 @@ export class ReservationMutationService {
 
     await this.assertNoHoldConflict(args.venueId, reservationTime, data.durationMinutes);
 
-    if (args.reservationId) {
-      const existing = await this.prisma.reservation.findFirst({
-        where: { id: args.reservationId, venueId: args.venueId },
-      });
-      if (!existing) throw new BadRequestException('Reservation not found');
+    return this.prisma.$transaction(async (transaction) => {
+      if (args.reservationId) {
+        const existing = await transaction.reservation.findFirst({
+          where: { id: args.reservationId, venueId: args.venueId },
+        });
+        if (!existing) throw new BadRequestException('Reservation not found');
 
-      const updated = await this.prisma.reservation.update({
-        where: { id: existing.id },
-        data,
-      });
-      await this.ensureExecutionWorkspace(updated);
-      return { reservation: updated, previousStatus: existing.status };
-    }
+        const updated = await transaction.reservation.update({
+          where: { id: existing.id },
+          data,
+        });
+        await this.ensureExecutionWorkspace(updated, transaction);
+        return { reservation: updated, previousStatus: existing.status };
+      }
 
-    const created = await this.prisma.reservation.create({ data });
-    await this.ensureExecutionWorkspace(created);
-    return { reservation: created, previousStatus: null };
+      const created = await transaction.reservation.create({ data });
+      await this.ensureExecutionWorkspace(created, transaction);
+      return { reservation: created, previousStatus: null };
+    });
   }
 
   async createHold(args: {
@@ -173,7 +175,7 @@ export class ReservationMutationService {
     durationMinutes: number;
     setupStyle: string | null;
     eventSpace: string | null;
-  }) {
+  }, transaction: Prisma.TransactionClient) {
     if (!this.autopilot || !reservation.isPrivateEvent || ['cancelled', 'no_show'].includes(reservation.status)) return;
     await this.autopilot.ensureWorkspace({
       venueId: reservation.venueId,
@@ -183,6 +185,6 @@ export class ReservationMutationService {
       startsAt: reservation.reservationTime,
       endsAt: new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60_000),
       setupStyle: reservation.setupStyle || reservation.eventSpace,
-    });
+    }, transaction);
   }
 }

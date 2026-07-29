@@ -39,7 +39,7 @@ function makeController() {
     prepBoardItem: { findMany: vi.fn().mockResolvedValue([]), createMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
     floorPlan: { findFirst: vi.fn().mockResolvedValue(null) },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
-    eventExecutionWorkspace: { upsert: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) },
+    eventExecutionWorkspace: { upsert: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     eventExecutionTask: { count: vi.fn().mockResolvedValue(0), createMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
     eventExecutionTimelineItem: { count: vi.fn().mockResolvedValue(0), createMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
     eventExecutionVendor: { count: vi.fn().mockResolvedValue(0), create: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
@@ -456,6 +456,27 @@ describe('OperationsController', () => {
         expect.objectContaining({ code: 'OPEN_PREP' }),
       ]));
       expect(result.events[0]).toEqual(expect.objectContaining({ title: 'Launch Party', readiness: 'watch' }));
+    });
+
+    it('includes persistent execution blockers in aggregate readiness', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-15T18:30:00.000Z'));
+      prisma.venueEvent.findMany.mockResolvedValue([
+        { id: 'evt-1', title: 'Gala', startsAt: new Date('2026-07-15T20:00:00.000Z'), endsAt: new Date('2026-07-15T23:00:00.000Z'), expectedGuests: 80, reservationId: null },
+      ]);
+      prisma.eventExecutionWorkspace.findMany.mockResolvedValue([{
+        id: 'workspace-1', sourceType: 'venue-event', sourceId: 'evt-1',
+        tasks: [{ id: 'execution-task-1', title: 'Complete room setup', department: 'setup', status: 'open' }],
+        timeline: [], vendors: [], incidents: [],
+      }]);
+
+      const result = await controller.getCommandCenter(managerUser);
+
+      expect(result.readiness).toEqual(expect.objectContaining({ status: 'blocked', categories: expect.objectContaining({ execution: 0 }) }));
+      expect(result.blockers).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'OPEN_EXECUTION_TASK', targetId: 'execution-task-1' })]));
+      expect(result.events[0]).toEqual(expect.objectContaining({ _id: 'evt-1', readiness: 'watch' }));
     });
 
     it('completes an execution task and writes an audit entry', async () => {
