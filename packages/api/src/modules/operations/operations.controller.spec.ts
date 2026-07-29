@@ -23,19 +23,27 @@ import { buildDailyBriefProfitabilityPulse } from './daily-brief-profitability';
 function makeController() {
   const prisma = {
     profile: { findUnique: vi.fn().mockResolvedValue(null) },
-    reservation: { findMany: vi.fn().mockResolvedValue([]) },
+    reservation: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
     managerGoal: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
       update: vi.fn(),
     },
-    venueEvent: { findMany: vi.fn().mockResolvedValue([]) },
+    venueEvent: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
+    crmBeo: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
     scheduleShift: { findMany: vi.fn().mockResolvedValue([]) },
     timeEntry: { findMany: vi.fn().mockResolvedValue([]) },
     staffRequest: { findMany: vi.fn().mockResolvedValue([]) },
     barInventoryItem: { findMany: vi.fn().mockResolvedValue([]) },
-    prepBoardItem: { findMany: vi.fn().mockResolvedValue([]) },
+    prepBoardItem: { findMany: vi.fn().mockResolvedValue([]), createMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
+    floorPlan: { findFirst: vi.fn().mockResolvedValue(null) },
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
+    eventExecutionWorkspace: { upsert: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) },
+    eventExecutionTask: { count: vi.fn().mockResolvedValue(0), createMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
+    eventExecutionTimelineItem: { count: vi.fn().mockResolvedValue(0), createMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
+    eventExecutionVendor: { count: vi.fn().mockResolvedValue(0), create: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
+    eventExecutionIncident: { create: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
     posCheck: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
     logbookEntry: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -66,8 +74,9 @@ function makeController() {
     upload: vi.fn().mockResolvedValue('s3-key-1'),
     getPresignedUrl: vi.fn().mockResolvedValue('https://signed.example/img.jpg'),
   } as any;
-  const controller = new OperationsController(prisma, mediaAccess, s3ImageService);
-  return { controller, prisma, mediaAccess, s3ImageService };
+  const executionAutopilot = { ensureWorkspace: vi.fn().mockResolvedValue({ id: 'workspace-1' }) } as any;
+  const controller = new OperationsController(prisma, mediaAccess, s3ImageService, executionAutopilot);
+  return { controller, prisma, mediaAccess, s3ImageService, executionAutopilot };
 }
 
 function makeProfile(overrides: Partial<Record<string, any>> = {}) {
@@ -420,6 +429,78 @@ describe('OperationsController', () => {
       expect(result.alerts).toEqual(['mock-alert']);
       expect(result.priorityActions).toEqual(['mock-priority-action']);
       expect(result.profitabilityPulse).toEqual({ tone: 'good', headline: 'mock-headline', detail: 'mock-detail' });
+    });
+  });
+
+  describe('getCommandCenter', () => {
+    it('reports blockers from existing modules without mutating state', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-15T18:30:00.000Z'));
+      prisma.reservation.findMany.mockResolvedValue([
+        { id: 'reservation-1', isPrivateEvent: true, eventName: 'Launch Party', setupStyle: 'cocktail', eventSpace: 'Main Room', reservationTime: new Date('2026-07-15T20:00:00.000Z'), durationMinutes: 240, tableAssignments: [] },
+      ]);
+      prisma.scheduleShift.findMany.mockResolvedValue([{ id: 'shift-1', status: 'open', jobTitle: 'Bartender', station: 'Bar' }]);
+      prisma.prepBoardItem.findMany.mockResolvedValue([
+          { id: 'task-1', title: 'Review Launch Party event brief', station: 'approvals', notes: 'execution:reservation:reservation-1 | generated', status: 'open' },
+          { id: 'task-2', title: 'Complete cocktail setup', station: 'setup', notes: 'execution:reservation:reservation-1 | generated', status: 'open' },
+        ]);
+
+      const result = await controller.getCommandCenter(managerUser);
+
+      expect(prisma.prepBoardItem.createMany).not.toHaveBeenCalled();
+      expect(result.readiness.status).toBe('blocked');
+      expect(result.blockers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'OPEN_SHIFT' }),
+        expect.objectContaining({ code: 'OPEN_PREP' }),
+      ]));
+      expect(result.events[0]).toEqual(expect.objectContaining({ title: 'Launch Party', readiness: 'watch' }));
+    });
+
+    it('completes an execution task and writes an audit entry', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      prisma.eventExecutionTask.findFirst.mockResolvedValue({ id: 'task-1', venueId: 'venue-1', title: 'Complete setup' });
+      prisma.eventExecutionTask.update.mockResolvedValue({ id: 'task-1', title: 'Complete setup', status: 'done', completedAt: new Date('2026-07-15T18:30:00.000Z') });
+
+      const result = await controller.updateExecutionTask(managerUser, 'task-1', { status: 'done' });
+
+      expect(result).toEqual(expect.objectContaining({ _id: 'task-1', status: 'done' }));
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: 'execution_task_completed', entityId: 'task-1' }) }));
+    });
+
+    it('generates a persistent workspace only through the explicit command', async () => {
+      const { controller, prisma, executionAutopilot } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      prisma.venueEvent.findFirst.mockResolvedValue({ id: 'evt-1', title: 'Gala', startsAt: new Date('2026-07-15T20:00:00Z'), endsAt: new Date('2026-07-15T23:00:00Z'), reservationId: null });
+
+      const result = await controller.generateCommandCenterEvent(managerUser, 'evt-1');
+
+      expect(result).toEqual({ workspaceId: 'workspace-1' });
+      expect(executionAutopilot.ensureWorkspace).toHaveBeenCalledWith(expect.objectContaining({ venueId: 'venue-1', sourceType: 'venue-event', sourceId: 'evt-1', title: 'Gala' }));
+    });
+
+    it('returns a persistent event workspace with timeline, vendor, and incident readiness', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      prisma.venueEvent.findFirst.mockResolvedValue({ id: 'evt-1', title: 'Gala', startsAt: new Date('2026-07-15T20:00:00Z'), endsAt: new Date('2026-07-15T23:00:00Z'), expectedGuests: 80, reservationId: null });
+      prisma.eventExecutionWorkspace.upsert.mockResolvedValue({ id: 'workspace-1' });
+      prisma.eventExecutionWorkspace.findFirst.mockResolvedValue({
+        id: 'workspace-1',
+        tasks: [{ id: 'task-1', title: 'Review Gala event brief', department: 'approvals', status: 'done', completedAt: new Date() }],
+        timeline: [{ id: 'timeline-1', title: 'Doors / guest arrival', startsAt: new Date('2026-07-15T20:00:00Z'), status: 'pending', completedAt: null }],
+        vendors: [{ id: 'vendor-1', name: 'Production', status: 'unconfirmed', dueAt: null, ownerId: null, arrivedAt: null }],
+        incidents: [],
+      });
+
+      const result = await controller.getCommandCenterEvent(managerUser, 'evt-1');
+
+      expect(result.event.title).toBe('Gala');
+      expect(result.tasks[0]).toEqual(expect.objectContaining({ _id: 'task-1', status: 'done' }));
+      expect(result.timeline[0]).toEqual(expect.objectContaining({ _id: 'timeline-1' }));
+      expect(result.vendors[0]).toEqual(expect.objectContaining({ _id: 'vendor-1', status: 'unconfirmed' }));
+      expect(result.blockers).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'VENDOR_NOT_READY' })]));
     });
   });
 

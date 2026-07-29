@@ -58,9 +58,10 @@ function makeController() {
 
   const email = { sendOrThrow: vi.fn().mockResolvedValue(undefined) };
   const templates = { renderTemplate: vi.fn().mockResolvedValue({ subject: 'Hi', body: 'Body' }) };
+  const executionAutopilot = { ensureWorkspace: vi.fn().mockResolvedValue({ id: 'workspace-1' }) };
 
-  const controller = new CrmController(prisma, email as any, templates as any);
-  return { controller, prisma, email, templates };
+  const controller = new CrmController(prisma, email as any, templates as any, executionAutopilot as any);
+  return { controller, prisma, email, templates, executionAutopilot };
 }
 
 const managerScope = { venueId: 'venue-1', profileId: 'manager-1', role: 'manager', allAccess: false } as any;
@@ -369,7 +370,7 @@ describe('CrmController', () => {
     });
 
     it('syncs a confirmed BEO with an event date to a new blocking reservation', async () => {
-      const { controller, prisma } = makeController();
+      const { controller, prisma, executionAutopilot } = makeController();
       const eventDate = Date.parse('2026-08-01T18:00:00.000Z');
 
       const result = await controller.saveBeo(managerScope, {
@@ -382,6 +383,9 @@ describe('CrmController', () => {
           isPrivateEvent: true, status: 'confirmed', tags: [`beo:beo-new`, 'private_event'],
         }),
       }));
+      expect(executionAutopilot.ensureWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+        venueId: 'venue-1', sourceType: 'beo', sourceId: 'beo-new', title: 'Gala',
+      }), prisma);
       expect(result).toEqual({ beoId: 'beo-new' });
     });
 

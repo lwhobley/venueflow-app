@@ -1,10 +1,14 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { ReservationSource, ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
 
 @Injectable()
 export class ReservationMutationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly autopilot?: ExecutionAutopilotService,
+  ) {}
 
   async saveReservation(args: {
     venueId: string;
@@ -86,10 +90,12 @@ export class ReservationMutationService {
         where: { id: existing.id },
         data,
       });
+      await this.ensureExecutionWorkspace(updated);
       return { reservation: updated, previousStatus: existing.status };
     }
 
     const created = await this.prisma.reservation.create({ data });
+    await this.ensureExecutionWorkspace(created);
     return { reservation: created, previousStatus: null };
   }
 
@@ -154,5 +160,29 @@ export class ReservationMutationService {
     if (hold) {
       throw new BadRequestException(`This time conflicts with a hold: ${hold.reason}`);
     }
+  }
+
+  private async ensureExecutionWorkspace(reservation: {
+    id: string;
+    venueId: string;
+    status: string;
+    isPrivateEvent: boolean | null;
+    eventName: string | null;
+    guestName: string;
+    reservationTime: Date;
+    durationMinutes: number;
+    setupStyle: string | null;
+    eventSpace: string | null;
+  }) {
+    if (!this.autopilot || !reservation.isPrivateEvent || ['cancelled', 'no_show'].includes(reservation.status)) return;
+    await this.autopilot.ensureWorkspace({
+      venueId: reservation.venueId,
+      sourceType: 'reservation',
+      sourceId: reservation.id,
+      title: reservation.eventName || reservation.guestName || 'Private event',
+      startsAt: reservation.reservationTime,
+      endsAt: new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60_000),
+      setupStyle: reservation.setupStyle || reservation.eventSpace,
+    });
   }
 }

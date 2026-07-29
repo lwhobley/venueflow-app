@@ -4,9 +4,10 @@ import { EmailModule } from '../../email/email.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CrmController } from './crm.controller';
 import { CrmTemplateService } from './crm-template.service';
+import { OperationsModule } from '../operations/operations.module';
 
 @Module({
-  imports: [PrismaModule, BillingModule, EmailModule],
+  imports: [PrismaModule, BillingModule, EmailModule, OperationsModule],
   controllers: [CrmController],
   providers: [CrmTemplateService],
 })

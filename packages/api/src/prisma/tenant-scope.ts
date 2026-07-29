@@ -20,6 +20,7 @@ export const VENUE_SCOPED_MODELS: ReadonlySet<string> = new Set([
   'ScheduleMemoryNote', 'ScheduleShift', 'ScheduleTemplate', 'ShiftSwap', 'StaffOnboardingTask', 'StaffRequest', 'Subscription',
   'SubscriptionEvent', 'TableAssignment', 'TableState', 'TableStateHistory', 'Team',
   'TimeEntry', 'VenueEvent', 'VenueRole', 'Waitlist', 'WorkplaceJoinRequest',
+  'EventExecutionWorkspace', 'EventExecutionTask', 'EventExecutionTimelineItem', 'EventExecutionVendor', 'EventExecutionIncident',
 ]);
 
 /**
