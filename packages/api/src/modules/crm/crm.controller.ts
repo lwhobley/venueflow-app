@@ -7,6 +7,7 @@ import {
   Get,
   Logger,
   NotFoundException,
+  Optional,
   Param,
   Post,
   Query,
@@ -31,6 +32,7 @@ import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { randomUUID } from 'crypto';
 import { CrmTemplateService } from './crm-template.service';
+import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -406,6 +408,7 @@ export class CrmController {
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly templates: CrmTemplateService,
+    @Optional() private readonly executionAutopilot?: ExecutionAutopilotService,
   ) {}
 
   @RequireSubscription('active')
@@ -683,6 +686,9 @@ export class CrmController {
         if ((becameConfirmed || relevantFieldChanged) && u.eventDate) {
           await this.syncBeoToReservation(tx, scope.venueId, u);
         }
+        if (u.status === 'confirmed' && u.eventDate) {
+          await this.ensureBeoExecutionWorkspace(tx, scope.venueId, u);
+        }
         return u;
       });
       if (existing.leadId && body.status !== undefined && body.status !== existing.status) {
@@ -704,6 +710,7 @@ export class CrmController {
       });
       if (created.status === 'confirmed' && created.eventDate) {
         await this.syncBeoToReservation(tx, scope.venueId, created);
+        await this.ensureBeoExecutionWorkspace(tx, scope.venueId, created);
       }
       return created;
     });
@@ -1109,6 +1116,25 @@ export class CrmController {
       // Activity log is best-effort; never block the calling mutation.
       this.logger.warn(`CRM activity log failed for lead ${leadId}: ${error?.message ?? String(error)}`);
     }
+  }
+
+  private async ensureBeoExecutionWorkspace(db: Prisma.TransactionClient, venueId: string, beo: {
+    id: string;
+    eventName: string;
+    eventDate: Date | null;
+    setupStyle: string | null;
+    venueSpace: string | null;
+  }) {
+    if (!this.executionAutopilot || !beo.eventDate) return;
+    await this.executionAutopilot.ensureWorkspace({
+      venueId,
+      sourceType: 'beo',
+      sourceId: beo.id,
+      title: beo.eventName,
+      startsAt: beo.eventDate,
+      endsAt: new Date(beo.eventDate.getTime() + 4 * 60 * 60_000),
+      setupStyle: beo.setupStyle ?? beo.venueSpace,
+    }, db);
   }
 
   private async syncBeoToReservation(db: Prisma.TransactionClient, venueId: string, beo: {

@@ -340,6 +340,7 @@ model Venue {
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
   joinRequests                  WorkplaceJoinRequest[]
+  eventExecutionWorkspaces      EventExecutionWorkspace[]
 }
 
 model Profile {
@@ -1500,6 +1501,101 @@ model VenueEvent {
 
   @@index([venueId, startsAt])
   @@index([reservationId])
+}
+
+model EventExecutionWorkspace {
+  id          String   @id @default(cuid())
+  venueId     String
+  sourceType  String
+  sourceId    String
+  title       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  venue       Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  tasks       EventExecutionTask[]
+  timeline    EventExecutionTimelineItem[]
+  vendors     EventExecutionVendor[]
+  incidents   EventExecutionIncident[]
+
+  @@unique([venueId, sourceType, sourceId])
+  @@unique([id, venueId])
+  @@index([venueId, updatedAt])
+}
+
+model EventExecutionTask {
+  id          String   @id @default(cuid())
+  venueId     String
+  workspaceId String
+  templateKey String
+  title       String
+  department  String
+  dueAt       DateTime?
+  critical    Boolean  @default(true)
+  status      String   @default("open")
+  ownerId     String?
+  completedBy String?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
+
+  @@unique([workspaceId, templateKey])
+  @@index([venueId, workspaceId, status])
+  @@index([venueId, dueAt])
+}
+
+model EventExecutionTimelineItem {
+  id          String   @id @default(cuid())
+  venueId     String
+  workspaceId String
+  templateKey String
+  title       String
+  startsAt    DateTime
+  status      String   @default("pending")
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
+
+  @@unique([workspaceId, templateKey])
+  @@index([venueId, workspaceId, startsAt])
+}
+
+model EventExecutionVendor {
+  id          String   @id @default(cuid())
+  venueId     String
+  workspaceId String
+  templateKey String
+  name        String
+  dueAt       DateTime?
+  status      String   @default("unconfirmed")
+  ownerId     String?
+  confirmedAt DateTime?
+  arrivedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
+
+  @@unique([workspaceId, templateKey])
+  @@index([venueId, workspaceId, status])
+}
+
+model EventExecutionIncident {
+  id            String   @id @default(cuid())
+  venueId       String
+  workspaceId   String
+  title         String
+  severity      String   @default("high")
+  status        String   @default("open")
+  blocksReadiness Boolean @default(true)
+  createdBy     String
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  workspace     EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
+
+  @@index([venueId, workspaceId, status])
 }
 
 model ReservationSetting {

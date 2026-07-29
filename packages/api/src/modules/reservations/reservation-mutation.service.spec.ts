@@ -47,6 +47,30 @@ describe('ReservationMutationService', () => {
     });
   });
 
+  it('creates an execution workspace immediately for a private event', async () => {
+    const reservation = {
+      id: 'reservation-private', venueId: 'venue-1', status: 'confirmed', isPrivateEvent: true,
+      eventName: 'Launch Party', guestName: 'Alex Guest', reservationTime: new Date('2026-08-01T18:00:00Z'),
+      durationMinutes: 240, setupStyle: 'cocktail', eventSpace: 'Main Room',
+    };
+    const prisma = {
+      reservationHold: { findFirst: vi.fn().mockResolvedValue(null) },
+      reservation: { create: vi.fn().mockResolvedValue(reservation) },
+    };
+    const autopilot = { ensureWorkspace: vi.fn().mockResolvedValue({ id: 'workspace-1' }) };
+    const service = new ReservationMutationService(prisma as any, autopilot as any);
+
+    await service.saveReservation({
+      venueId: 'venue-1', guestName: 'Alex Guest', partySize: 50,
+      reservationTime: '2026-08-01T18:00:00Z', durationMinutes: 240,
+      isPrivateEvent: true, eventName: 'Launch Party', setupStyle: 'cocktail',
+    });
+
+    expect(autopilot.ensureWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      venueId: 'venue-1', sourceType: 'reservation', sourceId: 'reservation-private', title: 'Launch Party',
+    }));
+  });
+
   it('rejects reservations that overlap a hold', async () => {
     const prisma = {
       reservationHold: {

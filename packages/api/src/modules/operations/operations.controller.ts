@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   Get,
   NotFoundException,
+  Optional,
   Param,
   Patch,
   Post,
@@ -32,6 +33,7 @@ import { S3ImageService } from '../chat/s3-image.service';
 import { buildDailyBriefAlerts } from './daily-brief-alerts';
 import { buildDailyBriefPriorityActions } from './daily-brief-priority-actions';
 import { buildDailyBriefProfitabilityPulse } from './daily-brief-profitability';
+import { ExecutionAutopilotService } from './execution-autopilot.service';
 
 const GOAL_PERIODS = ['day', 'week'] as const;
 const GOAL_STATUSES = ['open', 'done', 'cancelled'] as const;
@@ -96,6 +98,39 @@ class CompleteChecklistItemDto {
   @IsOptional()
   @IsIn([...ALLOWED_IMAGE_MIME])
   photoMimeType?: string;
+}
+
+class UpdateExecutionTaskDto {
+  @IsIn(['open', 'done'])
+  status!: 'open' | 'done';
+}
+
+class UpdateExecutionTimelineDto {
+  @IsIn(['pending', 'done'])
+  status!: 'pending' | 'done';
+}
+
+class UpdateExecutionVendorDto {
+  @IsIn(['unconfirmed', 'confirmed', 'arrived'])
+  status!: 'unconfirmed' | 'confirmed' | 'arrived';
+}
+
+class UpdateExecutionIncidentDto {
+  @IsIn(['open', 'resolved'])
+  status!: 'open' | 'resolved';
+}
+
+class CreateExecutionIncidentDto {
+  @IsString()
+  title!: string;
+
+  @IsOptional()
+  @IsIn(['low', 'high'])
+  severity?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  blocksReadiness?: boolean;
 }
 
 function cleanText(value: string | undefined): string | undefined {
@@ -209,6 +244,7 @@ export class OperationsController {
     private readonly prisma: PrismaService,
     private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
+    @Optional() private readonly executionAutopilot?: ExecutionAutopilotService,
   ) {}
 
   @RequireSubscription('active')
@@ -514,6 +550,206 @@ export class OperationsController {
   }
 
   @RequireSubscription('active')
+  @Get('command-center')
+  async getCommandCenter(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const timezone = profile.venue?.timezone;
+    const now = new Date();
+    const today = zonedIsoDate(timezone, now.getTime());
+    const bounds = zonedDayBounds(timezone, 0);
+    const todayStart = new Date(bounds.start);
+    const todayEnd = new Date(bounds.end);
+    const dayIndex = zonedDayOfWeek(timezone, now.getTime());
+
+    const [events, reservations, shifts, checklistItems, checklistCompletions, floorPlan, beos] = await Promise.all([
+      this.prisma.venueEvent.findMany({ where: { venueId, startsAt: { gte: todayStart, lt: todayEnd } }, orderBy: { startsAt: 'asc' }, take: 50 }),
+      this.prisma.reservation.findMany({
+        where: { venueId, reservationTime: { gte: todayStart, lt: todayEnd }, status: { notIn: ['cancelled', 'no_show'] } },
+        include: { tableAssignments: { where: { releasedAt: null }, select: { id: true } } },
+        orderBy: { reservationTime: 'asc' }, take: 200,
+      }),
+      this.prisma.scheduleShift.findMany({ where: { venueId, dayIndex }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 200 }),
+      this.prisma.checklistTemplateItem.findMany({ where: { venueId, kind: 'opening', active: true }, orderBy: { sortOrder: 'asc' }, take: 100 }),
+      this.prisma.checklistCompletion.findMany({ where: { venueId, date: today }, select: { templateItemId: true, status: true } }),
+      this.prisma.floorPlan.findFirst({ where: { venueId, isActive: true }, include: { tables: { select: { id: true, label: true, section: true } } } }),
+      this.prisma.crmBeo.findMany({ where: { venueId, eventDate: { gte: todayStart, lt: todayEnd }, status: { not: 'cancelled' } }, orderBy: { eventDate: 'asc' }, take: 50 }),
+    ]);
+
+    const prepItems = await this.prisma.prepBoardItem.findMany({
+      where: { venueId, status: 'open', kind: { not: 'event_execution' }, OR: [{ dueDate: null }, { dueDate: { lte: today } }] },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+
+    const openShifts = shifts.filter((shift) => shift.status === 'open');
+    const incompleteChecklist = checklistItems.filter((item) => checklistCompletions.find((completion) => completion.templateItemId === item.id)?.status !== 'done');
+    const unassignedReservations = reservations.filter((reservation) => reservation.tableAssignments.length === 0);
+    const unconfirmedBeos = beos.filter((beo) => beo.status !== 'confirmed');
+    const staffingScore = shifts.length === 0 ? 1 : (shifts.length - openShifts.length) / shifts.length;
+    const setupOpen = prepItems.length + incompleteChecklist.length;
+    const setupTotal = checklistItems.length + setupOpen;
+    const setupScore = setupOpen === 0 ? 1 : Math.max(0, 1 - setupOpen / Math.max(1, setupTotal));
+    const floorScore = reservations.length === 0 ? 1 : (reservations.length - unassignedReservations.length) / reservations.length;
+    const approvalScore = beos.length === 0 ? 1 : (beos.length - unconfirmedBeos.length) / beos.length;
+    const score = Math.round(staffingScore * 30 + setupScore * 25 + floorScore * 20 + approvalScore * 15 + 10);
+    const blockers = [
+      ...openShifts.slice(0, 8).map((shift) => ({ code: 'OPEN_SHIFT', severity: 'blocker', title: `${shift.jobTitle} shift is uncovered`, detail: `${shift.station || 'Service'} needs coverage.`, targetId: shift.id })),
+      ...prepItems.slice(0, 8).map((item) => ({ code: 'OPEN_PREP', severity: 'blocker', title: item.title, detail: `${item.station || 'Operations'} prep is still open.`, targetId: item.id })),
+      ...incompleteChecklist.slice(0, 8).map((item) => ({ code: 'OPEN_CHECKLIST', severity: 'blocker', title: item.title, detail: 'Opening checklist item is incomplete.', targetId: item.id })),
+      ...unassignedReservations.slice(0, 8).map((reservation) => ({ code: 'UNASSIGNED_TABLE', severity: 'warning', title: `${reservation.guestName} needs a table`, detail: `${reservation.partySize} covers are not assigned on the floor plan.`, targetId: reservation.id })),
+      ...unconfirmedBeos.slice(0, 8).map((beo) => ({ code: 'BEO_NOT_CONFIRMED', severity: 'warning', title: `${beo.eventName} is not confirmed`, detail: 'Review the CRM event brief before service.', targetId: beo.id })),
+    ];
+    const status = blockers.some((item) => item.severity === 'blocker') ? 'blocked' : blockers.length ? 'at-risk' : 'on-track';
+    const reservationById = new Map(reservations.map((reservation) => [reservation.id, reservation]));
+    const eventRows = [
+      ...events.map((event) => ({ _id: event.id, title: event.title, startsAt: event.startsAt.getTime(), endsAt: toMs(event.endsAt), expectedGuests: event.expectedGuests, reservationId: event.reservationId, readiness: event.reservationId && reservationById.get(event.reservationId)?.tableAssignments.length ? 'ready' : 'watch' })),
+      ...reservations.filter((reservation) => reservation.isPrivateEvent && !events.some((event) => event.reservationId === reservation.id)).map((reservation) => ({ _id: reservation.id, title: reservation.eventName || 'Private event', startsAt: reservation.reservationTime.getTime(), endsAt: reservation.reservationTime.getTime() + reservation.durationMinutes * 60_000, expectedGuests: reservation.partySize, reservationId: reservation.id, readiness: reservation.tableAssignments.length ? 'ready' : 'watch' })),
+    ];
+
+    return {
+      date: today,
+      readiness: { score, status, categories: { staffing: Math.round(staffingScore * 100), setup: Math.round(setupScore * 100), floor: Math.round(floorScore * 100), approvals: Math.round(approvalScore * 100) } },
+      blockers,
+      events: eventRows,
+      staffing: { scheduled: shifts.length, open: openShifts.length, covered: shifts.length - openShifts.length },
+      setup: { prepOpen: prepItems.length, checklistOpen: incompleteChecklist.length },
+      floor: { tableCount: floorPlan?.tables.length ?? 0, unassignedReservations: unassignedReservations.length },
+      approvals: { open: unconfirmedBeos.length, total: beos.length },
+    };
+  }
+
+  @RequireSubscription('active')
+  @Patch('command-center/tasks/:taskId')
+  async updateExecutionTask(@CurrentUser() user: AuthUser, @Param('taskId') taskId: string, @Body() body: UpdateExecutionTaskDto) {
+    const profile = await this.requireManagerProfile(user);
+    const executionTask = await this.prisma.eventExecutionTask.findFirst({ where: { id: taskId, venueId: profile.venueId! } });
+    if (executionTask) {
+      const updated = await this.prisma.eventExecutionTask.update({ where: { id: executionTask.id }, data: { status: body.status, completedBy: body.status === 'done' ? profile.id : null, completedAt: body.status === 'done' ? new Date() : null } });
+      await this.prisma.auditLog.create({ data: { venueId: profile.venueId!, actorProfileId: profile.id, actorName: profile.fullName, actorRole: profile.role, entityType: 'event_execution_task', entityId: executionTask.id, action: body.status === 'done' ? 'execution_task_completed' : 'execution_task_reopened', summary: `${body.status === 'done' ? 'Completed' : 'Reopened'} event task: ${executionTask.title}` } });
+      return { _id: updated.id, title: updated.title, status: updated.status, completedAt: toMs(updated.completedAt) };
+    }
+    throw new NotFoundException('Execution task not found');
+  }
+
+  @RequireSubscription('active')
+  @Patch('command-center/timeline/:itemId')
+  async updateExecutionTimeline(@CurrentUser() user: AuthUser, @Param('itemId') itemId: string, @Body() body: UpdateExecutionTimelineDto) {
+    const profile = await this.requireManagerProfile(user);
+    const item = await this.prisma.eventExecutionTimelineItem.findFirst({ where: { id: itemId, venueId: profile.venueId! } });
+    if (!item) throw new NotFoundException('Timeline item not found');
+    const updated = await this.prisma.eventExecutionTimelineItem.update({ where: { id: item.id }, data: { status: body.status, completedAt: body.status === 'done' ? new Date() : null } });
+    await this.prisma.auditLog.create({ data: { venueId: profile.venueId!, actorProfileId: profile.id, actorName: profile.fullName, actorRole: profile.role, entityType: 'event_execution_timeline', entityId: item.id, action: body.status === 'done' ? 'timeline_item_completed' : 'timeline_item_reopened', summary: `${body.status === 'done' ? 'Completed' : 'Reopened'} timeline item: ${item.title}` } });
+    return { _id: updated.id, status: updated.status, completedAt: toMs(updated.completedAt) };
+  }
+
+  @RequireSubscription('active')
+  @Patch('command-center/vendors/:vendorId')
+  async updateExecutionVendor(@CurrentUser() user: AuthUser, @Param('vendorId') vendorId: string, @Body() body: UpdateExecutionVendorDto) {
+    const profile = await this.requireManagerProfile(user);
+    const vendor = await this.prisma.eventExecutionVendor.findFirst({ where: { id: vendorId, venueId: profile.venueId! } });
+    if (!vendor) throw new NotFoundException('Execution vendor not found');
+    const now = new Date();
+    const updated = await this.prisma.eventExecutionVendor.update({ where: { id: vendor.id }, data: { status: body.status, ...(body.status === 'confirmed' ? { confirmedAt: now } : {}), ...(body.status === 'arrived' ? { confirmedAt: vendor.confirmedAt ?? now, arrivedAt: now } : {}) } });
+    await this.prisma.auditLog.create({ data: { venueId: profile.venueId!, actorProfileId: profile.id, actorName: profile.fullName, actorRole: profile.role, entityType: 'event_execution_vendor', entityId: vendor.id, action: 'vendor_status_updated', summary: `${vendor.name} marked ${body.status}` } });
+    return { _id: updated.id, name: updated.name, status: updated.status, arrivedAt: toMs(updated.arrivedAt) };
+  }
+
+  @RequireSubscription('active')
+  @Post('command-center/events/:eventId/incidents')
+  async createExecutionIncident(@CurrentUser() user: AuthUser, @Param('eventId') eventId: string, @Body() body: CreateExecutionIncidentDto) {
+    const profile = await this.requireManagerProfile(user);
+    const workspace = await this.prisma.eventExecutionWorkspace.findFirst({ where: { venueId: profile.venueId!, id: eventId } });
+    if (!workspace) throw new NotFoundException('Execution workspace not found');
+    const title = body.title.trim();
+    if (!title) throw new BadRequestException('Incident title is required');
+    const incident = await this.prisma.eventExecutionIncident.create({ data: { venueId: profile.venueId!, workspaceId: workspace.id, title, severity: body.severity ?? 'high', blocksReadiness: body.blocksReadiness ?? true, createdBy: profile.id } });
+    await this.prisma.auditLog.create({ data: { venueId: profile.venueId!, actorProfileId: profile.id, actorName: profile.fullName, actorRole: profile.role, entityType: 'event_execution_incident', entityId: incident.id, action: 'incident_created', summary: `Created incident: ${incident.title}` } });
+    return { _id: incident.id, title: incident.title, status: incident.status, blocksReadiness: incident.blocksReadiness };
+  }
+
+  @RequireSubscription('active')
+  @Patch('command-center/incidents/:incidentId')
+  async resolveExecutionIncident(@CurrentUser() user: AuthUser, @Param('incidentId') incidentId: string, @Body() body: UpdateExecutionIncidentDto) {
+    const profile = await this.requireManagerProfile(user);
+    const incident = await this.prisma.eventExecutionIncident.findFirst({ where: { id: incidentId, venueId: profile.venueId! } });
+    if (!incident) throw new NotFoundException('Execution incident not found');
+    const resolved = body.status === 'resolved';
+    const updated = await this.prisma.eventExecutionIncident.update({ where: { id: incident.id }, data: { status: body.status, resolvedBy: resolved ? profile.id : null, resolvedAt: resolved ? new Date() : null } });
+    await this.prisma.auditLog.create({ data: { venueId: profile.venueId!, actorProfileId: profile.id, actorName: profile.fullName, actorRole: profile.role, entityType: 'event_execution_incident', entityId: incident.id, action: resolved ? 'incident_resolved' : 'incident_reopened', summary: `${resolved ? 'Resolved' : 'Reopened'} incident: ${incident.title}` } });
+    return { _id: updated.id, status: updated.status, resolvedAt: toMs(updated.resolvedAt) };
+  }
+
+  @RequireSubscription('active')
+  @Post('command-center/events/:eventId/generate')
+  async generateCommandCenterEvent(@CurrentUser() user: AuthUser, @Param('eventId') eventId: string) {
+    const profile = await this.requireManagerProfile(user);
+    if (!this.executionAutopilot) throw new BadRequestException('Execution workspace generator is unavailable');
+    const source = await this.getExecutionSource(profile.venueId!, eventId);
+    if (!source) throw new NotFoundException('Event not found');
+    const workspace = await this.executionAutopilot.ensureWorkspace(source.input);
+    return { workspaceId: workspace.id };
+  }
+
+  @RequireSubscription('active')
+  @Get('command-center/events/:eventId')
+  async getCommandCenterEvent(@CurrentUser() user: AuthUser, @Param('eventId') eventId: string) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const source = await this.getExecutionSource(venueId, eventId);
+    if (!source) throw new NotFoundException('Event not found');
+    const { venueEvent, reservation, beo, input } = source;
+    const start = input.startsAt;
+    const workspace = await this.prisma.eventExecutionWorkspace.findFirst({ where: { venueId, sourceType: input.sourceType, sourceId: input.sourceId }, include: { tasks: { orderBy: { createdAt: 'asc' } }, timeline: { orderBy: { startsAt: 'asc' } }, vendors: { orderBy: { createdAt: 'asc' } }, incidents: { orderBy: { createdAt: 'desc' } } } });
+    if (!workspace) throw new NotFoundException('Execution workspace not found');
+    const tasks = workspace.tasks;
+    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId, dayIndex: zonedDayOfWeek(profile.venue?.timezone, start.getTime()) }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 100 });
+    const openTasks = tasks.filter((task) => task.status !== 'done');
+    const openShifts = shifts.filter((shift) => shift.status === 'open');
+    const hasFloorAssignment = reservation ? reservation.tableAssignments.length > 0 : true;
+    const taskScore = tasks.length === 0 ? 1 : (tasks.length - openTasks.length) / tasks.length;
+    const staffingScore = shifts.length === 0 ? 1 : (shifts.length - openShifts.length) / shifts.length;
+    const floorScore = hasFloorAssignment ? 1 : 0;
+    const approvalScore = beo ? (beo.status === 'confirmed' ? 1 : 0) : 1;
+    const dueTimeline = workspace.timeline.filter((item) => item.startsAt <= new Date());
+    const timelineScore = dueTimeline.length === 0 ? 1 : dueTimeline.filter((item) => item.status === 'done').length / dueTimeline.length;
+    const vendorScore = workspace.vendors.length === 0 ? 1 : workspace.vendors.filter((vendor) => vendor.status === 'arrived').length / workspace.vendors.length;
+    const incidentScore = workspace.incidents.filter((incident) => incident.status === 'open' && incident.blocksReadiness).length === 0 ? 1 : 0;
+    const score = Math.round(taskScore * 40 + staffingScore * 20 + floorScore * 10 + approvalScore * 10 + timelineScore * 5 + vendorScore * 10 + incidentScore * 5);
+    const blockers = [
+      ...openTasks.map((task) => ({ code: 'OPEN_EXECUTION_TASK', title: task.title, detail: `${task.department || 'Operations'} task is incomplete.`, targetId: task.id })),
+      ...openShifts.map((shift) => ({ code: 'OPEN_SHIFT', title: `${shift.jobTitle} shift is uncovered`, detail: `${shift.station || 'Service'} needs coverage.`, targetId: shift.id })),
+      ...(!hasFloorAssignment ? [{ code: 'UNASSIGNED_TABLE', title: 'Floor assignment missing', detail: 'Assign this booking to the floor plan before service.', targetId: reservation?.id }] : []),
+      ...(beo && beo.status !== 'confirmed' ? [{ code: 'BEO_NOT_CONFIRMED', title: 'Event brief is not confirmed', detail: 'Review and confirm the CRM event brief.', targetId: beo.id }] : []),
+      ...workspace.timeline.filter((item) => item.status !== 'done' && item.startsAt <= new Date()).map((item) => ({ code: 'TIMELINE_LATE', title: item.title, detail: 'Run-of-show milestone is behind.', targetId: item.id })),
+      ...workspace.vendors.filter((vendor) => vendor.status !== 'arrived').map((vendor) => ({ code: 'VENDOR_NOT_READY', title: `${vendor.name} is not ready`, detail: 'Confirm and mark the vendor arrived.', targetId: vendor.id })),
+      ...workspace.incidents.filter((incident) => incident.status === 'open' && incident.blocksReadiness).map((incident) => ({ code: 'BLOCKING_INCIDENT', title: incident.title, detail: 'Resolve the blocking incident.', targetId: incident.id })),
+    ];
+    return {
+      workspaceId: workspace.id,
+      event: {
+        _id: eventId,
+        title: venueEvent?.title ?? reservation?.eventName ?? beo?.eventName ?? 'Event',
+        startsAt: start.getTime(),
+        endsAt: venueEvent?.endsAt?.getTime() ?? (reservation ? reservation.reservationTime.getTime() + reservation.durationMinutes * 60_000 : null),
+        expectedGuests: venueEvent?.expectedGuests ?? reservation?.partySize ?? beo?.guestCount ?? null,
+        space: reservation?.eventSpace ?? beo?.venueSpace ?? null,
+        setupStyle: reservation?.setupStyle ?? beo?.setupStyle ?? null,
+        reservationId: reservation?.id ?? venueEvent?.reservationId ?? null,
+        beoId: beo?.id ?? null,
+      },
+      readiness: { score, status: blockers.length ? 'blocked' : 'on-track', categories: { tasks: Math.round(taskScore * 100), staffing: Math.round(staffingScore * 100), floor: Math.round(floorScore * 100), approvals: Math.round(approvalScore * 100), timeline: Math.round(timelineScore * 100), vendors: Math.round(vendorScore * 100), incidents: Math.round(incidentScore * 100) } },
+      blockers,
+      tasks: tasks.map((task) => ({ _id: task.id, title: task.title, station: task.department, status: task.status, completedAt: toMs(task.completedAt) })),
+      timeline: workspace.timeline.map((item) => ({ _id: item.id, title: item.title, startsAt: item.startsAt.getTime(), status: item.status, completedAt: toMs(item.completedAt) })),
+      vendors: workspace.vendors.map((vendor) => ({ _id: vendor.id, name: vendor.name, status: vendor.status, dueAt: toMs(vendor.dueAt), ownerId: vendor.ownerId })),
+      incidents: workspace.incidents.map((incident) => ({ _id: incident.id, title: incident.title, severity: incident.severity, status: incident.status, blocksReadiness: incident.blocksReadiness })),
+      staffing: { scheduled: shifts.length, open: openShifts.length, covered: shifts.length - openShifts.length },
+      floor: { assigned: hasFloorAssignment, tableIds: reservation?.tableAssignments.map((assignment) => assignment.tableId) ?? [] },
+    };
+  }
+
+  @RequireSubscription('active')
   @Patch('manager-goal')
   async upsertManagerGoal(@CurrentUser() user: AuthUser, @Body() body: UpsertManagerGoalDto) {
     const profile = await this.requireManagerProfile(user);
@@ -761,6 +997,37 @@ export class OperationsController {
 
   private async getProfile(user: AuthUser) {
     return this.prisma.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
+  }
+
+  private async getExecutionSource(venueId: string, eventId: string) {
+    const [venueEvent, initialReservation, beo] = await Promise.all([
+      this.prisma.venueEvent.findFirst({ where: { id: eventId, venueId } }),
+      this.prisma.reservation.findFirst({ where: { id: eventId, venueId }, include: { tableAssignments: { where: { releasedAt: null }, select: { id: true, tableId: true } } } }),
+      this.prisma.crmBeo.findFirst({ where: { id: eventId, venueId } }),
+    ]);
+    const reservation = initialReservation ?? (venueEvent?.reservationId
+      ? await this.prisma.reservation.findFirst({ where: { id: venueEvent.reservationId, venueId }, include: { tableAssignments: { where: { releasedAt: null }, select: { id: true, tableId: true } } } })
+      : null);
+    if (!venueEvent && !reservation && !beo) return null;
+    const startsAt = venueEvent?.startsAt ?? reservation?.reservationTime ?? beo!.eventDate!;
+    if (!startsAt) return null;
+    const endsAt = venueEvent?.endsAt ?? (reservation
+      ? new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60_000)
+      : new Date(startsAt.getTime() + 4 * 60 * 60_000));
+    return {
+      venueEvent,
+      reservation,
+      beo,
+      input: {
+        venueId,
+        sourceType: venueEvent ? 'venue-event' as const : reservation ? 'reservation' as const : 'beo' as const,
+        sourceId: eventId,
+        title: venueEvent?.title ?? reservation?.eventName ?? beo?.eventName ?? 'Event',
+        startsAt,
+        endsAt,
+        setupStyle: reservation?.setupStyle ?? beo?.setupStyle ?? reservation?.eventSpace ?? beo?.venueSpace,
+      },
+    };
   }
 
   private async requireManagerProfile(user: AuthUser) {

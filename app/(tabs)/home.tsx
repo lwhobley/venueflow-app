@@ -38,6 +38,7 @@ export default function HomeScreen() {
   const notifications = useQuery(api.app.getNotifications, isReady ? {} : 'skip');
   const markNotificationRead = useMutation(api.app.markNotificationRead);
   const upsertManagerGoal = useMutation(api.operations.upsertManagerGoal);
+  const updateExecutionTask = useMutation(api.operations.updateExecutionTask);
   const palette = useDesignTheme();
   const themeMode = useAppearanceStore((state) => state.mode);
   const setThemeMode = useAppearanceStore((state) => state.setMode);
@@ -53,6 +54,7 @@ export default function HomeScreen() {
   const canManage = Boolean(dashboard && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const dailyBrief = useQuery(api.operations.getDailyBrief, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const commandCenter = useQuery(api.operations.getCommandCenter, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const managerInsights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip');
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -210,6 +212,10 @@ export default function HomeScreen() {
         <OperationsAutopilotPanel
           palette={palette}
           priorityActions={dailyBrief.priorityActions}
+          commandCenter={commandCenter}
+          onResolveBlocker={(blocker) => {
+            if (blocker.targetId) void updateExecutionTask({ taskId: blocker.targetId, status: 'done' });
+          }}
         />
       ) : null}
 
