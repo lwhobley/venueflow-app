@@ -45,6 +45,8 @@ const queryRoutes: Record<string, Route> = {
   'pos.getLaborSummary': { path: (args) => `/v1/pos/labor?windowDays=${args.windowDays ?? 7}${args.startTs ? `&startTs=${args.startTs}` : ''}${args.endTs ? `&endTs=${args.endTs}` : ''}` },
   'operations.getManagerDashboard': { path: '/v1/operations/manager-dashboard' },
   'operations.getDailyBrief': { path: '/v1/operations/daily-brief' },
+  'operations.getCommandCenter': { path: '/v1/operations/command-center' },
+  'operations.getCommandCenterEvent': { path: (args) => `/v1/operations/command-center/events/${args.eventId ?? args.id}` },
   'operations.listLogbook': { path: (args) => `/v1/operations/logbook${args?.limit ? `?limit=${args.limit}` : ''}` },
   'operations.getChecklist': {
     path: (args) => `/v1/operations/checklist?kind=${encodeURIComponent(args.kind)}${args?.date ? `&date=${encodeURIComponent(args.date)}` : ''}`,
@@ -208,6 +210,42 @@ const mutationRoutes: Record<string, Route> = {
     method: 'POST',
     body: ({ photoBase64, photoMimeType }) => ({ photoBase64, photoMimeType }),
     invalidate: [['operations', 'getChecklist']],
+  },
+  'operations.generateExecutionWorkspace': {
+    path: (args) => `/v1/operations/command-center/events/${args.eventId ?? args.id}/generate`,
+    method: 'POST',
+    body: () => ({}),
+    invalidate: [['operations', 'getCommandCenter'], ['operations', 'getCommandCenterEvent']],
+  },
+  'operations.updateExecutionTask': {
+    path: (args) => `/v1/operations/command-center/tasks/${args.taskId ?? args.id}`,
+    method: 'PATCH',
+    body: ({ status }) => ({ status }),
+    invalidate: [['operations', 'getCommandCenter'], ['operations', 'getCommandCenterEvent'], ['operations', 'getDailyBrief'], ['barInventory', 'listPrepBoard']],
+  },
+  'operations.updateExecutionTimeline': {
+    path: (args) => `/v1/operations/command-center/timeline/${args.itemId ?? args.id}`,
+    method: 'PATCH',
+    body: ({ status }) => ({ status }),
+    invalidate: [['operations', 'getCommandCenterEvent']],
+  },
+  'operations.updateExecutionVendor': {
+    path: (args) => `/v1/operations/command-center/vendors/${args.vendorId ?? args.id}`,
+    method: 'PATCH',
+    body: ({ status }) => ({ status }),
+    invalidate: [['operations', 'getCommandCenterEvent']],
+  },
+  'operations.createExecutionIncident': {
+    path: (args) => `/v1/operations/command-center/events/${args.eventId}/incidents`,
+    method: 'POST',
+    body: ({ title, severity, blocksReadiness }) => ({ title, severity, blocksReadiness }),
+    invalidate: [['operations', 'getCommandCenterEvent']],
+  },
+  'operations.resolveExecutionIncident': {
+    path: (args) => `/v1/operations/command-center/incidents/${args.incidentId ?? args.id}`,
+    method: 'PATCH',
+    body: ({ status }) => ({ status }),
+    invalidate: [['operations', 'getCommandCenterEvent']],
   },
   'app.createStaffRequest': {
     path: '/v1/staff-requests',
@@ -450,6 +488,24 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
     queryFn: () => (route ? requestRoute<T>(route, args) : Promise.resolve(defaultQueryResult(key) as T)),
   });
   return query.data as T;
+}
+
+export function useQueryState<T = any>(ref: RailwayFunctionRef, args?: QueryArgs) {
+  const key = getKey(ref);
+  const route = queryRoutes[key];
+  if (!route) throw new Error(`Unknown Railway query route: ${key}`);
+  const enabled = args !== 'skip';
+  const query = useReactQuery({
+    queryKey: [...key.split('.'), args],
+    enabled,
+    queryFn: () => requestRoute<T>(route, args),
+  });
+  return {
+    data: query.data,
+    error: query.error,
+    isLoading: enabled && query.isLoading,
+    refetch: query.refetch,
+  };
 }
 
 export function useMutation<TArgs = any, TResult = any>(

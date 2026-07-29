@@ -14,14 +14,28 @@ type PriorityAction = {
   route: '/reservations' | '/staff' | '/schedule' | '/bar-stock' | '/reports';
 };
 
+type CommandCenterSnapshot = {
+  readiness?: { score: number; status: 'on-track' | 'at-risk' | 'blocked'; categories: Record<string, number> };
+  blockers?: Array<{ code: string; severity: 'warning' | 'blocker'; title: string; detail: string; targetId?: string }>;
+  events?: Array<{ _id: string; title: string; startsAt: number; expectedGuests: number | null; readiness: string }>;
+  staffing?: { scheduled: number; open: number; covered: number };
+  setup?: { prepOpen: number; checklistOpen: number };
+};
+
 export function OperationsAutopilotPanel({
   palette,
   priorityActions,
+  commandCenter,
+  onResolveBlocker,
 }: {
   palette: DesignPalette;
   priorityActions: PriorityAction[] | null | undefined;
+  commandCenter?: CommandCenterSnapshot | null;
+  onResolveBlocker?: (blocker: { code: string; targetId?: string }) => void;
 }) {
   const actions = priorityActions?.slice(0, 3) ?? [];
+  const blockers = commandCenter?.blockers?.slice(0, 4) ?? [];
+  const readiness = commandCenter?.readiness;
   const pillTone = actions[0]?.tone ?? 'good';
   const kindLabel = (kind: PriorityAction['kind']) => {
     if (kind === 'event') return 'Event prep';
@@ -37,12 +51,56 @@ export function OperationsAutopilotPanel({
         <View style={{ flex: 1, minWidth: 220 }}>
           <CommandText palette={palette} variant="label">Command center</CommandText>
           <CommandText palette={palette} variant="title">Operational autopilot</CommandText>
-          <CommandText palette={palette} variant="caption">Ranked next steps for event prep, staffing, requests, and inventory.</CommandText>
+          <CommandText palette={palette} variant="caption">Live readiness across bookings, staffing, setup, floor assignments, and event briefs.</CommandText>
         </View>
-        <StatusPill palette={palette} tone={pillTone}>
-          {actions.length > 0 ? `${actions.length} priorities` : 'Clear'}
+        <StatusPill palette={palette} tone={readiness?.status === 'blocked' || readiness?.status === 'at-risk' ? 'warn' : pillTone}>
+          {readiness ? `${readiness.score}% ready` : actions.length > 0 ? `${actions.length} priorities` : 'Clear'}
         </StatusPill>
       </View>
+
+      {readiness ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+          {Object.entries(readiness.categories).map(([key, value]) => (
+            <View key={key} style={{ flexGrow: 1, flexBasis: 110, padding: spacing.sm, borderRadius: 10, backgroundColor: palette.surfaceSoft }}>
+              <CommandText palette={palette} variant="metric">{`${value}%`}</CommandText>
+              <CommandText palette={palette} variant="caption">{key.replace(/-/g, ' ')}</CommandText>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {blockers.length > 0 ? (
+        <View style={{ gap: spacing.xs }}>
+          <CommandText palette={palette} variant="label">Action queue</CommandText>
+          {blockers.map((blocker) => (
+            <View key={`${blocker.code}-${blocker.title}`} style={{ padding: spacing.sm, borderRadius: 10, backgroundColor: blocker.severity === 'blocker' ? '#FDE7E9' : palette.surfaceSoft }}>
+              <CommandText palette={palette} variant="body">{blocker.title}</CommandText>
+              <CommandText palette={palette} variant="caption">{blocker.detail}</CommandText>
+              {blocker.code === 'OPEN_EXECUTION_TASK' && blocker.targetId && onResolveBlocker ? (
+                <CommandButton palette={palette} icon="check" onPress={() => onResolveBlocker(blocker)} style={{ alignSelf: 'flex-start' }}>
+                  Mark complete
+                </CommandButton>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {commandCenter?.events?.length ? (
+        <View style={{ gap: spacing.xs }}>
+          <CommandText palette={palette} variant="label">Today’s event run</CommandText>
+          {commandCenter.events.slice(0, 4).map((event) => (
+            <View key={event._id} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+              <CommandText palette={palette} variant="body" style={{ flex: 1 }}>{event.title}</CommandText>
+              <CommandText palette={palette} variant="caption">{event.expectedGuests ?? '—'} guests</CommandText>
+              <StatusPill palette={palette} tone={event.readiness === 'ready' ? 'good' : 'warn'}>{event.readiness}</StatusPill>
+              <CommandButton palette={palette} icon="arrow-right" onPress={() => router.push({ pathname: '/event-command-center', params: { eventId: event._id } })}>
+                Open
+              </CommandButton>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {actions.length === 0 ? (
