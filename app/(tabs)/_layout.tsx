@@ -73,7 +73,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="bar-stock"
-        options={{ title: t('nav.inventory'), href: '/bar-stock', tabBarIcon: icon('glass-cocktail') }}
+        options={{ title: t('nav.inventory'), href: '/bar-stock', tabBarIcon: icon('clipboard-text-outline') }}
       />
       <Tabs.Screen
         name="reports"
