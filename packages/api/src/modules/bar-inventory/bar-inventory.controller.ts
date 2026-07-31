@@ -18,7 +18,10 @@ import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 
-const CATEGORIES = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
+const CATEGORIES = [
+  'spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other',
+  'protein', 'produce', 'dairy', 'dry_goods', 'bakery', 'frozen'
+] as const;
 const MOVEMENT_TYPES = ['count', 'received', 'waste', 'comp', 'transfer', 'correction'] as const;
 const MAX_IMPORT_ITEMS = 100;
 const MAX_PARSE_TEXT_CHARS = 20_000;

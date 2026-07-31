@@ -12,7 +12,9 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 
-const categories = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
+const beverageCategories = ['spirit', 'wine', 'beer', 'mixer', 'garnish'] as const;
+const foodCategories = ['protein', 'produce', 'dairy', 'dry_goods', 'bakery', 'frozen'] as const;
+const categories = [...beverageCategories, ...foodCategories, 'supply', 'other'] as const;
 type Category = (typeof categories)[number];
 
 type BarItem = {
@@ -87,9 +89,23 @@ export default function BarStockScreen() {
   const [parseNotes, setParseNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'beverage' | 'food'>('beverage');
 
-  const items = useMemo(() => (stock?.items ?? []) as BarItem[], [stock]);
-  const lowItems = items.filter((item) => item.onHand <= item.parLevel);
+  const allItems = useMemo(() => (stock?.items ?? []) as BarItem[], [stock]);
+
+  const items = useMemo(() => {
+    return allItems.filter(item => {
+      const isFood = foodCategories.includes(item.category as any);
+      return activeTab === 'beverage' ? !isFood : isFood;
+    });
+  }, [allItems, activeTab]);
+
+  const lowItems = useMemo(() => items.filter((item) => item.onHand <= item.parLevel), [items]);
+
+  const activeLowStockCount = lowItems.length;
+  const activeTotalValueCents = useMemo(() => {
+    return items.reduce((sum, item) => sum + (item.onHand * (item.unitCostCents ?? 0)), 0);
+  }, [items]);
 
   const saveManualItem = async () => {
     if (!venue?.id) return;
@@ -225,15 +241,42 @@ export default function BarStockScreen() {
       showsVerticalScrollIndicator={false}
     >
       <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Bar Stock</Text>
-        <Text style={{ color: colors.muted }}>Count bottles, parse invoices, and keep reorder lists tight.</Text>
+        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>F&B Inventory</Text>
+        <Text style={{ color: colors.muted }}>Manage food & beverage stock, count items, and scan invoices.</Text>
+      </View>
+
+      <View style={{ flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 12, padding: 4, marginVertical: 4 }}>
+        <Button 
+          mode={activeTab === 'beverage' ? 'contained' : 'text'}
+          buttonColor={activeTab === 'beverage' ? colors.primary : undefined}
+          textColor={activeTab === 'beverage' ? '#fff' : colors.muted}
+          style={{ flex: 1, borderRadius: 8 }}
+          onPress={() => {
+            setActiveTab('beverage');
+            setCategory('spirit');
+          }}
+        >
+          Beverage
+        </Button>
+        <Button 
+          mode={activeTab === 'food' ? 'contained' : 'text'}
+          buttonColor={activeTab === 'food' ? colors.primary : undefined}
+          textColor={activeTab === 'food' ? '#fff' : colors.muted}
+          style={{ flex: 1, borderRadius: 8 }}
+          onPress={() => {
+            setActiveTab('food');
+            setCategory('protein');
+          }}
+        >
+          Food
+        </Button>
       </View>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {[
           { label: 'Items', value: String(items.length), a: accents[0] },
-          { label: 'Below par', value: String(stock?.lowStockCount ?? 0), a: accents[4] },
-          { label: 'Value on hand', value: money(stock?.totalValueCents ?? 0), a: accents[2] },
+          { label: 'Below par', value: String(activeLowStockCount), a: accents[4] },
+          { label: 'Value on hand', value: money(activeTotalValueCents), a: accents[2] },
         ].map((metric) => (
           <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '31%', flexGrow: 1, borderRadius: 16 }}>
             <Card.Content>
@@ -275,7 +318,10 @@ export default function BarStockScreen() {
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add item</Text>
           <TextInput label="Name" value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {categories.map((item) => (
+            {(activeTab === 'beverage' 
+              ? [...beverageCategories, 'supply', 'other'] 
+              : foodCategories
+            ).map((item) => (
               <Chip key={item} selected={category === item} onPress={() => setCategory(item)}>{item}</Chip>
             ))}
           </View>
@@ -309,7 +355,7 @@ export default function BarStockScreen() {
         <Card.Content style={{ gap: spacing.sm }}>
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>Stock list</Text>
           {items.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No bar stock yet.</Text>
+            <Text style={{ color: colors.muted }}>No stock items found.</Text>
           ) : (
             items.map((item) => (
               <View key={item._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>

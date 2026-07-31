@@ -65,7 +65,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="bar-stock"
-        options={{ title: t('nav.inventory'), href: canManage ? '/bar-stock' : null, tabBarIcon: icon('glass-cocktail') }}
+        options={{ title: t('nav.inventory'), href: canManage ? '/bar-stock' : null, tabBarIcon: icon('clipboard-text-outline') }}
       />
       <Tabs.Screen
         name="reports"
