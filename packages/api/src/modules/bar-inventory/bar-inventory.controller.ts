@@ -28,7 +28,10 @@ import { EmailService } from '../../email/email.service';
 import { BarInventoryParserService } from './bar-inventory-parser.service';
 import { BarInventoryReportsService } from './bar-inventory-reports.service';
 
-const CATEGORIES = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
+const CATEGORIES = [
+  'spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other',
+  'protein', 'produce', 'dairy', 'dry_goods', 'bakery', 'frozen'
+] as const;
 const MOVEMENT_TYPES = ['count', 'received', 'waste', 'comp', 'transfer', 'correction'] as const;
 const PREP_ITEM_KINDS = ['prep', 'eighty_six'] as const;
 const PREP_ITEM_STATUSES = ['open', 'done', 'cancelled'] as const;

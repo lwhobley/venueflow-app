@@ -37,10 +37,35 @@ const fr = {
 
 type Dictionary = typeof en;
 
-const expandPseudo = (value: string) => `⟦${value.replace(/[aeiou]/gi, (match) => `${match}${match}`)}⟧`;
+// Preserve {placeholder} tokens verbatim — otherwise interpolation silently
+// stops matching once vowels inside the token get doubled too.
+const expandPseudo = (value: string) =>
+  `⟦${value.replace(/\{[^}]*\}|[aeiou]/gi, (match) => (match.startsWith('{') ? match : `${match}${match}`))}⟧`;
+
+// A handful of dictionary values (help.sections.*.steps) hold a
+// JSON.stringify'd array rather than display text, so the caller can
+// JSON.parse it back. Wrapping the whole string in the pseudo brackets breaks
+// that parse — detect the shape and pseudo-transform each array element
+// instead, re-serializing to valid JSON.
+const looksLikeJsonArray = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed.startsWith('[') && trimmed.endsWith(']');
+};
 
 const makePseudo = <T,>(value: T): T => {
-  if (typeof value === 'string') return expandPseudo(value) as T;
+  if (typeof value === 'string') {
+    if (looksLikeJsonArray(value)) {
+      try {
+        const parsed: unknown = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return JSON.stringify(parsed.map((item) => (typeof item === 'string' ? expandPseudo(item) : item))) as T;
+        }
+      } catch {
+        // Not actually JSON — fall through to plain string handling.
+      }
+    }
+    return expandPseudo(value) as T;
+  }
   if (Array.isArray(value)) return value.map(makePseudo) as T;
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, makePseudo(nested)])) as T;

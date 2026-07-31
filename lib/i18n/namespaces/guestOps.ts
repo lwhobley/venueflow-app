@@ -60,6 +60,7 @@ export const en = {
         seatFailed: 'Failed to seat guest',
         markReadyFailed: 'Failed to mark ready',
         removeFailed: 'Failed to remove',
+        addFailed: 'Failed to add to waitlist',
       },
     },
     form: {
@@ -77,6 +78,8 @@ export const en = {
       partyLabel: 'Party',
       dateToday: 'Today · {date}',
       dateTomorrow: 'Tomorrow · {date}',
+      timeLabel: 'Time',
+      mealHint: 'Meal sets a quick default time and course duration — edit Time directly for any other slot.',
       notesLabel: 'Guest notes / requests',
       createButton: 'Create reservation',
       returningGuest: {
@@ -125,6 +128,13 @@ export const en = {
       deleteButton: 'Delete',
       tapInstructions: 'Tap an open table to reserve, or long-actions to seat now:',
       noOpenTablesBuild: 'No open tables. Build a floor plan first.',
+      assignFailed: 'Could not assign table.',
+    },
+    meals: {
+      breakfast: 'Breakfast',
+      brunch: 'Brunch',
+      lunch: 'Lunch',
+      dinner: 'Dinner',
     },
   },
   guests: {
@@ -785,6 +795,7 @@ export const es: GuestOpsDictionary = {
         seatFailed: 'No se pudo sentar al huésped',
         markReadyFailed: 'No se pudo marcar como listo',
         removeFailed: 'No se pudo quitar',
+        addFailed: 'No se pudo añadir a la lista de espera',
       },
     },
     form: {
@@ -802,6 +813,8 @@ export const es: GuestOpsDictionary = {
       partyLabel: 'Grupo',
       dateToday: 'Hoy · {date}',
       dateTomorrow: 'Mañana · {date}',
+      timeLabel: 'Hora',
+      mealHint: 'La comida establece una hora predeterminada y una duración de servicio — edita la Hora directamente para cualquier otro horario.',
       notesLabel: 'Notas / peticiones del huésped',
       createButton: 'Crear reserva',
       returningGuest: {
@@ -850,6 +863,13 @@ export const es: GuestOpsDictionary = {
       deleteButton: 'Eliminar',
       tapInstructions: 'Toca una mesa libre para reservar, o usa las acciones para sentar ahora:',
       noOpenTablesBuild: 'No hay mesas libres. Primero crea un plano de salón.',
+      assignFailed: 'No se pudo asignar la mesa.',
+    },
+    meals: {
+      breakfast: 'Desayuno',
+      brunch: 'Brunch',
+      lunch: 'Almuerzo',
+      dinner: 'Cena',
     },
   },
   guests: {
@@ -1508,6 +1528,7 @@ export const fr: GuestOpsDictionary = {
         seatFailed: "Impossible d'installer l'invité",
         markReadyFailed: 'Impossible de marquer comme prêt',
         removeFailed: 'Impossible de retirer',
+        addFailed: "Impossible d'ajouter à la liste d'attente",
       },
     },
     form: {
@@ -1525,6 +1546,8 @@ export const fr: GuestOpsDictionary = {
       partyLabel: 'Groupe',
       dateToday: "Aujourd'hui · {date}",
       dateTomorrow: 'Demain · {date}',
+      timeLabel: 'Heure',
+      mealHint: "Le repas définit une heure par défaut et une durée de service — modifiez l'heure directement pour tout autre créneau.",
       notesLabel: "Notes / demandes de l'invité",
       createButton: 'Créer la réservation',
       returningGuest: {
@@ -1573,6 +1596,13 @@ export const fr: GuestOpsDictionary = {
       deleteButton: 'Supprimer',
       tapInstructions: 'Touchez une table libre pour réserver, ou utilisez les actions pour installer maintenant :',
       noOpenTablesBuild: "Aucune table libre. Créez d'abord un plan de salle.",
+      assignFailed: "Impossible d'attribuer la table.",
+    },
+    meals: {
+      breakfast: 'Petit-déjeuner',
+      brunch: 'Brunch',
+      lunch: 'Déjeuner',
+      dinner: 'Dîner',
     },
   },
   guests: {

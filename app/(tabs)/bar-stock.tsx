@@ -32,7 +32,9 @@ import {
 import { InlineMessage } from '../../components/InlineMessage';
 import { SectionHeader } from '../../components/AppCard';
 
-const categories = ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const;
+const beverageCategories = ['spirit', 'wine', 'beer', 'mixer', 'garnish'] as const;
+const foodCategories = ['protein', 'produce', 'dairy', 'dry_goods', 'bakery', 'frozen'] as const;
+const categories = [...beverageCategories, ...foodCategories, 'supply', 'other'] as const;
 type Category = (typeof categories)[number];
 
 type BarItem = {
@@ -120,6 +122,7 @@ export default function BarStockScreen() {
   const [parseNotes, setParseNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'beverage' | 'food'>('beverage');
   const [historyItemId, setHistoryItemId] = useState<string | null>(null);
   const [countMode, setCountMode] = useState(false);
   const [countIndex, setCountIndex] = useState(0);
@@ -154,8 +157,22 @@ export default function BarStockScreen() {
   const costHistory = useQuery(api.barInventory.getCostHistory, isReady && canManage && costHistoryItemId ? { itemId: costHistoryItemId } : 'skip') as { itemName: string; currentCostCents: number | null; entries: CostHistoryEntry[] } | null | undefined;
   const agingReport = useQuery(api.barInventory.getAgingReport, isReady && canManage && showAgingReport ? {} : 'skip') as AgingReport | null | undefined;
 
-  const items = useMemo(() => (stock?.items ?? []) as BarItem[], [stock]);
-  const lowItems = items.filter((item) => item.onHand <= item.parLevel);
+  const allItems = useMemo(() => (stock?.items ?? []) as BarItem[], [stock]);
+
+  const items = useMemo(() => {
+    return allItems.filter(item => {
+      const isFood = foodCategories.includes(item.category as any);
+      return activeTab === 'beverage' ? !isFood : isFood;
+    });
+  }, [allItems, activeTab]);
+
+  const lowItems = useMemo(() => items.filter((item) => item.onHand <= item.parLevel), [items]);
+
+  const activeLowStockCount = lowItems.length;
+  const activeTotalValueCents = useMemo(() => {
+    return items.reduce((sum, item) => sum + (item.onHand * (item.unitCostCents ?? 0)), 0);
+  }, [items]);
+
   const prepItems = useMemo(() => prepBoard?.items ?? [], [prepBoard]);
   const activePrepItems = prepItems.filter((item) => item.status === 'open' && item.kind === 'prep');
   const activeEightySixItems = prepItems.filter((item) => item.status === 'open' && item.kind === 'eighty_six');
@@ -490,11 +507,38 @@ export default function BarStockScreen() {
     >
       <SectionHeader kicker={t('barStock.header.kicker')} title={t('barStock.header.title')} subtitle={t('barStock.header.managerSubtitle')} />
 
+      <View style={{ flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 12, padding: 4, marginVertical: 4 }}>
+        <Button 
+          mode={activeTab === 'beverage' ? 'contained' : 'text'}
+          buttonColor={activeTab === 'beverage' ? colors.primary : undefined}
+          textColor={activeTab === 'beverage' ? '#fff' : colors.muted}
+          style={{ flex: 1, borderRadius: 8 }}
+          onPress={() => {
+            setActiveTab('beverage');
+            setCategory('spirit');
+          }}
+        >
+          Beverage
+        </Button>
+        <Button 
+          mode={activeTab === 'food' ? 'contained' : 'text'}
+          buttonColor={activeTab === 'food' ? colors.primary : undefined}
+          textColor={activeTab === 'food' ? '#fff' : colors.muted}
+          style={{ flex: 1, borderRadius: 8 }}
+          onPress={() => {
+            setActiveTab('food');
+            setCategory('protein');
+          }}
+        >
+          Food
+        </Button>
+      </View>
+
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {[
           { label: t('barStock.metrics.items'), value: String(items.length), a: accents[0] },
-          { label: t('barStock.metrics.belowPar'), value: String(stock?.lowStockCount ?? 0), a: accents[4] },
-          { label: t('barStock.metrics.valueOnHand'), value: money(stock?.totalValueCents ?? 0), a: accents[2] },
+          { label: t('barStock.metrics.belowPar'), value: String(activeLowStockCount), a: accents[4] },
+          { label: t('barStock.metrics.valueOnHand'), value: money(activeTotalValueCents), a: accents[2] },
         ].map((metric) => (
           <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '31%', flexGrow: 1, borderRadius: radius.sharp }}>
             <Card.Content>
@@ -731,7 +775,10 @@ export default function BarStockScreen() {
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('barStock.form.title')}</Text>
           <TextInput label={t('barStock.form.nameLabel')} value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {categories.map((item) => (
+            {(activeTab === 'beverage' 
+              ? [...beverageCategories, 'supply', 'other'] 
+              : foodCategories
+            ).map((item) => (
               <Chip key={item} selected={category === item} onPress={() => setCategory(item)}>{item}</Chip>
             ))}
           </View>

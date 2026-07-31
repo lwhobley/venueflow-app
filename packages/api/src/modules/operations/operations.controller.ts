@@ -824,7 +824,7 @@ export class OperationsController {
     return mapGoal(created);
   }
 
-  // Manager logbook: shift handoff notes shared across the whole team
+  // ─── Manager logbook: shift handoff notes shared across the whole team ────
 
   @RequireSubscription('active')
   @Get('logbook')
@@ -875,7 +875,7 @@ export class OperationsController {
     return { ok: true };
   }
 
-  // Opening/closing task checklists with photo proof
+  // ─── Opening/closing task checklists with photo proof ─────────────────────
 
   @RequireSubscription('active')
   @Get('checklist')

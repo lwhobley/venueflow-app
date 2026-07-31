@@ -309,7 +309,7 @@ export class AppController {
       return { profile, venue };
     });
 
-    return { profile: mapProfile(result.profile), venue: mapVenue(result.venue) };
+    return { profile: mapProfile(result.profile, true), venue: mapVenue(result.venue) };
   }
 
   @UseGuards(AuthGuard)
@@ -362,8 +362,9 @@ export class AppController {
     ]);
     const countByStatus = (status: string) => shiftCounts.find((c) => c.status === status)?._count._all ?? 0;
 
+    const emailVerified = await this.isEmailVerified(user.sub);
     return {
-      profile: mapProfile(profile),
+      profile: mapProfile(profile, emailVerified),
       venue: mapVenue(profile.venue),
       analytics: {
         teamCount,
@@ -854,6 +855,20 @@ export class AppController {
   @Post('redeem-my-invite')
   async redeemMyInvite(@CurrentUser() user: AuthUser) {
     const email = await this.getVerifiedAccountEmail(user.sub);
+    // A caller who already belongs to a venue has nothing to redeem. Bail out
+    // before the adoption fallback below, which deletes the caller's profile —
+    // without this, re-verifying an email would tear an existing member out of
+    // their venue (and could orphan a venue whose sole owner they are, routing
+    // around the last-admin guard on account deletion). Mirrors the same check
+    // in redeemInviteForUser and joinByCode.
+    const current = await this.getProfile({ sub: user.sub });
+    if (current?.venueId) {
+      return {
+        redeemed: false,
+        profile: mapProfile(current, true),
+        venue: current.venue ? mapVenue(current.venue) : null,
+      };
+    }
     const matches = await this.prisma.invite.findMany({
       where: {
         email: { equals: email, mode: 'insensitive' },
@@ -870,6 +885,9 @@ export class AppController {
           email: { equals: email, mode: 'insensitive' },
           venueId: { not: null },
         },
+        // Deterministic pick when a roster carries more than one match, and the
+        // same one AuthService.issueSession would adopt on the signup path.
+        orderBy: { createdAt: 'asc' },
         include: { venue: true },
       });
 

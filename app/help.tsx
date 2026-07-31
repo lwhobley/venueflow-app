@@ -72,7 +72,7 @@ export default function HelpScreen() {
         section.summary.toLowerCase().includes(q) ||
         section.steps.some((step) => step.toLowerCase().includes(q)),
     );
-  }, [query]);
+  }, [query, SECTIONS]);
 
   return (
     <ScrollView

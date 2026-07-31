@@ -257,7 +257,7 @@ describe('AuthController recovery and logout safety', () => {
     await controller.logoutAll(user);
 
     expect(prisma.pushToken.deleteMany).not.toHaveBeenCalled();
-    expect(prisma.session.delete).toHaveBeenCalledWith({ where: { id: 'session-1' } });
+    expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { id: 'session-1' } });
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { PaperProvider } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
@@ -18,8 +18,9 @@ import { SubscriptionGate } from '../components/SubscriptionGate';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { consumeWebHandoff } from '../lib/web-handoff';
-import { configurePurchases } from '../lib/purchases';
+import { configurePurchases, logoutPurchases } from '../lib/purchases';
 import { DesktopWebStyles } from '../components/DesktopWebStyles';
+import { queryClient } from '../lib/query-client';
 
 const shouldIgnoreWebError = (message: string) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||
@@ -31,31 +32,26 @@ const shouldIgnoreWebError = (message: string) =>
 export default function RootLayout() {
   const themeMode = useAppearanceStore((state) => state.mode);
   const palette = designPalettes[themeMode];
-  // Preload application fonts, but never block the web shell on them. A CDN or
-  // hosting font failure must not leave authentication routes permanently blank.
-  useFonts({
+  // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
+  // and the nav use it). We hold the first paint until it's loaded, otherwise
+  // web shows blank "tofu" squares. A load error still lets the app through.
+  const [fontsLoaded, fontError] = useFonts({
     ...MaterialCommunityIcons.font,
     Fraunces_500Medium,
     Fraunces_600SemiBold,
     Fraunces_600SemiBold_Italic,
   });
-  const queryClient = useMemo(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 10000, // 10 seconds
-            gcTime: 300000, // 5 minutes (standard cacheTime replacement in TanStack v5)
-          },
-        },
-      }),
-    [],
-  );
-  const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
-  const storeHydrated = useAuthStore((state: AuthState) => state.hydrated);
+
+  // Only block the first paint on web (where an unloaded glyph font shows tofu
+  // squares). On native the icon font is bundled and renders fine, so never
+  // gate there — a gate could leave a blank screen if loading misbehaves.
+  const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
   const authScopeKey = useAuthStore(
     (state: AuthState) => `${state.authEpoch}:${state.user?.id ?? 'anon'}:${state.venue?.id ?? 'none'}`,
   );
+  const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
+  const token = useAuthStore((state: AuthState) => state.token);
+  const storeHydrated = useAuthStore((state: AuthState) => state.hydrated);
   const lastAuthScopeKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -63,7 +59,7 @@ export default function RootLayout() {
     lastAuthScopeKey.current = authScopeKey;
     void queryClient.cancelQueries();
     queryClient.clear();
-  }, [authScopeKey, queryClient]);
+  }, [authScopeKey]);
 
   // Consume a session handed off from the marketing site (venuewrangler.com) so
   // a user who just created a workspace lands signed in. Runs after the store
@@ -76,12 +72,20 @@ export default function RootLayout() {
     void consumeWebHandoff().finally(() => setHandoffChecked(true));
   }, [handoffChecked, storeHydrated]);
 
-
-  // Initialize in-app purchases (RevenueCat) keyed to the venue so a purchase
-  // ties to the tenant. No-op on web and when no key is configured.
   useEffect(() => {
+    if (lastAuthScopeKey.current === authScopeKey) return;
+    lastAuthScopeKey.current = authScopeKey;
+    void queryClient.cancelQueries();
+    queryClient.clear();
+  }, [authScopeKey]);
+
+  useEffect(() => {
+    if (!token) {
+      void logoutPurchases();
+      return;
+    }
     void configurePurchases(venueId ?? undefined);
-  }, [venueId]);
+  }, [token, venueId]);
   const debug = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__);
 
   useEffect(() => {

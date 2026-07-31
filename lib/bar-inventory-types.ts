@@ -52,6 +52,9 @@ export type PurchaseOrderLine = {
   qtyToOrder: number;
   unitCostCents: number | null;
   lineTotalCents: number | null;
+  dailyVelocity: number;
+  predictedDemand: number;
+  isPredictive: boolean;
 };
 
 export type PurchaseOrderGroup = {

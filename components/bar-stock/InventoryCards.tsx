@@ -8,7 +8,7 @@ import { View } from 'react-native';
 import { Button, Card, Chip, Text } from 'react-native-paper';
 import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { colors, spacing } from '../../lib/theme';
+import { accents, colors, spacing } from '../../lib/theme';
 import {
   money,
   type AgingReport,
@@ -188,9 +188,17 @@ export const PurchaseOrderCard = memo(function PurchaseOrderCard({
                 {group.lines.map((line) => (
                   <View key={line._id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: '600', fontSize: 13 }}>{line.name}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontWeight: '600', fontSize: 13 }}>{line.name}</Text>
+                        {line.isPredictive && (
+                          <View style={{ backgroundColor: accents[2].bg, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 }}>
+                            <Text style={{ color: accents[2].fg, fontSize: 9, fontWeight: '700' }}>SMART BOOST</Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={{ color: colors.muted, fontSize: 11 }}>
                         {line.sku ? `SKU: ${line.sku} · ` : ''}{line.onHand} on hand / par {line.parLevel}
+                        {line.dailyVelocity > 0 ? ` · Velocity: ${line.dailyVelocity}/day (7d: ${line.predictedDemand})` : ''}
                       </Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>

@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
   <title>Join your team | Venue Wrangler</title>
   <style>
     :root { --ink:#1f2a24; --muted:#657168; --green:#356b4a; --line:#d8e1d9; --soft:#f4f8f4; }
@@ -39,7 +40,13 @@
   </main>
   <script>
     const API_BASE = "https://venue-wranglerapi-production.up.railway.app/api";
-    const token = new URLSearchParams(window.location.search).get("invite")?.trim();
+    // Prefer the URL fragment (#invite=...) — fragments are never sent in the
+    // HTTP request, so the token never reaches server/CDN access logs. Fall
+    // back to the query string for any already-emailed links still using it.
+    const token = (
+      new URLSearchParams(window.location.hash.replace(/^#/, "")).get("invite")
+      || new URLSearchParams(window.location.search).get("invite")
+    )?.trim();
     const loading = document.getElementById("loading");
     const blocked = document.getElementById("blocked");
     const join = document.getElementById("join");

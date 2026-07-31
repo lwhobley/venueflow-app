@@ -84,7 +84,7 @@ export default function EventCommandCenterScreen() {
   if (!workspace || generationState === 'loading' || workspaceQuery.isLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: palette.background, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
-        <CommandText palette={palette} variant="title">Loading event workspace...</CommandText>
+        <CommandText palette={palette} variant="title">Loading event workspace…</CommandText>
         <CommandText palette={palette} variant="caption">Pulling the live event brief, staffing, floor, and execution tasks.</CommandText>
       </View>
     );
@@ -110,7 +110,7 @@ export default function EventCommandCenterScreen() {
 
       <CommandSurface palette={palette} strong style={{ gap: spacing.sm, borderColor: readiness.status === 'blocked' ? palette.warning : palette.primary }}>
         <CommandText palette={palette} variant="caption">
-          {new Date(event.startsAt).toLocaleString()} | {event.expectedGuests ?? '-'} guests{event.space ? ` | ${event.space}` : ''}
+          {new Date(event.startsAt).toLocaleString()} · {event.expectedGuests ?? '—'} guests{event.space ? ` · ${event.space}` : ''}
         </CommandText>
         {event.setupStyle ? <StatusPill palette={palette}>{event.setupStyle}</StatusPill> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
@@ -191,7 +191,7 @@ export default function EventCommandCenterScreen() {
         <CommandText palette={palette} variant="title">Incidents</CommandText>
         {workspace.incidents.map((incident) => (
           <View key={incident._id} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-            <View style={{ flex: 1 }}><CommandText palette={palette} variant="body">{incident.title}</CommandText><CommandText palette={palette} variant="caption">{incident.status} | {incident.severity}</CommandText></View>
+            <View style={{ flex: 1 }}><CommandText palette={palette} variant="body">{incident.title}</CommandText><CommandText palette={palette} variant="caption">{incident.status} · {incident.severity}</CommandText></View>
             <Button disabled={pendingAction !== null} compact mode="outlined" textColor={palette.primary} onPress={() => void runAction(`incident-${incident._id}`, () => resolveIncident({ incidentId: incident._id, status: incident.status === 'resolved' ? 'open' : 'resolved' }))}>{incident.status === 'resolved' ? 'Reopen' : 'Resolve'}</Button>
           </View>
         ))}
@@ -204,7 +204,7 @@ export default function EventCommandCenterScreen() {
 
       <CommandSurface palette={palette} style={{ gap: spacing.sm }}>
         <CommandText palette={palette} variant="title">Coverage and floor</CommandText>
-        <CommandText palette={palette} variant="body">Staffing: {workspace.staffing.covered}/{workspace.staffing.scheduled || '-'} covered{workspace.staffing.open ? ` | ${workspace.staffing.open} open` : ''}</CommandText>
+        <CommandText palette={palette} variant="body">Staffing: {workspace.staffing.covered}/{workspace.staffing.scheduled || '—'} covered{workspace.staffing.open ? ` · ${workspace.staffing.open} open` : ''}</CommandText>
         <CommandText palette={palette} variant="body">Floor assignment: {workspace.floor.assigned ? 'Ready' : 'Missing'}</CommandText>
       </CommandSurface>
     </ScrollView>

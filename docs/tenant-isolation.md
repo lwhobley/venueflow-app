@@ -11,12 +11,14 @@ The API-level controls are:
 
 Before enabling any direct Supabase client access, add SQL policies and tests that prove users can only read and mutate rows for their active venue.
 
-## Database-layer backstop (optional, inert until enabled)
+## Database-layer backstop (enforced by default)
 
 As defense-in-depth for the manual `where: { venueId }` controls above, a Prisma
-Client extension can scope venue-owned models to the request's tenant
-automatically. It is **inert until explicitly enabled**, so landing it changes
-nothing in production on its own.
+Client extension scopes venue-owned models to the request's tenant
+automatically. It is inert without a bound tenant context (auth flows,
+webhooks, system/background tasks), and can be disabled instantly by setting
+`TENANT_ISOLATION_ENFORCED=false` if it is ever suspected of causing a
+production issue.
 
 | File | Responsibility |
 |------|----------------|
@@ -39,22 +41,21 @@ nothing in production on its own.
 - **Inert by default.** No tenant context ⇒ no-op. Auth flows, webhooks, and
   system/background tasks (which legitimately cross venues) are unaffected.
 
-### Enablement (shipped, flag-gated)
+### Enablement (fail-closed by default)
 
-The cutover is wired but **off by default**. Setting `TENANT_ISOLATION_ENFORCED=true`
-in the environment activates both pieces; unsetting rolls back instantly.
+Both pieces are active unless `TENANT_ISOLATION_ENFORCED` is explicitly set to
+the literal string `"false"`.
 
-1. **`prisma.service.ts`** — when the flag is set, the service applies the
+1. **`prisma.service.ts`** — unless disabled, the service applies the
    extension via `this.$extends(tenantIsolationExtension())` and wraps itself in
    a `Proxy` that delegates Prisma calls to the extended client while keeping
    Nest lifecycle hooks on the wrapper. This preserves the `PrismaService`
    injection token across the codebase. `$transaction`'s `tx` callback is also
    extension-aware, so transactional writes are scoped.
-2. **`auth.guard.ts`** — when the flag is set and the token carries a `venueId`,
+2. **`auth.guard.ts`** — unless disabled, when the token carries a `venueId`,
    `enterTenant(venueId)` binds the AsyncLocalStorage tenant context for the
    rest of the request. Tokens without a venueId (auth flows, system tasks)
    stay unscoped, which is correct.
 
-Rollout: deploy with the flag **off** (zero behaviour change). Validate in a
-staging environment with `TENANT_ISOLATION_ENFORCED=true`, run the integration
-suite, then flip the flag in production. Unset to roll back instantly.
+Rollback: set `TENANT_ISOLATION_ENFORCED=false` in the environment to disable
+instantly if the extension is ever suspected of causing a production issue.

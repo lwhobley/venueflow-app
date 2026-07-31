@@ -42,16 +42,36 @@ const hasLocalStorage = (() => {
 })();
 const webStorage = {
   getItem: async (key: string) => {
-    if (hasLocalStorage) return window.localStorage.getItem(key);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        return window.localStorage.getItem(key);
+      } catch {
+        // Fall back to memoryStorage if localStorage is restricted
+      }
+    }
     return memoryStorage.get(key) ?? null;
   },
   setItem: async (key: string, value: string) => {
-    if (hasLocalStorage) window.localStorage.setItem(key, value);
-    else memoryStorage.set(key, value);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(key, value);
+        return;
+      } catch {
+        // Fall back to memoryStorage if localStorage is restricted
+      }
+    }
+    memoryStorage.set(key, value);
   },
   removeItem: async (key: string) => {
-    if (hasLocalStorage) window.localStorage.removeItem(key);
-    else memoryStorage.delete(key);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.removeItem(key);
+        return;
+      } catch {
+        // Fall back to memoryStorage if localStorage is restricted
+      }
+    }
+    memoryStorage.delete(key);
   },
 };
 

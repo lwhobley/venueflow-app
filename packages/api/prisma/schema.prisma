@@ -163,6 +163,12 @@ enum BarStockCategory {
   garnish
   supply
   other
+  protein
+  produce
+  dairy
+  dry_goods
+  bakery
+  frozen
 }
 
 enum BarStockMovementType {

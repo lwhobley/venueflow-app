@@ -59,13 +59,8 @@ export class TimeClockController {
       include: { profile: true },
     });
 
-    const myOpenEntry = entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile)
-      ? mapClockEntry(
-          entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile)!,
-          entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile)!.profile!,
-          venue,
-        )
-      : null;
+    const myRawEntry = entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile);
+    const myOpenEntry = myRawEntry ? mapClockEntry(myRawEntry, myRawEntry.profile!, venue) : null;
     const activeClockEntries = managerView
       ? entries.flatMap((entry) => (entry.isOpen && entry.profile ? [mapClockEntry(entry, entry.profile, venue, { includeLocation: false })] : []))
       : myOpenEntry

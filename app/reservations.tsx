@@ -18,11 +18,13 @@ import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
 
-const MEAL_TIMES: Record<string, { label: string; time: string; duration: number }> = {
-  breakfast: { label: 'Breakfast', time: '08:00', duration: 60 },
-  brunch: { label: 'Brunch', time: '10:00', duration: 90 },
-  lunch: { label: 'Lunch', time: '12:00', duration: 90 },
-  dinner: { label: 'Dinner', time: '18:00', duration: 120 },
+type MealId = 'breakfast' | 'brunch' | 'lunch' | 'dinner';
+
+const MEAL_TIMES: Record<MealId, { id: MealId; time: string; duration: number }> = {
+  breakfast: { id: 'breakfast', time: '08:00', duration: 60 },
+  brunch: { id: 'brunch', time: '10:00', duration: 90 },
+  lunch: { id: 'lunch', time: '12:00', duration: 90 },
+  dinner: { id: 'dinner', time: '18:00', duration: 120 },
 };
 
 function getMealsForDayOfWeek(dow: number) {
@@ -110,17 +112,22 @@ function ReservationsScreen() {
 
   const addWalkIn = async () => {
     if (!venue?.id || !wlName.trim()) return;
-    await addToWaitlist({
-      venueId: venue.id,
-      guestName: wlName.trim(),
-      partySize: wlParty,
-      guestPhone: wlPhone.trim() || undefined,
-      email: wlEmail.trim() || undefined,
-    });
-    setWlName('');
-    setWlPhone('');
-    setWlEmail('');
-    setWlParty(2);
+    setWaitlistError(null);
+    try {
+      await addToWaitlist({
+        venueId: venue.id,
+        guestName: wlName.trim(),
+        partySize: wlParty,
+        guestPhone: wlPhone.trim() || undefined,
+        email: wlEmail.trim() || undefined,
+      });
+      setWlName('');
+      setWlPhone('');
+      setWlEmail('');
+      setWlParty(2);
+    } catch (e) {
+      setWaitlistError(errorMessage(e, t('reservations.waitlist.errors.addFailed')));
+    }
   };
 
   const seatWaitlist = async (entryId: string, tableId: string) => {
@@ -177,7 +184,7 @@ function ReservationsScreen() {
   const [partySize, setPartySize] = useState(2);
   const [date, setDate] = useState(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`);
   const [time, setTime] = useState('18:00');
-  const [selectedMeal, setSelectedMeal] = useState('dinner');
+  const [selectedMeal, setSelectedMeal] = useState<MealId>('dinner');
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [mealMenuOpen, setMealMenuOpen] = useState(false);
   const [source, setSource] = useState<Source>('direct');
@@ -195,6 +202,7 @@ function ReservationsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
@@ -336,17 +344,22 @@ function ReservationsScreen() {
 
   const assignToTable = async (res: ReservationRow, tableId: string, seat: boolean) => {
     if (!venue?.id) return;
-    const startsAt = res.reservationTime;
-    const endsAt = startsAt + (res.durationMinutes || 120) * 60 * 1000;
-    await assignReservation({
-      venueId: venue.id,
-      reservationId: res.id as Id<'reservations'>,
-      tableIds: [tableId as Id<'tables'>],
-      holdType: seat ? 'seated' : 'reserved',
-      startsAt,
-      endsAt,
-    });
-    setAssigningId(null);
+    setAssignError(null);
+    try {
+      const startsAt = res.reservationTime;
+      const endsAt = startsAt + (res.durationMinutes || 120) * 60 * 1000;
+      await assignReservation({
+        venueId: venue.id,
+        reservationId: res.id as Id<'reservations'>,
+        tableIds: [tableId as Id<'tables'>],
+        holdType: seat ? 'seated' : 'reserved',
+        startsAt,
+        endsAt,
+      });
+      setAssigningId(null);
+    } catch (e) {
+      setAssignError(errorMessage(e, t('reservations.item.assignFailed')));
+    }
   };
 
   const deleteReservation = async (res: ReservationRow) => {
@@ -576,12 +589,12 @@ function ReservationsScreen() {
                   <Text style={{ minWidth: 28, textAlign: 'center' }}>{partySize}</Text>
                   <IconButton icon="plus" mode="outlined" size={16} onPress={() => setPartySize((p) => Math.min(30, p + 1))} />
                 </View>
-                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                   <Menu
                     visible={dateMenuOpen}
                     onDismiss={() => setDateMenuOpen(false)}
                     anchor={
-                      <Button mode="outlined" onPress={() => setDateMenuOpen(true)} style={{ flex: 1 }} contentStyle={{ justifyContent: 'flex-start' }}>
+                      <Button mode="outlined" onPress={() => setDateMenuOpen(true)} style={{ flex: 1, minWidth: 140 }} contentStyle={{ justifyContent: 'flex-start' }}>
                         {selectedDateOption?.label ?? date}
                       </Button>
                     }
@@ -594,7 +607,7 @@ function ReservationsScreen() {
                           setDate(opt.value);
                           setDateMenuOpen(false);
                           const meals = getMealsForDayOfWeek(opt.dayOfWeek);
-                          const stillValid = meals.some((m) => m.label.toLowerCase() === selectedMeal);
+                          const stillValid = meals.some((m) => m.id === selectedMeal);
                           if (!stillValid) {
                             const fallback = opt.dayOfWeek === 0 || opt.dayOfWeek === 6 ? 'brunch' : 'dinner';
                             setSelectedMeal(fallback);
@@ -604,21 +617,29 @@ function ReservationsScreen() {
                       />
                     ))}
                   </Menu>
+                  <TextInput
+                    label={t('reservations.form.timeLabel')}
+                    value={time}
+                    onChangeText={setTime}
+                    mode="outlined"
+                    placeholder="HH:MM"
+                    style={{ width: 90, backgroundColor: colors.surface }}
+                  />
                   <Menu
                     visible={mealMenuOpen}
                     onDismiss={() => setMealMenuOpen(false)}
                     anchor={
-                      <Button mode="outlined" onPress={() => setMealMenuOpen(true)} style={{ flex: 1 }} contentStyle={{ justifyContent: 'flex-start' }}>
-                        {MEAL_TIMES[selectedMeal]?.label ?? selectedMeal}
+                      <Button mode="outlined" onPress={() => setMealMenuOpen(true)} style={{ flex: 1, minWidth: 140 }} contentStyle={{ justifyContent: 'flex-start' }}>
+                        {MEAL_TIMES[selectedMeal] ? t(`reservations.meals.${selectedMeal}`) : selectedMeal}
                       </Button>
                     }
                   >
                     {availableMeals.map((meal) => {
-                      const key = meal.label.toLowerCase();
+                      const key = meal.id;
                       return (
                         <Menu.Item
                           key={key}
-                          title={`${meal.label} · ${meal.time}`}
+                          title={`${t(`reservations.meals.${key}`)} · ${meal.time}`}
                           onPress={() => {
                             setSelectedMeal(key);
                             setTime(meal.time);
@@ -629,6 +650,9 @@ function ReservationsScreen() {
                     })}
                   </Menu>
                 </View>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  {t('reservations.form.mealHint')}
+                </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {reservationSources.map((s) => (
                     <Chip key={s} selected={source === s} onPress={() => setSource(s)}>{s.replace('_', ' ')}</Chip>
@@ -716,7 +740,7 @@ function ReservationsScreen() {
               {canManage ? (
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                   {!seated && !cancelled ? (
-                    <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => setAssigningId(assigningId === res.id ? null : res.id)}>
+                    <Button compact mode={assigningId === res.id ? 'contained' : 'outlined'} buttonColor={assigningId === res.id ? colors.primary : undefined} textColor={assigningId === res.id ? '#fff' : colors.primary} onPress={() => { setAssignError(null); setAssigningId(assigningId === res.id ? null : res.id); }}>
                       {assigningId === res.id ? t('reservations.item.pickTable') : t('reservations.item.assignTable')}
                     </Button>
                   ) : null}
@@ -727,6 +751,7 @@ function ReservationsScreen() {
               {assigningId === res.id ? (
                 <View style={{ gap: 6, backgroundColor: colors.background, borderRadius: radius.sharp, padding: 10 }}>
                   <Text style={{ color: colors.muted }}>{t('reservations.item.tapInstructions')}</Text>
+                  {assignError ? <Text style={{ color: colors.danger }}>{assignError}</Text> : null}
                   {openTables.length === 0 ? (
                     <Text style={{ color: colors.danger }}>{t('reservations.item.noOpenTablesBuild')}</Text>
                   ) : (

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -38,7 +38,27 @@ export default function SignInScreen() {
   const { invite: inviteParam, phone: phoneParam, tab } = useLocalSearchParams<{ invite?: string; phone?: string; tab?: string }>();
   const inviteToken = typeof inviteParam === 'string' ? inviteParam : undefined;
   const invitePhone = typeof phoneParam === 'string' ? phoneParam : undefined;
-  const [invitePreview] = useState<InvitePreview | null>(null);
+  const [invitePreview, setInvitePreview] = useState<InvitePreview | null>(null);
+
+  useEffect(() => {
+    if (!inviteToken) {
+      setInvitePreview(null);
+      return;
+    }
+    let cancelled = false;
+    appApi.previewInvite(inviteToken)
+      .then((result) => {
+        if (cancelled) return;
+        setInvitePreview({ venueName: result.venueName, jobTitle: result.jobTitle });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setInvitePreview({ expired: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteToken]);
 
   const [flow, setFlow] = useState<'signIn' | 'signUp'>(inviteToken && tab !== 'signIn' ? 'signUp' : 'signIn');
   const [fullName, setFullName] = useState('');

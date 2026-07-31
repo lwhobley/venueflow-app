@@ -76,14 +76,51 @@ export class BarInventoryReportsService {
     return { rows, totals, windowDays: 30 };
   }
 
-  // ── Purchase order draft (below-par items grouped by supplier) ───────
+  // ── Purchase order draft (below-par items grouped by supplier with AI POS Sync velocity) ──
   async purchaseOrder(venueId: string) {
-    const items = await this.prisma.barInventoryItem.findMany({
-      where: { venueId },
-      orderBy: [{ supplier: 'asc' }, { name: 'asc' }],
-      take: 500,
-    });
-    const belowPar = items.filter((i) => i.onHand < i.parLevel);
+    const [items, posChecks] = await Promise.all([
+      this.prisma.barInventoryItem.findMany({
+        where: { venueId },
+        orderBy: [{ supplier: 'asc' }, { name: 'asc' }],
+        take: 500,
+      }),
+      this.prisma.posCheck.findMany({
+        where: { venueId, openedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
+        select: { menuItems: true },
+        take: 1000,
+      }),
+    ]);
+
+    // Parse POS sales
+    const salesMap = new Map<string, number>();
+    for (const check of posChecks) {
+      if (!check.menuItems) continue;
+      try {
+        const checkItems = typeof check.menuItems === 'string' ? JSON.parse(check.menuItems) : check.menuItems;
+        if (Array.isArray(checkItems)) {
+          for (const ci of checkItems) {
+            const name = String(ci.name ?? '').toLowerCase().trim();
+            const qty = Number(ci.quantity ?? 1);
+            salesMap.set(name, (salesMap.get(name) ?? 0) + qty);
+          }
+        }
+      } catch (e) {
+        // ignore JSON parse error
+      }
+    }
+
+    const getVelocity = (itemName: string) => {
+      const lowerName = itemName.toLowerCase().trim();
+      let totalSold = 0;
+      for (const [soldName, qty] of salesMap.entries()) {
+        if (soldName.includes(lowerName) || lowerName.includes(soldName)) {
+          totalSold += qty;
+        }
+      }
+      return Number((totalSold / 30).toFixed(2));
+    };
+
+    const belowPar = items.filter((i) => i.onHand < i.parLevel || getVelocity(i.name) > 0);
 
     const bySupplier = new Map<string, typeof belowPar>();
     for (const item of belowPar) {
@@ -95,7 +132,12 @@ export class BarInventoryReportsService {
 
     const groups = Array.from(bySupplier.entries()).map(([supplier, groupItems]) => {
       const lines = groupItems.map((item) => {
-        const qtyToOrder = Math.ceil(item.parLevel - item.onHand);
+        const velocity = getVelocity(item.name);
+        const predictedDemand = Math.ceil(velocity * 7);
+        const baseQty = Math.max(0, Math.ceil(item.parLevel - item.onHand));
+        const smartQty = Math.max(0, Math.ceil(item.parLevel - (item.onHand - predictedDemand)));
+        const qtyToOrder = Math.max(baseQty, smartQty);
+        
         return {
           _id: item.id,
           name: item.name,
@@ -103,9 +145,12 @@ export class BarInventoryReportsService {
           unit: item.unit,
           onHand: item.onHand,
           parLevel: item.parLevel,
+          dailyVelocity: velocity,
+          predictedDemand,
           qtyToOrder,
           unitCostCents: item.unitCostCents,
           lineTotalCents: item.unitCostCents != null ? Math.round(qtyToOrder * item.unitCostCents) : null,
+          isPredictive: smartQty > baseQty,
         };
       });
       const groupTotalCents = lines.reduce((sum, l) => sum + (l.lineTotalCents ?? 0), 0);
@@ -118,29 +163,33 @@ export class BarInventoryReportsService {
 
   // ── Purchase order CSV ───────────────────────────────────────────────
   async purchaseOrderCsv(venueId: string) {
-    const items = await this.prisma.barInventoryItem.findMany({
-      where: { venueId },
-      orderBy: [{ supplier: 'asc' }, { name: 'asc' }],
-      take: 200,
-    });
-    const belowPar = items.filter((i) => i.onHand < i.parLevel);
-    const headers = ['Supplier', 'Item', 'SKU', 'Unit', 'On Hand', 'Par', 'Order Qty', 'Unit Cost ($)', 'Line Total ($)'];
+    const po = await this.purchaseOrder(venueId);
+    const headers = [
+      'Supplier', 'Item', 'SKU', 'Unit', 'On Hand', 'Par',
+      'Daily Velocity (units/day)', 'Predicted 7-Day Demand', 'Suggested Order Qty',
+      'Unit Cost ($)', 'Line Total ($)', 'Predictive Boost'
+    ];
     const rows = [headers.map(csvCell).join(',')];
-    for (const item of belowPar) {
-      const qty = Math.ceil(item.parLevel - item.onHand);
-      const unitCost = item.unitCostCents != null ? (item.unitCostCents / 100).toFixed(2) : '';
-      const lineTotal = item.unitCostCents != null ? (qty * item.unitCostCents / 100).toFixed(2) : '';
-      rows.push([
-        csvCell(item.supplier ?? 'Unspecified'),
-        csvCell(item.name),
-        csvCell(item.sku),
-        csvCell(item.unit),
-        csvCell(item.onHand),
-        csvCell(item.parLevel),
-        csvCell(qty),
-        csvCell(unitCost),
-        csvCell(lineTotal),
-      ].join(','));
+    
+    for (const group of po.groups) {
+      for (const line of group.lines) {
+        const unitCost = line.unitCostCents != null ? (line.unitCostCents / 100).toFixed(2) : '';
+        const lineTotal = line.lineTotalCents != null ? (line.lineTotalCents / 100).toFixed(2) : '';
+        rows.push([
+          csvCell(group.supplier),
+          csvCell(line.name),
+          csvCell(line.sku ?? ''),
+          csvCell(line.unit),
+          csvCell(line.onHand),
+          csvCell(line.parLevel),
+          csvCell(line.dailyVelocity),
+          csvCell(line.predictedDemand),
+          csvCell(line.qtyToOrder),
+          csvCell(unitCost),
+          csvCell(lineTotal),
+          csvCell(line.isPredictive ? 'YES' : 'NO'),
+        ].join(','));
+      }
     }
     return rows.join('\n');
   }

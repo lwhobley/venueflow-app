@@ -44,7 +44,7 @@ function initials(name: string) {
 
 
 function colorFor(index: number) {
-  return accents[index % accents.length].fg;
+  return accents[index % accents.length].icon;
 }
 
 const ConversationListRow = memo(function ConversationListRow({
