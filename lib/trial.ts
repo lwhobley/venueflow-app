@@ -1,7 +1,7 @@
-// Per-user 14-day free trial helpers. The trial start is stored on the profile
-// (trialEndsAt) by the backend at sign up. During the trial users can browse
-// everything except premium features (Integrations, CRM). After it expires all
-// features are locked until they upgrade.
+// Per-user intro access helpers. The access window is stored on the profile
+// (trialEndsAt) by the backend. During intro access users can browse everything
+// except premium features (Integrations, CRM). After it expires all features are
+// locked until they upgrade.
 
 export type TrialState = {
   active: boolean;

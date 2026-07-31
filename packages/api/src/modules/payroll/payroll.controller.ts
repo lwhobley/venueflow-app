@@ -43,6 +43,12 @@ function parseDateParam(value: string | undefined, fallback: Date): Date {
   return isNaN(d.getTime()) ? fallback : d;
 }
 
+function parsePeriodEndParam(value: string | undefined, fallback: Date): Date {
+  if (!value) return fallback;
+  const d = new Date(`${value}T23:59:59.999Z`);
+  return isNaN(d.getTime()) ? fallback : d;
+}
+
 async function buildPayrollRows(
   prisma: PrismaService,
   venueId: string,
@@ -74,7 +80,16 @@ async function buildPayrollRows(
       if (!e.clockOutAt) return sum;
       const start = Math.max(e.clockInAt.getTime(), periodStart.getTime());
       const end = Math.min(e.clockOutAt.getTime(), periodEnd.getTime());
-      return sum + Math.max(0, end - start) / 3600000;
+      let durationMs = Math.max(0, end - start);
+      const breaks = (e.breaks as any[]) || [];
+      for (const b of breaks) {
+        if (b.type !== 'unpaid' || !b.startAt || !b.endAt) continue;
+        const breakStart = Math.max(start, Number(b.startAt));
+        const breakEnd = Math.min(end, Number(b.endAt));
+        if (!Number.isFinite(breakStart) || !Number.isFinite(breakEnd)) continue;
+        durationMs -= Math.max(0, breakEnd - breakStart);
+      }
+      return sum + Math.max(0, durationMs) / 3600000;
     }, 0);
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -93,7 +108,10 @@ async function buildPayrollRows(
     employeeName: member.fullName,
     role: member.role as string,
     jobTitle: member.jobTitle,
-    totalHours: round2(hoursOf(entriesByProfile.get(member.id) ?? [])),
+    regularHours: round2(hoursOf(entriesByProfile.get(member.id) ?? [])),
+  })).map((row) => ({
+    ...row,
+    totalHours: row.regularHours,
   }));
 
   // Wage records retained after account deletion (profileId is null) still
@@ -105,14 +123,15 @@ async function buildPayrollRows(
     formerByName.set(name, [...(formerByName.get(name) ?? []), e]);
   }
   for (const [name, rowsForName] of formerByName) {
-    rows.push({
-      profileId: null,
-      employeeName: name,
-      role: 'staff',
-      jobTitle: 'Former staff',
-      totalHours: round2(hoursOf(rowsForName)),
-    });
-  }
+      rows.push({
+        profileId: null,
+        employeeName: name,
+        role: 'staff',
+        jobTitle: 'Former staff',
+        regularHours: round2(hoursOf(rowsForName)),
+        totalHours: round2(hoursOf(rowsForName)),
+      });
+    }
 
   return rows;
 }
@@ -136,7 +155,7 @@ export class PayrollController {
     const now = new Date();
     const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
     const periodStart = parseDateParam(startDate, twoWeeksAgo);
-    const periodEnd = parseDateParam(endDate, now);
+    const periodEnd = parsePeriodEndParam(endDate, now);
 
     const rows = await buildPayrollRows(this.prisma, scope.venueId, periodStart, periodEnd);
     const totalHours = Math.round(rows.reduce((sum, r) => sum + r.totalHours, 0) * 100) / 100;
@@ -165,7 +184,7 @@ export class PayrollController {
     const now = new Date();
     const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
     const periodStart = parseDateParam(startDate, twoWeeksAgo);
-    const periodEnd = parseDateParam(endDate, now);
+    const periodEnd = parsePeriodEndParam(endDate, now);
 
     const rows = await buildPayrollRows(this.prisma, scope.venueId, periodStart, periodEnd);
     const headers = ['Employee', 'Role', 'Regular Hours', 'Total Hours', 'Start Date', 'End Date'];
@@ -174,7 +193,7 @@ export class PayrollController {
       csvRows.push([
         csvCell(row.employeeName),
         csvCell(row.role),
-        csvCell(row.totalHours),
+        csvCell((row as { regularHours?: number }).regularHours ?? row.totalHours),
         csvCell(row.totalHours),
         csvCell(periodStart.toISOString().slice(0, 10)),
         csvCell(periodEnd.toISOString().slice(0, 10)),

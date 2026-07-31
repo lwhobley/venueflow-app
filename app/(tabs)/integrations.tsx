@@ -1,26 +1,42 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { accents, colors, radius, spacing } from '../../lib/theme';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { formatMoney, formatShortDateTime, errorMessage } from '../../lib/format';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
+import { ProviderDropdown } from '../../components/ProviderDropdown';
+import { InlineMessage } from '../../components/InlineMessage';
+import { ManagerGate } from '../../components/ManagerGate';
+import { SectionHeader } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
-const providers = ['toast', 'square', 'clover', 'generic'] as const;
-type Provider = (typeof providers)[number];
-const reservationProviders = ['opentable', 'resy', 'sevenrooms', 'tock', 'google', 'generic'] as const;
-type ReservationProvider = (typeof reservationProviders)[number];
+// Must stay in sync with POS_PROVIDERS in packages/api/src/modules/pos/pos.controller.ts
+// and the PosProvider enum in prisma/schema.prisma.
+const posProviderOptions = [
+  { value: 'toast', label: 'Toast' },
+  { value: 'square', label: 'Square' },
+  { value: 'clover', label: 'Clover' },
+  { value: 'shopify_pos', label: 'Shopify POS' },
+  { value: 'lightspeed_restaurant', label: 'Lightspeed Restaurant' },
+  { value: 'spoton', label: 'SpotOn' },
+  { value: 'generic', label: 'Other (generic webhook)' },
+] as const;
+type Provider = (typeof posProviderOptions)[number]['value'];
 
-function money(cents: number) {
-  return `$${(cents / 100).toFixed(2)}`;
-}
+const reservationProviderOptions = [
+  { value: 'opentable', label: 'OpenTable' },
+  { value: 'resy', label: 'Resy' },
+  { value: 'sevenrooms', label: 'SevenRooms' },
+  { value: 'tock', label: 'Tock' },
+  { value: 'google', label: 'Google Reserve' },
+  { value: 'generic', label: 'Other (generic webhook)' },
+] as const;
+type ReservationProvider = (typeof reservationProviderOptions)[number]['value'];
 
-function dateTime(value: number | null | undefined) {
-  return value ? new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Never';
-}
+
 
 export default function IntegrationsScreen() {
   return (
@@ -31,11 +47,8 @@ export default function IntegrationsScreen() {
 }
 
 function IntegrationsScreenInner() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const user = useAuthStore((state: AuthState) => state.user);
-  const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const { t } = useI18n();
+  const { venue, isReady, canManage, profileLoading } = useVenueAuth();
   const overview = useQuery(api.pos.getPosOverview, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const reservationOverview = useQuery(
     api.reservationIntegrations.getReservationIntegrationOverview,
@@ -68,9 +81,9 @@ function IntegrationsScreenInner() {
         status: 'connected',
       });
       if (r?.webhookSecret) setNewSecret(r.webhookSecret);
-      setMessage('POS connection saved.');
+      setMessage(t('integrations.messages.posSaved'));
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not save POS connection.');
+      setMessage(errorMessage(e, t('integrations.messages.posSaveError')));
     } finally {
       setPending(null);
     }
@@ -88,9 +101,9 @@ function IntegrationsScreenInner() {
         status: 'connected',
       });
       if (r?.webhookSecret) setNewSecret(r.webhookSecret);
-      setMessage('Reservation connection saved.');
+      setMessage(t('integrations.messages.reservationSaved'));
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not save reservation connection.');
+      setMessage(errorMessage(e, t('integrations.messages.reservationSaveError')));
     } finally {
       setPending(null);
     }
@@ -103,146 +116,154 @@ function IntegrationsScreenInner() {
     try {
       const r = await rotateLeadsSecret({ venueId: venue.id });
       if (r?.webhookSecret) setNewSecret(r.webhookSecret);
-      setMessage('Lead webhook secret generated.');
+      setMessage(t('integrations.messages.leadsGenerated'));
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not generate lead webhook secret.');
+      setMessage(errorMessage(e, t('integrations.messages.leadsGenerateError')));
     } finally {
       setPending(null);
     }
   };
 
-  if (!canManage) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Integrations are available to managers and admins.</Text>
-      </ScrollView>
-    );
-  }
-
   return (
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Integrations">
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Integrations</Text>
-        <Text style={{ color: colors.muted }}>Connect POS, reservation sync, and provider activity for {venue?.name ?? 'your venue'}.</Text>
-      </View>
+      <SectionHeader
+        kicker={t('integrations.header.kicker')}
+        title={t('integrations.header.title')}
+        subtitle={t('integrations.header.subtitle', { venue: venue?.name ?? t('integrations.header.venueFallback') })}
+      />
 
       {newSecret ? (
-        <Card style={{ backgroundColor: '#FFF7E6', borderRadius: 16, borderWidth: 1, borderColor: '#F2C97D' }}>
+        <Card style={{ backgroundColor: colors.surfaceSoft, borderRadius: radius.sharp, borderWidth: 1, borderColor: colors.warning }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text style={{ fontWeight: '800', color: colors.charcoal }}>Webhook secret — copy it now</Text>
+            <Text style={{ fontWeight: '800', color: colors.charcoal }}>{t('integrations.secret.title')}</Text>
             <Text style={{ color: colors.muted, fontSize: 13 }}>
-              Send this in the x-venueflow-connection-secret header on each webhook. It is shown once and cannot be retrieved later — save it, then rotate if you lose it.
+              {t('integrations.secret.body')}
             </Text>
-            <Text selectable style={{ fontFamily: 'monospace', fontSize: 14, color: colors.charcoal, backgroundColor: colors.surface, padding: spacing.sm, borderRadius: 8 }}>
+            <Text selectable style={{ fontFamily: 'monospace', fontSize: 14, color: colors.charcoal, backgroundColor: colors.surface, padding: spacing.sm, borderRadius: radius.sharp }}>
               {newSecret}
             </Text>
-            <Button compact mode="text" textColor={colors.primary} onPress={() => setNewSecret(null)}>I've saved it</Button>
+            <Button compact mode="text" textColor={colors.primary} onPress={() => setNewSecret(null)}>{t('integrations.secret.saved')}</Button>
           </Card.Content>
         </Card>
       ) : null}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
         {[
-          { label: 'Today sales', value: money(overview?.todaySalesCents ?? 0), a: accents[0] },
-          { label: 'Today tips', value: money(overview?.todayTipsCents ?? 0), a: accents[2] },
-          { label: 'Open checks', value: String(overview?.openChecks ?? 0), a: accents[3] },
-          { label: 'Last sync', value: dateTime(overview?.lastSyncAt), a: accents[4] },
+          { label: t('integrations.metrics.todaySales'), value: formatMoney(overview?.todaySalesCents ?? 0), a: accents[0] },
+          { label: t('integrations.metrics.todayTips'), value: formatMoney(overview?.todayTipsCents ?? 0), a: accents[2] },
+          { label: t('integrations.metrics.openChecks'), value: String(overview?.openChecks ?? 0), a: accents[3] },
+          { label: t('integrations.metrics.lastSync'), value: overview?.lastSyncAt ? formatShortDateTime(overview.lastSyncAt) : t('integrations.metrics.never'), a: accents[4] },
         ].map((metric) => (
-          <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: 16 }}>
+          <Card key={metric.label} style={{ backgroundColor: metric.a.bg, width: '48%', flexGrow: 1, borderRadius: radius.sharp }}>
             <Card.Content>
               <Text style={{ color: metric.a.fg, fontSize: 24, fontWeight: '800' }}>{metric.value}</Text>
-              <Text style={{ color: colors.muted }}>{metric.label}</Text>
+                  <Text style={{ color: colors.charcoal }}>{metric.label}</Text>
             </Card.Content>
           </Card>
         ))}
       </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>POS sync</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {providers.map((item) => (
-              <Chip key={item} selected={provider === item} onPress={() => setProvider(item)}>{item}</Chip>
-            ))}
-          </View>
-          <TextInput label="Provider location ID" value={locationId} onChangeText={setLocationId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
-          {message ? <Text style={{ color: message.includes('Could') ? colors.danger : colors.muted }}>{message}</Text> : null}
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('integrations.pos.title')}</Text>
+          <ProviderDropdown
+            label={t('integrations.pos.providerLabel')}
+            value={provider}
+            options={posProviderOptions}
+            onChange={(next) => setProvider(next as Provider)}
+            disabled={pending !== null}
+          />
+          <TextInput label={t('integrations.pos.locationLabel')} value={locationId} onChangeText={setLocationId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
+          <InlineMessage message={message} />
           <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-            <Button mode="contained" buttonColor={colors.primary} loading={pending === 'pos'} disabled={pending !== null} onPress={() => void saveConnection()}>Save connection</Button>
+            <Button mode="contained" buttonColor={colors.primary} loading={pending === 'pos'} disabled={pending !== null} onPress={() => void saveConnection()}>{t('integrations.pos.save')}</Button>
           </View>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: POST /api/v1/pos/ingest/:venueId with the x-webhook-secret header (per-connection secret).</Text>
-        </Card.Content>
-      </Card>
-
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservation integration</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {reservationProviders.map((item) => (
-              <Chip key={item} selected={reservationProvider === item} onPress={() => setReservationProvider(item)}>{item}</Chip>
-            ))}
-          </View>
-          <TextInput label="Provider venue ID" value={externalVenueId} onChangeText={setExternalVenueId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
-          <Button mode="contained" buttonColor={colors.primary} loading={pending === 'reservation'} disabled={pending !== null} onPress={() => void saveReservationConnection()}>
-            Save reservation connection
-          </Button>
-          <Text style={{ color: colors.muted }}>Webhook endpoint: POST /api/v1/reservations/ingest/:venueId with the x-webhook-secret header (per-connection secret).</Text>
-        </Card.Content>
-      </Card>
-
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>CRM lead capture</Text>
           <Text style={{ color: colors.muted }}>
-            Pipe website forms, email, or CSV uploads into your guest CRM. Generate a per-venue secret, then POST to /api/v1/guests/leads-webhook/:venueId with the x-webhook-secret header.
+            {t('integrations.pos.webhookInfo')}
+          </Text>
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('integrations.reservation.title')}</Text>
+          <ProviderDropdown
+            label={t('integrations.reservation.providerLabel')}
+            value={reservationProvider}
+            options={reservationProviderOptions}
+            onChange={(next) => setReservationProvider(next as ReservationProvider)}
+            disabled={pending !== null}
+          />
+          <TextInput label={t('integrations.reservation.venueIdLabel')} value={externalVenueId} onChangeText={setExternalVenueId} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
+          <Button mode="contained" buttonColor={colors.primary} loading={pending === 'reservation'} disabled={pending !== null} onPress={() => void saveReservationConnection()}>
+            {t('integrations.reservation.save')}
+          </Button>
+          <Text style={{ color: colors.muted }}>{t('integrations.reservation.webhookInfo')}</Text>
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('integrations.leads.title')}</Text>
+          <Text style={{ color: colors.muted }}>
+            {t('integrations.leads.body')}
           </Text>
           <Button mode="contained" buttonColor={colors.primary} loading={pending === 'leads'} disabled={pending !== null} onPress={() => void generateLeadsSecret()}>
-            Generate lead webhook secret
+            {t('integrations.leads.generate')}
           </Button>
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Connections</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('integrations.connections.title')}</Text>
           {(overview?.connections ?? []).length === 0 ? (
-            <Text style={{ color: colors.muted }}>No POS provider connected yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('integrations.connections.empty')}</Text>
           ) : (
             overview.connections.map((connection: any) => (
               <View key={connection._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
                 <Text style={{ fontWeight: '700' }}>{connection.provider}</Text>
-                <Text style={{ color: colors.muted }}>Status: {connection.status} · Location: {connection.externalLocationId ?? 'not set'}</Text>
-                <Text style={{ color: colors.muted }}>Last sync: {dateTime(connection.lastSyncAt)}</Text>
+                <Text style={{ color: colors.muted }}>
+                  {t('integrations.connections.statusLocation', { status: connection.status, location: connection.externalLocationId ?? t('integrations.connections.notSet') })}
+                </Text>
+                <Text style={{ color: colors.muted }}>
+                  {t('integrations.connections.lastSync', { value: connection.lastSyncAt ? formatShortDateTime(connection.lastSyncAt) : t('integrations.metrics.never') })}
+                </Text>
               </View>
             ))
           )}
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Reservation connections</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('integrations.reservationConnections.title')}</Text>
           {(reservationOverview?.connections ?? []).length === 0 ? (
-            <Text style={{ color: colors.muted }}>No reservation provider connected yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('integrations.reservationConnections.empty')}</Text>
           ) : (
             reservationOverview.connections.map((connection: any) => (
               <View key={connection._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
                 <Text style={{ fontWeight: '700' }}>{connection.provider}</Text>
-                <Text style={{ color: colors.muted }}>Status: {connection.status} · Venue ID: {connection.externalVenueId ?? 'not set'}</Text>
-                <Text style={{ color: colors.muted }}>Last sync: {dateTime(connection.lastSyncAt)}</Text>
+                <Text style={{ color: colors.muted }}>
+                  {t('integrations.reservationConnections.statusVenue', { status: connection.status, value: connection.externalVenueId ?? t('integrations.connections.notSet') })}
+                </Text>
+                <Text style={{ color: colors.muted }}>
+                  {t('integrations.reservationConnections.lastSync', { value: connection.lastSyncAt ? formatShortDateTime(connection.lastSyncAt) : t('integrations.metrics.never') })}
+                </Text>
               </View>
             ))
           )}
           {(reservationOverview?.recentEvents ?? []).length > 0 ? (
             <View style={{ gap: 4 }}>
-              <Text style={{ fontWeight: '700' }}>Recent reservation sync events</Text>
+              <Text style={{ fontWeight: '700' }}>{t('integrations.reservationConnections.recentEvents')}</Text>
               {reservationOverview.recentEvents.slice(0, 5).map((event: any) => (
                 <Text key={event._id} style={{ color: colors.muted }}>
-                  {event.provider} · {event.eventType} · {dateTime(event.processedAt)}
+                  {event.provider} · {event.eventType} · {formatShortDateTime(event.processedAt)}
                 </Text>
               ))}
             </View>
@@ -250,22 +271,29 @@ function IntegrationsScreenInner() {
         </Card.Content>
       </Card>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Recent checks</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('integrations.recentChecks.title')}</Text>
           {(overview?.recentChecks ?? []).length === 0 ? (
-            <Text style={{ color: colors.muted }}>No POS checks have synced yet.</Text>
+            <Text style={{ color: colors.muted }}>{t('integrations.recentChecks.empty')}</Text>
           ) : (
             overview.recentChecks.map((check: any) => (
               <View key={check._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 2 }}>
-                <Text style={{ fontWeight: '700' }}>{check.provider} · {money(check.totalCents)}</Text>
-                <Text style={{ color: colors.muted }}>{check.status} · Table {check.tableLabel ?? '-'} · {check.guestName ?? 'Guest'}</Text>
-                <Text style={{ color: colors.muted }}>{dateTime(check.openedAt)}</Text>
+                <Text style={{ fontWeight: '700' }}>{check.provider} · {formatMoney(check.totalCents)}</Text>
+                <Text style={{ color: colors.muted }}>
+                  {t('integrations.recentChecks.statusTable', {
+                    status: check.status,
+                    table: check.tableLabel ?? t('integrations.recentChecks.tableFallback'),
+                    guest: check.guestName ?? t('integrations.recentChecks.guestFallback'),
+                  })}
+                </Text>
+                <Text style={{ color: colors.muted }}>{formatShortDateTime(check.openedAt)}</Text>
               </View>
             ))
           )}
         </Card.Content>
       </Card>
     </ScrollView>
+    </ManagerGate>
   );
 }

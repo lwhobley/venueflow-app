@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { EmailModule } from './email/email.module';
 import { HealthController } from './health.controller';
+import { SupportController } from './support.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { VenueModule } from './venue/venue.module';
@@ -15,6 +18,7 @@ import { AppController } from './modules/app/app.controller';
 import { AppBillingController } from './modules/app/app-billing.controller';
 import { AppStaffController } from './modules/app/app-staff.controller';
 import { ProfileService } from './modules/app/profile.service';
+import { StaffImportParserService } from './modules/app/staff-import-parser.service';
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
@@ -31,6 +35,8 @@ import { ChatModule } from './modules/chat/chat.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
+import { SchedulingAssignmentService } from './modules/scheduling/scheduling-assignment.service';
+import { AiSchedulerService } from './modules/scheduling/ai-scheduler.service';
 
 @Module({
   imports: [
@@ -38,6 +44,8 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
       isGlobal: true,
       envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env.local', '.env'],
     }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     VenueModule,
@@ -59,6 +67,7 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
   ],
   controllers: [
     HealthController,
+    SupportController,
     AuthController,
     AppController,
     AppBillingController,
@@ -69,6 +78,9 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
     StaffController,
   ],
   providers: [
+    // Throttle FIRST so unauthenticated attackers can't hammer the auth check
+    // without ever incrementing the rate-limit counter.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Protect every route by default. Opt out explicitly with @Public().
     { provide: APP_GUARD, useExisting: AuthGuard },
     // Resolve profile+venue once per request and expose via request.venueScope.
@@ -78,6 +90,9 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
     // Shared /v1/app profile + venue resolution (AppController, AppBilling,
     // AppStaff controllers all depend on it).
     ProfileService,
+    StaffImportParserService,
+    SchedulingAssignmentService,
+    AiSchedulerService,
   ],
 })
 export class AppModule {}

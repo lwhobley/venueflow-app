@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Join your team | Venue Wrangler</title>
+  <style>
+    :root { --ink:#1f2a24; --muted:#657168; --green:#356b4a; --line:#d8e1d9; --soft:#f4f8f4; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; color:var(--ink); background:var(--soft); font-family:Arial, sans-serif; }
+    main { width:min(100%, 520px); background:#fff; border:1px solid var(--line); border-radius:20px; padding:32px; box-shadow:0 18px 50px rgba(31,42,36,.08); }
+    h1 { margin:0 0 8px; font-size:32px; } p { color:var(--muted); line-height:1.5; }
+    form { display:grid; gap:14px; margin-top:24px; } label { display:grid; gap:6px; font-size:13px; font-weight:700; }
+    input { width:100%; padding:12px; border:1px solid var(--line); border-radius:10px; font:inherit; }
+    button { border:0; border-radius:10px; padding:13px 16px; background:var(--green); color:#fff; font:inherit; font-weight:700; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:wait; } .status { min-height:22px; color:var(--muted); } .status.error { color:#a6332b; } .status.success { color:var(--green); }
+    .terms { display:flex; gap:8px; align-items:flex-start; color:var(--muted); font-size:13px; font-weight:400; } .terms input { width:auto; margin-top:2px; }
+    a { color:var(--green); } [hidden] { display:none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <section id="loading"><h1>Checking your invitation…</h1><p>Please wait while we validate your secure link.</p></section>
+    <section id="blocked" hidden><h1>Invitation link required</h1><p>This page is available only through a valid, unexpired invitation link. Ask your manager to send a new invite if needed.</p></section>
+    <section id="join" hidden>
+      <p id="kicker">You’re invited to join</p>
+      <h1 id="venueName"></h1>
+      <p id="jobTitle"></p>
+      <form id="joinForm">
+        <label>Your name<input name="fullName" autocomplete="name" required /></label>
+        <label>Invited email<input name="email" type="email" autocomplete="email" required /></label>
+        <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
+        <label class="terms"><input name="termsAccepted" type="checkbox" required /><span>I agree to the <a href="../terms/">Terms of Service</a> and <a href="../privacy/">Privacy Policy</a>.</span></label>
+        <button id="joinButton" type="submit">Create account and join team</button>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </form>
+    </section>
+  </main>
+  <script>
+    const API_BASE = "https://venue-wranglerapi-production.up.railway.app/api";
+    // Prefer the URL fragment (#invite=...) — fragments are never sent in the
+    // HTTP request, so the token never reaches server/CDN access logs. Fall
+    // back to the query string for any already-emailed links still using it.
+    const token = (
+      new URLSearchParams(window.location.hash.replace(/^#/, "")).get("invite")
+      || new URLSearchParams(window.location.search).get("invite")
+    )?.trim();
+    const loading = document.getElementById("loading");
+    const blocked = document.getElementById("blocked");
+    const join = document.getElementById("join");
+    const form = document.getElementById("joinForm");
+    const button = document.getElementById("joinButton");
+    const status = document.getElementById("status");
+
+    async function request(path, options = {}) {
+      const response = await fetch(API_BASE + path, {
+        ...options,
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) throw new Error(data?.message || "Request failed.");
+      return data;
+    }
+
+    async function loadInvite() {
+      if (!token) throw new Error("Missing invitation token");
+      const invite = await request("/v1/app/invite/" + encodeURIComponent(token));
+      document.getElementById("venueName").textContent = invite.venueName;
+      document.getElementById("jobTitle").textContent = `Join as ${invite.jobTitle}.`;
+      loading.hidden = true;
+      join.hidden = false;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(form).entries());
+      button.disabled = true;
+      status.className = "status";
+      status.textContent = "Creating your account…";
+      try {
+        const session = await request("/v1/auth/password", {
+          method: "POST",
+          body: JSON.stringify({
+            email: String(data.email || "").trim(),
+            password: String(data.password || ""),
+            fullName: String(data.fullName || "").trim(),
+            flow: "signUp",
+            inviteToken: token,
+            termsAccepted: data.termsAccepted === "on",
+          }),
+        });
+        if (!session.profile?.venueId) throw new Error("Your account was created, but the invitation could not be redeemed. Ask your manager for a new link.");
+        status.className = "status success";
+        status.textContent = `Your account is ready and you joined ${session.venue?.name || "the team"}. You can now sign in to Venue Wrangler.`;
+        form.reset();
+      } catch (error) {
+        status.className = "status error";
+        status.textContent = error.message || "Could not create your account.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    loadInvite().catch(() => {
+      loading.hidden = true;
+      blocked.hidden = false;
+    });
+  </script>
+</body>
+</html>

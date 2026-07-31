@@ -11,16 +11,15 @@ import {
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button, Text } from 'react-native-paper';
-import { authColors as colors, spacing } from '../../lib/theme';
+import { authColors as colors, spacing, type } from '../../lib/theme';
+import { useI18n } from '../../lib/i18n';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type Slide = {
-  key: string;
+  key: 'scheduling' | 'reservations' | 'crm';
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
   secondaryIcons: (keyof typeof MaterialCommunityIcons.glyphMap)[];
-  title: string;
-  description: string;
 };
 
 const slides: Slide[] = [
@@ -28,26 +27,32 @@ const slides: Slide[] = [
     key: 'scheduling',
     icon: 'calendar-month',
     secondaryIcons: ['clock-outline', 'account-group'],
-    title: 'Faster Scheduling',
-    description: 'Build the work schedule in minutes.\nShare and track it instantly.',
   },
   {
     key: 'reservations',
     icon: 'book-open-variant',
     secondaryIcons: ['table-chair', 'bell-ring-outline'],
-    title: 'Smarter Reservations',
-    description: 'Manage bookings, walk-ins, and\nwaitlists all from one place.',
   },
   {
     key: 'crm',
     icon: 'account-heart-outline',
     secondaryIcons: ['chart-line', 'tag-multiple-outline'],
-    title: 'Know Your Guests',
-    description: 'Track preferences, visits, and spend\nto deliver a personal experience.',
   },
 ];
 
-function AnimatedSlide({ item, index, scrollX }: { item: Slide; index: number; scrollX: Animated.Value }) {
+function AnimatedSlide({
+  item,
+  index,
+  scrollX,
+  title,
+  description,
+}: {
+  item: Slide;
+  index: number;
+  scrollX: Animated.Value;
+  title: string;
+  description: string;
+}) {
   const inputRange = [(index - 1) * SCREEN_WIDTH, index * SCREEN_WIDTH, (index + 1) * SCREEN_WIDTH];
 
   const iconScale = scrollX.interpolate({
@@ -87,14 +92,15 @@ function AnimatedSlide({ item, index, scrollX }: { item: Slide; index: number; s
       </Animated.View>
 
       <Animated.View style={{ opacity: textOpacity, transform: [{ translateY: textTranslate }] }}>
-        <Text variant="headlineSmall" style={styles.title}>{item.title}</Text>
-        <Text variant="bodyLarge" style={styles.description}>{item.description}</Text>
+        <Text style={styles.title}>{title}</Text>
+        <Text variant="bodyLarge" style={styles.description}>{description}</Text>
       </Animated.View>
     </View>
   );
 }
 
 export default function WelcomeScreen() {
+  const { t } = useI18n();
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<Animated.FlatList>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -131,7 +137,7 @@ export default function WelcomeScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.logoArea}>
-        <Text variant="headlineLarge" style={styles.logo}>Venue Wrangler</Text>
+        <Text style={styles.logo}>{t('welcome.brand')}</Text>
       </View>
 
       <View style={{ flex: 1 }}>
@@ -147,7 +153,15 @@ export default function WelcomeScreen() {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           onScrollBeginDrag={stopAutoPlay}
-          renderItem={({ item, index }) => <AnimatedSlide item={item} index={index} scrollX={scrollX} />}
+          renderItem={({ item, index }: { item: Slide; index: number }) => (
+            <AnimatedSlide
+              item={item}
+              index={index}
+              scrollX={scrollX}
+              title={t(`welcome.slides.${item.key}.title` as const)}
+              description={t(`welcome.slides.${item.key}.description` as const)}
+            />
+          )}
           keyExtractor={(item) => item.key}
           getItemLayout={(_, index) => ({ length: SCREEN_WIDTH, offset: SCREEN_WIDTH * index, index })}
         />
@@ -176,7 +190,7 @@ export default function WelcomeScreen() {
           labelStyle={styles.buttonLabel}
           onPress={() => router.push({ pathname: '/(auth)/sign-in', params: { tab: 'signIn' } })}
         >
-          Log In
+          {t('welcome.logIn')}
         </Button>
         <Button
           mode="outlined"
@@ -184,10 +198,11 @@ export default function WelcomeScreen() {
           style={styles.signUpButton}
           contentStyle={styles.buttonContent}
           labelStyle={styles.buttonLabel}
-          onPress={() => router.push({ pathname: '/(auth)/sign-in', params: { tab: 'signUp' } })}
+          onPress={() => router.push('/(auth)/invite-check')}
         >
-          Sign Up
+          {t('welcome.joinWithInvite')}
         </Button>
+        <Text style={styles.registerNote}>{t('welcome.footerNote')}</Text>
       </View>
     </View>
   );
@@ -204,8 +219,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   logo: {
+    ...type.title,
     color: colors.primary,
-    fontWeight: '800',
   },
   slide: {
     alignItems: 'center',
@@ -223,7 +238,7 @@ const styles = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: 80,
-    backgroundColor: '#E5F1E7',
+    backgroundColor: colors.highlight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -238,13 +253,13 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#E5F1E7',
+    backgroundColor: colors.highlight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
+    ...type.heading,
     color: colors.text,
-    fontWeight: '700',
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -263,7 +278,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#D4CFC6',
+    backgroundColor: colors.border,
   },
   dotActive: {
     backgroundColor: colors.primary,
@@ -280,6 +295,12 @@ const styles = StyleSheet.create({
   buttonLabel: {
     fontSize: 17,
     fontWeight: '700',
+  },
+  registerNote: {
+    color: colors.muted,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 4,
   },
   signUpButton: {
     borderColor: colors.border,

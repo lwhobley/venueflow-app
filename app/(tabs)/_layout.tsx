@@ -1,4 +1,4 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ColorValue } from 'react-native';
 import { useQuery } from '../../lib/railway-hooks';
@@ -15,6 +15,8 @@ const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap) =>
 
 export default function TabsLayout() {
   const localUser = useAuthStore((state: AuthState) => state.user);
+  const venue = useAuthStore((state: AuthState) => state.venue);
+  const hydrated = useAuthStore((state: AuthState) => state.hydrated);
   const fullName = localUser?.full_name ?? 'Profile';
   const { t } = useI18n();
   const palette = useDesignTheme();
@@ -22,8 +24,14 @@ export default function TabsLayout() {
   // expose manager-only tabs. While loading, hide gated tabs.
   const { isReady } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const role = me?.profile.role ?? null;
-  const canManage = canManageVenue(role ?? localUser?.role, me?.profile.allAccess ?? localUser?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
+
+  // Enforce venue membership: a signed-in user without a venue can't use the
+  // app and is sent to choose or join a team. <Redirect> is render-safe (no
+  // navigate-before-mount), unlike an imperative router.replace here.
+  if (hydrated && localUser && !venue) {
+    return <Redirect href="/(auth)/team-choice" />;
+  }
 
   return (
     <Tabs
@@ -53,7 +61,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="integrations"
-        options={{ title: t('nav.integrations'), href: null, tabBarIcon: icon('connection') }}
+        options={{ title: t('nav.integrations'), href: canManage ? '/integrations' : null, tabBarIcon: icon('connection') }}
       />
       <Tabs.Screen
         name="sales"

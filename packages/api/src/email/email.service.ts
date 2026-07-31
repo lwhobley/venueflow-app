@@ -9,9 +9,10 @@ type EmailArgs = {
   text: string;
   html?: string;
   replyTo?: string;
+  bcc?: string[];
 };
 
-type EmailMessage = Omit<EmailArgs, 'to'>;
+type EmailMessage = Omit<EmailArgs, 'to' | 'bcc'>;
 
 type ProfileEmailTarget = {
   id: string;
@@ -41,7 +42,8 @@ export class EmailService {
 
   async sendOrThrow(args: EmailArgs) {
     const to = this.normalizeRecipients(args.to);
-    if (to.length === 0) return;
+    const bcc = args.bcc ? this.normalizeRecipients(args.bcc) : [];
+    if (to.length === 0 && bcc.length === 0) return;
 
     const apiKey = this.config.get<string>('RESEND_API_KEY') ?? this.config.get<string>('EMAIL_API_KEY');
     if (!apiKey) {
@@ -57,11 +59,13 @@ export class EmailService {
       body: JSON.stringify({
         from: this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>',
         to,
+        ...(bcc.length ? { bcc } : {}),
         subject: args.subject,
         text: args.text,
         html: args.html ?? this.textToHtml(args.text),
         ...(args.replyTo ? { reply_to: args.replyTo } : {}),
       }),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {
@@ -71,45 +75,57 @@ export class EmailService {
   }
 
   async sendToProfile(profileId: string, message: EmailMessage) {
+    let profile: { email: string } | null;
     try {
-      const profile = await this.prisma.profile.findUnique({
+      profile = await this.prisma.profile.findUnique({
         where: { id: profileId },
         select: { email: true },
       });
-      if (!profile) return;
-      return this.send({ to: profile.email, ...message });
     } catch (error: any) {
-      this.logger.warn(`Email lookup failed for profile ${profileId}: ${error?.message ?? String(error)}`);
+      this.logger.error(`Email recipient lookup failed for profile ${profileId}: ${error?.message ?? String(error)}`);
+      return;
     }
+    if (!profile) return;
+    return this.send({ to: profile.email, ...message });
   }
 
   async sendToVenueManagers(venueId: string, message: EmailMessage) {
+    let managers: ProfileEmailTarget[];
     try {
-      const managers = await this.prisma.profile.findMany({
+      managers = await this.prisma.profile.findMany({
         where: { venueId, role: { in: MANAGER_ROLES }, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, email: true, fullName: true },
       });
-      return this.sendToProfiles(managers, message);
     } catch (error: any) {
-      this.logger.warn(`Email lookup failed for venue managers ${venueId}: ${error?.message ?? String(error)}`);
+      this.logger.error(`Email recipient lookup failed for venue managers ${venueId}: ${error?.message ?? String(error)}`);
+      return;
     }
+    return this.sendToProfiles(managers, message);
   }
 
   async sendToVenueStaff(venueId: string, message: EmailMessage) {
+    let staff: ProfileEmailTarget[];
     try {
-      const staff = await this.prisma.profile.findMany({
+      staff = await this.prisma.profile.findMany({
         where: { venueId, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, email: true, fullName: true },
       });
-      return this.sendToProfiles(staff, message);
     } catch (error: any) {
-      this.logger.warn(`Email lookup failed for venue staff ${venueId}: ${error?.message ?? String(error)}`);
+      this.logger.error(`Email recipient lookup failed for venue staff ${venueId}: ${error?.message ?? String(error)}`);
+      return;
     }
+    return this.sendToProfiles(staff, message);
   }
 
   async sendToProfiles(profiles: ProfileEmailTarget[], message: EmailMessage) {
     const recipients = profiles.map((profile) => profile.email);
-    return this.send({ to: recipients, ...message });
+    if (recipients.length === 0) return;
+    // Resend's "to" is a visible recipient list, not a blind list — putting
+    // every staff/manager email there would let each recipient see everyone
+    // else's address. Broadcast via bcc instead; "to" still needs a
+    // non-empty value, so it points at our own from-address as a placeholder.
+    const from = this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>';
+    return this.send({ to: from, bcc: recipients, ...message });
   }
 
   private normalizeRecipients(input: string | string[]) {

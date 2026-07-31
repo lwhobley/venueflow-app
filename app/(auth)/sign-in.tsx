@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Button, Card, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Checkbox, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { authCardStyle, authColors, spacing } from '../../lib/theme';
+import { authCardStyle, authColors, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
 
@@ -27,7 +28,7 @@ export default function SignInScreen() {
   const authControlTheme = {
     colors: {
       primary: authColors.primary,
-      secondaryContainer: '#E5F1E7',
+      secondaryContainer: authColors.highlight,
       onSecondaryContainer: authColors.text,
       onSurface: authColors.text,
       outline: authColors.border,
@@ -37,12 +38,33 @@ export default function SignInScreen() {
   const { invite: inviteParam, phone: phoneParam, tab } = useLocalSearchParams<{ invite?: string; phone?: string; tab?: string }>();
   const inviteToken = typeof inviteParam === 'string' ? inviteParam : undefined;
   const invitePhone = typeof phoneParam === 'string' ? phoneParam : undefined;
-  const [invitePreview] = useState<InvitePreview | null>(null);
+  const [invitePreview, setInvitePreview] = useState<InvitePreview | null>(null);
 
-  const [flow, setFlow] = useState<'signIn' | 'signUp'>(tab === 'signIn' ? 'signIn' : 'signUp');
+  useEffect(() => {
+    if (!inviteToken) {
+      setInvitePreview(null);
+      return;
+    }
+    let cancelled = false;
+    appApi.previewInvite(inviteToken)
+      .then((result) => {
+        if (cancelled) return;
+        setInvitePreview({ venueName: result.venueName, jobTitle: result.jobTitle });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setInvitePreview({ expired: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteToken]);
+
+  const [flow, setFlow] = useState<'signIn' | 'signUp'>(inviteToken && tab !== 'signIn' ? 'signUp' : 'signIn');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -59,14 +81,8 @@ export default function SignInScreen() {
       flow,
       fullName: fullName.trim() || undefined,
       inviteToken: options?.inviteToken,
+      termsAccepted: flow === 'signUp' ? termsAccepted : undefined,
     });
-
-    if (options?.inviteToken && !last.venue) {
-      Alert.alert(
-        'Invite pending',
-        'This invite could not be applied. Ask your manager for a fresh invite or to add your email to the roster.',
-      );
-    }
 
     const { profile, venue, token } = last;
     setSession({
@@ -92,7 +108,18 @@ export default function SignInScreen() {
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
+    // After signup, route to email verification first.
+    // verify-email.tsx calls redeemInvite / redeemMyInvite after code entry
+    // to finalize venue membership before taking the user into the app.
+    if (!profile.emailVerified && flow === 'signUp') {
+      if (options?.inviteToken) {
+        router.replace({ pathname: '/(auth)/verify-email', params: { invite: options.inviteToken } });
+      } else {
+        router.replace('/(auth)/verify-email');
+      }
+    } else {
+      router.replace(venue ? '/(tabs)/home' : '/(auth)/team-choice');
+    }
   };
 
   const resetExistingSession = () => {
@@ -101,12 +128,17 @@ export default function SignInScreen() {
 
   const submit = async () => {
     const trimmed = email.trim();
-    if (!trimmed.includes('@') || password.trim().length < 6) {
-      Alert.alert('Check your details', 'Enter a valid email and a password with at least 6 characters.');
+    const minPasswordLength = flow === 'signUp' ? 8 : 6;
+    if (!trimmed.includes('@') || password.trim().length < minPasswordLength) {
+      Alert.alert(t('signIn.invalidDetailsTitle'), t('signIn.invalidDetailsMessage', { count: minPasswordLength }));
       return;
     }
     if (flow === 'signUp' && !fullName.trim()) {
-      Alert.alert('Your name', 'Enter your name so your team can recognize you.');
+      Alert.alert(t('signIn.nameRequiredTitle'), t('signIn.nameRequiredMessage'));
+      return;
+    }
+    if (flow === 'signUp' && !termsAccepted) {
+      Alert.alert(t('signIn.invalidDetailsTitle'), t('register.errors.termsRequired'));
       return;
     }
     setSubmitting(true);
@@ -115,7 +147,10 @@ export default function SignInScreen() {
       resetExistingSession();
       await finishSession({ inviteToken });
     } catch (e) {
-      showError(flow === 'signUp' ? 'Could not create account' : 'Sign in failed', e instanceof Error ? e.message : 'Try again.');
+      showError(
+        flow === 'signUp' ? t('signIn.createAccountFailedTitle') : t('signIn.signInFailedTitle'),
+        e instanceof Error ? e.message : t('signIn.tryAgain'),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -124,7 +159,7 @@ export default function SignInScreen() {
   const inviteBanner = inviteToken && invitePreview && !invitePreview.expired ? (
     <View style={{ alignItems: 'center', gap: 6, marginBottom: spacing.sm }}>
       <Text variant="titleMedium" style={{ fontWeight: '700', color: authColors.primary, textAlign: 'center' }}>
-        You're invited to join
+        {t('signIn.inviteBannerTitle')}
       </Text>
       <Text variant="titleLarge" style={{ fontWeight: '800', textAlign: 'center', color: authColors.text }}>
         {invitePreview.venueName}
@@ -138,10 +173,11 @@ export default function SignInScreen() {
       <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
         <View style={{ marginBottom: spacing.sm, alignItems: 'center', gap: 10 }}>
           <Image source={logoSource} style={styles.logo} />
-          <Text variant="headlineLarge" style={{ color: authColors.primary, fontWeight: '800' }}>Venue Wrangler</Text>
+          <Kicker>{flow === 'signUp' ? t('signIn.kickerSignUp') : t('signIn.kickerSignIn')}</Kicker>
+          <Text style={{ ...type.title, color: authColors.text }}>{t('signIn.brand')}</Text>
           {!inviteToken ? (
             <Text variant="bodyMedium" style={{ color: authColors.muted, marginTop: 6, textAlign: 'center' }}>
-              Time tracking, scheduling, reservations, and team chat. Start your 14-day free trial now, then join a venue when an owner invites you.
+              {t('signIn.subtitle')}
             </Text>
           ) : null}
         </View>
@@ -151,47 +187,52 @@ export default function SignInScreen() {
             {inviteBanner}
             {inviteToken ? (
               <Text style={{ color: authColors.muted, textAlign: 'center', marginBottom: spacing.sm }}>
-                Create or sign in to your account and this invite will attach you to the venue.
+                {t('signIn.inviteInstructions')}
               </Text>
             ) : null}
             {formError ? (
               <Text style={{ color: authColors.danger, textAlign: 'center' }}>{formError}</Text>
             ) : null}
 
-            <SegmentedButtons
-              theme={authControlTheme}
-              value={flow}
-              onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
-              buttons={[{ value: 'signUp', label: 'Create account' }, { value: 'signIn', label: 'Sign in' }]}
-            />
+            {inviteToken ? (
+              <SegmentedButtons
+                theme={authControlTheme}
+                value={flow}
+                onValueChange={(v) => setFlow(v as 'signIn' | 'signUp')}
+                buttons={[{ value: 'signUp', label: t('signIn.tabCreateAccount') }, { value: 'signIn', label: t('signIn.tabSignIn') }]}
+              />
+            ) : null}
 
             {flow === 'signUp' ? (
-              <TextInput {...authInputProps} label="Your name" value={fullName} onChangeText={setFullName} mode="outlined" />
+              <TextInput {...authInputProps} label={t('signIn.nameLabel')} value={fullName} onChangeText={setFullName} mode="outlined" />
             ) : null}
-            <TextInput {...authInputProps} label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
-            <TextInput {...authInputProps} label="Password" value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
+            <TextInput {...authInputProps} label={t('signIn.emailLabel')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" mode="outlined" />
+            <TextInput {...authInputProps} label={t('signIn.passwordLabel')} value={password} onChangeText={setPassword} secureTextEntry mode="outlined" />
             {flow === 'signIn' ? (
               <Button mode="text" compact textColor={authColors.primary} onPress={() => router.push('/(auth)/reset-password')}>
-                Forgot password?
+                {t('signIn.forgotPassword')}
               </Button>
             ) : null}
 
             <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
-                ? (inviteToken && invitePreview && !invitePreview.expired ? `Join ${invitePreview.venueName}` : 'Start free trial')
-                : 'Sign in'}
+                ? (inviteToken && invitePreview && !invitePreview.expired ? t('signIn.joinVenueButton', { venueName: invitePreview.venueName ?? '' }) : t('signIn.createAccountButton'))
+                : t('signIn.signInButton')}
             </Button>
 
-            {!inviteToken && flow === 'signUp' ? (
-              <Text style={{ color: authColors.muted, fontSize: 12, textAlign: 'center' }}>
-                By creating an account, you agree to our{' '}
-                <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
-                  Terms of Service
-                </Text>{' '}and{' '}
-                <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
-                  Privacy Policy
-                </Text>. Your 14-day trial starts automatically.
-              </Text>
+            {flow === 'signUp' ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Checkbox status={termsAccepted ? 'checked' : 'unchecked'} onPress={() => setTermsAccepted((value) => !value)} color={authColors.primary} />
+                <Text style={{ color: authColors.muted, fontSize: 12, flex: 1 }}>
+                  {t('signIn.termsPrefix')}{' '}
+                  <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
+                    {t('signIn.termsOfService')}
+                  </Text>{' '}{t('signIn.and')}{' '}
+                  <Text style={{ color: authColors.primary, fontSize: 12 }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
+                    {t('signIn.privacyPolicy')}
+                  </Text>.
+                </Text>
+              </View>
             ) : null}
           </Card.Content>
         </Card>
@@ -202,11 +243,14 @@ export default function SignInScreen() {
             textColor={authColors.primary}
             onPress={() => router.push('/(auth)/invite-check')}
           >
-            I have an invite from my manager
+            {t('signIn.haveInviteButton')}
           </Button>
         ) : null}
 
-        <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
+        <View style={{ alignItems: 'center', marginTop: spacing.sm, gap: 6 }}>
+          <Text style={{ color: authColors.muted, fontSize: 13, textAlign: 'center' }}>
+            {t('signIn.footerNote')}
+          </Text>
           <Text style={{ color: authColors.muted, fontSize: 12, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
           <Text style={{ color: authColors.muted, fontSize: 11 }}>{t('common.loungeability')}</Text>
         </View>

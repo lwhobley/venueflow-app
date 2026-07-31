@@ -6,9 +6,19 @@ import { api } from '../lib/railway-api';
 import type { Id } from '../lib/ids';
 import { accents, colors, spacing } from '../lib/theme';
 import { useIsDesktop } from '../lib/responsive';
+import { formatMoneyWhole, formatShortDate, dollarsToCents, splitTags as baseSplitTags, errorMessage } from '../lib/format';
+import { AnimatedTab } from './AppCard';
 
 type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal_sent' | 'negotiating' | 'won' | 'lost' | 'unqualified' | 'on_hold';
-type WorkspaceView = 'dashboard' | 'pipeline' | 'contacts' | 'events' | 'contracts';
+type WorkspaceView = 'dashboard' | 'pipeline' | 'contacts' | 'events' | 'contracts' | 'insights' | 'templates';
+
+type ForecastRow = { stage: string; probability: number; count: number; rawValueCents: number; weightedValueCents: number };
+type ForecastResponse = { byStage: ForecastRow[]; totals: { leadCount: number; rawValueCents: number; weightedValueCents: number; wonCount: number; wonValueCents: number } };
+type SourceRoiRow = { source: string; leadCount: number; wonCount: number; lostCount: number; pipelineValueCents: number; wonValueCents: number; winRate: number };
+type StaleLead = { id: string; fullName: string; status: string; email: string | null; phone: string | null; lastActivityAt: number | null; estimatedValueCents: number; daysSinceActivity: number };
+type StaleLeadsResponse = { thresholdDays: number; leads: StaleLead[] };
+type ActivityRow = { id: string; kind: string; detail: string | null; actorId: string | null; actorName: string | null; createdAt: number };
+type EmailTemplateRow = { id: string; name: string; subject: string; body: string; variables: string[]; updatedAt: number };
 
 type LeadRow = {
   _id: Id<'crmLeads'>;
@@ -35,8 +45,15 @@ type BeoRow = {
   eventType?: string;
   guestCount?: number;
   venueSpace?: string;
+  setupStyle?: string;
   fbMinimumCents?: number;
   depositCents?: number;
+  menuAppetizers?: string;
+  menuEntrees?: string;
+  menuDesserts?: string;
+  menuBarPackage?: string;
+  specialRequirements?: string;
+  internalNotes?: string;
   status: string;
   updatedAt: number;
 };
@@ -75,30 +92,13 @@ const statusColumns: Array<{ status: LeadStatus; label: string; accent: (typeof 
 
 const lostStatuses: LeadStatus[] = ['lost', 'unqualified', 'on_hold'];
 
-function money(cents?: number) {
-  return `$${((cents ?? 0) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-}
-
-function dateText(value?: number) {
-  return value ? new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'TBD';
-}
-
 function dateInputValue(value: string) {
   const time = Date.parse(`${value}T12:00:00`);
   return Number.isFinite(time) ? time : undefined;
 }
 
 function splitTags(value: string) {
-  return Array.from(new Set(value.split(',').map((tag) => tag.trim()).filter(Boolean))).slice(0, 12);
-}
-
-function parseDollars(value: string) {
-  const amount = Number(value.replace(/[^0-9.]/g, ''));
-  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : undefined;
-}
-
-function errMsg(err: unknown) {
-  return err instanceof Error ? err.message : 'Unknown error';
+  return Array.from(new Set(baseSplitTags(value))).slice(0, 12);
 }
 
 export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> | undefined; enabled: boolean }) {
@@ -120,8 +120,15 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
   const [eventType, setEventType] = useState('Private dining');
   const [eventGuests, setEventGuests] = useState('');
   const [eventSpace, setEventSpace] = useState('');
+  const [eventSetup, setEventSetup] = useState('');
   const [eventMinimum, setEventMinimum] = useState('');
   const [eventDeposit, setEventDeposit] = useState('');
+  const [eventApps, setEventApps] = useState('');
+  const [eventEntrees, setEventEntrees] = useState('');
+  const [eventDesserts, setEventDesserts] = useState('');
+  const [eventBar, setEventBar] = useState('');
+  const [eventSpecial, setEventSpecial] = useState('');
+  const [eventInternal, setEventInternal] = useState('');
   const [noteText, setNoteText] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
@@ -130,11 +137,19 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
   const beos = useQuery(api.crm.listBeos, enabled && venueId ? { venueId } : 'skip') as BeoRow[] | undefined;
   const contracts = useQuery(api.crm.listContracts, enabled && venueId ? { venueId } : 'skip') as ContractRow[] | undefined;
   const detail = useQuery(api.crm.getLead, enabled && venueId && selectedLeadId ? { venueId, leadId: selectedLeadId } : 'skip') as LeadDetail | null | undefined;
+  const forecast = useQuery(api.crm.getForecast, enabled && venueId ? { venueId } : 'skip') as ForecastResponse | undefined;
+  const sourceRoi = useQuery(api.crm.getSourceRoi, enabled && venueId ? { venueId } : 'skip') as SourceRoiRow[] | undefined;
+  const staleLeads = useQuery(api.crm.getStaleLeads, enabled && venueId ? { venueId, days: 7 } : 'skip') as StaleLeadsResponse | undefined;
+  const leadActivity = useQuery(api.crm.getLeadActivity, enabled && venueId && selectedLeadId ? { venueId, leadId: selectedLeadId } : 'skip') as ActivityRow[] | undefined;
+  const templates = useQuery(api.crm.listTemplates, enabled && venueId ? { venueId } : 'skip') as EmailTemplateRow[] | undefined;
   const saveLead = useMutation(api.crm.saveLead);
   const saveBeo = useMutation(api.crm.saveBeo);
   const saveContract = useMutation(api.crm.saveContract);
   const convertBeoToContract = useMutation(api.crm.convertBeoToContract);
   const addNote = useMutation(api.crm.addNote);
+  const emailBeo = useMutation(api.crm.emailBeo);
+  const saveTemplate = useMutation(api.crm.saveTemplate);
+  const deleteTemplate = useMutation(api.crm.deleteTemplate);
 
   const selectedLead = detail?.lead ?? leads?.find((lead) => lead._id === selectedLeadId) ?? null;
   const openLeads = useMemo(() => (leads ?? []).filter((lead) => !lostStatuses.includes(lead.status) && lead.status !== 'won'), [leads]);
@@ -167,7 +182,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         source: leadSource.trim() || undefined,
         status: 'new',
         tags: splitTags(leadTags),
-        estimatedValueCents: parseDollars(leadValue),
+        estimatedValueCents: dollarsToCents(leadValue),
         marketingOptIn: true,
       });
       setSelectedLeadId(leadId);
@@ -180,7 +195,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setLeadTags('');
       setMessage('Lead created.');
     } catch (err) {
-      setMessage(`Failed to create lead: ${errMsg(err)}`);
+      setMessage(`Failed to create lead: ${errorMessage(err)}`);
     }
   };
 
@@ -192,7 +207,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       await saveLead({ venueId, leadId, fullName: target.fullName, status });
       setMessage(`Moved to ${status.replace('_', ' ')}.`);
     } catch (err) {
-      setMessage(`Failed to update lead: ${errMsg(err)}`);
+      setMessage(`Failed to update lead: ${errorMessage(err)}`);
     }
   };
 
@@ -210,8 +225,15 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         eventType: eventType.trim() || undefined,
         guestCount: Number(eventGuests) || undefined,
         venueSpace: eventSpace.trim() || undefined,
-        fbMinimumCents: parseDollars(eventMinimum),
-        depositCents: parseDollars(eventDeposit),
+        setupStyle: eventSetup.trim() || undefined,
+        fbMinimumCents: dollarsToCents(eventMinimum),
+        depositCents: dollarsToCents(eventDeposit),
+        menuAppetizers: eventApps.trim() || undefined,
+        menuEntrees: eventEntrees.trim() || undefined,
+        menuDesserts: eventDesserts.trim() || undefined,
+        menuBarPackage: eventBar.trim() || undefined,
+        specialRequirements: eventSpecial.trim() || undefined,
+        internalNotes: eventInternal.trim() || undefined,
         status: 'draft',
       });
       setShowEventForm(false);
@@ -219,18 +241,25 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setEventDate('');
       setEventGuests('');
       setEventSpace('');
+      setEventSetup('');
       setEventMinimum('');
       setEventDeposit('');
+      setEventApps('');
+      setEventEntrees('');
+      setEventDesserts('');
+      setEventBar('');
+      setEventSpecial('');
+      setEventInternal('');
       setMessage('BEO draft created.');
       return beoId;
     } catch (err) {
-      setMessage(`Failed to create BEO: ${errMsg(err)}`);
+      setMessage(`Failed to create BEO: ${errorMessage(err)}`);
     }
   };
 
   const createContractFromLead = async () => {
     if (!venueId || !selectedLead) return;
-    const depositCents = parseDollars(eventDeposit);
+    const depositCents = dollarsToCents(eventDeposit);
     try {
       await saveContract({
         venueId,
@@ -239,7 +268,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         eventDate: dateInputValue(eventDate),
         guestCount: Number(eventGuests) || undefined,
         venueSpace: eventSpace.trim() || undefined,
-        fbMinimumCents: parseDollars(eventMinimum) ?? selectedLead.estimatedValueCents,
+        fbMinimumCents: dollarsToCents(eventMinimum) ?? selectedLead.estimatedValueCents,
         paymentSchedule: depositCents ? [{ amountCents: depositCents, dueDate: Date.now(), type: 'deposit' as const }] : undefined,
         cancellationPolicy: 'Deposit is non-refundable after the booking deadline. Final balance is due before event start.',
         forceMajeure: true,
@@ -254,7 +283,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setEventDeposit('');
       setMessage('Contract draft created.');
     } catch (err) {
-      setMessage(`Failed to create contract: ${errMsg(err)}`);
+      setMessage(`Failed to create contract: ${errorMessage(err)}`);
     }
   };
 
@@ -265,7 +294,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setNoteText('');
       setMessage('Note added.');
     } catch (err) {
-      setMessage(`Failed to save note: ${errMsg(err)}`);
+      setMessage(`Failed to save note: ${errorMessage(err)}`);
     }
   };
 
@@ -299,8 +328,10 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
               { value: 'contacts', label: 'Contacts' },
               { value: 'events', label: 'Events' },
               { value: 'contracts', label: 'Contracts' },
+              { value: 'insights', label: 'Insights' },
+              { value: 'templates', label: 'Templates' },
             ]}
-            style={{ minWidth: 680 }}
+            style={{ minWidth: 920 }}
           />
         </ScrollView>
 
@@ -340,8 +371,22 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
               <TextInput label="Type" value={eventType} onChangeText={setEventType} mode="outlined" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
               <TextInput label="Space" value={eventSpace} onChangeText={setEventSpace} mode="outlined" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
+              <TextInput label="Setup" value={eventSetup} onChangeText={setEventSetup} mode="outlined" style={{ flex: 1, minWidth: 150, backgroundColor: colors.surface }} />
               <TextInput label="F&B minimum" value={eventMinimum} onChangeText={setEventMinimum} mode="outlined" keyboardType="numeric" style={{ width: 150, backgroundColor: colors.surface }} />
               <TextInput label="Deposit" value={eventDeposit} onChangeText={setEventDeposit} mode="outlined" keyboardType="numeric" style={{ width: 130, backgroundColor: colors.surface }} />
+            </View>
+            <Text variant="titleSmall" style={{ fontWeight: '800' }}>Food and beverage</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <TextInput label="Appetizers" value={eventApps} onChangeText={setEventApps} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+              <TextInput label="Entrees" value={eventEntrees} onChangeText={setEventEntrees} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <TextInput label="Desserts" value={eventDesserts} onChangeText={setEventDesserts} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+              <TextInput label="Bar package" value={eventBar} onChangeText={setEventBar} mode="outlined" multiline style={{ flex: 1, minWidth: 210, backgroundColor: colors.surface }} />
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <TextInput label="Guest requirements" value={eventSpecial} onChangeText={setEventSpecial} mode="outlined" multiline style={{ flex: 1, minWidth: 230, backgroundColor: colors.surface }} />
+              <TextInput label="Internal run-of-show notes" value={eventInternal} onChangeText={setEventInternal} mode="outlined" multiline style={{ flex: 1, minWidth: 230, backgroundColor: colors.surface }} />
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' }}>
               <Button mode="outlined" textColor={colors.primary} onPress={() => void createEventDoc()}>Save BEO</Button>
@@ -350,39 +395,82 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
           </View>
         ) : null}
 
-        {view === 'dashboard' ? (
-          <DashboardView stats={stats} leads={leads} beos={beos} contracts={contracts} onSelectLead={setSelectedLeadId} onView={setView} />
-        ) : null}
+        <AnimatedTab tabKey={view}>
+          {view === 'dashboard' ? (
+            <DashboardView stats={stats} leads={leads} beos={beos} contracts={contracts} onSelectLead={setSelectedLeadId} onView={setView} />
+          ) : null}
 
-        {view === 'pipeline' ? (
-          <PipelineView leads={leads} selectedLeadId={selectedLead?._id ?? null} onSelectLead={setSelectedLeadId} onMove={(leadId, status) => void updateLeadStatus(leadId, status)} />
-        ) : null}
+          {view === 'pipeline' ? (
+            <PipelineView leads={leads} selectedLeadId={selectedLead?._id ?? null} onSelectLead={setSelectedLeadId} onMove={(leadId, status) => void updateLeadStatus(leadId, status)} />
+          ) : null}
 
-        {view === 'contacts' ? (
-          <ContactsView leads={leads} search={leadSearch} onSearch={setLeadSearch} onSelectLead={setSelectedLeadId} />
-        ) : null}
+          {view === 'contacts' ? (
+            <ContactsView leads={leads} search={leadSearch} onSearch={setLeadSearch} onSelectLead={setSelectedLeadId} />
+          ) : null}
 
-        {view === 'events' ? (
-          <EventsView beos={beos} onConvert={async (beoId) => {
-            if (!venueId) return;
-            try {
-              await convertBeoToContract({ venueId, beoId });
-              setMessage('Converted BEO to contract.');
-            } catch (err) {
-              setMessage(`Failed to convert: ${errMsg(err)}`);
-            }
-          }} />
-        ) : null}
+          {view === 'events' ? (
+            <EventsView beos={beos} onConvert={async (beoId) => {
+              if (!venueId) return;
+              try {
+                await convertBeoToContract({ venueId, beoId });
+                setMessage('Converted BEO to contract.');
+              } catch (err) {
+                setMessage(`Failed to convert: ${errorMessage(err)}`);
+              }
+            }} />
+          ) : null}
 
-        {view === 'contracts' ? (
-          <ContractsView contracts={contracts} />
-        ) : null}
+          {view === 'contracts' ? (
+            <ContractsView contracts={contracts} />
+          ) : null}
+
+          {view === 'insights' ? (
+            <InsightsView
+              forecast={forecast}
+              sourceRoi={sourceRoi}
+              staleLeads={staleLeads}
+              onSelectLead={setSelectedLeadId}
+            />
+          ) : null}
+
+          {view === 'templates' ? (
+            <TemplatesView
+              templates={templates ?? []}
+              onSave={async (tpl) => {
+                try {
+                  await saveTemplate({ venueId, ...tpl });
+                  setMessage(tpl.templateId ? 'Template updated.' : 'Template saved.');
+                } catch (err) {
+                  setMessage(`Failed to save: ${errorMessage(err)}`);
+                }
+              }}
+              onDelete={async (templateId) => {
+                try {
+                  await deleteTemplate({ venueId, templateId });
+                  setMessage('Template deleted.');
+                } catch (err) {
+                  setMessage(`Failed to delete: ${errorMessage(err)}`);
+                }
+              }}
+            />
+          ) : null}
+        </AnimatedTab>
 
         <Divider />
 
         <LeadDetailPanel
           lead={selectedLead}
           detail={detail}
+          activity={leadActivity ?? []}
+          beos={detail?.beos ?? []}
+          onEmailBeo={async (beoId, toEmail, message) => {
+            try {
+              await emailBeo({ venueId, beoId, toEmail, message });
+              setMessage(`BEO emailed to ${toEmail}.`);
+            } catch (err) {
+              setMessage(`Failed to send: ${errorMessage(err)}`);
+            }
+          }}
           noteText={noteText}
           onNoteText={setNoteText}
           onSaveNote={() => void saveNote()}
@@ -412,10 +500,10 @@ function DashboardView({
   return (
     <View style={{ gap: spacing.md }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <StatTile label="Pipeline" value={money(stats.pipelineCents)} accent={accents[0]} />
+        <StatTile label="Pipeline" value={formatMoneyWhole(stats.pipelineCents)} accent={accents[0]} />
         <StatTile label="Open deals" value={String(stats.openCount)} accent={accents[2]} />
         <StatTile label="Proposals" value={String(stats.proposalCount)} accent={accents[1]} />
-        <StatTile label="Won revenue" value={money(stats.wonCents)} accent={accents[4]} />
+        <StatTile label="Won revenue" value={formatMoneyWhole(stats.wonCents)} accent={accents[4]} />
         <StatTile label="BEOs" value={String(stats.eventCount)} accent={accents[3]} />
         <StatTile label="Contracts" value={String(stats.contractCount)} accent={accents[5]} />
       </View>
@@ -426,7 +514,7 @@ function DashboardView({
         </View>
         <View style={{ flexGrow: 1, flexBasis: 320, gap: spacing.sm }}>
           <SectionHeader title="Recent documents" action="Docs" onPress={() => onView('events')} />
-          {(beos ?? []).slice(0, 3).map((beo) => <DocRow key={beo._id} title={beo.eventName} subtitle={`${beo.leadName ?? 'Unlinked'} - ${dateText(beo.eventDate)}`} status={beo.status} />)}
+          {(beos ?? []).slice(0, 3).map((beo) => <DocRow key={beo._id} title={beo.eventName} subtitle={`${beo.leadName ?? 'Unlinked'} - ${formatShortDate(beo.eventDate, 'TBD')}`} status={beo.status} />)}
           {(contracts ?? []).slice(0, 3).map((contract) => <DocRow key={contract._id} title={contract.eventName ?? contract.contractNumber} subtitle={`${contract.leadName ?? 'Unlinked'} - ${contract.contractNumber}`} status={contract.status} />)}
           {!(beos?.length || contracts?.length) ? <EmptyLine text="No BEOs or contracts yet." /> : null}
         </View>
@@ -459,16 +547,16 @@ function PipelineView({
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.xs }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: column.accent.fg, fontWeight: '800' }}>{column.label}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{rows.length} deals - {money(total)}</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 12 }}>{rows.length} deals - {formatMoneyWhole(total)}</Text>
                 </View>
                 {canMoveSelectedHere ? (
                   <Button compact mode="text" textColor={colors.primary} onPress={() => onMove(selectedLead._id, column.status)}>Move here</Button>
                 ) : null}
               </View>
-              {rows.length === 0 ? <Text style={{ color: colors.muted, fontSize: 12 }}>No deals in this stage.</Text> : rows.map((lead) => (
+              {rows.length === 0 ? <Text style={{ color: colors.charcoal, fontSize: 12 }}>No deals in this stage.</Text> : rows.map((lead) => (
                 <View key={lead._id} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: colors.surface, borderWidth: selectedLeadId === lead._id ? 1 : 0, borderColor: column.accent.fg }}>
                   <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{lead.company ?? lead.source ?? 'No company'} - {money(lead.estimatedValueCents)}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{lead.company ?? lead.source ?? 'No company'} - {formatMoneyWhole(lead.estimatedValueCents)}</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', marginTop: spacing.xs }}>
                     <Button compact mode="text" textColor={colors.primary} onPress={() => onSelectLead(lead._id)}>{selectedLeadId === lead._id ? 'Selected' : 'Select'}</Button>
                   </View>
@@ -501,11 +589,27 @@ function EventsView({ beos, onConvert }: { beos: BeoRow[] | undefined; onConvert
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontWeight: '800', color: colors.charcoal }}>{beo.eventName}</Text>
-              <Text style={{ color: colors.muted }}>{beo.leadName ?? 'Unlinked'} - {dateText(beo.eventDate)} - {beo.guestCount ?? 'TBD'} guests</Text>
+              <Text style={{ color: colors.muted }}>{beo.leadName ?? 'Unlinked'} - {formatShortDate(beo.eventDate, 'TBD')} - {beo.guestCount ?? 'TBD'} guests</Text>
             </View>
             <Chip compact>{beo.status}</Chip>
           </View>
-          <Text style={{ color: colors.muted }}>Space {beo.venueSpace ?? 'TBD'} - Minimum {money(beo.fbMinimumCents)} - Deposit {money(beo.depositCents)}</Text>
+          <Text style={{ color: colors.muted }}>Space {beo.venueSpace ?? 'TBD'} - Minimum {formatMoneyWhole(beo.fbMinimumCents)} - Deposit {formatMoneyWhole(beo.depositCents)}</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {beo.eventType ? <Chip compact>{beo.eventType}</Chip> : null}
+            {beo.setupStyle ? <Chip compact>{beo.setupStyle}</Chip> : null}
+            {beo.menuBarPackage ? <Chip compact>{beo.menuBarPackage}</Chip> : null}
+          </View>
+          {[
+            { label: 'Apps', value: beo.menuAppetizers },
+            { label: 'Entrees', value: beo.menuEntrees },
+            { label: 'Dessert', value: beo.menuDesserts },
+            { label: 'Guest needs', value: beo.specialRequirements },
+            { label: 'Run-of-show', value: beo.internalNotes },
+          ].filter((item) => item.value).map((item) => (
+            <Text key={item.label} style={{ color: colors.charcoal, fontSize: 12 }}>
+              <Text style={{ fontWeight: '800' }}>{item.label}: </Text>{item.value}
+            </Text>
+          ))}
           <Button compact mode="outlined" icon="file-sign" textColor={colors.primary} onPress={() => void onConvert(beo._id)}>Convert to contract</Button>
         </View>
       ))}
@@ -520,7 +624,7 @@ function ContractsView({ contracts }: { contracts: ContractRow[] | undefined }) 
         <DocRow
           key={contract._id}
           title={contract.eventName ?? contract.contractNumber}
-          subtitle={`${contract.leadName ?? 'Unlinked'} - ${dateText(contract.eventDate)} - ${contract.guestCount ?? 'TBD'} guests - ${money(contract.fbMinimumCents)}`}
+          subtitle={`${contract.leadName ?? 'Unlinked'} - ${formatShortDate(contract.eventDate, 'TBD')} - ${contract.guestCount ?? 'TBD'} guests - ${formatMoneyWhole(contract.fbMinimumCents)}`}
           status={contract.status}
         />
       ))}
@@ -531,6 +635,9 @@ function ContractsView({ contracts }: { contracts: ContractRow[] | undefined }) 
 function LeadDetailPanel({
   lead,
   detail,
+  activity,
+  beos,
+  onEmailBeo,
   noteText,
   onNoteText,
   onSaveNote,
@@ -538,18 +645,24 @@ function LeadDetailPanel({
 }: {
   lead: LeadRow | null;
   detail: LeadDetail | null | undefined;
+  activity: ActivityRow[];
+  beos: BeoRow[];
+  onEmailBeo: (beoId: string, toEmail: string, message?: string) => Promise<void>;
   noteText: string;
   onNoteText: (value: string) => void;
   onSaveNote: () => void;
   onMove: (status: LeadStatus) => void;
 }) {
+  const [emailingBeoId, setEmailingBeoId] = useState<string | null>(null);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailMsg, setEmailMsg] = useState('');
   if (!lead) return <EmptyLine text="Select a deal to open the CRM record." />;
   return (
     <View style={{ gap: spacing.sm }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: spacing.sm }}>
         <View style={{ flex: 1, minWidth: 220 }}>
           <Text variant="titleLarge" style={{ color: colors.primary, fontWeight: '800' }}>{lead.fullName}</Text>
-          <Text style={{ color: colors.muted }}>{lead.company ?? 'No company'} - {lead.email ?? lead.phone ?? 'No contact'} - {money(lead.estimatedValueCents)}</Text>
+          <Text style={{ color: colors.muted }}>{lead.company ?? 'No company'} - {lead.email ?? lead.phone ?? 'No contact'} - {formatMoneyWhole(lead.estimatedValueCents)}</Text>
         </View>
         <Chip>{lead.status.replace('_', ' ').toUpperCase()}</Chip>
       </View>
@@ -572,23 +685,52 @@ function LeadDetailPanel({
           {(detail?.notes ?? []).slice(0, 4).map((note) => (
             <View key={note._id} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: colors.background }}>
               <Text style={{ color: colors.charcoal }}>{note.text}</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>{note.authorName} - {dateText(note.createdAt)}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>{note.authorName} - {formatShortDate(note.createdAt)}</Text>
             </View>
           ))}
         </View>
         <View style={{ flexGrow: 1, flexBasis: 300, gap: spacing.sm }}>
           <Text variant="titleSmall" style={{ fontWeight: '800' }}>Timeline</Text>
-          {(detail?.activityLog ?? []).slice(0, 6).map((item) => (
-            <View key={item._id} style={{ paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-              <Text style={{ fontWeight: '700', color: colors.charcoal }}>{item.kind.replaceAll('_', ' ')}</Text>
-              <Text style={{ color: colors.muted }}>{dateText(item.createdAt)} - {item.detail ?? 'No detail'}</Text>
+          {activity.length === 0 ? <Text style={{ color: colors.muted, fontSize: 13 }}>No activity yet.</Text> : null}
+          {activity.slice(0, 8).map((item) => (
+            <View key={item.id} style={{ paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <Text style={{ fontWeight: '700', color: colors.charcoal, fontSize: 13 }}>{item.kind.replace(/_/g, ' ')}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>
+                {item.actorName ? `${item.actorName} · ` : ''}{formatShortDate(item.createdAt)}{item.detail ? ` · ${item.detail}` : ''}
+              </Text>
             </View>
           ))}
-          {(detail?.beos?.length || detail?.contracts?.length) ? (
+          {(beos.length || (detail?.contracts?.length ?? 0)) ? (
             <View style={{ gap: spacing.xs }}>
               <Text style={{ fontWeight: '800' }}>Documents</Text>
-              {(detail?.beos ?? []).slice(0, 3).map((beo) => <Text key={beo._id} style={{ color: colors.muted }}>BEO - {beo.eventName} - {beo.status}</Text>)}
-              {(detail?.contracts ?? []).slice(0, 3).map((contract) => <Text key={contract._id} style={{ color: colors.muted }}>Contract - {contract.contractNumber} - {contract.status}</Text>)}
+              {beos.slice(0, 3).map((beo) => (
+                <View key={beo._id} style={{ gap: 4, padding: spacing.xs, borderRadius: 6, backgroundColor: colors.background }}>
+                  <Text style={{ color: colors.charcoal }}>BEO · {beo.eventName} · {beo.status}</Text>
+                  {emailingBeoId === beo._id ? (
+                    <View style={{ gap: 4 }}>
+                      <TextInput dense label="Recipient email" value={emailTo} onChangeText={setEmailTo} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
+                      <TextInput dense label="Optional message" value={emailMsg} onChangeText={setEmailMsg} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <Button compact mode="contained" buttonColor={colors.primary} disabled={!emailTo.trim()} onPress={async () => {
+                          await onEmailBeo(beo._id, emailTo.trim(), emailMsg.trim() || undefined);
+                          setEmailingBeoId(null);
+                          setEmailTo('');
+                          setEmailMsg('');
+                        }}>Send</Button>
+                        <Button compact mode="text" onPress={() => setEmailingBeoId(null)}>Cancel</Button>
+                      </View>
+                    </View>
+                  ) : (
+                    <Button compact mode="text" textColor={colors.primary} icon="email-outline" onPress={() => {
+                      setEmailingBeoId(beo._id);
+                      setEmailTo(lead?.email ?? '');
+                    }}>Email to client</Button>
+                  )}
+                </View>
+              ))}
+              {(detail?.contracts ?? []).slice(0, 3).map((contract) => (
+                <Text key={contract._id} style={{ color: colors.muted }}>Contract · {contract.contractNumber} · {contract.status}</Text>
+              ))}
             </View>
           ) : null}
         </View>
@@ -601,7 +743,7 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
   return (
     <View style={{ minWidth: 145, flexGrow: 1, padding: spacing.md, borderRadius: 8, backgroundColor: accent.bg }}>
       <Text style={{ color: accent.fg, fontWeight: '800', fontSize: 22 }}>{value}</Text>
-      <Text style={{ color: colors.muted }}>{label}</Text>
+      <Text style={{ color: colors.charcoal }}>{label}</Text>
     </View>
   );
 }
@@ -623,7 +765,7 @@ function LeadListRow({ lead, onPress }: { lead: LeadRow; onPress: () => void }) 
           <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
           <Text style={{ color: colors.muted }}>{lead.company ?? lead.source ?? 'No company'} - {lead.email ?? lead.phone ?? 'No contact'}</Text>
         </View>
-        <Text style={{ color: colors.primary, fontWeight: '800' }}>{money(lead.estimatedValueCents)}</Text>
+        <Text style={{ color: colors.primary, fontWeight: '800' }}>{formatMoneyWhole(lead.estimatedValueCents)}</Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, flex: 1 }}>
@@ -654,6 +796,183 @@ function EmptyLine({ text }: { text: string }) {
   return (
     <View style={{ padding: spacing.md, borderRadius: 8, backgroundColor: colors.background }}>
       <Text style={{ color: colors.muted }}>{text}</Text>
+    </View>
+  );
+}
+
+function InsightsView({
+  forecast,
+  sourceRoi,
+  staleLeads,
+  onSelectLead,
+}: {
+  forecast: ForecastResponse | undefined;
+  sourceRoi: SourceRoiRow[] | undefined;
+  staleLeads: StaleLeadsResponse | undefined;
+  onSelectLead: (leadId: Id<'crmLeads'>) => void;
+}) {
+  return (
+    <View style={{ gap: spacing.md }}>
+      {/* Pipeline forecast */}
+      <View style={{ gap: spacing.sm }}>
+        <Text variant="titleSmall" style={{ fontWeight: '800' }}>Pipeline forecast</Text>
+        {forecast === undefined ? (
+          <Text style={{ color: colors.muted }}>Loading…</Text>
+        ) : (
+          <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+              <StatTile label="Weighted pipeline" value={formatMoneyWhole(forecast.totals.weightedValueCents)} accent={accents[0]} />
+              <StatTile label="Raw pipeline" value={formatMoneyWhole(forecast.totals.rawValueCents)} accent={accents[1]} />
+              <StatTile label="Closed-won" value={formatMoneyWhole(forecast.totals.wonValueCents)} accent={accents[2]} />
+              <StatTile label="Won deals" value={String(forecast.totals.wonCount)} accent={accents[3]} />
+            </View>
+            <View style={{ gap: 4 }}>
+              {forecast.byStage.map((row) => (
+                <View key={row.stage} style={{ padding: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.charcoal, fontWeight: '700' }}>{row.stage.replace(/_/g, ' ')}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>{row.count} deals · {Math.round(row.probability * 100)}% probability</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ color: colors.primary, fontWeight: '800' }}>{formatMoneyWhole(row.weightedValueCents)}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>raw {formatMoneyWhole(row.rawValueCents)}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+      </View>
+
+      <Divider />
+
+      {/* Source ROI */}
+      <View style={{ gap: spacing.sm }}>
+        <Text variant="titleSmall" style={{ fontWeight: '800' }}>Lead source ROI</Text>
+        {sourceRoi === undefined ? (
+          <Text style={{ color: colors.muted }}>Loading…</Text>
+        ) : sourceRoi.length === 0 ? (
+          <EmptyLine text="No leads with sources yet." />
+        ) : (
+          sourceRoi.map((row) => (
+            <View key={row.source} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: colors.background, gap: 4 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{row.source}</Text>
+                <Chip compact>{Math.round(row.winRate * 100)}% win</Chip>
+              </View>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>
+                {row.leadCount} leads · {row.wonCount} won · {row.lostCount} lost · {formatMoneyWhole(row.wonValueCents)} closed · {formatMoneyWhole(row.pipelineValueCents)} pipeline
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+
+      <Divider />
+
+      {/* Stale leads */}
+      <View style={{ gap: spacing.sm }}>
+        <Text variant="titleSmall" style={{ fontWeight: '800' }}>
+          Needs follow-up{staleLeads ? ` (${staleLeads.thresholdDays}+ days idle)` : ''}
+        </Text>
+        {staleLeads === undefined ? (
+          <Text style={{ color: colors.muted }}>Loading…</Text>
+        ) : staleLeads.leads.length === 0 ? (
+          <EmptyLine text="All active leads have recent activity." />
+        ) : (
+          staleLeads.leads.map((lead) => (
+            <View key={lead.id} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: accents[5].bg, gap: 4 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{lead.fullName}</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 12 }}>
+                    {lead.status.replace(/_/g, ' ')} · {lead.daysSinceActivity}d idle · {formatMoneyWhole(lead.estimatedValueCents)}
+                  </Text>
+                </View>
+                <Button compact mode="text" textColor={colors.primary} onPress={() => onSelectLead(lead.id as Id<'crmLeads'>)}>Open</Button>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+    </View>
+  );
+}
+
+function TemplatesView({
+  templates,
+  onSave,
+  onDelete,
+}: {
+  templates: EmailTemplateRow[];
+  onSave: (tpl: { templateId?: string; name: string; subject: string; body: string; variables?: string }) => Promise<void>;
+  onDelete: (templateId: string) => Promise<void>;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+
+  const startEdit = (tpl: EmailTemplateRow) => {
+    setEditingId(tpl.id);
+    setName(tpl.name);
+    setSubject(tpl.subject);
+    setBody(tpl.body);
+  };
+
+  const reset = () => {
+    setEditingId(null);
+    setName('');
+    setSubject('');
+    setBody('');
+  };
+
+  const submit = async () => {
+    if (!name.trim() || !subject.trim() || !body.trim()) return;
+    await onSave({ templateId: editingId ?? undefined, name: name.trim(), subject, body });
+    reset();
+  };
+
+  return (
+    <View style={{ gap: spacing.md }}>
+      <View style={{ gap: spacing.sm }}>
+        <Text variant="titleSmall" style={{ fontWeight: '800' }}>{editingId ? 'Edit template' : 'New template'}</Text>
+        <Text style={{ color: colors.muted, fontSize: 12 }}>
+          Use double-brace variables like {'{{lead.name}}'}, {'{{lead.firstName}}'}, {'{{event.date}}'}, {'{{venue.name}}'}.
+        </Text>
+        <TextInput dense label="Name (e.g. Inquiry reply)" value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+        <TextInput dense label="Subject" value={subject} onChangeText={setSubject} mode="outlined" style={{ backgroundColor: colors.surface }} />
+        <TextInput dense label="Body" value={body} onChangeText={setBody} mode="outlined" multiline numberOfLines={6} style={{ backgroundColor: colors.surface, minHeight: 120 }} />
+        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+          <Button mode="contained" buttonColor={colors.primary} disabled={!name.trim() || !subject.trim() || !body.trim()} onPress={() => void submit()}>
+            {editingId ? 'Update template' : 'Save template'}
+          </Button>
+          {editingId ? <Button mode="text" onPress={reset}>Cancel</Button> : null}
+        </View>
+      </View>
+
+      <Divider />
+
+      <View style={{ gap: spacing.sm }}>
+        <Text variant="titleSmall" style={{ fontWeight: '800' }}>Saved templates</Text>
+        {templates.length === 0 ? (
+          <EmptyLine text="No templates yet." />
+        ) : (
+          templates.map((tpl) => (
+            <View key={tpl.id} style={{ padding: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: 8, gap: 4 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{tpl.name}</Text>
+                <View style={{ flexDirection: 'row', gap: 4 }}>
+                  <Button compact mode="text" textColor={colors.primary} onPress={() => startEdit(tpl)}>Edit</Button>
+                  <Button compact mode="text" textColor={colors.danger} onPress={() => void onDelete(tpl.id)}>Delete</Button>
+                </View>
+              </View>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>Subject: {tpl.subject}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={2}>{tpl.body}</Text>
+            </View>
+          ))
+        )}
+      </View>
     </View>
   );
 }

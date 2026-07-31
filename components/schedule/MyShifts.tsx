@@ -15,6 +15,7 @@ type Shift = {
   dayIndex: number;
   dayLabel: string;
   startMinutes: number;
+  endMinutes: number;
   startTime: string;
   endTime: string;
   jobTitle: string;
@@ -25,7 +26,19 @@ type Shift = {
 };
 
 type Blackout = { _id: Id<'blackoutDates'>; startDate: string; endDate: string; reason: string };
-type Coworker = { profileId: Id<'profiles'>; name: string; jobTitle: string; startTime: string; endTime: string; withMe: boolean };
+type Coworker = {
+  shiftId: Id<'scheduleShifts'>;
+  profileId: Id<'profiles'>;
+  name: string;
+  jobTitle: string;
+  station: string;
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  startTime: string;
+  endTime: string;
+  withMe: boolean;
+};
 type RosterDay = { dayIndex: number; dayLabel: string; coworkers: Coworker[] };
 
 export function MyShifts() {
@@ -48,6 +61,7 @@ export function MyShifts() {
   const [offError, setOffError] = useState<string | null>(null);
   const [offOk, setOffOk] = useState(false);
   const [swapShiftId, setSwapShiftId] = useState<string | null>(null);
+  const [swapTargetShiftId, setSwapTargetShiftId] = useState<Id<'scheduleShifts'> | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   // Surfaces mutation errors (e.g. double-booking, claim races) as a toast
@@ -64,26 +78,39 @@ export function MyShifts() {
   const messageTeammate = (profileId: Id<'profiles'>) =>
     run(async () => {
       if (!venue?.id) return;
-      const id = await openDm({ venueId: venue.id, otherProfileId: profileId });
-      router.push(`/chat/${id}`);
+      const result = await openDm({ venueId: venue.id, targetProfileId: profileId });
+      router.push(`/chat/${result?.conversationId ?? result}`);
     });
 
   const teammates = useMemo(() => (directory ?? []) as { _id: Id<'profiles'>; fullName: string; jobTitle: string }[], [directory]);
+  const coworkersPerDay = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const day of (data?.roster ?? []) as RosterDay[]) {
+      map.set(day.dayIndex, day.coworkers.length);
+    }
+    return map;
+  }, [data?.roster]);
   const mySwaps = useMemo(() => (swaps ?? []) as Array<{ _id: Id<'shiftSwaps'>; status: string; requesterName: string; targetName: string; requesterShift: string; targetShift: string | null; direction: string }>, [swaps]);
   const incomingSwaps = mySwaps.filter((s) => s.direction === 'incoming' && s.status === 'proposed');
   const otherSwaps = mySwaps.filter((s) => !(s.direction === 'incoming' && s.status === 'proposed'));
 
-  const offerSwap = (shiftId: string, targetProfileId: Id<'profiles'>) =>
+  const offerSwap = (shiftId: string, targetProfileId: Id<'profiles'>, targetShiftId?: Id<'scheduleShifts'> | null) =>
     run(async () => {
       if (!venue?.id) return;
-      await proposeSwap({ myShiftId: shiftId as Id<'scheduleShifts'>, targetProfileId });
+      await proposeSwap({ myShiftId: shiftId as Id<'scheduleShifts'>, targetProfileId, targetShiftId: targetShiftId ?? undefined });
       setSwapShiftId(null);
-    }, 'Swap offered.');
+      setSwapTargetShiftId(null);
+    }, targetShiftId ? 'Swap offered.' : 'Coverage offer sent.');
 
   const mine = useMemo(() => (data?.mine ?? []) as Shift[], [data]);
   const open = useMemo(() => (data?.open ?? []) as Shift[], [data]);
   const roster = useMemo(() => (data?.roster ?? []) as RosterDay[], [data]);
   const blackouts = useMemo(() => (blackoutData ?? []) as Blackout[], [blackoutData]);
+  const coworkerShiftOptions = useMemo(
+    () => roster.flatMap((day) => day.coworkers.map((coworker) => ({ ...coworker, dayLabel: day.dayLabel }))),
+    [roster],
+  );
+  const selectedSwapTarget = coworkerShiftOptions.find((shift) => shift.shiftId === swapTargetShiftId) ?? null;
 
   const weekDates = useMemo(() => {
     const today = new Date();
@@ -160,9 +187,19 @@ export function MyShifts() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                   <View>
                     <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
+                    <Text style={{ color: colors.charcoal, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
                   </View>
-                  {s.conflict ? <Text style={{ color: colors.danger, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {s.conflict ? <Text style={{ color: colors.charcoal, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
+                    {(() => {
+                      const coworkers = coworkersPerDay.get(s.dayIndex) ?? 0;
+                      const label = coworkers >= 6 ? '🔥 High volume' : coworkers >= 3 ? 'Moderate' : coworkers > 0 ? 'Light day' : null;
+                      const bg = coworkers >= 6 ? accents[3].bg : coworkers >= 3 ? accents[1].bg : accents[2].bg;
+                      const fg = coworkers >= 6 ? accents[3].fg : coworkers >= 3 ? accents[1].fg : accents[2].fg;
+                      if (!label) return null;
+                      return <View style={{ backgroundColor: bg, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}><Text style={{ color: fg, fontSize: 11 }}>{label}</Text></View>;
+                    })()}
+                  </View>
                 </View>
                 <Text style={{ color: colors.charcoal }}>{s.jobTitle} · {s.station}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
@@ -175,11 +212,40 @@ export function MyShifts() {
                 </View>
                 {swapShiftId === s._id ? (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {coworkerShiftOptions.length > 0 ? (
+                      <>
+                        <Text style={{ width: '100%', color: colors.charcoal, fontSize: 12 }}>
+                          Optional: pick a coworker shift to request back.
+                        </Text>
+                        {coworkerShiftOptions.map((target) => {
+                          const selected = swapTargetShiftId === target.shiftId;
+                          return (
+                            <Chip
+                              key={target.shiftId}
+                              selected={selected}
+                              onPress={() => setSwapTargetShiftId(selected ? null : target.shiftId)}
+                            >
+                              {target.name}: {target.dayLabel} {target.startTime}
+                            </Chip>
+                          );
+                        })}
+                      </>
+                    ) : null}
+                    {selectedSwapTarget ? (
+                      <Button
+                        compact
+                        mode="contained"
+                        buttonColor={colors.primary}
+                        onPress={() => void offerSwap(s._id, selectedSwapTarget.profileId, selectedSwapTarget.shiftId)}
+                      >
+                        Offer swap with {selectedSwapTarget.name}
+                      </Button>
+                    ) : null}
                     {teammates.length === 0 ? (
-                      <Text style={{ color: colors.muted }}>No teammates to offer to.</Text>
+                      <Text style={{ color: colors.charcoal }}>No teammates to offer to.</Text>
                     ) : (
                       teammates.map((t) => (
-                        <Chip key={t._id} onPress={() => void offerSwap(s._id, t._id)}>{t.fullName}</Chip>
+                        <Chip key={t._id} onPress={() => void offerSwap(s._id, t._id)}>Ask {t.fullName} to cover</Chip>
                       ))
                     )}
                   </View>
@@ -194,13 +260,13 @@ export function MyShifts() {
       {incomingSwaps.length > 0 || otherSwaps.length > 0 ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shift swaps</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>Shift swap marketplace</Text>
             {incomingSwaps.map((sw) => (
               <View key={sw._id} style={{ padding: 10, borderRadius: 12, backgroundColor: accents[0].bg, gap: 6 }}>
-                <Text>{sw.requesterName} wants you to take {sw.requesterShift}{sw.targetShift ? ` (for your ${sw.targetShift})` : ''}.</Text>
+                <Text>{sw.requesterName} wants you to take {sw.requesterShift}{sw.targetShift ? ` in exchange for your ${sw.targetShift}` : ''}.</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: true }), 'Swap accepted — pending manager approval.')}>Accept</Button>
-                  <Button compact mode="text" textColor={colors.danger} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: false }), 'Swap declined.')}>Decline</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: true }), 'Swap accepted — pending manager approval.')} accessibilityLabel="Accept swap">Accept</Button>
+                  <Button compact mode="text" textColor={colors.danger} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: false }), 'Swap declined.')} accessibilityLabel="Decline swap">Decline</Button>
                 </View>
               </View>
             ))}
@@ -269,7 +335,7 @@ export function MyShifts() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <View>
                     <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
+                    <Text style={{ color: colors.charcoal, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
                   </View>
                   {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Outside your availability</Chip> : null}
                 </View>

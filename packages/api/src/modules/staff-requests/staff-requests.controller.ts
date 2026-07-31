@@ -14,8 +14,12 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -23,6 +27,7 @@ import { Prisma, RequestStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapStaffRequest } from '../../common/mappers';
+import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -31,8 +36,50 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
 
-const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'availability', 'shift_swap', 'open_shift', 'other'];
+const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'availability', 'shift_swap', 'open_shift', 'sick_leave', 'time_correction', 'other'];
 const REVIEW_STATUSES = ['approved', 'denied', 'cancelled'];
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const HOURS_PER_DAY = 8.0;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Parse a strict YYYY-MM-DD calendar date to noon UTC (noon dodges DST edges),
+ * rejecting malformed or impossible values (e.g. 2026-02-31). Returns null when
+ * the string is not a valid calendar date. A calendar date's identity (and its
+ * weekday) is timezone-independent, so we deliberately do not involve a venue tz.
+ */
+export function parseIsoCalendarDate(dateStr: string | null | undefined): Date | null {
+  if (!dateStr || !ISO_DATE_RE.test(dateStr)) return null;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return null;
+  }
+  return dt;
+}
+
+/**
+ * Whole-day hours for a PTO/sick request. Requires valid, non-reversed
+ * YYYY-MM-DD dates and always returns a finite, positive number — a malformed
+ * or reversed range throws rather than silently feeding NaN into a balance
+ * decrement.
+ */
+export function calculateRequestHours(startStr?: string | null, endStr?: string | null): number {
+  if (!startStr) return HOURS_PER_DAY;
+  const start = parseIsoCalendarDate(startStr);
+  if (!start) throw new BadRequestException('Request dates must be valid YYYY-MM-DD values.');
+  const end = endStr ? parseIsoCalendarDate(endStr) : start;
+  if (!end) throw new BadRequestException('Request dates must be valid YYYY-MM-DD values.');
+  if (end.getTime() < start.getTime()) {
+    throw new BadRequestException('End date must be on or after the start date.');
+  }
+  const diffDays = Math.round((end.getTime() - start.getTime()) / MS_PER_DAY) + 1;
+  const hours = diffDays * HOURS_PER_DAY;
+  if (!Number.isFinite(hours) || hours <= 0) {
+    throw new BadRequestException('Could not compute request hours from the provided dates.');
+  }
+  return hours;
+}
 
 class AvailabilityBlockDto {
   @IsInt()
@@ -48,6 +95,31 @@ class AvailabilityBlockDto {
   available!: boolean;
 }
 
+// Time-correction payload for the clock screen. Distinct from AvailabilityBlock:
+// corrections are a single object (not an array of weekly blocks), so they need
+// their own validated shape — sending this under `availability` fails @IsArray
+// and every submission would 400.
+class TimeCorrectionDto {
+  @IsOptional()
+  @IsString()
+  timeEntryId?: string | null;
+
+  // Epoch milliseconds, as produced by the client's Date(...).getTime().
+  @IsNumber()
+  @Min(0)
+  clockInAt!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  clockOutAt?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 class CreateStaffRequestDto {
   @IsString()
   @IsIn(REQUEST_KINDS)
@@ -61,6 +133,7 @@ class CreateStaffRequestDto {
 
   @IsString()
   @IsOptional()
+  @Matches(ISO_DATE_RE, { message: 'requestedForDate must be a YYYY-MM-DD date' })
   requestedForDate?: string;
 
   @IsString()
@@ -69,10 +142,12 @@ class CreateStaffRequestDto {
 
   @IsString()
   @IsOptional()
+  @Matches(ISO_DATE_RE, { message: 'requestedRangeStart must be a YYYY-MM-DD date' })
   requestedRangeStart?: string;
 
   @IsString()
   @IsOptional()
+  @Matches(ISO_DATE_RE, { message: 'requestedRangeEnd must be a YYYY-MM-DD date' })
   requestedRangeEnd?: string;
 
   @IsArray()
@@ -80,6 +155,11 @@ class CreateStaffRequestDto {
   @ValidateNested({ each: true })
   @Type(() => AvailabilityBlockDto)
   availability?: AvailabilityBlockDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TimeCorrectionDto)
+  timeCorrection?: TimeCorrectionDto;
 }
 
 class ReviewStaffRequestDto {
@@ -127,14 +207,34 @@ export class StaffRequestsController {
         const blackouts = await this.prisma.blackoutDate.findMany({
           where: { venueId: scope.venueId },
         });
-        const hit = blackouts.find((b) => reqStart <= b.endDate && b.startDate <= reqEnd);
+        const hit = blackouts.find((b) => {
+          const bStart = b.startDate.toISOString().split('T')[0];
+          const bEnd = b.endDate.toISOString().split('T')[0];
+          return reqStart <= bEnd && bStart <= reqEnd;
+        });
         if (hit) {
+          const bStartStr = hit.startDate.toISOString().split('T')[0];
+          const bEndStr = hit.endDate.toISOString().split('T')[0];
           throw new BadRequestException(
-            `Time off is blacked out ${hit.startDate}${hit.endDate !== hit.startDate ? ` – ${hit.endDate}` : ''} (${hit.reason}). Please choose other dates.`,
+            `Time off is blacked out ${bStartStr}${bEndStr !== bStartStr ? ` – ${bEndStr}` : ''} (${hit.reason}). Please choose other dates.`,
           );
         }
       }
     }
+
+    // Time corrections carry a single correction object (stored in the same
+    // `availability` JSON column the reviewer reads). Validate it here so an
+    // approval later can't act on a nonsensical range.
+    if (body.kind === 'time_correction') {
+      if (!body.timeCorrection) {
+        throw new BadRequestException('Time correction details are required.');
+      }
+      const { clockInAt, clockOutAt } = body.timeCorrection;
+      if (clockOutAt != null && clockOutAt <= clockInAt) {
+        throw new BadRequestException('Clock-out time must be after clock-in time.');
+      }
+    }
+    const requestPayload = body.kind === 'time_correction' ? body.timeCorrection : body.availability;
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
     const request = await this.prisma.staffRequest.create({
@@ -149,8 +249,8 @@ export class StaffRequestsController {
         requestedShiftId: body.requestedShiftId,
         requestedRangeStart: body.requestedRangeStart,
         requestedRangeEnd: body.requestedRangeEnd,
-        availability: body.availability
-          ? (body.availability as unknown as Prisma.InputJsonValue)
+        availability: requestPayload
+          ? (requestPayload as unknown as Prisma.InputJsonValue)
           : undefined,
       },
     });
@@ -161,9 +261,31 @@ export class StaffRequestsController {
       title: 'New staff request',
       body: `${profile.fullName} submitted ${body.kind.replace('_', ' ')}: ${body.title}`,
     });
+    const kindLabel = body.kind.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const reqStart = body.requestedRangeStart || body.requestedForDate;
+    const reqEnd = body.requestedRangeEnd || body.requestedForDate || reqStart;
+    const dateRangeStr = reqStart && reqEnd ? (reqStart === reqEnd ? reqStart : `${reqStart} – ${reqEnd}`) : null;
+
     void this.email.sendToVenueManagers(scope.venueId, {
-      subject: `New ${body.kind.replace('_', ' ')} request`,
-      text: `${profile.fullName} submitted a ${body.kind.replace('_', ' ')} request.\n\nTitle: ${body.title}\nDetails: ${body.details}`,
+      subject: `Staff Request — ${kindLabel}: Action Required`,
+      text:
+        `Hi Manager,\n\n` +
+        `${profile.fullName} has submitted a new ${kindLabel.toLowerCase()} request. Please review and take action in the Venue Wrangler app.\n\n` +
+        `Request Details\n` +
+        `Detail\tInfo\n` +
+        `Employee\t${profile.fullName}\n` +
+        `Request Type\t${kindLabel}\n` +
+        `Title\t${body.title}\n` +
+        `Details\t${body.details}\n` +
+        (dateRangeStr ? `Date/Range\t${dateRangeStr}\n` : '') + '\n' +
+        `How to Respond\n` +
+        `1. Open the Venue Wrangler app\n` +
+        `2. Go to Requests & Approvals\n` +
+        `3. Select the request\n` +
+        `4. Tap Approve or Deny — the employee will be notified instantly\n\n` +
+        `Pending requests can also be managed from your Operations Dashboard.\n\n` +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
 
     return mapStaffRequest(request);
@@ -180,7 +302,9 @@ export class StaffRequestsController {
       throw new ForbiddenException('Not authorized');
     }
 
-    const request = await this.prisma.staffRequest.findUnique({ where: { id } });
+    const result = await this.prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "StaffRequest" WHERE "id" = ${id} FOR UPDATE`;
+    const request = await tx.staffRequest.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Request not found');
     if (request.venueId !== scope.venueId) {
       throw new ForbiddenException('Request does not belong to this venue');
@@ -189,8 +313,143 @@ export class StaffRequestsController {
       throw new BadRequestException('Only pending requests can be reviewed');
     }
 
-    const reviewer = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const updated = await this.prisma.staffRequest.update({
+    const reviewer = await tx.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+
+    // Handle approval side-effects
+    if (body.status === 'approved') {
+      if (request.kind === 'sick_leave') {
+        const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
+        // Atomic decrement clamped at zero so two concurrent approvals can't
+        // both read the same balance and under-deduct (lost update).
+        await tx.$executeRaw`
+          UPDATE "Profile"
+          SET "sickHoursAccrued" = GREATEST(0, "sickHoursAccrued" - ${hours})
+          WHERE id = ${request.profileId}`;
+      } else if (request.kind === 'time_off') {
+        const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
+        await tx.$executeRaw`
+          UPDATE "Profile"
+          SET "ptoHoursAccrued" = GREATEST(0, "ptoHoursAccrued" - ${hours})
+          WHERE id = ${request.profileId}`;
+      }
+      
+      // PTO/sick: deduct balances above, but do NOT auto-unassign ScheduleShift
+      // rows. Shifts are weekly templates keyed only by dayIndex (no week/date),
+      // so opening by weekday would clear every matching day forever. Managers
+      // adjust the affected week's schedule manually after approval.
+
+      if (request.kind === 'time_correction') {
+        const correction = (request.availability as any) || {};
+        const venue = await tx.venue.findUnique({
+          where: { id: request.venueId },
+          select: { timezone: true },
+        });
+        const correctedClockIn = new Date(correction.clockInAt);
+        if (isNaN(correctedClockIn.getTime())) {
+          throw new BadRequestException('Invalid correction clock-in time');
+        }
+        const correctedClockOut = correction.clockOutAt ? new Date(correction.clockOutAt) : null;
+        if (correction.clockOutAt && (!correctedClockOut || isNaN(correctedClockOut.getTime()))) {
+          throw new BadRequestException('Invalid correction clock-out time');
+        }
+        const willBeOpen = !correctedClockOut;
+
+        const applyCorrection = async (targetId: string) => {
+          if (willBeOpen) {
+            const otherOpen = await tx.timeEntry.findFirst({
+              where: {
+                profileId: request.profileId,
+                venueId: request.venueId,
+                isOpen: true,
+                id: { not: targetId },
+              },
+              select: { id: true },
+            });
+            if (otherOpen) {
+              throw new BadRequestException(
+                'Cannot leave this correction open — staff already has an open clock-in.',
+              );
+            }
+          }
+          await tx.timeEntry.update({
+            where: { id: targetId },
+            data: {
+              clockInAt: correctedClockIn,
+              clockOutAt: correctedClockOut,
+              isOpen: willBeOpen,
+            },
+          });
+        };
+
+        if (correction.timeEntryId) {
+          // Only correct a time entry that belongs to this venue AND the same
+          // staff member who filed the request — never a foreign entry id
+          // smuggled in via the client-supplied availability blob.
+          const target = await tx.timeEntry.findFirst({
+            where: { id: correction.timeEntryId, venueId: request.venueId, profileId: request.profileId },
+          });
+          if (!target) throw new BadRequestException('Time entry not found for this request');
+          await applyCorrection(target.id);
+        } else {
+          // No specific entry ID — find an existing entry for this profile on the
+          // same venue-local calendar day and correct it. Only create a new entry
+          // if none exists (the employee genuinely forgot to clock in).
+          const dayIso = zonedIsoDate(venue?.timezone ?? null, correctedClockIn.getTime());
+          const { start: dayStartMs, end: dayEndMs } = zonedDateBounds(
+            venue?.timezone ?? null,
+            dayIso,
+          );
+          const existing = await tx.timeEntry.findFirst({
+            where: {
+              profileId: request.profileId,
+              venueId: request.venueId,
+              clockInAt: { gte: new Date(dayStartMs), lt: new Date(dayEndMs) },
+            },
+          });
+          if (existing) {
+            await applyCorrection(existing.id);
+          } else {
+            if (willBeOpen) {
+              const otherOpen = await tx.timeEntry.findFirst({
+                where: {
+                  profileId: request.profileId,
+                  venueId: request.venueId,
+                  isOpen: true,
+                },
+                select: { id: true },
+              });
+              if (otherOpen) {
+                throw new BadRequestException(
+                  'Cannot create an open correction — staff already has an open clock-in.',
+                );
+              }
+            }
+            await tx.timeEntry.create({
+              data: {
+                profileId: request.profileId,
+                venueId: request.venueId,
+                clockInAt: correctedClockIn,
+                clockOutAt: correctedClockOut
+                  ?? new Date(correctedClockIn.getTime() + 8 * 60 * 60 * 1000),
+                clockInLat: 0,
+                clockInLng: 0,
+                clockInAccuracyM: 0,
+                clockInMocked: false,
+                clockOutLat: 0,
+                clockOutLng: 0,
+                clockOutAccuracyM: 0,
+                clockOutMocked: false,
+                // New corrections without an explicit out time default to a closed
+                // 8h entry so we never collide with the one-open-punch unique index.
+                isOpen: false,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    const updated = await tx.staffRequest.update({
       where: { id: request.id },
       data: {
         status: body.status as RequestStatus,
@@ -199,6 +458,9 @@ export class StaffRequestsController {
         responseNotes: body.responseNotes,
       },
     });
+    return { request, reviewer, updated };
+    });
+    const { request, reviewer, updated } = result;
 
     await this.notifications.notifyProfile({
       venueId: scope.venueId,
@@ -209,11 +471,24 @@ export class StaffRequestsController {
         body.responseNotes?.trim() ||
         `${reviewer.fullName} marked your ${request.kind.replace('_', ' ')} request ${body.status}.`,
     });
+    const kindLabel = request.kind.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const statusText = body.status.charAt(0).toUpperCase() + body.status.slice(1);
+    const noteText = body.responseNotes?.trim();
+
     void this.email.sendToProfile(request.profileId, {
-      subject: `Your request was ${body.status}`,
+      subject: `Your ${kindLabel} Request Has Been ${statusText}`,
       text:
-        body.responseNotes?.trim() ||
-        `${reviewer.fullName} marked your ${request.kind.replace('_', ' ')} request ${body.status}.`,
+        `Hi there,\n\n` +
+        `Your ${kindLabel.toLowerCase()} request has been ${body.status} by your manager. Here are the details:\n\n` +
+        `Request Review Details\n` +
+        `Detail\tInfo\n` +
+        `Request Type\t${kindLabel}\n` +
+        `Title\t${request.title}\n` +
+        `Status\t${statusText}\n` +
+        `Reviewed By\t${reviewer.fullName}\n` +
+        (noteText ? `Manager's Note\t${noteText}\n` : '') + '\n' +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
 
     return mapStaffRequest(updated);

@@ -6,9 +6,12 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { CommandButton, CommandSurface, CommandText, MiniTrend, StatusPill } from '../../components/FutureUI';
+import { CollapsibleSection } from '../../components/AppCard';
 import { AiCopilotPanel } from '../../components/AiCopilotPanel';
 import { AlertsPanel } from '../../components/AlertsPanel';
 import { CosmicInsights } from '../../components/CosmicInsights';
+import { OperationsAutopilotPanel } from '../../components/OperationsAutopilotPanel';
+import { ProfitabilityPulsePanel } from '../../components/ProfitabilityPulsePanel';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
@@ -35,6 +38,7 @@ export default function HomeScreen() {
   const notifications = useQuery(api.app.getNotifications, isReady ? {} : 'skip');
   const markNotificationRead = useMutation(api.app.markNotificationRead);
   const upsertManagerGoal = useMutation(api.operations.upsertManagerGoal);
+  const updateExecutionTask = useMutation(api.operations.updateExecutionTask);
   const palette = useDesignTheme();
   const themeMode = useAppearanceStore((state) => state.mode);
   const setThemeMode = useAppearanceStore((state) => state.setMode);
@@ -45,10 +49,12 @@ export default function HomeScreen() {
   const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? '';
   const role = dashboard?.profile.role ?? 'staff';
   const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
-  const venueName = dashboard?.venue.name ?? venue?.name ?? 'Individual account';
+  const venueName = dashboard?.venue.name ?? venue?.name ?? t('dashboard.individualAccountTitle');
   const openShifts = dashboard?.analytics.openShiftCount ?? 0;
-  const canManage = canManageVenue(role, dashboard?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(dashboard && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const dailyBrief = useQuery(api.operations.getDailyBrief, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const commandCenter = useQuery(api.operations.getCommandCenter, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const managerInsights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip');
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -130,16 +136,16 @@ export default function HomeScreen() {
               {unreadNotifications.length ? `${t('command.alerts')} ${unreadNotifications.length}` : t('command.alerts')}
             </CommandButton>
             <CommandButton palette={palette} icon="creation" selected={copilotOpen} onPress={() => setCopilotOpen((value) => !value)}>
-              {copilotOpen ? 'Copilot Active' : t('command.ai')}
+              {copilotOpen ? t('dashboard.copilotActive') : t('command.ai')}
             </CommandButton>
           </View>
         </View>
 
         {!venue?.id ? (
           <CommandSurface palette={palette} style={{ gap: spacing.xs }}>
-            <CommandText palette={palette} variant="title">Individual account</CommandText>
+            <CommandText palette={palette} variant="title">{t('dashboard.individualAccountTitle')}</CommandText>
             <CommandText palette={palette} variant="caption">
-              You can keep this account ready for your next team invite. When a venue owner invites you, sign in with this same email to join their workspace.
+              {t('dashboard.individualAccountBody')}
             </CommandText>
           </CommandSurface>
         ) : null}
@@ -202,21 +208,114 @@ export default function HomeScreen() {
         </CommandSurface>
       ) : null}
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        {kpis.map((item) => (
-          <CommandSurface key={item.label} palette={palette} inset style={{ flexGrow: 1, flexBasis: 150, gap: spacing.sm, minHeight: 136 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-              <MaterialCommunityIcons name={item.icon} size={19} color={palette.primary} />
-              <MiniTrend palette={palette} values={item.trend} />
+      {canManage && dailyBrief ? (
+        <OperationsAutopilotPanel
+          palette={palette}
+          priorityActions={dailyBrief.priorityActions}
+          commandCenter={commandCenter}
+          onResolveBlocker={(blocker) => {
+            if (blocker.targetId) void updateExecutionTask({ taskId: blocker.targetId, status: 'done' });
+          }}
+        />
+      ) : null}
+
+      {canManage && dailyBrief ? (
+        <ProfitabilityPulsePanel
+          palette={palette}
+          pulse={dailyBrief.profitabilityPulse}
+        />
+      ) : null}
+
+      {canManage && dailyBrief ? (
+        <CommandSurface palette={palette} style={{ gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
+            <View style={{ flex: 1, minWidth: 220 }}>
+              <CommandText palette={palette} variant="title">{t('dashboard.managerDailyBrief')}</CommandText>
+              <CommandText palette={palette} variant="caption">
+                {t('dashboard.serviceSnapshot', { date: dailyBrief.date, venue: venueName })}
+              </CommandText>
             </View>
-            <CommandText palette={palette} variant="metric">{item.value}</CommandText>
-            <View style={{ gap: 2 }}>
-              <CommandText palette={palette} variant="label">{item.label}</CommandText>
-              <CommandText palette={palette} variant="caption">{item.delta}</CommandText>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'flex-end' }}>
+              <StatusPill palette={palette}>{t('dashboard.coversCount', { count: formatNumber(dailyBrief.covers ?? 0) })}</StatusPill>
+              <StatusPill palette={palette} tone={(dailyBrief.openShiftCount ?? 0) > 0 ? 'warn' : 'good'}>
+                {t('dashboard.scheduledCount', { count: formatNumber(dailyBrief.scheduledCount ?? 0) })}
+              </StatusPill>
+              <StatusPill palette={palette} tone={(dailyBrief.eightySixCount ?? 0) > 0 ? 'warn' : 'neutral'}>
+                {formatNumber(dailyBrief.eightySixCount ?? 0)} 86
+              </StatusPill>
             </View>
-          </CommandSurface>
-        ))}
-      </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            {[
+              { label: t('dashboard.posSales'), value: formatCurrency(dailyBrief.salesCents ?? 0) },
+              { label: t('dashboard.clockedInMetric'), value: formatNumber(dailyBrief.clockedInCount ?? 0) },
+              { label: t('dashboard.prepOpen'), value: formatNumber(dailyBrief.prepOpenCount ?? 0) },
+              { label: t('dashboard.lowStock'), value: formatNumber(dailyBrief.lowStockCount ?? 0) },
+            ].map((item) => (
+              <View key={item.label} style={{ flexGrow: 1, flexBasis: 120, gap: 2, padding: spacing.sm, borderWidth: 1, borderColor: palette.divider, borderRadius: 8 }}>
+                <CommandText palette={palette} variant="metric">{item.value}</CommandText>
+                <CommandText palette={palette} variant="caption">{item.label}</CommandText>
+              </View>
+            ))}
+          </View>
+
+          {(dailyBrief.alerts ?? []).length > 0 ? (
+            <View style={{ gap: spacing.xs }}>
+              {(dailyBrief.alerts ?? []).slice(0, 4).map((alert: string) => (
+                <View key={alert} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                  <MaterialCommunityIcons name="alert-circle-outline" size={16} color={palette.warning} />
+                  <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>{alert}</CommandText>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <CommandText palette={palette} variant="caption">{t('dashboard.noUrgentAlerts')}</CommandText>
+          )}
+
+          {(dailyBrief.reservations ?? []).length > 0 ? (
+            <View style={{ gap: spacing.xs }}>
+              <CommandText palette={palette} variant="label">{t('dashboard.nextArrivals')}</CommandText>
+              {(dailyBrief.reservations ?? []).slice(0, 3).map((reservation: any) => (
+                <View key={reservation._id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, borderTopWidth: 1, borderTopColor: palette.divider, paddingTop: spacing.xs }}>
+                  <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>
+                    {formatDate(reservation.reservationTime, { hour: 'numeric', minute: '2-digit' })} - {reservation.guestName}
+                  </CommandText>
+                  <StatusPill palette={palette}>{t('dashboard.partySizeTop', { count: formatNumber(reservation.partySize) })}</StatusPill>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </CommandSurface>
+      ) : null}
+
+      {(() => {
+        // Only render KPIs that have meaningful (non-zero) values. Six empty
+        // tiles for a brand-new venue is the single biggest source of "wall of
+        // dashboards" confusion on the home screen.
+        const meaningful = kpis.filter((item) => {
+          const raw = String(item.value).replace(/[^0-9.]/g, '');
+          return raw !== '' && Number(raw) > 0;
+        });
+        if (meaningful.length === 0) return null;
+        return (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            {meaningful.map((item) => (
+              <CommandSurface key={item.label} palette={palette} inset style={{ flexGrow: 1, flexBasis: 150, gap: spacing.sm, minHeight: 136 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
+                  <MaterialCommunityIcons name={item.icon} size={19} color={palette.primary} />
+                  <MiniTrend palette={palette} values={item.trend} />
+                </View>
+                <CommandText palette={palette} variant="metric">{item.value}</CommandText>
+                <View style={{ gap: 2 }}>
+                  <CommandText palette={palette} variant="label">{item.label}</CommandText>
+                  <CommandText palette={palette} variant="caption">{item.delta}</CommandText>
+                </View>
+              </CommandSurface>
+            ))}
+          </View>
+        );
+      })()}
 
       {canManage ? (
         <CommandSurface palette={palette} style={{ gap: spacing.md }}>
@@ -275,114 +374,94 @@ export default function HomeScreen() {
             )}
           </CommandSurface>
 
-          <CommandSurface palette={palette} style={{ flexGrow: 1, flexBasis: 240, gap: spacing.md }}>
-            <CommandText palette={palette} variant="title">{t('dashboard.floorControl')}</CommandText>
-            {[
-              [t('dashboard.seatingFlow'), 0, palette.primary],
-              [t('dashboard.kitchenFire'), 0, palette.warning],
-              [t('dashboard.barQueue'), 0, openShifts ? palette.danger : palette.success],
-            ].map(([label, value, color]) => (
-              <View key={String(label)} style={{ gap: spacing.xs }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <CommandText palette={palette} variant="caption">{String(label)}</CommandText>
-                  <CommandText palette={palette} variant="caption">{formatNumber(Number(value))}%</CommandText>
-                </View>
-                <View style={{ height: 8, borderRadius: 99, backgroundColor: palette.surfaceSoft, overflow: 'hidden' }}>
-                  <View style={{ width: `${Math.min(100, Number(value))}%`, height: '100%', backgroundColor: String(color), borderRadius: 99 }} />
-                </View>
-              </View>
-            ))}
-          </CommandSurface>
         </View>
       ) : (
         <CosmicInsights />
       )}
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <CommandSurface palette={palette} style={{ flexGrow: 1, flexBasis: 260, gap: spacing.sm }}>
-          <CommandText palette={palette} variant="title">{t('dashboard.eventRun')}</CommandText>
+      <CollapsibleSection
+        title={t('dashboard.staffing')}
+        subtitle={weeklyHighlights.length ? t('dashboard.upcomingShifts', { count: weeklyHighlights.length }) : t('dashboard.noShifts')}
+      >
+        {loading ? (
+          <Skeleton height={64} />
+        ) : weeklyHighlights.length === 0 ? (
+          <CommandText palette={palette} variant="caption">{t('dashboard.noShifts')}</CommandText>
+        ) : (
+          weeklyHighlights.map((item: any) => (
+            <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
+              <CommandText palette={palette} variant="label" style={{ width: 42 }}>{item.day}</CommandText>
+              <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>{item.jobs}</CommandText>
+              <StatusPill palette={palette} tone={item.isOpen ? 'warn' : 'good'}>{item.isOpen ? t('common.needsCoverage') : t('common.scheduled')}</StatusPill>
+            </View>
+          ))
+        )}
+      </CollapsibleSection>
+
+      {canManage && (managerDashboard?.events ?? []).length > 0 ? (
+        <CollapsibleSection
+          title={t('dashboard.eventRun')}
+          subtitle={t('dashboard.upcomingEvents', { count: (managerDashboard?.events ?? []).length })}
+        >
           {(managerDashboard?.events ?? []).slice(0, 4).map((event: any) => (
             <View key={event._id} style={{ borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm, gap: 2 }}>
               <CommandText palette={palette} variant="body">{event.title}</CommandText>
               <CommandText palette={palette} variant="caption">{event.eventDate} · {event.status}</CommandText>
             </View>
           ))}
-          {(managerDashboard?.events ?? []).length === 0 ? <CommandText palette={palette} variant="caption">{t('dashboard.clear')}</CommandText> : null}
-        </CommandSurface>
+        </CollapsibleSection>
+      ) : null}
 
-        <CommandSurface palette={palette} style={{ flexGrow: 1, flexBasis: 260, gap: spacing.sm }}>
-          <CommandText palette={palette} variant="title">{t('dashboard.staffing')}</CommandText>
-          {loading ? (
-            <Skeleton height={64} />
-          ) : weeklyHighlights.length === 0 ? (
-            <CommandText palette={palette} variant="caption">{t('dashboard.noShifts')}</CommandText>
-          ) : (
-            weeklyHighlights.map((item: any) => (
-              <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
-                <CommandText palette={palette} variant="label" style={{ width: 42 }}>{item.day}</CommandText>
-                <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>{item.jobs}</CommandText>
-                <StatusPill palette={palette} tone={item.isOpen ? 'warn' : 'good'}>{item.isOpen ? t('common.needsCoverage') : t('common.scheduled')}</StatusPill>
-              </View>
-            ))
-          )}
-        </CommandSurface>
-      </View>
+      {recentNotifications.length > 0 ? (
+        <CollapsibleSection
+          title={t('dashboard.notifications')}
+          subtitle={unreadNotifications.length ? t('dashboard.unreadCount', { count: unreadNotifications.length }) : t('dashboard.allCaughtUp')}
+          defaultOpen={unreadNotifications.length > 0}
+        >
+          {recentNotifications.slice(0, 4).map((item) => (
+            <View key={item._id} style={{ borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm, gap: 4 }}>
+              <CommandText palette={palette} variant="body" style={{ fontWeight: item.read ? '600' : '900' }}>{item.title}</CommandText>
+              <CommandText palette={palette} variant="caption">{item.body}</CommandText>
+              {!item.read ? (
+                <CommandButton palette={palette} onPress={() => void markNotificationRead({ notificationId: item._id })} style={{ alignSelf: 'flex-start' }}>
+                  {t('common.markRead')}
+                </CommandButton>
+              ) : null}
+            </View>
+          ))}
+        </CollapsibleSection>
+      ) : null}
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <CommandSurface palette={palette} style={{ flexGrow: 1, flexBasis: 260, gap: spacing.sm }}>
-          <CommandText palette={palette} variant="title">{canManage ? t('dashboard.vipInsights') : t('dashboard.analytics')}</CommandText>
-          {canManage && reservations.length > 0 ? (
-            reservations.slice(0, 3).map((reservation: any) => (
-              <View key={reservation._id} style={{ gap: 2, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
-                <CommandText palette={palette} variant="body">{reservation.guestName} · {formatNumber(reservation.partySize)}</CommandText>
-                <CommandText palette={palette} variant="caption">{formatDate(reservation.reservationTime, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</CommandText>
-                {reservation.notes ? <CommandText palette={palette} variant="caption">{reservation.notes}</CommandText> : null}
-              </View>
-            ))
-          ) : (
-            <CosmicInsights />
-          )}
-        </CommandSurface>
+      {canManage && reservations.length > 0 ? (
+        <CollapsibleSection
+          title={t('dashboard.vipInsights')}
+          subtitle={t('dashboard.vipBookings', { count: reservations.length })}
+        >
+          {reservations.slice(0, 3).map((reservation: any) => (
+            <View key={reservation._id} style={{ gap: 2, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
+              <CommandText palette={palette} variant="body">{reservation.guestName} · {formatNumber(reservation.partySize)}</CommandText>
+              <CommandText palette={palette} variant="caption">{formatDate(reservation.reservationTime, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</CommandText>
+              {reservation.notes ? <CommandText palette={palette} variant="caption">{reservation.notes}</CommandText> : null}
+            </View>
+          ))}
+        </CollapsibleSection>
+      ) : null}
 
-        <CommandSurface palette={palette} style={{ flexGrow: 1, flexBasis: 260, gap: spacing.sm }}>
-          <CommandText palette={palette} variant="title">{t('dashboard.notifications')}</CommandText>
-          {recentNotifications.length === 0 ? (
-            <CommandText palette={palette} variant="caption">{t('dashboard.noNotifications')}</CommandText>
-          ) : (
-            recentNotifications.slice(0, 4).map((item) => (
-              <View key={item._id} style={{ borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm, gap: 4 }}>
-                <CommandText palette={palette} variant="body" style={{ fontWeight: item.read ? '600' : '900' }}>{item.title}</CommandText>
-                <CommandText palette={palette} variant="caption">{item.body}</CommandText>
-                {!item.read ? (
-                  <CommandButton palette={palette} onPress={() => void markNotificationRead({ notificationId: item._id })} style={{ alignSelf: 'flex-start' }}>
-                    {t('common.markRead')}
-                  </CommandButton>
-                ) : null}
+      {canManage && liveStaff.length > 0 ? (
+        <CollapsibleSection
+          title={t('dashboard.clockedIn')}
+          subtitle={t('dashboard.onShiftCount', { count: liveStaff.length })}
+        >
+          {liveStaff.map((person: any) => (
+            <View key={person.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
+              <View style={{ flex: 1 }}>
+                <CommandText palette={palette} variant="body">{person.name}</CommandText>
+                <CommandText palette={palette} variant="caption">{person.job}</CommandText>
               </View>
-            ))
-          )}
-        </CommandSurface>
-      </View>
-
-      {canManage ? (
-        <CommandSurface palette={palette} style={{ gap: spacing.sm }}>
-          <CommandText palette={palette} variant="title">{t('dashboard.clockedIn')}</CommandText>
-          {loading ? (
-            <Skeleton height={64} />
-          ) : liveStaff.length === 0 ? (
-            <CommandText palette={palette} variant="caption">{t('dashboard.noClockedIn')}</CommandText>
-          ) : (
-            liveStaff.map((person: any) => (
-              <View key={person.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
-                <View style={{ flex: 1 }}>
-                  <CommandText palette={palette} variant="body">{person.name}</CommandText>
-                  <CommandText palette={palette} variant="caption">{person.job}</CommandText>
-                </View>
-                <StatusPill palette={palette}>{person.role}</StatusPill>
-              </View>
-            ))
-          )}
-        </CommandSurface>
+              <StatusPill palette={palette}>{person.role}</StatusPill>
+            </View>
+          ))}
+        </CollapsibleSection>
       ) : null}
 
     </ScrollView>

@@ -85,6 +85,7 @@ export class NotificationsService {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(chunk),
+          signal: AbortSignal.timeout(10000),
         });
         if (!res.ok) {
           this.logger.warn(`Expo push failed (${res.status}) for ${chunk.length} tokens`);
@@ -96,7 +97,10 @@ export class NotificationsService {
         await this.disableUnregistered(json, chunk.map((m) => m.to));
       }
     } catch (error) {
-      this.logger.warn(`Push delivery error: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(
+        `Push delivery error for venue ${args.venueId}: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
     }
   }
 

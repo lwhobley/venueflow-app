@@ -7,12 +7,13 @@
     "node": ">=20.19.4"
   },
   "scripts": {
-    "build": "nest build",
+    "build": "prisma generate && nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
     "release": "prisma migrate deploy",
     "test": "vitest run",
+    "test:integration": "vitest run --config ../../vitest.integration.config.ts",
     "lint": "prisma generate && tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
@@ -21,12 +22,17 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
+    "@aws-sdk/s3-request-presigner": "^3.1075.0",
     "@nestjs/common": "^11.1.6",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.6",
     "@nestjs/jwt": "^11.0.0",
-    "@nestjs/platform-express": "^11.1.6",
+    "@nestjs/platform-express": "^11.1.28",
+    "@nestjs/schedule": "^6.1.3",
+    "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^6.19.0",
+    "@sentry/node": "^10.62.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "helmet": "^8.1.0",
@@ -37,9 +43,13 @@
     "@nestjs/cli": "^11.0.10",
     "@nestjs/schematics": "^11.0.7",
     "@nestjs/testing": "^11.1.6",
+    "@testcontainers/postgresql": "^12.0.3",
     "@types/express": "^5.0.6",
     "@types/node": "^24.10.1",
+    "@types/supertest": "^7.2.0",
     "prisma": "^6.19.0",
+    "supertest": "^7.2.2",
+    "testcontainers": "^12.0.3",
     "typescript": "~5.9.2"
   }
 }

@@ -51,25 +51,70 @@ function getApiBaseUrl() {
   return configuredApiBaseUrl;
 }
 
+/**
+ * Resolve a media reference to an absolute URL for <Image>. Server-stored chat
+ * photos come back as relative paths (e.g. /v1/chat/images/<id>); legacy or
+ * external URLs are already absolute and pass through unchanged.
+ */
+export function resolveMediaUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${getApiBaseUrl()}${path}`;
+}
+
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = useAuthStore.getState().token;
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: options.method ?? 'GET',
-    headers: {
-      Accept: 'application/json',
-      ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+  const timeout = options.timeoutMs ?? 30_000;
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const signal = controller?.signal ?? options.signal;
+  let timedOut = false;
+  const abortFromCaller = () => controller?.abort();
+  if (options.signal?.aborted) abortFromCaller();
+  else options.signal?.addEventListener('abort', abortFromCaller);
+  const timer =
+    controller && timeout > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, timeout)
+      : null;
+
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
+      method: options.method ?? 'GET',
+      headers: {
+        Accept: 'application/json, text/csv;q=0.9, text/plain;q=0.8',
+        ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      ...(signal ? { signal } : {}),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError' && timedOut) {
+      throw new ApiError('Request timed out. Check your connection and try again.', 408);
+    }
+    throw error;
+  } finally {
+    options.signal?.removeEventListener('abort', abortFromCaller);
+    if (timer) clearTimeout(timer);
+  }
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => null);
+    if (response.status === 401 && token) {
+      useAuthStore.getState().clearSession();
+    }
+    const errorBody = await response.json().catch(async () => {
+      const text = await response.text().catch(() => '');
+      return text ? { message: text } : null;
+    });
     const message =
       typeof errorBody?.message === 'string'
         ? errorBody.message
@@ -80,14 +125,21 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   if (response.status === 204) return null as T;
-  return response.json() as Promise<T>;
+  const contentType = response.headers.get('content-type') ?? '';
+  if (contentType.includes('application/json')) {
+    return response.json() as Promise<T>;
+  }
+  return response.text() as Promise<T>;
 }
 
 export function useApiQuery<T>(queryKey: QueryKey, path: string, enabled = true) {
+  const authEpoch = useAuthStore((state) => state.authEpoch);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const venueId = useAuthStore((state) => state.venue?.id ?? null);
   const token = useAuthStore((state) => state.token);
   return useQuery({
-    queryKey,
-    queryFn: () => apiRequest<T>(path),
+    queryKey: [...queryKey, authEpoch, userId, venueId],
+    queryFn: ({ signal }) => apiRequest<T>(path, { signal }),
     enabled: enabled && Boolean(token),
   });
 }
@@ -106,7 +158,7 @@ export function useApiMutation<TArgs, TResult>(
 }
 
 export type InviteCheckResult =
-  | { status: 'found'; venueName: string; jobTitle: string; role: string; expiresAt: number }
+  | { status: 'found'; emailSent?: boolean; venueName?: string; jobTitle?: string; role?: string; expiresAt?: number }
   | { status: 'not_found' | 'expired' | 'used' };
 
 export type JoinRequestResult = { requestId: string; status: 'pending'; venueName: string };
@@ -122,6 +174,7 @@ export const appApi = {
     fullName?: string;
     lastName?: string;
     inviteToken?: string;
+    termsAccepted?: boolean;
   }) =>
     apiRequest<AuthSessionResponse>('/v1/auth/password', { method: 'POST', body }),
   resendVerification: () => apiRequest<{ ok: true; alreadyVerified?: boolean }>('/v1/auth/verify-email/send', { method: 'POST' }),
@@ -134,9 +187,6 @@ export const appApi = {
     apiRequest<{ valid: boolean; venueName: string; role: string; jobTitle: string; expiresAt: number }>(
       '/v1/app/invite/' + encodeURIComponent(code.trim()),
     ),
-  // Owner setup: create the venue/master account (caller becomes admin/owner).
-  registerVenue: (body: { businessName: string; staffRange: string; ownerName?: string; phone?: string; address?: string; venueType?: string }) =>
-    apiRequest<{ profile: ApiProfile; venue: ApiVenue | null }>('/v1/app/register-venue', { method: 'POST', body }),
   // Solo user joins an existing team later by code.
   joinByCode: (code: string) =>
     apiRequest<{ profile: ApiProfile; venue: ApiVenue | null }>('/v1/app/join', { method: 'POST', body: { code } }),
@@ -151,14 +201,18 @@ export const appApi = {
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),
   getNotifications: () => apiRequest<any[]>('/v1/app/notifications'),
   markNotificationRead: (notificationId: string) => apiRequest('/v1/app/notifications/' + notificationId + '/read', { method: 'POST' }),
-  getClockBoard: () => apiRequest<any | null>('/v1/app/clock-board'),
-  getMyTimeClock: () => apiRequest<any | null>('/v1/app/time-clock'),
-  clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-in', { method: 'POST', body }),
-  clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/app/clock-out', { method: 'POST', body }),
+  getClockBoard: () => apiRequest<any | null>('/v1/time-clock/board'),
+  getMyTimeClock: () => apiRequest<any | null>('/v1/time-clock/me'),
+  clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-in', { method: 'POST', body }),
+  clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-out', { method: 'POST', body }),
+  breakStart: (body: { type: 'paid' | 'unpaid' }) => apiRequest('/v1/time-clock/break-start', { method: 'POST', body }),
+  breakEnd: () => apiRequest('/v1/time-clock/break-end', { method: 'POST' }),
   listVenueStaff: () => apiRequest<any[]>('/v1/app/staff'),
   upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string; phone?: string; altPhone?: string; address?: string; dateOfBirth?: string; certifications?: string[] }) =>
     apiRequest('/v1/app/staff', { method: 'POST', body }),
   deactivateVenueStaff: (staffId: string) => apiRequest('/v1/app/staff/' + staffId, { method: 'DELETE' }),
+  createStaffRequest: (body: { kind: string; title: string; details: string; availability?: any; timeCorrection?: { timeEntryId?: string | null; clockInAt: number; clockOutAt?: number | null; reason?: string } }) =>
+    apiRequest('/v1/staff-requests', { method: 'POST', body }),
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
     apiRequest<any>('/v1/app/venue', { method: 'PATCH', body }),
   deleteMyAccount: () => apiRequest('/v1/app/me', { method: 'DELETE' }),
@@ -168,7 +222,7 @@ export const appApi = {
     apiRequest<InviteCheckResult>('/v1/workforce/invite-check', { method: 'POST', body }),
   searchVenues: (q: string) =>
     apiRequest<{ venues: VenueSearchResult[] }>(`/v1/workforce/venues/search?q=${encodeURIComponent(q)}`),
-  submitJoinRequest: (body: { venueId: string }) =>
+  submitJoinRequest: (body: { venueId: string; code: string }) =>
     apiRequest<JoinRequestResult>('/v1/workforce/join-request', { method: 'POST', body }),
   listMyJoinRequests: () =>
     apiRequest<{ requests: any[] }>('/v1/workforce/join-requests'),

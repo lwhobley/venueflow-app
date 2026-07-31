@@ -1,21 +1,18 @@
-import { ScrollView, View } from 'react-native';
-import { Text } from 'react-native-paper';
+import { ScrollView } from 'react-native';
 import { colors, spacing } from '../../lib/theme';
+import { SectionHeader } from '../../components/AppCard';
 import { AvailabilityEditor } from '../../components/schedule/AvailabilityEditor';
+import { useI18n } from '../../lib/i18n';
 
 export default function AvailabilityScreen() {
+  const { t } = useI18n();
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
-          Availability
-        </Text>
-        <Text style={{ color: colors.muted }}>Tell your managers when you can work.</Text>
-      </View>
+      <SectionHeader kicker={t('availability.kicker')} title={t('availability.title')} subtitle={t('availability.subtitle')} />
       <AvailabilityEditor />
     </ScrollView>
   );

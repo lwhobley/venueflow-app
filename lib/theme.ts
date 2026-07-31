@@ -93,12 +93,12 @@ export const authInputProps = {
 };
 
 export const accents = [
-  { bg: 'rgba(123, 199, 126, 0.14)', fg: '#7BC77E', icon: '#7BC77E' },
-  { bg: 'rgba(224, 168, 79, 0.16)', fg: '#E0A84F', icon: '#E0A84F' },
-  { bg: 'rgba(139, 185, 177, 0.14)', fg: '#8BB9B1', icon: '#8BB9B1' },
-  { bg: 'rgba(196, 123, 86, 0.14)', fg: '#D89261', icon: '#D89261' },
-  { bg: 'rgba(145, 159, 125, 0.14)', fg: '#A9B78E', icon: '#A9B78E' },
-  { bg: 'rgba(224, 111, 98, 0.14)', fg: '#E06F62', icon: '#E06F62' },
+  { bg: 'rgba(123, 199, 126, 0.14)', fg: '#000000', icon: '#7BC77E' },
+  { bg: 'rgba(224, 168, 79, 0.16)', fg: '#000000', icon: '#E0A84F' },
+  { bg: 'rgba(139, 185, 177, 0.14)', fg: '#000000', icon: '#8BB9B1' },
+  { bg: 'rgba(196, 123, 86, 0.14)', fg: '#000000', icon: '#D89261' },
+  { bg: 'rgba(145, 159, 125, 0.14)', fg: '#000000', icon: '#A9B78E' },
+  { bg: 'rgba(224, 111, 98, 0.14)', fg: '#000000', icon: '#E06F62' },
 ] as const;
 
 export const spacing = {
@@ -108,33 +108,61 @@ export const spacing = {
   lg: 16,
   xl: 24,
   xxl: 32,
+  xxxl: 48,
+  huge: 64,
 };
 
+// Editorial system rule: at most two radii anywhere in the UI. `sharp` is for
+// nearly everything (inputs, tags, buttons, most panels); `soft` is reserved
+// for the handful of surfaces that read as genuine "cards" (modals, sheets,
+// the rare stat tile). The old sm/md/lg/xl/pill keys are kept so the ~50
+// existing call sites don't need touching, but they now all resolve to one
+// of the two allowed values.
 export const radius = {
-  sm: 6,
-  md: 8,
+  sharp: 2,
+  soft: 10,
+  sm: 2,
+  md: 2,
   lg: 10,
-  xl: 14,
-  pill: 999,
+  xl: 10,
+  pill: 10,
 };
 
+// Typography: a serif display face (Fraunces) carries headlines and large
+// numbers; everything else stays on the system sans so body text and form
+// controls remain fast and native-feeling. Deliberately not Inter.
+export const fontFamily = {
+  display: 'Fraunces_600SemiBold',
+  displayItalic: 'Fraunces_600SemiBold_Italic',
+  displayMedium: 'Fraunces_500Medium',
+} as const;
+
+export const type = {
+  micro: { fontSize: 12, lineHeight: 16, letterSpacing: 0.2 },
+  label: { fontSize: 13, lineHeight: 18, letterSpacing: 0.4 },
+  body: { fontSize: 15, lineHeight: 22, letterSpacing: 0 },
+  bodyLarge: { fontSize: 17, lineHeight: 24, letterSpacing: 0 },
+  heading: { fontSize: 20, lineHeight: 26, letterSpacing: -0.2, fontFamily: fontFamily.display },
+  title: { fontSize: 28, lineHeight: 33, letterSpacing: -0.4, fontFamily: fontFamily.display },
+  display: { fontSize: 40, lineHeight: 44, letterSpacing: -0.6, fontFamily: fontFamily.display },
+} as const;
+
+// No default drop shadow — surfaces are separated by hairline rules and
+// whitespace, not elevation. Kept only for the rare truly-floating surface
+// (a modal/sheet over content), used explicitly, never as a card default.
 export const shadow = {
   shadowColor: designPalettes.light.shadow,
-  shadowOpacity: 0.08,
-  shadowRadius: 16,
-  shadowOffset: { width: 0, height: 8 },
-  elevation: 2,
+  shadowOpacity: 0.05,
+  shadowRadius: 12,
+  shadowOffset: { width: 0, height: 4 },
+  elevation: 1,
 } as const;
 
 export const authCardStyle = {
   backgroundColor: authColors.surface,
-  borderRadius: 14,
+  borderRadius: radius.soft,
   borderWidth: 1,
   borderColor: authColors.border,
-  shadowColor: designPalettes.light.shadow,
-  shadowOpacity: 0.08,
-  shadowRadius: 16,
-  shadowOffset: { width: 0, height: 8 },
 } as const;
 
 export const glass = {
@@ -152,7 +180,7 @@ export const makePaperTheme = (mode: ThemeMode) => {
   return {
     ...base,
     dark: mode === 'dark',
-    roundness: 10,
+    roundness: radius.sharp,
     colors: {
       ...base.colors,
       primary: palette.primary,

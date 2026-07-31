@@ -1,30 +1,25 @@
-import { useMemo, useState } from 'react';
-import { ScrollView, Share, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { Alert, FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
-import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
+import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { accents, colors, radius, spacing } from '../../lib/theme';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { errorMessage } from '../../lib/format';
 import type { Role } from '../../lib/types';
+import { SectionHeader } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 
 type VenueRole = { _id: string; name: string };
+type ParsedStaffImportRow = { fullName: string; email: string; phone?: string; jobTitle: string; role: 'manager' | 'staff' };
 // Access level = the permission tier an admin/manager assigns when adding a
 // teammate. Roles are never self-selected — they are set here on the roster.
 type AccessRole = 'manager' | 'staff';
-
-const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'manager', label: 'Manager' },
-  { value: 'staff', label: 'Staff' },
-];
-const LINK_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
-  { value: 'manager', label: 'Manager' },
-  { value: 'staff', label: 'Staff' },
-];
 
 // Job titles / positions, selectable from a dropdown.
 const JOB_ROLES = [
@@ -49,7 +44,7 @@ function Dropdown({
   placeholder?: string;
   options: Array<{ value: string; label: string }>;
   onSelect: (value: string) => void;
-  style?: any;
+  style?: import('react-native').ViewStyle;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value);
@@ -104,11 +99,53 @@ type StaffMember = {
   venueId: string | null;
 };
 
-export default function StaffScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+type OnboardingTask = {
+  _id: string;
+  profileId: string;
+  title: string;
+  details: string | null;
+  category: string;
+  status: 'open' | 'done' | 'cancelled';
+  completedAt: number | null;
+};
+
+type OnboardingStaff = {
+  _id: string;
+  fullName: string;
+  completedCount: number;
+  totalCount: number;
+  tasks: OnboardingTask[];
+};
+
+type OnboardingResponse = { staff: OnboardingStaff[] };
+
+type AuditEntry = {
+  _id: string;
+  actorName: string | null;
+  actorRole: string | null;
+  targetName: string | null;
+  targetRole: string | null;
+  action: string;
+  summary: string;
+  createdAt: number;
+};
+
+export default function StaffScreenWrapper() {
+  return <ScreenErrorBoundary><StaffScreen /></ScreenErrorBoundary>;
+}
+
+function StaffScreen() {
+  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
+  const { t } = useI18n();
+  const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
+    { value: 'admin', label: t('staff.roleAdmin') },
+    { value: 'manager', label: t('staff.roleManager') },
+    { value: 'staff', label: t('staff.roleStaff') },
+  ];
+  const LINK_ACCESS_LEVELS: Array<{ value: AccessRole; label: string }> = [
+    { value: 'manager', label: t('staff.roleManager') },
+    { value: 'staff', label: t('staff.roleStaff') },
+  ];
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -122,8 +159,11 @@ export default function StaffScreen() {
 
   const staffQuery = useQuery(api.app.listVenueStaff, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
   const staff = useMemo(() => (staffQuery ?? []) as StaffMember[], [staffQuery]);
+  const onboardingQuery = useQuery(api.app.listStaffOnboarding, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip') as OnboardingResponse | null | undefined;
+  const auditLogQuery = useQuery(api.app.listStaffAuditLog, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip') as { entries: AuditEntry[] } | null | undefined;
   const upsertStaff = useMutation(api.app.upsertVenueStaff);
   const deactivateStaff = useMutation(api.app.deactivateVenueStaff);
+  const updateOnboardingTask = useMutation(api.app.updateStaffOnboardingTask);
 
   // Custom roles + PIN invite
   const rolesQuery = useQuery(api.staffAuth.listVenueRoles, isReady && venue?.id && canManage ? { venueId: venue.id } : 'skip');
@@ -161,12 +201,81 @@ export default function StaffScreen() {
         role: inviteLinkRole,
         jobTitle: inviteLinkPosition.trim() || 'Team Member',
       });
-      await Share.share({ message: `Join ${venue.name} on Venue Wrangler: ${inviteUrl}` });
-      setInviteLinkMsg('Invite link generated and ready to share. It expires in 7 days.');
+      await Share.share({ message: t('staff.shareMessage', { venue: venue.name, url: inviteUrl }) });
+      setInviteLinkMsg(t('staff.inviteLinkGenerated'));
     } catch (e) {
-      setInviteLinkErr(e instanceof Error ? e.message : 'Could not generate link.');
+      setInviteLinkErr(errorMessage(e, t('staff.inviteLinkError')));
     } finally {
       setGeneratingLink(false);
+    }
+  };
+
+  // Roster migration: paste an export from any scheduling platform, let the AI
+  // normalize it, review the parsed rows, then commit them as staff invites.
+  const parseStaffImport = useAction(api.app.parseStaffImport);
+  const commitStaffImport = useMutation(api.app.commitStaffImport);
+  const [importText, setImportText] = useState('');
+  const [importRows, setImportRows] = useState<ParsedStaffImportRow[]>([]);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importErr, setImportErr] = useState<string | null>(null);
+
+  const onParseStaffImport = async () => {
+    if (!importText.trim()) return;
+    setImportErr(null);
+    setImportMsg(null);
+    setImportBusy(true);
+    try {
+      const result = await parseStaffImport({ text: importText });
+      const items = (result.items ?? []) as ParsedStaffImportRow[];
+      setImportRows(items);
+      setImportMsg(items.length > 0
+        ? t('staff.parsedPeople', { count: items.length, personLabel: items.length === 1 ? t('staff.person') : t('staff.people') })
+        : t('staff.noStaffRowsFound'));
+    } catch (e) {
+      setImportErr(errorMessage(e, t('staff.importParseFailed')));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const onCommitStaffImport = async () => {
+    if (!venue?.id || importRows.length === 0) return;
+    setImportErr(null);
+    setImportMsg(null);
+    setImportBusy(true);
+    try {
+      const result = await commitStaffImport({ venueId: venue.id, items: importRows });
+      const total = result.created + result.updated;
+      setImportMsg(
+        t('staff.addedUpdated', { created: result.created, updated: result.updated, plural: total === 1 ? '' : 's' }) +
+          (result.failed.length > 0 ? t('staff.rowsFailed', { count: result.failed.length, plural: result.failed.length === 1 ? '' : 's' }) : ''),
+      );
+      setImportRows([]);
+      setImportText('');
+    } catch (e) {
+      setImportErr(errorMessage(e, t('staff.importCommitFailed')));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const removeImportRow = (index: number) => setImportRows((prev) => prev.filter((_, i) => i !== index));
+
+  const pickImportCsv = async () => {
+    setImportErr(null);
+    setImportMsg(null);
+    setImportBusy(true);
+    try {
+      const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
+      if (doc.canceled || !doc.assets[0]?.uri) return;
+      const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
+      setImportText(text);
+      setImportMsg(t('staff.csvLoaded', { name: doc.assets[0].name ?? 'upload' }));
+    } catch (e) {
+      setImportErr(errorMessage(e, t('staff.csvLoadFailed')));
+    } finally {
+      setImportBusy(false);
     }
   };
 
@@ -183,6 +292,14 @@ export default function StaffScreen() {
   };
 
   const selectedStaff = staff.find((member: StaffMember) => member._id === selectedStaffId) ?? null;
+  const onboardingRows = onboardingQuery?.staff ?? [];
+  const selectedOnboarding = selectedStaffId
+    ? onboardingRows.find((row) => row._id === selectedStaffId) ?? null
+    : null;
+  const auditEntries = auditLogQuery?.entries ?? [];
+  const onboardingProgress = selectedOnboarding && selectedOnboarding.totalCount > 0
+    ? Math.round((selectedOnboarding.completedCount / selectedOnboarding.totalCount) * 100)
+    : 0;
 
   const fillFromStaff = (member: StaffMember) => {
     setSelectedStaffId(member._id);
@@ -212,34 +329,63 @@ export default function StaffScreen() {
 
   const onSubmit = async () => {
     if (!venue?.id || !canManage) return;
-    await upsertStaff({
-      venueId: venue.id,
-      fullName,
-      email,
-      role,
-      jobTitle,
-      phone: phone.trim() || undefined,
-      altPhone: altPhone.trim() || undefined,
-      address: address.trim() || undefined,
-      dateOfBirth: dateOfBirth.trim() || undefined,
-      certifications: certifications.length > 0 ? certifications : undefined,
-    });
-    clearForm();
+    try {
+      await upsertStaff({
+        venueId: venue.id,
+        staffId: selectedStaffId ?? undefined,
+        fullName,
+        email,
+        role,
+        jobTitle,
+        phone: phone.trim() || undefined,
+        altPhone: altPhone.trim() || undefined,
+        address: address.trim() || undefined,
+        dateOfBirth: dateOfBirth.trim() || undefined,
+        certifications: certifications.length > 0 ? certifications : undefined,
+      });
+      clearForm();
+    } catch (e) {
+      Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.saveFailed')));
+    }
   };
 
   const onDeactivate = async (member: StaffMember) => {
     if (!canManage) return;
-    await deactivateStaff({ staffId: member._id as Id<'profiles'> });
-    if (selectedStaffId === member._id) clearForm();
+    Alert.alert(t('staff.deactivateConfirmTitle'), t('staff.deactivateConfirmMessage', { name: member.fullName }), [
+      { text: t('staff.cancel'), style: 'cancel' },
+      { text: t('staff.deactivate'), style: 'destructive', onPress: async () => {
+        try {
+          await deactivateStaff({ staffId: member._id as Id<'profiles'> });
+          if (selectedStaffId === member._id) clearForm();
+        } catch (e) {
+          Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.actionFailed')));
+        }
+      }}
+    ]);
   };
 
+  const setOnboardingStatus = async (task: OnboardingTask, status: 'open' | 'done') => {
+    try {
+      await updateOnboardingTask({ taskId: task._id, status });
+    } catch (e) {
+      Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.onboardingUpdateFailed')));
+    }
+  };
+
+  if (profileLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
+        <Text style={{ color: colors.muted }}>{t('staff.loading')}</Text>
+      </View>
+    );
+  }
   if (!canManage) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: 8 }}>
-            <Text variant="headlineSmall">Staff Management</Text>
-            <Text style={{ color: colors.muted }}>Only admins and managers can manage staff roles and access.</Text>
+            <Text variant="headlineSmall">{t('staff.managementTitle')}</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.managementRestricted')}</Text>
           </Card.Content>
         </Card>
       </View>
@@ -247,36 +393,38 @@ export default function StaffScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: colors.background, padding: spacing.lg, gap: spacing.md }}>
-      <View style={{ gap: 4 }}>
-        <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>
-          Staff Management
-        </Text>
-        <Text style={{ color: colors.muted }}>
-          Add staff to {venue?.name ?? 'your venue'} and assign roles.
-        </Text>
-        <Text style={{ color: colors.muted }}>
-          Staff are scoped to this venue and can be promoted or updated without leaving the workspace.
-        </Text>
-        <Button
-          mode="outlined"
-          icon="account-check"
-          textColor={colors.primary}
-          onPress={() => router.push('/join-requests')}
-          style={{ alignSelf: 'flex-start', marginTop: 4 }}
-        >
-          Review join requests
-        </Button>
-      </View>
+    <FlatList
+      data={staff}
+      keyExtractor={(item) => item._id}
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md }}
+      removeClippedSubviews
+      ListHeaderComponent={(
+        <>
+      <SectionHeader
+        kicker={t('staff.kicker')}
+        title={t('staff.managementTitle')}
+        subtitle={t('staff.subtitle', { venue: venue?.name ?? t('common.yourVenue') })}
+        trailing={
+          <Button
+            mode="outlined"
+            icon="account-check"
+            textColor={colors.primary}
+            onPress={() => router.push('/join-requests')}
+          >
+            {t('staff.joinRequests')}
+          </Button>
+        }
+      />
 
       {/* Roles / positions */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Roles & positions</Text>
-          <Text style={{ color: colors.muted }}>Add the positions used at your venue (e.g. Bartender, Sommelier, Line Cook).</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('staff.rolesTitle')}</Text>
+          <Text style={{ color: colors.muted }}>{t('staff.rolesSubtitle')}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {customRoles.length === 0 ? (
-              <Text style={{ color: colors.muted }}>No custom roles yet.</Text>
+              <Text style={{ color: colors.muted }}>{t('staff.noCustomRoles')}</Text>
             ) : (
               customRoles.map((r) => (
                 <Chip key={r._id} onClose={() => venue?.id && void removeVenueRole({ venueId: venue.id, roleId: r._id as Id<'venueRoles'> })}>
@@ -286,65 +434,65 @@ export default function StaffScreen() {
             )}
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <PaperTextInput placeholder="New role name" value={newRole} onChangeText={setNewRole} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <Button mode="contained" buttonColor={colors.primary} onPress={() => void onAddRole()}>Add role</Button>
+            <PaperTextInput placeholder={t('staff.newRolePlaceholder')} value={newRole} onChangeText={setNewRole} mode="outlined" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <Button mode="contained" buttonColor={colors.primary} onPress={() => void onAddRole()}>{t('staff.addRole')}</Button>
           </View>
         </Card.Content>
       </Card>
 
       {/* Invite staff via link (primary) */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Invite staff via link</Text>
-          <Text style={{ color: colors.muted }}>Generate a 7-day invite link. Staff tap it, create an account or sign in, and are automatically added to {venue?.name ?? 'your venue'}.</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('staff.inviteLinkTitle')}</Text>
+          <Text style={{ color: colors.muted }}>{t('staff.inviteLinkSubtitle', { venue: venue?.name ?? t('common.yourVenue') })}</Text>
           <Dropdown
-            label="Access level"
+            label={t('staff.accessLevel')}
             value={inviteLinkRole}
             options={LINK_ACCESS_LEVELS}
             onSelect={(v) => setInviteLinkRole(v as 'manager' | 'staff')}
           />
           <Dropdown
-            label="Role / position"
+            label={t('staff.rolePosition')}
             value={inviteLinkPosition}
-            placeholder="Select a role"
+            placeholder={t('staff.selectRole')}
             options={jobRoleOptions}
             onSelect={setInviteLinkPosition}
           />
           {inviteLinkErr ? <Text style={{ color: colors.danger }}>{inviteLinkErr}</Text> : null}
           {inviteLinkMsg ? <Text style={{ color: accents[2].fg }}>{inviteLinkMsg}</Text> : null}
-          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()}>
-            Generate & share invite link
+          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel={t('staff.generateShareLink')}>
+            {t('staff.generateShareLink')}
           </Button>
         </Card.Content>
       </Card>
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Add staff by email</Text>
+          <Text variant="titleMedium">{t('staff.addByEmailTitle')}</Text>
           <Text style={{ color: colors.muted }}>
-            Add a teammate's email to your roster and assign their role. They sign in with their own email and password — once added, they gain access to {venue?.name ?? 'your venue'}.
+            {t('staff.addByEmailSubtitle', { venue: venue?.name ?? t('common.yourVenue') })}
           </Text>
-          <PaperTextInput placeholder="Full name" value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.fullNamePlaceholder')} value={fullName} onChangeText={setFullName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.emailPlaceholder')} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" mode="outlined" style={{ backgroundColor: colors.surface }} />
           <Dropdown
-            label="Access level"
+            label={t('staff.accessLevel')}
             value={role}
             options={ACCESS_LEVELS}
             onSelect={(v) => setRole(v as Role)}
           />
           <Dropdown
-            label="Role"
+            label={t('staff.roleLabel')}
             value={jobTitle}
-            placeholder="Select a role"
+            placeholder={t('staff.selectRole')}
             options={jobRoleOptions}
             onSelect={setJobTitle}
           />
-          <PaperTextInput placeholder="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Alt phone" value={altPhone} onChangeText={setAltPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Address" value={address} onChangeText={setAddress} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <PaperTextInput placeholder="Date of birth (YYYY-MM-DD)" value={dateOfBirth} onChangeText={setDateOfBirth} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.phonePlaceholder')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.altPhonePlaceholder')} value={altPhone} onChangeText={setAltPhone} keyboardType="phone-pad" mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.addressPlaceholder')} value={address} onChangeText={setAddress} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <PaperTextInput placeholder={t('staff.dobPlaceholder')} value={dateOfBirth} onChangeText={setDateOfBirth} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <View style={{ gap: 4 }}>
-            <Text style={{ color: colors.muted }}>Certifications</Text>
+            <Text style={{ color: colors.muted }}>{t('staff.certifications')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {CERTIFICATIONS.map((cert) => (
                 <Chip
@@ -361,29 +509,85 @@ export default function StaffScreen() {
               ))}
             </View>
           </View>
-          <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()}>
-            {selectedStaff ? 'Update staff member' : 'Add staff member'}
+          <Button mode="contained" buttonColor={colors.primary} onPress={() => void onSubmit()} accessibilityLabel={selectedStaff ? t('staff.updateStaffMember') : t('staff.addStaffMember')}>
+            {selectedStaff ? t('staff.updateStaffMember') : t('staff.addStaffMember')}
           </Button>
           {selectedStaff ? (
             <Button mode="text" textColor={colors.primary} onPress={clearForm}>
-              Clear selection
+              {t('staff.clearSelection')}
             </Button>
           ) : null}
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium">{t('staff.migrateTitle')}</Text>
+          <Text style={{ color: colors.muted }}>
+            {t('staff.migrateSubtitle')}
+          </Text>
+          <PaperTextInput
+            placeholder={t('staff.pasteRosterPlaceholder')}
+            value={importText}
+            onChangeText={setImportText}
+            mode="outlined"
+            multiline
+            numberOfLines={5}
+            style={{ backgroundColor: colors.surface, minHeight: 110 }}
+          />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            <Button
+              mode="contained"
+              buttonColor={colors.primary}
+              loading={importBusy}
+              disabled={importBusy || !importText.trim()}
+              onPress={() => void onParseStaffImport()}
+            >
+              {t('staff.parseRoster')}
+            </Button>
+            <Button mode="outlined" textColor={colors.primary} disabled={importBusy} onPress={() => void pickImportCsv()}>
+              {t('staff.uploadCsv')}
+            </Button>
+          </View>
+          {importRows.length > 0 ? (
+            <View style={{ gap: spacing.sm }}>
+              <Text style={{ fontWeight: '700' }}>{t('staff.reviewBeforeImport', { count: importRows.length })}</Text>
+              {importRows.map((row, index) => (
+                <View
+                  key={`${row.email}-${index}`}
+                  style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: '700' }}>{row.fullName}</Text>
+                    <Text style={{ color: colors.muted }}>{row.email} · {row.jobTitle} · {row.role}</Text>
+                  </View>
+                  <Button mode="text" textColor={colors.muted} compact onPress={() => removeImportRow(index)}>
+                    {t('staff.remove')}
+                  </Button>
+                </View>
+              ))}
+              <Button mode="contained" buttonColor={colors.primary} loading={importBusy} onPress={() => void onCommitStaffImport()}>
+                {t('staff.addStaffCount', { count: importRows.length, plural: importRows.length === 1 ? '' : 's' })}
+              </Button>
+            </View>
+          ) : null}
+          {importErr ? <Text style={{ color: colors.danger }}>{importErr}</Text> : null}
+          {importMsg ? <Text style={{ color: accents[2].fg }}>{importMsg}</Text> : null}
         </Card.Content>
       </Card>
 
       {selectedStaff ? (
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium">Deactivate selected staff</Text>
+            <Text variant="titleMedium">{t('staff.deactivateTitle')}</Text>
             <Text style={{ color: colors.muted }}>
-              Deactivate removes this staff member's access to the venue.
+              {t('staff.deactivateDesc')}
             </Text>
             <Text style={{ fontWeight: '700' }}>{selectedStaff.fullName}</Text>
             <Text style={{ color: colors.muted }}>{selectedStaff.email}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Button mode="contained" buttonColor={colors.primary} onPress={() => void onDeactivate(selectedStaff)}>
-                Deactivate
+                {t('staff.deactivate')}
               </Button>
             </View>
           </Card.Content>
@@ -392,47 +596,134 @@ export default function StaffScreen() {
 
       <Card style={{ backgroundColor: colors.surface }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium">Venue staff</Text>
-          {staff.length === 0 ? (
-            <Text style={{ color: colors.muted }}>No staff added yet.</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
+            <View style={{ flex: 1, minWidth: 220 }}>
+              <Text variant="titleMedium">{t('staff.onboardingTitle')}</Text>
+              <Text style={{ color: colors.muted }}>
+                {t('staff.onboardingSubtitle')}
+              </Text>
+            </View>
+            {selectedOnboarding ? (
+              <Chip compact style={{ backgroundColor: onboardingProgress === 100 ? accents[2].bg : accents[1].bg }}>
+                {t('staff.onboardingProgress', { completed: selectedOnboarding.completedCount, total: selectedOnboarding.totalCount })}
+              </Chip>
+            ) : null}
+          </View>
+
+          {!selectedStaff ? (
+            <Text style={{ color: colors.muted }}>{t('staff.onboardingChooseStaff')}</Text>
+          ) : !selectedOnboarding ? (
+            <Text style={{ color: colors.muted }}>{t('staff.onboardingLoading')}</Text>
           ) : (
-            staff.map((member: StaffMember) => (
-              <Card key={member._id} style={{ backgroundColor: member._id === selectedStaffId ? '#F6E8E4' : colors.cream }}>
-                <Card.Content style={{ gap: 6 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <View style={{ gap: spacing.sm }}>
+              <Text style={{ fontWeight: '700' }}>{selectedOnboarding.fullName}</Text>
+              <View style={{ height: 6, backgroundColor: colors.border, borderRadius: 999, overflow: 'hidden' }}>
+                <View style={{ height: 6, width: `${onboardingProgress}%`, backgroundColor: onboardingProgress === 100 ? accents[2].fg : colors.primary }} />
+              </View>
+              {selectedOnboarding.tasks.filter((task) => task.status !== 'cancelled').map((task) => (
+                <View key={task._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: '700' }}>{member.fullName}</Text>
-                      <Text style={{ color: colors.muted }}>{member.email}</Text>
+                      <Text style={{ fontWeight: '700', textDecorationLine: task.status === 'done' ? 'line-through' : 'none' }}>{task.title}</Text>
+                      {task.details ? <Text style={{ color: colors.muted, fontSize: 12 }}>{task.details}</Text> : null}
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>
+                        {task.completedAt
+                          ? t('staff.taskCompleted', { category: task.category, date: new Date(task.completedAt).toLocaleDateString() })
+                          : task.category}
+                      </Text>
                     </View>
-                    <Chip compact>{member.role}</Chip>
-                  </View>
-                  <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
-                  {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>Phone: {member.phone}</Text> : null}
-                  {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>DOB: {member.dateOfBirth}</Text> : null}
-                  {member.certifications?.length > 0 ? (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                      {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
-                    </View>
-                  ) : null}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    <Button mode="outlined" onPress={() => fillFromStaff(member)}>
-                      Edit
+                    <Button
+                      compact
+                      mode={task.status === 'done' ? 'outlined' : 'contained'}
+                      buttonColor={task.status === 'done' ? undefined : colors.primary}
+                      textColor={task.status === 'done' ? colors.primary : undefined}
+                      onPress={() => void setOnboardingStatus(task, task.status === 'done' ? 'open' : 'done')}
+                    >
+                      {task.status === 'done' ? t('staff.reopen') : t('staff.done')}
                     </Button>
-                    <Button mode="outlined" onPress={() => void onDeactivate(member)}>
-                      Deactivate
-                    </Button>
-                    {selectedStaffId === member._id ? (
-                      <Button mode="text" textColor={colors.primary} onPress={clearForm}>
-                        Deselect
-                      </Button>
-                    ) : null}
                   </View>
-                </Card.Content>
-              </Card>
+                </View>
+              ))}
+            </View>
+          )}
+        </Card.Content>
+      </Card>
+
+      <Card style={{ backgroundColor: colors.surface }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium">{t('staff.auditLogTitle')}</Text>
+          <Text style={{ color: colors.muted }}>
+            {t('staff.auditLogSubtitle')}
+          </Text>
+          {auditEntries.length === 0 ? (
+            <Text style={{ color: colors.muted }}>{t('staff.noAuditEntries')}</Text>
+          ) : (
+            auditEntries.slice(0, 8).map((entry) => (
+              <View key={entry._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
+                <Text style={{ fontWeight: '700' }}>{entry.summary}</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  {new Date(entry.createdAt).toLocaleString()} - {entry.actorName ?? 'System'} ({entry.actorRole ?? 'unknown'})
+                  {entry.targetName ? ` -> ${entry.targetName} (${entry.targetRole ?? 'unknown'})` : ''}
+                </Text>
+                <Chip compact style={{ alignSelf: 'flex-start' }}>{entry.action.replace(/_/g, ' ')}</Chip>
+              </View>
             ))
           )}
         </Card.Content>
       </Card>
-    </ScrollView>
+
+      <Card style={{ backgroundColor: colors.surface }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <Text variant="titleMedium">{t('staff.venueStaffTitle')}</Text>
+          {staff.length === 0 ? (
+            <Text style={{ color: colors.muted }}>{t('staff.noStaffYet')}</Text>
+          ) : null}
+        </Card.Content>
+      </Card>
+        </>
+      )}
+        renderItem={({ item: member }) => (
+          <View
+            style={{
+              gap: 6,
+              paddingVertical: spacing.sm,
+              paddingHorizontal: member._id === selectedStaffId ? spacing.sm : 0,
+              backgroundColor: member._id === selectedStaffId ? colors.cream : 'transparent',
+              borderBottomWidth: member._id === selectedStaffId ? 0 : 1,
+              borderBottomColor: colors.divider,
+              marginBottom: spacing.sm,
+            }}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: '700' }}>{member.fullName}</Text>
+                <Text style={{ color: colors.muted }}>{member.email}</Text>
+              </View>
+              <Chip compact>{member.role}</Chip>
+            </View>
+            <Text style={{ color: colors.muted }}>{member.jobTitle}</Text>
+            {member.phone ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('staff.phoneLabelValue', { phone: member.phone })}</Text> : null}
+            {member.dateOfBirth ? <Text style={{ color: colors.muted, fontSize: 12 }}>{t('staff.dobLabelValue', { dob: member.dateOfBirth })}</Text> : null}
+            {member.certifications?.length > 0 ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                {member.certifications.map((c) => <Chip key={c} compact>{c}</Chip>)}
+              </View>
+            ) : null}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <Button mode="outlined" onPress={() => fillFromStaff(member)}>
+                {t('staff.edit')}
+              </Button>
+              <Button mode="outlined" onPress={() => void onDeactivate(member)}>
+                {t('staff.deactivate')}
+              </Button>
+              {selectedStaffId === member._id ? (
+                <Button mode="text" textColor={colors.primary} onPress={clearForm}>
+                  {t('staff.deselect')}
+                </Button>
+              ) : null}
+            </View>
+          </View>
+        )}
+    />
   );
 }

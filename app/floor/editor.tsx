@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Dimensions, PanResponder, Pressable, ScrollView, View } from 'react-native';
-import { Button, Card, Chip, IconButton, Text, TextInput } from 'react-native-paper';
+import { Button, Chip, IconButton, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { accents, colors, spacing } from '../../lib/theme';
+import { colors, spacing, type } from '../../lib/theme';
+import { AppCard, SectionHeader } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
+import { useI18n } from '../../lib/i18n';
+import { errorMessage } from '../../lib/format';
 
 type Shape = 'round' | 'square' | 'rect' | 'booth';
 type Section = 'main' | 'patio' | 'bar' | 'vip';
@@ -64,6 +67,59 @@ const MIN_SIZE = 50;
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 const snap = (v: number, grid = 10) => Math.round(v / grid) * grid;
 
+// A ready-made starter layout: a grid of tables across the service areas plus a
+// short row of standalone bar stools. Every position is clamped into the given
+// room, so it also lands sensibly in a smaller venue.
+function buildSampleLayout(venueW: number, venueH: number): { tables: DraftTable[]; chairs: DraftChair[] } {
+  const tables: DraftTable[] = [];
+  const chairs: DraftChair[] = [];
+  let n = 0;
+  const addTable = (shape: Shape, section: Section, x: number, y: number) => {
+    const d = shapeDefaults[shape];
+    n += 1;
+    tables.push({
+      key: `sample_t_${n}`,
+      label: `T${n}`,
+      shape,
+      seats: d.seats,
+      seatLabelStyle: 'number',
+      x: snap(clamp(x, 0, Math.max(0, venueW - d.width))),
+      y: snap(clamp(y, 0, Math.max(0, venueH - d.height))),
+      width: d.width,
+      height: d.height,
+      rotation: 0,
+      section,
+      minSpend: section === 'vip' ? 25000 : 0,
+      isReservable: true,
+    });
+  };
+
+  // Main dining: 2 rows × 3 columns of round 4-tops.
+  for (const ry of [90, 300]) for (const cx of [90, 300, 510]) addTable('round', 'main', cx, ry);
+  // Two large rectangle tables along the lower main area.
+  addTable('rect', 'main', 90, 520);
+  addTable('rect', 'main', 300, 520);
+  // VIP booths down the right side.
+  addTable('booth', 'vip', 760, 90);
+  addTable('booth', 'vip', 760, 240);
+  // Patio rounds, lower-right.
+  addTable('round', 'patio', 780, 420);
+  addTable('round', 'patio', 780, 560);
+
+  // A short bar: four standalone stools in a row.
+  for (let i = 0; i < 4; i += 1) {
+    chairs.push({
+      key: `sample_c_${i + 1}`,
+      x: snap(clamp(520 + i * 44, 0, Math.max(0, venueW - CHAIR_SIZE))),
+      y: snap(clamp(560, 0, Math.max(0, venueH - CHAIR_SIZE))),
+      rotation: 0,
+      label: '',
+    });
+  }
+
+  return { tables, chairs };
+}
+
 // Chair (seat) positions around a table in table-local coordinates.
 function chairPositions(shape: Shape, w: number, h: number, seats: number): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
@@ -103,6 +159,7 @@ function TableNode({
   onMove: (x: number, y: number) => void;
   onResize: (w: number, h: number) => void;
 }) {
+  const { t } = useI18n();
   const pos = useRef(new Animated.ValueXY({ x: table.x, y: table.y })).current;
   const size = useRef(new Animated.ValueXY({ x: table.width, y: table.height })).current;
   const start = useRef({ x: table.x, y: table.y, w: table.width, h: table.height });
@@ -213,7 +270,7 @@ function TableNode({
         }}
       >
         <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{table.label}</Text>
-        <Text style={{ color: '#fff', fontSize: 10 }}>{table.seats} seats</Text>
+        <Text style={{ color: '#fff', fontSize: 10 }}>{t('floorEditor.seatsCount', { count: table.seats })}</Text>
       </Animated.View>
       {selected ? (
         <View
@@ -330,6 +387,7 @@ function ChairNode({
 }
 
 export default function FloorEditorScreen() {
+  const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
@@ -337,7 +395,7 @@ export default function FloorEditorScreen() {
   const saveFloorPlan = useMutation(api.floor.saveFloorPlan);
   const clearActiveFloorPlan = useMutation(api.floor.clearActiveFloorPlan);
 
-  const canEdit = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canEdit = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const [tables, setTables] = useState<DraftTable[]>([]);
   const [chairs, setChairs] = useState<DraftChair[]>([]);
@@ -348,6 +406,8 @@ export default function FloorEditorScreen() {
   const [name, setName] = useState('Main Floor');
   const [saved, setSaved] = useState(false);
   const [clearMessage, setClearMessage] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [clearError, setClearError] = useState<string | null>(null);
   const counter = useRef(0);
   const chairCounter = useRef(0);
 
@@ -459,48 +519,74 @@ export default function FloorEditorScreen() {
 
   const onPublish = async () => {
     if (!venue?.id) return;
-    await saveFloorPlan({
-      venueId: venue.id,
-      name: name.trim() || 'Main Floor',
-      width: venueW,
-      height: venueH,
-      backgroundImageUrl: null,
-      tables: tables.map((t) => ({
-        label: t.label,
-        shape: t.shape,
-        seats: t.seats,
-        seatLabelStyle: t.seatLabelStyle,
-        x: t.x,
-        y: t.y,
-        width: t.width,
-        height: t.height,
-        rotation: t.rotation,
-        section: t.section,
-        minSpend: t.minSpend,
-        isReservable: t.isReservable,
-      })),
-      chairs: chairs.map((c) => ({ x: c.x, y: c.y, rotation: c.rotation, label: c.label || undefined })),
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    setPublishError(null);
+    try {
+      await saveFloorPlan({
+        venueId: venue.id,
+        name: name.trim() || 'Main Floor',
+        width: venueW,
+        height: venueH,
+        backgroundImageUrl: null,
+        tables: tables.map((t) => ({
+          label: t.label,
+          shape: t.shape,
+          seats: t.seats,
+          seatLabelStyle: t.seatLabelStyle,
+          x: t.x,
+          y: t.y,
+          width: t.width,
+          height: t.height,
+          rotation: t.rotation,
+          section: t.section,
+          minSpend: t.minSpend,
+          isReservable: t.isReservable,
+        })),
+        chairs: chairs.map((c) => ({ x: c.x, y: c.y, rotation: c.rotation, label: c.label || undefined })),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setPublishError(errorMessage(e, t('floorEditor.publishFailed')));
+    }
+  };
+
+  const loadSampleLayout = () => {
+    const sample = buildSampleLayout(venueW, venueH);
+    setTables(sample.tables);
+    setChairs(sample.chairs);
+    setSelectedKey(null);
+    setSelectedChairKey(null);
+    setClearMessage(
+      t('floorEditor.sampleLoadedMessage', { tables: sample.tables.length, chairs: sample.chairs.length }),
+    );
+    setTimeout(() => setClearMessage(null), 4000);
   };
 
   const onClearFloorPlan = async () => {
     if (!venue?.id) return;
+    const previousTables = tables;
+    const previousChairs = chairs;
     setTables([]);
     setChairs([]);
     setSelectedKey(null);
     setSelectedChairKey(null);
     setClearMessage(null);
-    const result = await clearActiveFloorPlan({ venueId: venue.id });
-    setClearMessage(`Cleared ${result.deletedTables} table${result.deletedTables === 1 ? '' : 's'} and ${result.deletedChairs} chair${result.deletedChairs === 1 ? '' : 's'}.`);
-    setTimeout(() => setClearMessage(null), 3000);
+    setClearError(null);
+    try {
+      const result = await clearActiveFloorPlan({ venueId: venue.id });
+      setClearMessage(t('floorEditor.clearedMessage', { tables: result.deletedTables, chairs: result.deletedChairs }));
+      setTimeout(() => setClearMessage(null), 3000);
+    } catch (e) {
+      setTables(previousTables);
+      setChairs(previousChairs);
+      setClearError(errorMessage(e, t('floorEditor.clearFailed')));
+    }
   };
 
   if (!canEdit) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Only managers and admins can edit the floor plan.</Text>
+        <Text style={{ color: colors.muted }}>{t('floorEditor.onlyManagersCanEdit')}</Text>
       </View>
     );
   }
@@ -514,51 +600,49 @@ export default function FloorEditorScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Floor editor</Text>
-          <Text style={{ color: colors.muted }}>Drag to move · drag the corner to resize · tap to select.</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>{t('floorEditor.title')}</Text>
+          <Text style={{ color: colors.muted }}>{t('floorEditor.subtitle')}</Text>
         </View>
       </View>
 
       {/* Add shapes */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Add to floor</Text>
+      <AppCard>
+          <SectionHeader title={t('floorEditor.addToFloor')} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Button mode="contained-tonal" icon="circle-outline" onPress={() => addTable('round')}>Circle</Button>
-            <Button mode="contained-tonal" icon="square-outline" onPress={() => addTable('square')}>Square</Button>
-            <Button mode="contained-tonal" icon="rectangle-outline" onPress={() => addTable('rect')}>Rectangle</Button>
-            <Button mode="contained-tonal" icon="sofa-outline" onPress={() => addTable('booth')}>Booth</Button>
-            <Button mode="contained-tonal" icon="seat-outline" onPress={addChair}>Chair</Button>
-            <Button mode="outlined" textColor={colors.danger} icon="delete-sweep-outline" onPress={() => void onClearFloorPlan()}>Clear floor plan</Button>
+            <Button mode="contained-tonal" icon="circle-outline" onPress={() => addTable('round')}>{t('floorEditor.circle')}</Button>
+            <Button mode="contained-tonal" icon="square-outline" onPress={() => addTable('square')}>{t('floorEditor.square')}</Button>
+            <Button mode="contained-tonal" icon="rectangle-outline" onPress={() => addTable('rect')}>{t('floorEditor.rectangle')}</Button>
+            <Button mode="contained-tonal" icon="sofa-outline" onPress={() => addTable('booth')}>{t('floorEditor.booth')}</Button>
+            <Button mode="contained-tonal" icon="seat-outline" onPress={addChair}>{t('floorEditor.chair')}</Button>
+            <Button mode="contained-tonal" icon="auto-fix" onPress={loadSampleLayout}>{t('floorEditor.loadSample')}</Button>
+            <Button mode="outlined" textColor={colors.danger} icon="delete-sweep-outline" onPress={() => void onClearFloorPlan()}>{t('floorEditor.clearFloorPlan')}</Button>
           </View>
-          {clearMessage ? <Text style={{ color: colors.muted }}>{clearMessage}</Text> : null}
-        </Card.Content>
-      </Card>
+          {clearMessage ? <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{clearMessage}</Text> : null}
+          {clearError ? <Text style={{ color: colors.danger, marginTop: spacing.sm }}>{clearError}</Text> : null}
+      </AppCard>
 
       {/* Venue size */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Venue size</Text>
-          <Text style={{ color: colors.muted }}>Resize the room rectangle to fit your venue.</Text>
+      <AppCard>
+          <SectionHeader title={t('floorEditor.venueSize')} subtitle={t('floorEditor.venueSizeSubtitle')} />
+          <View style={{ gap: spacing.sm }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ width: 56 }}>Width</Text>
+            <Text style={{ width: 56 }}>{t('floorEditor.width')}</Text>
             <IconButton icon="minus" mode="outlined" size={16} onPress={() => setVenueW((w) => Math.max(400, w - 100))} />
             <Text style={{ minWidth: 48, textAlign: 'center' }}>{venueW}</Text>
             <IconButton icon="plus" mode="outlined" size={16} onPress={() => setVenueW((w) => Math.min(2400, w + 100))} />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ width: 56 }}>Height</Text>
+            <Text style={{ width: 56 }}>{t('floorEditor.height')}</Text>
             <IconButton icon="minus" mode="outlined" size={16} onPress={() => setVenueH((h) => Math.max(300, h - 100))} />
             <Text style={{ minWidth: 48, textAlign: 'center' }}>{venueH}</Text>
             <IconButton icon="plus" mode="outlined" size={16} onPress={() => setVenueH((h) => Math.min(2000, h + 100))} />
           </View>
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
 
       {/* Service-area legend */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Service areas</Text>
+      <AppCard>
+          <SectionHeader title={t('floorEditor.serviceAreas')} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
             {sections.map((s) => (
               <View key={s} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -567,12 +651,10 @@ export default function FloorEditorScreen() {
               </View>
             ))}
           </View>
-        </Card.Content>
-      </Card>
+      </AppCard>
 
       {/* Canvas */}
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
+      <AppCard>
           <View
             style={{
               width: canvasW,
@@ -614,32 +696,31 @@ export default function FloorEditorScreen() {
             </Pressable>
           </View>
           {tables.length === 0 && chairs.length === 0 ? (
-            <Text style={{ color: colors.muted, textAlign: 'center' }}>Add a table or chair above to start building your floor.</Text>
+            <Text style={{ color: colors.muted, textAlign: 'center', marginTop: spacing.sm }}>{t('floorEditor.emptyCanvasNotice')}</Text>
           ) : null}
-        </Card.Content>
-      </Card>
+      </AppCard>
 
       {/* Selected table inspector */}
       {selected ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
+        <AppCard>
+          <View style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>{selected.label}</Text>
-              <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelected}>Delete</Button>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>{selected.label}</Text>
+              <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelected}>{t('floorEditor.delete')}</Button>
             </View>
 
-            <TextInput label="Label" value={selected.label} onChangeText={(v) => update(selected.key, { label: v })} mode="outlined" style={{ backgroundColor: colors.surface }} />
+            <TextInput label={t('floorEditor.label')} value={selected.label} onChangeText={(v) => update(selected.key, { label: v })} mode="outlined" style={{ backgroundColor: colors.surface }} />
 
-            <Text style={{ color: colors.muted }}>Shape</Text>
+            <Text style={{ color: colors.muted }}>{t('floorEditor.shape')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {(['round', 'square', 'rect', 'booth'] as Shape[]).map((sh) => (
                 <Chip key={sh} selected={selected.shape === sh} onPress={() => update(selected.key, { shape: sh })}>
-                  {sh === 'round' ? 'Circle' : sh === 'rect' ? 'Rectangle' : sh.charAt(0).toUpperCase() + sh.slice(1)}
+                  {sh === 'round' ? t('floorEditor.shapeCircle') : sh === 'rect' ? t('floorEditor.shapeRectangle') : sh === 'square' ? t('floorEditor.square') : t('floorEditor.booth')}
                 </Chip>
               ))}
             </View>
 
-            <Text style={{ color: colors.muted }}>Service area</Text>
+            <Text style={{ color: colors.muted }}>{t('floorEditor.serviceArea')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {sections.map((s) => (
                 <Chip
@@ -655,23 +736,23 @@ export default function FloorEditorScreen() {
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ width: 64 }}>Seats</Text>
+              <Text style={{ width: 64 }}>{t('floorEditor.seats')}</Text>
               <IconButton icon="minus" mode="outlined" size={16} onPress={() => update(selected.key, { seats: Math.max(0, selected.seats - 1) })} />
               <Text style={{ minWidth: 28, textAlign: 'center' }}>{selected.seats}</Text>
               <IconButton icon="plus" mode="outlined" size={16} onPress={() => update(selected.key, { seats: Math.min(20, selected.seats + 1) })} />
             </View>
 
-            <Text style={{ color: colors.muted }}>Seat labels</Text>
+            <Text style={{ color: colors.muted }}>{t('floorEditor.seatLabels')}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {(['number', 'letter', 'none'] as SeatLabelStyle[]).map((st) => (
                 <Chip key={st} selected={selected.seatLabelStyle === st} onPress={() => update(selected.key, { seatLabelStyle: st })}>
-                  {st === 'number' ? '1, 2, 3' : st === 'letter' ? 'A, B, C' : 'Hidden'}
+                  {st === 'number' ? t('floorEditor.seatLabelsNumber') : st === 'letter' ? t('floorEditor.seatLabelsLetter') : t('floorEditor.seatLabelsHidden')}
                 </Chip>
               ))}
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ width: 64 }}>Rotate</Text>
+              <Text style={{ width: 64 }}>{t('floorEditor.rotate')}</Text>
               <IconButton icon="rotate-left" mode="outlined" size={16} onPress={() => update(selected.key, { rotation: (selected.rotation - 15 + 360) % 360 })} />
               <Text style={{ minWidth: 40, textAlign: 'center' }}>{selected.rotation}°</Text>
               <IconButton icon="rotate-right" mode="outlined" size={16} onPress={() => update(selected.key, { rotation: (selected.rotation + 15) % 360 })} />
@@ -683,35 +764,36 @@ export default function FloorEditorScreen() {
               onPress={() => update(selected.key, { isReservable: !selected.isReservable })}
               style={{ alignSelf: 'flex-start' }}
             >
-              {selected.isReservable ? 'Reservable' : 'Not reservable'}
+              {selected.isReservable ? t('floorEditor.reservable') : t('floorEditor.notReservable')}
             </Chip>
-          </Card.Content>
-        </Card>
+          </View>
+        </AppCard>
       ) : null}
 
       {selectedChair ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content style={{ gap: spacing.sm }}>
+        <AppCard>
+          <View style={{ gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ fontWeight: '700' }}>Chair{selectedChair.label ? ` · ${selectedChair.label}` : ''}</Text>
-              <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelectedChair}>Delete</Button>
+              <Text style={{ ...type.heading, color: colors.charcoal }}>{t('floorEditor.chairTitle')}{selectedChair.label ? ` · ${selectedChair.label}` : ''}</Text>
+              <Button compact mode="text" textColor={colors.danger} icon="delete" onPress={deleteSelectedChair}>{t('floorEditor.delete')}</Button>
             </View>
-            <TextInput label="Label (e.g. Bar 1)" value={selectedChair.label} onChangeText={(v) => updateChair(selectedChair.key, { label: v })} mode="outlined" style={{ backgroundColor: colors.surface }} />
+            <TextInput label={t('floorEditor.chairLabelPlaceholder')} value={selectedChair.label} onChangeText={(v) => updateChair(selectedChair.key, { label: v })} mode="outlined" style={{ backgroundColor: colors.surface }} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ width: 64 }}>Rotate</Text>
+              <Text style={{ width: 64 }}>{t('floorEditor.rotate')}</Text>
               <IconButton icon="rotate-left" mode="outlined" size={16} onPress={() => updateChair(selectedChair.key, { rotation: (selectedChair.rotation - 15 + 360) % 360 })} />
               <Text style={{ minWidth: 40, textAlign: 'center' }}>{selectedChair.rotation}°</Text>
               <IconButton icon="rotate-right" mode="outlined" size={16} onPress={() => updateChair(selectedChair.key, { rotation: (selectedChair.rotation + 15) % 360 })} />
             </View>
-            <Text style={{ color: colors.muted }}>Drag the chair on the canvas to position it.</Text>
-          </Card.Content>
-        </Card>
+            <Text style={{ color: colors.muted }}>{t('floorEditor.dragChairNotice')}</Text>
+          </View>
+        </AppCard>
       ) : null}
 
       <Button mode="contained" buttonColor={colors.primary} icon="content-save" onPress={() => void onPublish()}>
-        Save & publish floor plan
+        {t('floorEditor.savePublish')}
       </Button>
-      {saved ? <Text style={{ color: accents[2].fg, textAlign: 'center' }}>Saved ✓</Text> : null}
+      {saved ? <Text style={{ color: colors.success, textAlign: 'center' }}>{t('floorEditor.saved')}</Text> : null}
+      {publishError ? <Text style={{ color: colors.danger, textAlign: 'center' }}>{publishError}</Text> : null}
     </ScrollView>
   );
 }

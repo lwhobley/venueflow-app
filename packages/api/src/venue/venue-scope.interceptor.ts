@@ -10,6 +10,7 @@ import type { AuthenticatedRequest } from '../auth/auth.guard';
 import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { Role } from '@prisma/client';
 
 export type VenueScopedRequest = AuthenticatedRequest & {
   venueScope?: {
@@ -58,7 +59,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const profile = await this.prisma.profile.findFirst({
+    const profile = await this.prisma.profile.findUnique({
       where: { userId: user.sub },
       include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
     });

@@ -8,14 +8,13 @@ import { config } from '../lib/config';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { hasAllAccess } from '../lib/permissions';
 
-// Wraps premium-only features (Integrations, CRM). The 14-day trial unlocks
-// these features automatically after signup; after it expires the user must
-// upgrade. When billing is disabled (local/dev builds) the feature is always
-// unlocked.
+// Wraps premium-only features (Integrations, CRM). Intro access unlocks these
+// features until it expires; after that the user must upgrade. When billing is
+// disabled (local/dev builds) the feature is always unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
-  const { user, me, isAuthLoading } = useAuthenticatedSession();
+  const { me, isAuthLoading } = useAuthenticatedSession();
   const { isPremium, isLoading } = useA0Purchases();
-  const allAccess = hasAllAccess(me?.profile.allAccess ?? user?.all_access);
+  const allAccess = hasAllAccess(me?.profile.allAccess);
 
   // Avoid flashing the upsell while entitlement or profile is still resolving.
   if (isLoading || isAuthLoading || me === undefined) {
@@ -27,7 +26,7 @@ export function PremiumFeatureGate({ feature, children }: { feature: string; chi
     return <>{children}</>;
   }
 
-  const headline = 'Your free trial has ended';
+  const headline = 'Intro access has ended';
   const body = `Upgrade to a paid plan to unlock ${feature} and the rest of Venue Wrangler.`;
 
   return (

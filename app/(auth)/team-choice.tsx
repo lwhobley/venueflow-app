@@ -1,20 +1,22 @@
-import { useEffect } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
-import { authCardStyle, authColors as colors, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useI18n } from '../../lib/i18n';
 
 export default function TeamChoiceScreen() {
+  const { t } = useI18n();
   const venue = useAuthStore((s: AuthState) => s.venue);
+  const clearSession = useAuthStore((s: AuthState) => s.clearSession);
 
-  useEffect(() => {
-    if (venue) {
-      router.replace('/(tabs)/home');
-    }
-  }, [venue]);
+  const useDifferentAccount = () => {
+    clearSession();
+    router.replace('/(auth)/welcome');
+  };
 
-  if (venue) return null;
+  if (venue) return <Redirect href="/(tabs)/home" />;
 
   return (
     <KeyboardAvoidingView
@@ -30,37 +32,20 @@ export default function TeamChoiceScreen() {
         }}
       >
         <View style={{ gap: 6, alignItems: 'center' }}>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
-            How do you want to get started?
+          <Kicker>{t('teamChoice.kicker')}</Kicker>
+          <Text style={{ ...type.title, color: colors.text, textAlign: 'center' }}>
+            {t('teamChoice.title')}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted, textAlign: 'center' }}>
-            Create a new team for your venue, or join an existing one.
+            {t('teamChoice.subtitle')}
           </Text>
         </View>
 
         <Card style={styles.card}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700', color: colors.text }}>I'm an owner or manager</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '700', color: colors.text }}>{t('teamChoice.cardTitle')}</Text>
             <Text style={{ color: colors.muted }}>
-              Set up your venue and start managing your team right away.
-            </Text>
-            <Button
-              mode="contained"
-              buttonColor={colors.primary}
-              textColor={colors.buttonText}
-              icon="plus-circle-outline"
-              onPress={() => router.push('/(auth)/create-venue')}
-            >
-              Create a team
-            </Button>
-          </Card.Content>
-        </Card>
-
-        <Card style={styles.card}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700', color: colors.text }}>I'm joining a team</Text>
-            <Text style={{ color: colors.muted }}>
-              Your manager already set things up — find your venue or use an invite.
+              {t('teamChoice.cardBody')}
             </Text>
             <Button
               mode="contained"
@@ -69,17 +54,19 @@ export default function TeamChoiceScreen() {
               icon="account-group-outline"
               onPress={() => router.push('/(auth)/invite-check')}
             >
-              I have an invite
-            </Button>
-            <Button
-              mode="outlined"
-              textColor={colors.primary}
-              onPress={() => router.push('/(auth)/workplace-search')}
-            >
-              Search for my workplace
+              {t('teamChoice.findInviteButton')}
             </Button>
           </Card.Content>
         </Card>
+
+        <View style={{ alignItems: 'center', gap: 2, marginTop: spacing.sm }}>
+          <Text style={{ color: colors.muted, textAlign: 'center' }}>
+            {t('teamChoice.differentLoginQuestion')}
+          </Text>
+          <Button mode="text" textColor={colors.primary} onPress={useDifferentAccount}>
+            {t('teamChoice.signInDifferentAccount')}
+          </Button>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

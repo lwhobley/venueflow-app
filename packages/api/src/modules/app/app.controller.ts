@@ -8,14 +8,20 @@ import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
+import { unpaidBreakMs } from '../../common/break-duration';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
+import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { sanitizeForEmail } from '../../common/sanitize-email-text';
+import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappers';
+import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
 import { ProfileService } from './profile.service';
+import { syncTeamMemberCount } from '../../common/team-sync';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
@@ -106,6 +112,12 @@ class ClockDto {
   mocked!: boolean;
 }
 
+class BreakStartDto {
+  @IsString()
+  @IsIn(['paid', 'unpaid'])
+  type!: 'paid' | 'unpaid';
+}
+
 class VenueRoleDto {
   @IsString()
   name!: string;
@@ -188,10 +200,22 @@ export class AppController {
       include: { venue: true },
     });
 
+    const venueName = profile.venue?.name ?? 'your venue';
     void this.email.send({
       to: profile.email,
-      subject: 'Your Venue Wrangler account was updated',
-      text: `Hi ${profile.fullName},\n\nYour Venue Wrangler account profile was updated.`,
+      subject: 'Your Venue Wrangler Account Was Updated',
+      text:
+        `Hi ${profile.fullName},\n\n` +
+        `Your Venue Wrangler account profile was successfully updated. Here are your current profile details:\n\n` +
+        `Updated Profile Details\n` +
+        `Detail\tInfo\n` +
+        `Name\t${profile.fullName}\n` +
+        `Role\t${profile.role}\n` +
+        `Job Title\t${profile.jobTitle}\n` +
+        (profile.venueId ? `Venue\t${venueName}\n` : '') + '\n' +
+        `If you have any questions or did not authorize this, please contact support.\n\n` +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
 
     return {
@@ -208,6 +232,14 @@ export class AppController {
     if (!businessName) throw new BadRequestException('Enter your business name');
     if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new BadRequestException('Choose a staff size range');
 
+    // The intended client flow already routes signup through email
+    // verification before create-venue; enforce it server-side too so a
+    // direct API call can't create a venue (and start a trial) on an
+    // unverified account.
+    if (!(await this.isEmailVerified(user.sub))) {
+      throw new ForbiddenException('Verify your email before creating a venue.');
+    }
+
     const existingProfile = await this.getProfile(user);
     if (existingProfile?.venue) {
       const emailVerified = await this.isEmailVerified(user.sub);
@@ -221,9 +253,10 @@ export class AppController {
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
     const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`register-venue:${user.sub}`}))`;
       // Re-check inside the transaction so a double-submit doesn't create a
       // second venue + subscription for an owner who already has one.
-      const current = await tx.profile.findFirst({ where: { userId: user.sub }, include: { venue: true } });
+      const current = await tx.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
       if (current?.venue) {
         return { profile: current, venue: current.venue };
       }
@@ -272,10 +305,11 @@ export class AppController {
           trialEndsAt,
         },
       });
+      await syncTeamMemberCount(tx, venue.id);
       return { profile, venue };
     });
 
-    return { profile: mapProfile(result.profile), venue: mapVenue(result.venue) };
+    return { profile: mapProfile(result.profile, true), venue: mapVenue(result.venue) };
   }
 
   @UseGuards(AuthGuard)
@@ -289,16 +323,17 @@ export class AppController {
         ...(body.name?.trim() ? { name: body.name.trim() } : {}),
         ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
         ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
-        ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(20, Math.min(2000, body.geofenceRadiusM)) } : {}),
+        ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(25, Math.min(2000, body.geofenceRadiusM)) } : {}),
       },
     });
     return mapVenue(venue);
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('dashboard')
   async getDashboard(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
+    const profile = await this.requireVenueProfile(user);
     if (!profile?.venue) return null;
     const canManage = isAdminRole(profile.role);
     const shiftWhere = {
@@ -327,8 +362,9 @@ export class AppController {
     ]);
     const countByStatus = (status: string) => shiftCounts.find((c) => c.status === status)?._count._all ?? 0;
 
+    const emailVerified = await this.isEmailVerified(user.sub);
     return {
-      profile: mapProfile(profile),
+      profile: mapProfile(profile, emailVerified),
       venue: mapVenue(profile.venue),
       analytics: {
         teamCount,
@@ -344,9 +380,10 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('manager-insights')
   async getManagerInsights(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
+    const profile = await this.requireVenueProfile(user);
     if (!profile?.venueId || !isAdminRole(profile.role)) return null;
     const venueId = profile.venueId;
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -396,13 +433,13 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('notifications')
   async getNotifications(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venueId) return [];
+    const profile = await this.requireVenueProfile(user);
     const rows = await this.prisma.notificationEvent.findMany({
       where: {
-        venueId: profile.venueId,
+        venueId: profile.venueId!,
         OR: [
           { audience: 'staff' },
           ...(isAdminRole(profile.role) ? [{ audience: 'managers' }] : []),
@@ -444,10 +481,10 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('clock-board')
   async getClockBoard(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile?.venue) return null;
+    const profile = await this.requireVenueProfile(user);
     const entries = await this.prisma.timeEntry.findMany({
       where: { venueId: profile.venueId!, isOpen: true },
       include: { profile: true, venue: true },
@@ -456,7 +493,7 @@ export class AppController {
     });
     const openEntries = entries.map((entry) => mapClockEntry(entry, entry.profile, entry.venue));
     return {
-      venue: mapVenue(profile.venue),
+      venue: mapVenue(profile.venue!),
       activeClockEntries: isAdminRole(profile.role) ? openEntries : [],
       employeeEntry: openEntries.find((entry) => entry.memberId === profile.id) ?? null,
       managerAlerts: [],
@@ -464,18 +501,17 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Get('time-clock')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile) return null;
+    const profile = await this.requireVenueProfile(user);
     const entries = await this.prisma.timeEntry.findMany({
       where: { profileId: profile.id },
       orderBy: { clockInAt: 'desc' },
       take: 100,
     });
     const open = entries.find((entry) => entry.isOpen) ?? null;
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = new Date(zonedDayBounds(profile.venue?.timezone ?? null, 0).start);
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const punches = entries
       .flatMap((entry) => [
@@ -485,13 +521,29 @@ export class AppController {
       .sort((a, b) => a.at - b.at);
     const regularHours = entries.reduce((sum, entry) => {
       if (!entry.clockOutAt || entry.clockOutAt.getTime() < weekAgo) return sum;
-      return sum + (entry.clockOutAt.getTime() - entry.clockInAt.getTime()) / 3600000;
+      let durationMs = entry.clockOutAt.getTime() - entry.clockInAt.getTime();
+      const breaks = (entry.breaks as any[]) || [];
+      for (const b of breaks) {
+        if (b.type === 'unpaid' && b.startAt && b.endAt) {
+          durationMs -= unpaidBreakMs(b.startAt, b.endAt);
+        }
+      }
+      return sum + Math.max(0, durationMs) / 3600000;
     }, 0);
     const rounded = Math.round(regularHours * 10) / 10;
-    return { isClockedIn: Boolean(open), openSince: toMs(open?.clockInAt), regularHours: rounded, sickHours: 0, totalHours: rounded, punches };
+    return {
+      isClockedIn: Boolean(open),
+      openSince: toMs(open?.clockInAt),
+      regularHours: rounded,
+      sickHours: profile.sickHoursAccrued,
+      ptoHours: profile.ptoHoursAccrued,
+      totalHours: rounded,
+      punches,
+    };
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Post('clock-in')
   async clockIn(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
     const profile = await this.requireVenueProfile(user);
@@ -500,6 +552,31 @@ export class AppController {
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
     if (existing) throw new BadRequestException('Already clocked in');
+
+    if (!isAdminRole(profile.role)) {
+      const nowMs = Date.now();
+      const today = zonedDayOfWeek(venue.timezone, nowMs);
+      const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
+      const shift = await this.prisma.scheduleShift.findFirst({
+        where: {
+          venueId: venue.id,
+          profileId: profile.id,
+          dayIndex: today,
+          status: 'scheduled',
+        },
+        orderBy: { startMinutes: 'asc' },
+      });
+      if (shift) {
+        const earlyWindow = venue.earlyClockInWindowMin ?? 10;
+        if (minutesNow < shift.startMinutes - earlyWindow) {
+          const formattedStart = minutesToTime(shift.startMinutes);
+          throw new BadRequestException(
+            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
+          );
+        }
+      }
+    }
+
     try {
       const entry = await this.prisma.timeEntry.create({
         data: {
@@ -524,6 +601,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @RequireSubscription()
   @Post('clock-out')
   async clockOut(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
     const profile = await this.requireVenueProfile(user);
@@ -532,8 +610,8 @@ export class AppController {
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
     if (!existing) throw new BadRequestException('No active clock-in found');
-    const entry = await this.prisma.timeEntry.update({
-      where: { id: existing.id },
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: existing.id, isOpen: true, updatedAt: existing.updatedAt },
       data: {
         clockOutAt: new Date(),
         clockOutLat: body.lat,
@@ -542,9 +620,65 @@ export class AppController {
         clockOutMocked: body.mocked,
         isOpen: false,
       },
+    });
+    if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');
+    const entry = await this.prisma.timeEntry.findUniqueOrThrow({
+      where: { id: existing.id },
       include: { profile: true, venue: true },
     });
     return mapClockEntry(entry, entry.profile, entry.venue);
+  }
+
+  @UseGuards(AuthGuard)
+  @RequireSubscription()
+  @Post('time-clock/break-start')
+  async startBreak(@CurrentUser() user: AuthUser, @Body() body: BreakStartDto) {
+    const profile = await this.requireVenueProfile(user);
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: profile.id, isOpen: true },
+      include: { profile: true, venue: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+    const breaks = (entry.breaks as any[]) || [];
+    if (breaks.find((b: any) => b.endAt === null)) throw new BadRequestException('Already on a break');
+    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
+      data: { breaks: newBreaks },
+    });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({
+      where: { id: entry.id },
+      include: { profile: true, venue: true },
+    });
+    return mapClockEntry(updated, updated.profile, updated.venue);
+  }
+
+  @UseGuards(AuthGuard)
+  @RequireSubscription()
+  @Post('time-clock/break-end')
+  async endBreak(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireVenueProfile(user);
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: profile.id, isOpen: true },
+      include: { profile: true, venue: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
+    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
+    const newBreaks = [...breaks];
+    newBreaks[activeBreakIndex] = { ...newBreaks[activeBreakIndex], endAt: Date.now() };
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
+      data: { breaks: newBreaks },
+    });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({
+      where: { id: entry.id },
+      include: { profile: true, venue: true },
+    });
+    return mapClockEntry(updated, updated.profile, updated.venue);
   }
 
   @UseGuards(AuthGuard)
@@ -588,35 +722,54 @@ export class AppController {
   @Post('invites')
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
+    // Only owner, admin, or allAccess profiles may create manager-level invites.
+    // A plain manager can only invite staff, matching the canManageRole policy
+    // enforced on direct staff edits.
+    const canElevate = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess;
+    const inviteRole = body.role === 'manager' && canElevate ? 'manager' : 'staff';
     const email = body.email?.trim().toLowerCase() || null;
+    // The plaintext token is only ever needed for the instant it's embedded
+    // in the deep-link/response/email below — only its hash is persisted
+    // (Invite.tokenHash), so a DB dump/backup leak can't yield a usable
+    // signup link. Use this local variable everywhere below, never re-read
+    // `invite.token` from the DB.
     const token = randomBytes(18).toString('base64url');
+    const tokenHash = hashInviteToken(token);
     const code = await this.uniqueInviteCode();
     const invite = await this.prisma.invite.create({
       data: {
         venueId: profile.venueId!,
         email,
-        token,
+        tokenHash,
         code,
-        role: body.role === 'manager' ? 'manager' : 'staff',
+        role: inviteRole,
         jobTitle: body.jobTitle?.trim() || 'Team Member',
         createdBy: profile.id,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-    const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(invite.token)}`;
-    const venueName = profile.venue?.name ?? 'your Venue Wrangler team';
+    const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(token)}`;
+    const venueName = sanitizeForEmail(profile.venue?.name ?? 'your Venue Wrangler team');
     if (email) {
       void this.email.send({
         to: email,
-        subject: `Join ${venueName}`,
+        subject: `Invitation: Join the Team at ${venueName} on Venue Wrangler`,
         text:
-          `${profile.fullName} invited you to join ${venueName}.\n\n` +
-          `Open the Venue Wrangler app, choose "Join a team", and enter this code:\n\n  ${code}\n\n` +
-          `Or open this link on your phone:\n${inviteUrl}\n\nThis invite expires in 7 days.`,
+          `Hi there,\n\n` +
+          `You have been invited by ${profile.fullName} to join the team at ${venueName} on Venue Wrangler.\n\n` +
+          `To accept your invitation and join the venue:\n\n` +
+          `1. Open the Venue Wrangler app on your phone and choose "Join a team"\n` +
+          `2. Enter the following invite code when prompted:\n\n` +
+          `   ${code}\n\n` +
+          `Alternatively, you can tap this link directly on your mobile device:\n` +
+          `${inviteUrl}\n\n` +
+          `Note: This invitation is valid for 7 days.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
       });
     }
     return {
-      token: invite.token,
+      token,
       code: invite.code,
       inviteUrl,
       expiresAt: invite.expiresAt.getTime(),
@@ -635,7 +788,7 @@ export class AppController {
       PUBLIC_INVITE_RATE_LIMIT_MAX,
       PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS,
     );
-    const invite = await this.findRedeemableInvite(rawCode);
+    const invite = await this.findRedeemableInvite({ codeOrToken: rawCode });
     if (!invite) throw new NotFoundException('That invite code is invalid, used, or expired.');
     const venue = await this.prisma.venue.findUnique({ where: { id: invite.venueId }, select: { name: true } });
     return {
@@ -650,14 +803,19 @@ export class AppController {
   // Authenticated: lets a solo user (no venue yet) join a team later by code.
   @UseGuards(AuthGuard)
   @Post('join')
-  async joinByCode(@CurrentUser() user: AuthUser, @Body() body: JoinByCodeDto) {
+  async joinByCode(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: JoinByCodeDto) {
+    // Codes are short (6-char, ~30-symbol alphabet); without a per-user rate
+    // limit an authenticated attacker could brute-force one and join a
+    // stranger's venue.
+    await assertWithinSharedRateLimit(this.prisma, `join-code:${user.sub}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `join-code:ip:${getClientIp(request)}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
     const profile = await this.getProfile(user);
     if (!profile) throw new NotFoundException('Profile not found');
     if (profile.venueId) throw new BadRequestException('You are already part of a team.');
     const verifiedEmail = await this.getVerifiedAccountEmail(user.sub);
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const invite = await this.findRedeemableInvite(body.code, tx);
+      const invite = await this.findRedeemableInvite({ codeOrToken: body.code }, tx);
       if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
       if (invite.email && invite.email.toLowerCase() !== verifiedEmail.toLowerCase()) {
         throw new ForbiddenException('This invite was sent to a different email address.');
@@ -668,11 +826,13 @@ export class AppController {
         data: { usedBy: profile.id },
       });
       if (claimed.count === 0) throw new BadRequestException('That invite has already been used.');
-      return tx.profile.update({
+      const up = await tx.profile.update({
         where: { id: profile.id },
         data: { venueId: invite.venueId, role: invite.role, jobTitle: invite.jobTitle },
         include: { venue: true },
       });
+      await syncTeamMemberCount(tx, invite.venueId);
+      return up;
     });
 
     const emailVerified = await this.isEmailVerified(user.sub);
@@ -684,14 +844,31 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @Post('redeem-invite')
-  async redeemInvite(@CurrentUser() user: AuthUser, @Body() body: RedeemInviteDto) {
-    return this.redeemInviteForUser(user.sub, body.codeOrToken);
+  async redeemInvite(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: RedeemInviteDto) {
+    // Same brute-force concern as /join — this also accepts the short code.
+    await assertWithinSharedRateLimit(this.prisma, `redeem-invite:${user.sub}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
+    await assertWithinSharedRateLimit(this.prisma, `redeem-invite:ip:${getClientIp(request)}`, PUBLIC_INVITE_RATE_LIMIT_MAX, PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS);
+    return this.redeemInviteForUser(user.sub, { codeOrToken: body.codeOrToken });
   }
 
   @UseGuards(AuthGuard)
   @Post('redeem-my-invite')
   async redeemMyInvite(@CurrentUser() user: AuthUser) {
     const email = await this.getVerifiedAccountEmail(user.sub);
+    // A caller who already belongs to a venue has nothing to redeem. Bail out
+    // before the adoption fallback below, which deletes the caller's profile —
+    // without this, re-verifying an email would tear an existing member out of
+    // their venue (and could orphan a venue whose sole owner they are, routing
+    // around the last-admin guard on account deletion). Mirrors the same check
+    // in redeemInviteForUser and joinByCode.
+    const current = await this.getProfile({ sub: user.sub });
+    if (current?.venueId) {
+      return {
+        redeemed: false,
+        profile: mapProfile(current, true),
+        venue: current.venue ? mapVenue(current.venue) : null,
+      };
+    }
     const matches = await this.prisma.invite.findMany({
       where: {
         email: { equals: email, mode: 'insensitive' },
@@ -702,21 +879,72 @@ export class AppController {
       take: 2,
     });
     if (matches.length === 0) {
-      return { redeemed: false };
+      const unclaimedProfile = await this.prisma.profile.findFirst({
+        where: {
+          userId: null,
+          email: { equals: email, mode: 'insensitive' },
+          venueId: { not: null },
+        },
+        // Deterministic pick when a roster carries more than one match, and the
+        // same one AuthService.issueSession would adopt on the signup path.
+        orderBy: { createdAt: 'asc' },
+        include: { venue: true },
+      });
+
+      if (!unclaimedProfile) {
+        return { redeemed: false };
+      }
+
+      const profile = await this.getProfile(user);
+      if (!profile) throw new NotFoundException('Profile not found');
+
+      const updated = await this.prisma.$transaction(async (tx) => {
+        // Delete temporary profile created on signup
+        await tx.profile.delete({
+          where: { id: profile.id },
+        });
+
+        // Adopt the unclaimed profile
+        return tx.profile.update({
+          where: { id: unclaimedProfile.id },
+          data: {
+            userId: user.sub,
+          },
+          include: { venue: true },
+        });
+      });
+
+      return {
+        redeemed: true,
+        profile: mapProfile(updated, true),
+        venue: updated.venue ? mapVenue(updated.venue) : null,
+      };
     }
     if (matches.length > 1) {
       throw new BadRequestException('Multiple pending invites were found for this email. Use the specific invite link from your manager.');
     }
-    return this.redeemInviteForUser(user.sub, matches[0].token);
+    return this.redeemInviteForUser(user.sub, { id: matches[0].id });
   }
 
-  // Resolve a redeemable invite by either the short code or the long token.
-  private findRedeemableInvite(codeOrToken: string, tx: Prisma.TransactionClient = this.prisma) {
-    const value = codeOrToken?.trim();
+  // Resolve a redeemable invite either by an already-known row id (the caller
+  // already looked it up some other way, e.g. by the redeemer's verified
+  // email — no plaintext token involved) or by a user-submitted short code /
+  // long token (the token is never stored in plaintext, so it's hashed
+  // before the lookup).
+  private findRedeemableInvite(
+    identifier: { id: string } | { codeOrToken: string },
+    tx: Prisma.TransactionClient = this.prisma,
+  ) {
+    if ('id' in identifier) {
+      return tx.invite.findFirst({
+        where: { id: identifier.id, usedBy: null, expiresAt: { gt: new Date() } },
+      });
+    }
+    const value = identifier.codeOrToken?.trim();
     if (!value) return Promise.resolve(null);
     return tx.invite.findFirst({
       where: {
-        OR: [{ code: { equals: value, mode: 'insensitive' } }, { token: value }],
+        OR: [{ code: { equals: value, mode: 'insensitive' } }, { tokenHash: hashInviteToken(value) }],
         usedBy: null,
         expiresAt: { gt: new Date() },
       },
@@ -740,37 +968,49 @@ export class AppController {
     if (!profile) return { ok: true };
     const deletedAccountEmail = profile.email;
     const deletedAccountName = profile.fullName;
-    if (profile.venueId && isOwnerOrAdminRole(profile.role)) {
-      const [ownerAdminCount, memberCount] = await Promise.all([
-        this.prisma.profile.count({ where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } } }),
-        this.prisma.profile.count({ where: { venueId: profile.venueId } }),
-      ]);
-      // A sole remaining member may delete (orphaning an empty venue is fine,
-      // and App Store guideline 5.1.1(v) requires in-app account deletion).
-      // Block only when other staff remain but this is the last owner/admin.
-      if (ownerAdminCount <= 1 && memberCount > 1) {
-        throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
+    await this.prisma.$transaction(async (tx) => {
+      if (profile.venueId && isOwnerOrAdminRole(profile.role)) {
+        // Advisory-lock the venue so two concurrent last-admin deletions can't
+        // both read the same pre-delete count and both pass the guard.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${profile.venueId}`}))`;
+        const [ownerAdminCount, memberCount] = await Promise.all([
+          tx.profile.count({ where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } } }),
+          tx.profile.count({ where: { venueId: profile.venueId } }),
+        ]);
+        // A sole remaining member may delete (orphaning an empty venue is fine,
+        // and App Store guideline 5.1.1(v) requires in-app account deletion).
+        // Block only when other staff remain but this is the last owner/admin.
+        if (ownerAdminCount <= 1 && memberCount > 1) {
+          throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
+        }
       }
-    }
-    await this.prisma.$transaction([
-      this.prisma.pushToken.deleteMany({ where: { profileId: profile.id } }),
-      this.prisma.availability.deleteMany({ where: { profileId: profile.id } }),
+      await tx.pushToken.deleteMany({ where: { profileId: profile.id } });
+      await tx.availability.deleteMany({ where: { profileId: profile.id } });
       // Time entries are employer wage records (FLSA retention) — keep them.
       // Snapshot the name; deleting the profile then SetNulls the linkage.
-      this.prisma.timeEntry.updateMany({
+      await tx.timeEntry.updateMany({
         where: { profileId: profile.id },
         data: { profileFullName: profile.fullName, isOpen: false },
-      }),
-      this.prisma.scheduleShift.updateMany({ where: { profileId: profile.id }, data: { profileId: null, status: 'open' } }),
-      this.prisma.session.deleteMany({ where: { userId: user.sub } }),
-      this.prisma.authAccount.deleteMany({ where: { userId: user.sub } }),
-      this.prisma.profile.delete({ where: { id: profile.id } }),
-      this.prisma.user.deleteMany({ where: { id: user.sub } }),
-    ]);
+      });
+      await tx.scheduleShift.updateMany({ where: { profileId: profile.id }, data: { profileId: null, status: 'open' } });
+      await tx.session.deleteMany({ where: { userId: user.sub } });
+      await tx.authAccount.deleteMany({ where: { userId: user.sub } });
+      await tx.profile.delete({ where: { id: profile.id } });
+      await tx.user.deleteMany({ where: { id: user.sub } });
+      if (profile.venueId) {
+        await syncTeamMemberCount(tx, profile.venueId);
+      }
+    });
     void this.email.send({
       to: deletedAccountEmail,
-      subject: 'Your Venue Wrangler account was deleted',
-      text: `Hi ${deletedAccountName},\n\nYour Venue Wrangler account has been deleted. Any retained time records remain available to the venue for wage and compliance records.`,
+      subject: 'Your Venue Wrangler Account Has Been Deleted',
+      text:
+        `Hi ${deletedAccountName},\n\n` +
+        `Your Venue Wrangler account has been successfully deleted.\n\n` +
+        `Please note that any retained timeclock records remain available to the venue as employer wage and compliance records in accordance with federal and local regulations.\n\n` +
+        `Thank you for using Venue Wrangler.\n\n` +
+        `Questions? support@venuewrangler.com\n\n` +
+        `— The Venue Wrangler Team`,
     });
     return { ok: true };
   }
@@ -805,7 +1045,7 @@ export class AppController {
     return this.profiles.isEmailVerified(userId);
   }
 
-  private async redeemInviteForUser(userId: string, codeOrToken: string) {
+  private async redeemInviteForUser(userId: string, identifier: { id: string } | { codeOrToken: string }) {
     const email = await this.getVerifiedAccountEmail(userId);
     const profile = await this.getProfile({ sub: userId });
     if (!profile) throw new NotFoundException('Profile not found');
@@ -819,12 +1059,12 @@ export class AppController {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const invite = await this.findRedeemableInvite(codeOrToken, tx);
+      const invite = await this.findRedeemableInvite(identifier, tx);
       if (!invite) throw new BadRequestException('That invite code is invalid, used, or expired.');
-      if (!invite.email) {
-        throw new ForbiddenException('Ask your manager to resend this invite to your email address before joining.');
-      }
-      if (invite.email.toLowerCase() !== email.toLowerCase()) {
+      // Email-specific invites: enforce that the redeeming user's verified email
+      // matches the invite's target. Link-based invites (no email on the invite)
+      // are open to any authenticated user — the short-lived token is the auth.
+      if (invite.email && invite.email.toLowerCase() !== email.toLowerCase()) {
         throw new ForbiddenException('This invite was sent to a different email address.');
       }
       const claimed = await tx.invite.updateMany({
@@ -834,7 +1074,7 @@ export class AppController {
       if (claimed.count === 0) {
         throw new BadRequestException('That invite has already been used.');
       }
-      return tx.profile.update({
+      const up = await tx.profile.update({
         where: { id: profile.id },
         data: {
           email,
@@ -844,6 +1084,8 @@ export class AppController {
         },
         include: { venue: true },
       });
+      await syncTeamMemberCount(tx, invite.venueId);
+      return up;
     });
 
     return {

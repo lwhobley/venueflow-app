@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -9,12 +10,15 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Button, Card, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
-import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing } from '../../lib/theme';
+import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
+import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useI18n } from '../../lib/i18n';
 
 export default function InviteAcceptScreen() {
+  const { t } = useI18n();
   const setSession = useAuthStore((s: AuthState) => s.setSession);
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
 
@@ -25,16 +29,20 @@ export default function InviteAcceptScreen() {
     phone?: string;
   }>();
 
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const validate = (): string | null => {
-    if (!email.trim().includes('@')) return 'Enter a valid email address.';
-    if (password.length < 6) return 'Password must be at least 6 characters.';
-    if (password !== confirmPassword) return 'Passwords do not match.';
+    if (!fullName.trim()) return t('inviteAccept.errors.nameRequired');
+    if (!email.trim().includes('@')) return t('inviteAccept.errors.invalidEmail');
+    if (password.length < 8) return t('inviteAccept.errors.passwordLength');
+    if (password !== confirmPassword) return t('inviteAccept.errors.passwordMismatch');
+    if (!termsAccepted) return t('register.errors.termsRequired');
     return null;
   };
 
@@ -50,7 +58,9 @@ export default function InviteAcceptScreen() {
         phone,
         password,
         flow: 'signUp',
+        fullName: fullName.trim(),
         inviteToken: token,
+        termsAccepted,
       });
       const { profile, venue, token: authToken } = resp;
       setSession({
@@ -76,11 +86,17 @@ export default function InviteAcceptScreen() {
         token: authToken,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(tabs)/home');
+      // Route to email verification — verify-email.tsx will call redeemInvite
+      // with the invite token after code confirmation to finalize team membership.
+      if (!profile.emailVerified) {
+        router.replace({ pathname: '/(auth)/verify-email', params: { invite: token } });
+      } else {
+        router.replace('/(tabs)/home');
+      }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Something went wrong. Try again.';
+      const msg = e instanceof Error ? e.message : t('inviteAccept.genericError');
       setError(msg);
-      Alert.alert('Could not create account', msg);
+      Alert.alert(t('inviteAccept.createAccountFailedTitle'), msg);
     } finally {
       setSubmitting(false);
     }
@@ -106,14 +122,12 @@ export default function InviteAcceptScreen() {
         </View>
 
         <View style={{ gap: 6 }}>
-          <Text variant="labelMedium" style={{ color: colors.primary, textTransform: 'uppercase', letterSpacing: 1 }}>
-            You're invited to join
-          </Text>
-          <Text variant="headlineMedium" style={{ color: colors.text, fontWeight: '800' }}>
+          <Kicker>{t('inviteAccept.kicker')}</Kicker>
+          <Text style={{ ...type.title, color: colors.text }}>
             {venueName}
           </Text>
           <Text variant="bodyMedium" style={{ color: colors.muted }}>
-            as {jobTitle} — create your account to accept.
+            {t('inviteAccept.roleLine', { jobTitle })}
           </Text>
         </View>
 
@@ -125,7 +139,14 @@ export default function InviteAcceptScreen() {
 
             <TextInput
               {...inputProps}
-              label="Email"
+              label={t('inviteAccept.nameLabel')}
+              value={fullName}
+              onChangeText={setFullName}
+              mode="outlined"
+            />
+            <TextInput
+              {...inputProps}
+              label={t('inviteAccept.emailLabel')}
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
@@ -134,7 +155,7 @@ export default function InviteAcceptScreen() {
             />
             <TextInput
               {...inputProps}
-              label="Password"
+              label={t('inviteAccept.passwordLabel')}
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -142,7 +163,7 @@ export default function InviteAcceptScreen() {
             />
             <TextInput
               {...inputProps}
-              label="Confirm password"
+              label={t('inviteAccept.confirmPasswordLabel')}
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               secureTextEntry
@@ -150,6 +171,18 @@ export default function InviteAcceptScreen() {
               returnKeyType="go"
               onSubmitEditing={() => void submit()}
             />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Checkbox status={termsAccepted ? 'checked' : 'unchecked'} onPress={() => setTermsAccepted((value) => !value)} color={colors.primary} />
+              <Text style={{ color: colors.muted, fontSize: 12, flex: 1 }}>
+                {t('register.termsPrefix')}{' '}
+                <Text style={{ color: colors.primary }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/terms')}>
+                  {t('register.termsOfService')}
+                </Text>{' '}{t('register.and')}{' '}
+                <Text style={{ color: colors.primary }} onPress={() => void Linking.openURL('https://www.venuewrangler.com/privacy')}>
+                  {t('register.privacyPolicy')}
+                </Text>
+              </Text>
+            </View>
 
             <Button
               mode="contained"
@@ -158,11 +191,11 @@ export default function InviteAcceptScreen() {
               loading={submitting}
               onPress={() => void submit()}
             >
-              Accept invite &amp; create account
+              {t('inviteAccept.acceptButton')}
             </Button>
 
             <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
-              Already have an account?{' '}
+              {t('inviteAccept.alreadyHaveAccount')}{' '}
               <Text
                 style={{ color: colors.primary, fontWeight: '600' }}
                 onPress={() =>
@@ -172,14 +205,14 @@ export default function InviteAcceptScreen() {
                   })
                 }
               >
-                Sign in instead
+                {t('inviteAccept.signInInstead')}
               </Text>
             </Text>
           </Card.Content>
         </Card>
 
         <Button mode="text" textColor={colors.muted} onPress={() => router.back()}>
-          Back
+          {t('inviteAccept.back')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -188,9 +221,9 @@ export default function InviteAcceptScreen() {
 
 const styles = StyleSheet.create({
   stepRow: { flexDirection: 'row', gap: 6, marginBottom: 4 },
-  step: { flex: 1, height: 4, borderRadius: 2, backgroundColor: '#E8E2D8' },
-  stepActive: { backgroundColor: '#2F7D46' },
-  stepDone: { backgroundColor: '#A8CBB0' },
+  step: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  stepActive: { backgroundColor: colors.primary },
+  stepDone: { backgroundColor: colors.primary, opacity: 0.45 },
   card: {
     ...authCardStyle,
   },

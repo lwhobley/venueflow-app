@@ -38,7 +38,8 @@ export function AutoScheduleModal({
   onApplied: (msg: string) => void;
   staff: StaffOption[];
 }) {
-  const preview = useQuery(api.scheduling.previewAutoSchedule, visible ? { venueId, weekStartDate: currentWeekSundayISO() } : 'skip');
+  const [weekStartDate, setWeekStartDate] = useState(currentWeekSundayISO);
+  const preview = useQuery(api.scheduling.previewAutoSchedule, visible ? { venueId, weekStartDate } : 'skip');
   const applyAutoSchedule = useMutation(api.scheduling.applyAutoSchedule);
 
   // shiftId -> chosen profileId ('' = leave open). Seeded from the engine's
@@ -46,6 +47,10 @@ export function AutoScheduleModal({
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (visible) setWeekStartDate(currentWeekSundayISO());
+  }, [visible]);
 
   useEffect(() => {
     if (!preview) return;
@@ -68,7 +73,7 @@ export function AutoScheduleModal({
     }
     setBusy(true);
     try {
-      const r = await applyAutoSchedule({ venueId, assignments });
+      const r = await applyAutoSchedule({ venueId, weekStartDate: preview?.weekStart ?? weekStartDate, assignments });
       onApplied(`Auto-scheduled ${r.assigned} shift${r.assigned === 1 ? '' : 's'}${r.skipped ? `, skipped ${r.skipped}` : ''}.`);
       onClose();
     } finally {

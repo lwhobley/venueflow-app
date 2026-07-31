@@ -11,6 +11,7 @@ type SessionState = {
 };
 
 export type AuthState = SessionState & {
+  authEpoch: number;
   hydrated: boolean;
   setHydrated: (hydrated: boolean) => void;
   setSession: (session: {
@@ -30,31 +31,64 @@ const secureStorage = {
 
 const memoryStorage = new Map<string, string>();
 const webStorage = {
-  getItem: async (key: string) => memoryStorage.get(key) ?? null,
+  getItem: async (key: string) => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        return window.localStorage.getItem(key);
+      } catch {
+        // Fall back to memoryStorage if localStorage is restricted
+      }
+    }
+    return memoryStorage.get(key) ?? null;
+  },
   setItem: async (key: string, value: string) => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(key, value);
+        return;
+      } catch {
+        // Fall back to memoryStorage if localStorage is restricted
+      }
+    }
     memoryStorage.set(key, value);
   },
   removeItem: async (key: string) => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.removeItem(key);
+        return;
+      } catch {
+        // Fall back to memoryStorage if localStorage is restricted
+      }
+    }
     memoryStorage.delete(key);
   },
 };
 
 const storage = Platform.OS === 'web' ? webStorage : secureStorage;
 
-const createAuthStore = (set: (partial: Partial<AuthState>) => void): AuthState => ({
+const createAuthStore = (set: any): AuthState => ({
+  authEpoch: 0,
   hydrated: false,
   user: null,
   venue: null,
   token: null,
   setHydrated: (hydrated: boolean) => set({ hydrated }),
   setSession: (session: { user: UserSummary; venue: Venue | null; token?: string | null }) =>
-    set({
+    set((state: AuthState) => ({
       user: session.user,
       venue: session.venue,
       ...(session.token !== undefined ? { token: session.token } : {}),
-    }),
+      authEpoch: session.token !== undefined ? state.authEpoch + 1 : state.authEpoch,
+    })),
   setVenue: (venue: Venue) => set({ venue }),
-  clearSession: () => set({ user: null, venue: null, token: null }),
+  clearSession: () =>
+    set((state: AuthState) => ({
+      user: null,
+      venue: null,
+      token: null,
+      authEpoch: state.authEpoch + 1,
+    })),
 });
 
 export const useAuthStore = create<AuthState>()(

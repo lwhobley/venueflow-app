@@ -1,11 +1,14 @@
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius, useDesignTheme } from '../lib/theme';
+import { fontFamily, useDesignTheme } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
 
 type TabRoute = BottomTabBarProps['state']['routes'][number];
 
+// Editorial tab bar: no filled pill indicator — the active tab is marked by
+// a hairline underline and the accent color, like a masthead nav rather than
+// a row of chips. Separated from content by a single top rule, not a shadow.
 export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const palette = useDesignTheme();
@@ -20,24 +23,21 @@ export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarP
     <View
       style={{
         backgroundColor: palette.backgroundAlt,
-        borderTopWidth: 0,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: palette.divider,
         paddingBottom: insets.bottom,
-        shadowColor: palette.shadow,
-        shadowOpacity: palette.mode === 'dark' ? 0.2 : 0.08,
-        shadowRadius: 20,
-        shadowOffset: { width: 0, height: -8 },
       }}
     >
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 10, alignItems: 'center' }}
+        contentContainerStyle={{ paddingHorizontal: 14, alignItems: 'center' }}
       >
         {visible.map((route: TabRoute) => {
           const { options } = descriptors[route.key];
           const activeIndex = state.routes.findIndex((r: TabRoute) => r.key === route.key);
           const isFocused = state.index === activeIndex;
-          const color = isFocused ? palette.backgroundAlt : palette.muted;
+          const color = isFocused ? palette.primary : palette.muted;
           const label = (options.title ?? route.name) as string;
 
           const onPress = () => {
@@ -51,30 +51,36 @@ export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarP
             <Pressable
               key={route.key}
               onPress={onPress}
-              accessibilityRole="button"
+              accessibilityRole="tab"
+              accessibilityLabel={label}
               accessibilityState={isFocused ? { selected: true } : {}}
               style={{
-                minWidth: 68,
-                paddingVertical: 7,
-                paddingHorizontal: 10,
-                marginVertical: 6,
-                marginHorizontal: 1,
-                borderRadius: radius.pill,
+                minWidth: 66,
+                paddingTop: 9,
+                paddingBottom: 7,
+                paddingHorizontal: 8,
+                marginHorizontal: 3,
                 alignItems: 'center',
                 gap: 3,
-                backgroundColor: isFocused ? palette.primary : 'transparent',
+                borderBottomWidth: 2,
+                borderBottomColor: isFocused ? palette.primary : 'transparent',
               }}
             >
-              {options.tabBarIcon?.({ focused: isFocused, color, size: 22 })}
-              <Text numberOfLines={1} style={{ color, fontSize: 11, fontWeight: isFocused ? '700' : '600' }}>
+              {options.tabBarIcon?.({ focused: isFocused, color, size: 21 })}
+              <Text
+                numberOfLines={1}
+                style={{ color, fontSize: 10.5, fontWeight: isFocused ? '700' : '500', letterSpacing: 0.1 }}
+              >
                 {label}
               </Text>
             </Pressable>
           );
         })}
-        <View style={{ paddingHorizontal: 14, alignItems: 'flex-start', justifyContent: 'center', minHeight: 54 }}>
-          <Text style={{ color: palette.muted, fontSize: 10, fontWeight: '700' }}>{t('common.venueWrangler')}</Text>
-          <Text style={{ color: palette.muted, fontSize: 9 }}>{t('common.loungeability')}</Text>
+        <View style={{ paddingHorizontal: 16, alignItems: 'flex-start', justifyContent: 'center', minHeight: 54 }}>
+          <Text style={{ color: palette.charcoal, fontFamily: fontFamily.displayMedium, fontSize: 13 }}>
+            {t('common.venueWrangler')}
+          </Text>
+          <Text style={{ color: palette.muted, fontSize: 9, fontStyle: 'italic' }}>{t('common.loungeability')}</Text>
         </View>
       </ScrollView>
     </View>

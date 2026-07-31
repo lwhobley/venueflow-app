@@ -4,32 +4,45 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
+  Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Matches, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { csvCell } from '../../common/csv';
+import { htmlEscape } from '../../common/html-escape';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { EmailService } from '../../email/email.service';
+import { BarInventoryParserService } from './bar-inventory-parser.service';
+import { BarInventoryReportsService } from './bar-inventory-reports.service';
 
 const CATEGORIES = [
   'spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other',
   'protein', 'produce', 'dairy', 'dry_goods', 'bakery', 'frozen'
 ] as const;
 const MOVEMENT_TYPES = ['count', 'received', 'waste', 'comp', 'transfer', 'correction'] as const;
+const PREP_ITEM_KINDS = ['prep', 'eighty_six'] as const;
+const PREP_ITEM_STATUSES = ['open', 'done', 'cancelled'] as const;
 const MAX_IMPORT_ITEMS = 100;
-const MAX_PARSE_TEXT_CHARS = 20_000;
-const MAX_IMAGE_BASE64_CHARS = 6_000_000;
-const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const AI_PARSE_RATE_LIMIT_MAX = 20;
+const AI_PARSE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 type BarStockCategory = (typeof CATEGORIES)[number];
 type BarStockMovementType = (typeof MOVEMENT_TYPES)[number];
+type PrepItemKind = (typeof PREP_ITEM_KINDS)[number];
+type PrepItemStatus = (typeof PREP_ITEM_STATUSES)[number];
 
 class UpsertBarItemDto {
   @IsString()
@@ -134,6 +147,12 @@ class ImportParsedBarItemsDto {
   items!: ParsedItemDto[];
 }
 
+class UpdateCostDto {
+  @IsNumber()
+  @Min(0)
+  unitCostCents!: number;
+}
+
 class ParseBarInventoryInputDto {
   @IsString()
   @IsOptional()
@@ -148,21 +167,52 @@ class ParseBarInventoryInputDto {
   imageMimeType?: string;
 }
 
+class UpsertPrepBoardItemDto {
+  @IsString()
+  @IsOptional()
+  itemId?: string;
+
+  @IsIn(PREP_ITEM_KINDS)
+  kind!: PrepItemKind;
+
+  @IsString()
+  title!: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  quantity?: number;
+
+  @IsString()
+  @IsOptional()
+  unit?: string;
+
+  @IsString()
+  @IsOptional()
+  station?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
+  @IsString()
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'dueDate must be in YYYY-MM-DD format.' })
+  dueDate?: string;
+
+  @IsIn(PREP_ITEM_STATUSES)
+  @IsOptional()
+  status?: PrepItemStatus;
+}
+
+class UpdatePrepBoardItemStatusDto {
+  @IsIn(PREP_ITEM_STATUSES)
+  status!: PrepItemStatus;
+}
+
 function cleanText(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function parseAiInventoryJson(rawText: string) {
-  try {
-    const parsed = JSON.parse(rawText);
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) {
-      throw new Error('Invalid inventory parse shape');
-    }
-    return parsed;
-  } catch {
-    throw new BadRequestException('AI inventory parser returned invalid JSON. Try again with a clearer image or text input.');
-  }
 }
 
 function toMs(date: Date | null | undefined): number | null {
@@ -205,15 +255,61 @@ function mapItem(item: {
   };
 }
 
+function mapPrepBoardItem(item: {
+  id: string;
+  venueId: string;
+  kind: string;
+  title: string;
+  quantity: number | null;
+  unit: string | null;
+  station: string | null;
+  notes: string | null;
+  dueDate: string | null;
+  status: string;
+  createdBy: string;
+  completedBy: string | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    _id: item.id,
+    venueId: item.venueId,
+    kind: item.kind,
+    title: item.title,
+    quantity: item.quantity,
+    unit: item.unit,
+    station: item.station,
+    notes: item.notes,
+    dueDate: item.dueDate,
+    status: item.status,
+    createdBy: item.createdBy,
+    completedBy: item.completedBy,
+    completedAt: toMs(item.completedAt),
+    createdAt: item.createdAt.getTime(),
+    updatedAt: item.updatedAt.getTime(),
+  };
+}
+
 @Controller('v1/bar-inventory')
 @UseGuards(AuthGuard)
 export class BarInventoryController {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(BarInventoryController.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+    private readonly email: EmailService,
+    private readonly parser: BarInventoryParserService,
+    private readonly reports: BarInventoryReportsService,
+  ) {}
 
   @RequireSubscription('active')
   @Get()
   async getBarStock(@CurrentUser() user: AuthUser) {
-    const profile = await this.requireManagerProfile(user);
+    // Read-only inventory is visible to any venue member; mutations below
+    // still require a manager profile.
+    const profile = await this.requireVenueProfile(user);
     const items = await this.prisma.barInventoryItem.findMany({
       where: { venueId: profile.venueId! },
       take: 300,
@@ -278,7 +374,9 @@ export class BarInventoryController {
   ) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
-    const movement = await this.prisma.$transaction(async (tx) => {
+    const { movement, item, previousOnHand, nextOnHand } = await this.prisma.$transaction(async (tx) => {
+      const lockKey = `bar-inventory-${itemId}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const item = await tx.barInventoryItem.findFirst({ where: { id: itemId, venueId } });
       if (!item) throw new NotFoundException('Item not found');
       const previousOnHand = item.onHand;
@@ -295,7 +393,7 @@ export class BarInventoryController {
           updatedAt: now,
         },
       });
-      return tx.barInventoryMovement.create({
+      const movement = await tx.barInventoryMovement.create({
         data: {
           venueId,
           itemId: item.id,
@@ -308,7 +406,12 @@ export class BarInventoryController {
           createdAt: now,
         },
       });
+      return { movement, item, previousOnHand, nextOnHand };
     });
+
+    // Fire-and-forget alerts after the transaction commits
+    void this.fireInventoryAlerts({ venueId, item, previousOnHand, nextOnHand, movementType: body.movementType, quantity: body.quantity });
+
     return { _id: movement.id };
   }
 
@@ -368,168 +471,558 @@ export class BarInventoryController {
     @CurrentUser() user: AuthUser,
     @Body() body: ParseBarInventoryInputDto,
   ) {
-    await this.requireManagerProfile(user);
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new BadRequestException('AI parsing requires OPENAI_API_KEY configuration');
-    const inputText = body.text?.trim() ?? '';
-    if (!inputText && !body.imageBase64) {
-      throw new BadRequestException('Add pasted text, a CSV/list upload, or a photo to parse');
-    }
-    if (inputText.length > MAX_PARSE_TEXT_CHARS) {
-      throw new BadRequestException(
-        `Text imports are limited to ${MAX_PARSE_TEXT_CHARS.toLocaleString()} characters`,
-      );
-    }
-    if (body.imageBase64 && body.imageBase64.length > MAX_IMAGE_BASE64_CHARS) {
-      throw new BadRequestException('Photo imports are limited to about 4.5MB');
-    }
-    const imageMimeType = body.imageMimeType ?? 'image/jpeg';
-    if (body.imageBase64 && !ALLOWED_IMAGE_MIME_TYPES.has(imageMimeType)) {
-      throw new BadRequestException('Photo imports must be JPEG, PNG, WebP, HEIC, or HEIF');
-    }
+    const profile = await this.requireManagerProfile(user);
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `ai-parse:bar-inventory:${profile.venueId}`,
+      AI_PARSE_RATE_LIMIT_MAX,
+      AI_PARSE_RATE_LIMIT_WINDOW_MS,
+      'Too many AI parse requests. Try again in a few minutes.',
+    );
+    return this.parser.parse(body);
+  }
 
-    let parsed: any;
-    if (apiKey.startsWith('sk-or-')) {
-      const model = process.env.OPENAI_INVENTORY_MODEL ?? 'meta-llama/llama-3.2-11b-vision-instruct:free';
-      const promptContent: any[] = [
-        {
-          type: 'text',
-          text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present. Return STRICT JSON matching schema: {"notes": "string", "items": [{"name": "string", "category": "spirit|wine|beer|mixer|garnish|supply|other", "area": "string", "unit": "string", "parLevel": number, "onHand": number, "unitCostCents": number, "supplier": "string", "sku": "string", "notes": "string"}]}`,
-        },
-      ];
-      if (inputText) {
-        promptContent.push({ type: 'text', text: inputText });
-      }
-      if (body.imageBase64) {
-        promptContent.push({
-          type: 'image_url',
-          image_url: {
-            url: `data:${imageMimeType};base64,${body.imageBase64}`,
-          },
-        });
-      }
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://venue-wrangler.pages.dev',
-          'X-Title': 'Venue Wrangler',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: promptContent }],
-          response_format: { type: 'json_object' },
-        }),
-      });
-      const json: any = await response.json();
-      if (!response.ok) {
-        throw new BadRequestException(json?.error?.message ?? 'OpenRouter inventory parse failed');
-      }
-      const rawText = json?.choices?.[0]?.message?.content ?? '{"notes":"","items":[]}';
-      parsed = parseAiInventoryJson(rawText);
-    } else {
-      const content: Array<Record<string, unknown>> = [
-        {
-          type: 'input_text',
-          text: `Extract bar inventory items from this input. Return only bar stock items. Infer reasonable categories from: spirit, wine, beer, mixer, garnish, supply, other. Unit examples: bottle, case, keg, can, each, liter. Prices should be cents when present.\n\n${inputText}`,
-        },
-      ];
-      if (body.imageBase64) {
-        content.push({
-          type: 'input_image',
-          image_url: `data:${imageMimeType};base64,${body.imageBase64}`,
-          detail: 'high',
-        });
-      }
-
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_INVENTORY_MODEL ?? 'gpt-4.1-mini',
-          input: [{ role: 'user', content }],
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'bar_inventory_import',
-              strict: true,
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  notes: { type: 'string' },
-                  items: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      additionalProperties: false,
-                      properties: {
-                        name: { type: 'string' },
-                        category: {
-                          type: 'string',
-                          enum: ['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'],
-                        },
-                        area: { type: 'string' },
-                        unit: { type: 'string' },
-                        parLevel: { type: 'number' },
-                        onHand: { type: 'number' },
-                        unitCostCents: { type: 'number' },
-                        supplier: { type: 'string' },
-                        sku: { type: 'string' },
-                        notes: { type: 'string' },
-                      },
-                      required: ['name', 'category', 'unit'],
-                    },
-                  },
-                },
-                required: ['notes', 'items'],
-              },
-            },
-          },
-        }),
-      });
-
-      const json: any = await response.json();
-      if (!response.ok) {
-        throw new BadRequestException(json?.error?.message ?? 'OpenAI inventory parse failed');
-      }
-      const outputText =
-        json.output_text ??
-        json.output
-          ?.flatMap((part: any) => part.content ?? [])
-          .find((part: any) => part.type === 'output_text')?.text;
-      parsed = parseAiInventoryJson(outputText ?? '{"notes":"No output","items":[]}');
+  // ── Usage velocity ───────────────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('velocity')
+  async getUsageVelocity(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
+    const items = await this.prisma.barInventoryItem.findMany({
+      where: { venueId },
+      take: 300,
+    });
+    const depletions = await this.prisma.barInventoryMovement.findMany({
+      where: {
+        venueId,
+        createdAt: { gte: fourWeeksAgo },
+        movementType: { in: ['waste', 'comp', 'transfer'] },
+      },
+      select: { itemId: true, quantity: true, createdAt: true },
+    });
+    const countMovements = await this.prisma.barInventoryMovement.findMany({
+      where: {
+        venueId,
+        createdAt: { gte: fourWeeksAgo },
+        movementType: 'count',
+      },
+      select: { itemId: true, quantity: true, previousOnHand: true, createdAt: true },
+    });
+    const usageByItem = new Map<string, number>();
+    for (const d of depletions) {
+      usageByItem.set(d.itemId, (usageByItem.get(d.itemId) ?? 0) + Math.abs(d.quantity));
     }
-    const parsedItems = Array.isArray(parsed.items) ? parsed.items : [];
+    for (const c of countMovements) {
+      const impliedUsage = c.previousOnHand - c.quantity;
+      if (impliedUsage > 0) {
+        usageByItem.set(c.itemId, (usageByItem.get(c.itemId) ?? 0) + impliedUsage);
+      }
+    }
+    const weeks = 4;
+    return items.map((item) => {
+      const totalUsed = usageByItem.get(item.id) ?? 0;
+      const perWeek = totalUsed / weeks;
+      const daysUntilEmpty = perWeek > 0 ? Math.round((item.onHand / (perWeek / 7)) * 10) / 10 : null;
+      return {
+        _id: item.id,
+        name: item.name,
+        category: item.category,
+        onHand: item.onHand,
+        parLevel: item.parLevel,
+        unit: item.unit,
+        usageLast4Weeks: Math.round(totalUsed * 10) / 10,
+        perWeek: Math.round(perWeek * 10) / 10,
+        daysUntilEmpty,
+      };
+    });
+  }
+
+  // ── Stock CSV export ─────────────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('export-csv')
+  async exportStockCsv(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const items = await this.prisma.barInventoryItem.findMany({
+      where: { venueId },
+      orderBy: { name: 'asc' },
+      take: 500,
+    });
+    const headers = ['Name', 'Category', 'Area', 'Unit', 'On Hand', 'Par Level', 'Unit Cost ($)', 'Supplier', 'SKU', 'Last Counted'];
+    const rows = [headers.map(csvCell).join(',')];
+    for (const item of items) {
+      rows.push([
+        csvCell(item.name),
+        csvCell(item.category),
+        csvCell(item.area),
+        csvCell(item.unit),
+        csvCell(item.onHand),
+        csvCell(item.parLevel),
+        csvCell(item.unitCostCents != null ? (item.unitCostCents / 100).toFixed(2) : ''),
+        csvCell(item.supplier),
+        csvCell(item.sku),
+        csvCell(item.lastCountedAt ? item.lastCountedAt.toISOString().slice(0, 10) : ''),
+      ].join(','));
+    }
+    return rows.join('\n');
+  }
+
+  // ── Movement log CSV export ──────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('movements/export-csv')
+  async exportMovementsCsv(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const movements = await this.prisma.barInventoryMovement.findMany({
+      where: { venueId, createdAt: { gte: twoWeeksAgo } },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    });
+    const itemIds = Array.from(new Set(movements.map((m) => m.itemId)));
+    const profileIds = Array.from(new Set(movements.map((m) => m.createdBy).filter(Boolean)));
+    const [items, profiles] = await Promise.all([
+      itemIds.length ? this.prisma.barInventoryItem.findMany({ where: { id: { in: itemIds } }, select: { id: true, name: true } }) : [],
+      profileIds.length ? this.prisma.profile.findMany({ where: { id: { in: profileIds } }, select: { id: true, fullName: true } }) : [],
+    ]);
+    const itemName = new Map(items.map((i) => [i.id, i.name]));
+    const profileName = new Map(profiles.map((p) => [p.id, p.fullName]));
+    const headers = ['Date', 'Item', 'Type', 'Quantity', 'Before', 'After', 'By', 'Notes'];
+    const rows = [headers.map(csvCell).join(',')];
+    for (const m of movements) {
+      rows.push([
+        csvCell(m.createdAt.toISOString().slice(0, 19).replace('T', ' ')),
+        csvCell(itemName.get(m.itemId) ?? m.itemId),
+        csvCell(m.movementType),
+        csvCell(m.quantity),
+        csvCell(m.previousOnHand),
+        csvCell(m.nextOnHand),
+        csvCell(profileName.get(m.createdBy) ?? m.createdBy),
+        csvCell(m.notes),
+      ].join(','));
+    }
+    return rows.join('\n');
+  }
+
+  // ── Shrinkage / variance report ──────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('shrinkage')
+  async getShrinkageReport(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    return this.reports.shrinkageReport(profile.venueId!);
+  }
+
+  // ── Purchase order draft ─────────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('purchase-order')
+  async getPurchaseOrder(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    return this.reports.purchaseOrder(profile.venueId!);
+  }
+
+  // ── Purchase order CSV ───────────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('purchase-order/export-csv')
+  async exportPurchaseOrderCsv(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    return this.reports.purchaseOrderCsv(profile.venueId!);
+  }
+
+  // ── SKU lookup for barcode scanning ──────────────────────────────────
+  @RequireSubscription('active')
+  @Get('sku/:sku')
+  async lookupBySku(@CurrentUser() user: AuthUser, @Param('sku') sku: string) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const item = await this.prisma.barInventoryItem.findFirst({
+      where: { venueId, sku },
+    });
+    if (!item) throw new NotFoundException('No item found with that SKU');
+    return mapItem(item);
+  }
+
+  // ── Update unit cost (tracks history via correction movement) ─────────
+  @RequireSubscription('active')
+  @Patch(':id/cost')
+  async updateItemCost(
+    @CurrentUser() user: AuthUser,
+    @Param('id') itemId: string,
+    @Body() body: UpdateCostDto,
+  ) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const item = await this.prisma.barInventoryItem.findFirst({ where: { id: itemId, venueId } });
+    if (!item) throw new NotFoundException('Item not found');
+    const oldCost = item.unitCostCents ?? 0;
+    const newCost = Math.max(0, Math.round(body.unitCostCents));
+    if (oldCost === newCost) return mapItem(item);
+    const now = new Date();
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.barInventoryItem.update({
+        where: { id: item.id },
+        data: { unitCostCents: newCost, updatedAt: now },
+      }),
+      // Write a zero-quantity correction so cost history is queryable from movement log
+      this.prisma.barInventoryMovement.create({
+        data: {
+          venueId,
+          itemId: item.id,
+          movementType: 'correction',
+          quantity: 0,
+          previousOnHand: item.onHand,
+          nextOnHand: item.onHand,
+          notes: `cost_change:${oldCost}:${newCost}`,
+          createdBy: profile.id,
+          createdAt: now,
+        },
+      }),
+    ]);
+    return mapItem(updated);
+  }
+
+  // ── Cost history (from correction movements) ──────────────────────────
+  @RequireSubscription('active')
+  @Get('cost-history/:id')
+  async getCostHistory(@CurrentUser() user: AuthUser, @Param('id') itemId: string) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const item = await this.prisma.barInventoryItem.findFirst({ where: { id: itemId, venueId } });
+    if (!item) throw new NotFoundException('Item not found');
+    const movements = await this.prisma.barInventoryMovement.findMany({
+      where: { itemId, venueId, movementType: 'correction', notes: { startsWith: 'cost_change:' } },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+    });
+    const profileIds = Array.from(new Set(movements.map((m) => m.createdBy).filter(Boolean)));
+    const profiles = profileIds.length
+      ? await this.prisma.profile.findMany({ where: { id: { in: profileIds } }, select: { id: true, fullName: true } })
+      : [];
+    const nameById = new Map(profiles.map((p) => [p.id, p.fullName]));
+    const entries = movements.map((m) => {
+      const parts = (m.notes ?? '').split(':');
+      const oldCost = Number(parts[1] ?? 0);
+      const newCost = Number(parts[2] ?? 0);
+      return {
+        _id: m.id,
+        oldCostCents: oldCost,
+        newCostCents: newCost,
+        changedBy: nameById.get(m.createdBy) ?? m.createdBy,
+        createdAt: m.createdAt.getTime(),
+      };
+    });
+    return { itemName: item.name, currentCostCents: item.unitCostCents, entries };
+  }
+
+  // ── Stock aging report ───────────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('aging')
+  async getAgingReport(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    return this.reports.agingReport(profile.venueId!);
+  }
+
+  // ── Send purchase order email ─────────────────────────────────────────
+  @RequireSubscription('active')
+  @Get('prep-board')
+  async listPrepBoard(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const items = await this.prisma.prepBoardItem.findMany({
+      where: { venueId: profile.venueId!, status: { not: 'cancelled' } },
+      orderBy: [{ status: 'asc' }, { kind: 'asc' }, { createdAt: 'desc' }],
+      take: 100,
+    });
     return {
-      notes: typeof parsed.notes === 'string' ? parsed.notes : '',
-      items: parsedItems.slice(0, MAX_IMPORT_ITEMS).map((item: any) => ({
-        name: String(item.name ?? ''),
-        category: CATEGORIES.includes(item.category) ? item.category : 'other',
-        area: cleanText(item.area),
-        unit: String(item.unit || 'unit'),
-        parLevel: Number(item.parLevel || 0),
-        onHand: Number(item.onHand || 0),
-        unitCostCents: Number(item.unitCostCents || 0),
-        supplier: cleanText(item.supplier),
-        sku: cleanText(item.sku),
-        notes: cleanText(item.notes),
+      items: items.map(mapPrepBoardItem),
+      openCount: items.filter((item) => item.status === 'open').length,
+      eightySixCount: items.filter((item) => item.status === 'open' && item.kind === 'eighty_six').length,
+      prepCount: items.filter((item) => item.status === 'open' && item.kind === 'prep').length,
+    };
+  }
+
+  @RequireSubscription('active')
+  @Post('prep-board')
+  async upsertPrepBoardItem(@CurrentUser() user: AuthUser, @Body() body: UpsertPrepBoardItemDto) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const title = body.title.trim();
+    if (!title) throw new BadRequestException('Prep item title is required');
+    const now = new Date();
+    const status = body.status ?? 'open';
+    const payload = {
+      venueId,
+      kind: body.kind,
+      title,
+      quantity: body.quantity == null ? null : Math.max(0, body.quantity),
+      unit: cleanText(body.unit) ?? null,
+      station: cleanText(body.station) ?? null,
+      notes: cleanText(body.notes) ?? null,
+      dueDate: cleanText(body.dueDate) ?? null,
+      status,
+      completedBy: status === 'done' ? profile.id : null,
+      completedAt: status === 'done' ? now : null,
+      updatedAt: now,
+    };
+    if (body.itemId) {
+      const existing = await this.prisma.prepBoardItem.findFirst({ where: { id: body.itemId, venueId } });
+      if (!existing) throw new NotFoundException('Prep item not found');
+      const updated = await this.prisma.prepBoardItem.update({
+        where: { id: existing.id },
+        data: payload,
+      });
+      return mapPrepBoardItem(updated);
+    }
+    const created = await this.prisma.prepBoardItem.create({
+      data: { ...payload, createdBy: profile.id, createdAt: now },
+    });
+    return mapPrepBoardItem(created);
+  }
+
+  @RequireSubscription('active')
+  @Patch('prep-board/:id/status')
+  async updatePrepBoardItemStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('id') itemId: string,
+    @Body() body: UpdatePrepBoardItemStatusDto,
+  ) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const existing = await this.prisma.prepBoardItem.findFirst({ where: { id: itemId, venueId } });
+    if (!existing) throw new NotFoundException('Prep item not found');
+    const now = new Date();
+    const updated = await this.prisma.prepBoardItem.update({
+      where: { id: existing.id },
+      data: {
+        status: body.status,
+        completedBy: body.status === 'done' ? profile.id : null,
+        completedAt: body.status === 'done' ? now : null,
+        updatedAt: now,
+      },
+    });
+    return mapPrepBoardItem(updated);
+  }
+
+  @RequireSubscription('active')
+  @Post('purchase-order/send-email')
+  async sendPurchaseOrderEmail(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const items = await this.prisma.barInventoryItem.findMany({ where: { venueId }, orderBy: [{ supplier: 'asc' }, { name: 'asc' }], take: 500 });
+    const belowPar = items.filter((i) => i.onHand < i.parLevel);
+    if (belowPar.length === 0) return { sent: false, reason: 'All items at or above par — nothing to order.' };
+
+    const bySupplier = new Map<string, typeof belowPar>();
+    for (const item of belowPar) {
+      const supplier = item.supplier?.trim() || 'Unspecified';
+      const group = bySupplier.get(supplier) ?? [];
+      group.push(item);
+      bySupplier.set(supplier, group);
+    }
+
+    let grandTotal = 0;
+    const supplierSections = Array.from(bySupplier.entries()).map(([supplier, groupItems]) => {
+      const rows = groupItems.map((item) => {
+        const qty = Math.ceil(item.parLevel - item.onHand);
+        const lineTotal = item.unitCostCents != null ? qty * item.unitCostCents : null;
+        if (lineTotal != null) grandTotal += lineTotal;
+        return `<tr><td>${htmlEscape(item.name)}</td><td>${htmlEscape(item.sku ?? '—')}</td><td>${htmlEscape(item.unit)}</td><td>${item.onHand}</td><td>${item.parLevel}</td><td><strong>${qty}</strong></td><td>${lineTotal != null ? '$' + (lineTotal / 100).toFixed(2) : '—'}</td></tr>`;
+      }).join('');
+      return `<h3>${htmlEscape(supplier)}</h3><table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><th>Item</th><th>SKU</th><th>Unit</th><th>On Hand</th><th>Par</th><th>Order Qty</th><th>Est. Cost</th></tr>${rows}</table>`;
+    }).join('<br>');
+
+    const venueName = profile.venue?.name ?? 'Your venue';
+    const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const html = `<h2>Purchase Order — ${htmlEscape(venueName)}</h2><p>Generated ${date} · ${belowPar.length} items below par</p>${supplierSections}${grandTotal > 0 ? `<p><strong>Estimated total: $${(grandTotal / 100).toFixed(2)}</strong></p>` : ''}`;
+    const text = `Purchase Order — ${venueName}\n${date} · ${belowPar.length} items below par\n\n${belowPar.map((i) => `${i.supplier ?? 'Unspecified'}: ${i.name} — order ${Math.ceil(i.parLevel - i.onHand)} ${i.unit}`).join('\n')}${grandTotal > 0 ? `\n\nEst. total: $${(grandTotal / 100).toFixed(2)}` : ''}`;
+
+    await this.email.sendToVenueManagers(venueId, {
+      subject: `Purchase Order — ${venueName} (${belowPar.length} items)`,
+      text,
+      html,
+    });
+    return { sent: true, itemCount: belowPar.length };
+  }
+
+  // ── Inventory digest email ────────────────────────────────────────────
+  @RequireSubscription('active')
+  @Post('send-digest')
+  async sendInventoryDigest(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [items, movements] = await Promise.all([
+      this.prisma.barInventoryItem.findMany({ where: { venueId }, take: 500 }),
+      this.prisma.barInventoryMovement.findMany({
+        where: { venueId, createdAt: { gte: thirtyDaysAgo } },
+        select: { itemId: true, movementType: true, quantity: true },
+      }),
+    ]);
+
+    const itemMap = new Map(items.map((i) => [i.id, i]));
+    const belowPar = items.filter((i) => i.onHand < i.parLevel);
+    const uncounted = items.filter((i) => !i.lastCountedAt || i.lastCountedAt < sevenDaysAgo);
+
+    let wasteCents = 0;
+    let compCents = 0;
+    for (const m of movements) {
+      const item = itemMap.get(m.itemId);
+      if (!item) continue;
+      const cost = item.unitCostCents ?? 0;
+      if (m.movementType === 'waste') wasteCents += Math.abs(m.quantity) * cost;
+      if (m.movementType === 'comp') compCents += Math.abs(m.quantity) * cost;
+    }
+
+    const venueName = profile.venue?.name ?? 'Your venue';
+    const date = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    const belowParLines = belowPar.slice(0, 20).map((i) => `  • ${i.name}: ${i.onHand} ${i.unit} on hand (par ${i.parLevel})`).join('\n');
+    const text = [
+      `📊 Inventory Digest — ${venueName}`,
+      date,
+      '',
+      `Below par: ${belowPar.length} item${belowPar.length !== 1 ? 's' : ''}`,
+      belowParLines || '  (none)',
+      '',
+      `30-day shrinkage: waste $${(wasteCents / 100).toFixed(2)} · comp $${(compCents / 100).toFixed(2)} · total $${((wasteCents + compCents) / 100).toFixed(2)}`,
+      '',
+      `Items not counted in 7+ days: ${uncounted.length}`,
+      `Total items tracked: ${items.length}`,
+    ].join('\n');
+
+    const html = `
+      <h2>Inventory Digest — ${htmlEscape(venueName)}</h2>
+      <p>${date}</p>
+      <h3>Below par (${belowPar.length} items)</h3>
+      ${belowPar.length === 0 ? '<p>All items at or above par.</p>' : `<ul>${belowPar.slice(0, 20).map((i) => `<li>${htmlEscape(i.name)}: ${i.onHand} ${htmlEscape(i.unit)} (par ${i.parLevel})</li>`).join('')}${belowPar.length > 20 ? `<li>…and ${belowPar.length - 20} more</li>` : ''}</ul>`}
+      <h3>30-day shrinkage</h3>
+      <p>Waste: <strong>$${(wasteCents / 100).toFixed(2)}</strong> · Comp: <strong>$${(compCents / 100).toFixed(2)}</strong> · Total: <strong>$${((wasteCents + compCents) / 100).toFixed(2)}</strong></p>
+      <h3>Inventory health</h3>
+      <p>Items not counted in 7+ days: <strong>${uncounted.length}</strong> · Total items tracked: <strong>${items.length}</strong></p>
+    `;
+
+    await this.email.sendToVenueManagers(venueId, {
+      subject: `Inventory Digest — ${venueName} · ${belowPar.length} below par`,
+      text,
+      html,
+    });
+
+    void this.notifications.notifyManagers({
+      venueId,
+      kind: 'inventory_digest',
+      title: 'Inventory digest sent',
+      body: `${belowPar.length} items below par · $${((wasteCents + compCents) / 100).toFixed(2)} shrinkage (30d)`,
+    });
+
+    return { sent: true, belowParCount: belowPar.length, shrinkageCents: wasteCents + compCents };
+  }
+
+  // ── Movement history (parameterized — must come after literal routes) ─
+  @RequireSubscription('active')
+  @Get(':id/movements')
+  async getItemMovements(
+    @CurrentUser() user: AuthUser,
+    @Param('id') itemId: string,
+    @Query('limit') limitParam?: string,
+  ) {
+    const profile = await this.requireManagerProfile(user);
+    const venueId = profile.venueId!;
+    const item = await this.prisma.barInventoryItem.findFirst({ where: { id: itemId, venueId } });
+    if (!item) throw new NotFoundException('Item not found');
+    const limit = Math.min(Math.max(1, Number(limitParam) || 50), 200);
+    const movements = await this.prisma.barInventoryMovement.findMany({
+      where: { itemId, venueId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    const profileIds = Array.from(new Set(movements.map((m) => m.createdBy).filter(Boolean)));
+    const profiles = profileIds.length
+      ? await this.prisma.profile.findMany({ where: { id: { in: profileIds } }, select: { id: true, fullName: true } })
+      : [];
+    const nameById = new Map(profiles.map((p) => [p.id, p.fullName]));
+    return {
+      itemName: item.name,
+      movements: movements.map((m) => ({
+        _id: m.id,
+        movementType: m.movementType,
+        quantity: m.quantity,
+        previousOnHand: m.previousOnHand,
+        nextOnHand: m.nextOnHand,
+        notes: m.notes,
+        createdBy: nameById.get(m.createdBy) ?? m.createdBy,
+        createdAt: m.createdAt.getTime(),
       })),
     };
   }
 
+  private fireInventoryAlerts(args: {
+    venueId: string;
+    item: { id: string; name: string; parLevel: number; unitCostCents: number | null };
+    previousOnHand: number;
+    nextOnHand: number;
+    movementType: string;
+    quantity: number;
+  }) {
+    void this.fireInventoryAlertsInBackground(args).catch((error) => {
+      this.logger.error(
+        `Inventory alert delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    });
+  }
+
+  private async fireInventoryAlertsInBackground(args: {
+    venueId: string;
+    item: { id: string; name: string; parLevel: number; unitCostCents: number | null };
+    previousOnHand: number;
+    nextOnHand: number;
+    movementType: string;
+    quantity: number;
+  }) {
+    const { venueId, item, previousOnHand, nextOnHand, movementType, quantity } = args;
+
+    // Low-stock alert: just crossed below par
+    if (previousOnHand >= item.parLevel && nextOnHand < item.parLevel) {
+      await this.notifications.notifyManagers({
+        venueId,
+        kind: 'inventory_low_stock',
+        title: `Low stock: ${item.name}`,
+        body: `${nextOnHand} ${nextOnHand === 1 ? 'unit' : 'units'} remaining (par ${item.parLevel})`,
+      });
+    }
+
+    // Large waste/comp alert: loss > $50 in cost
+    if ((movementType === 'waste' || movementType === 'comp') && item.unitCostCents != null) {
+      const lossCents = Math.abs(quantity) * item.unitCostCents;
+      if (lossCents >= 5000) {
+        await this.notifications.notifyManagers({
+          venueId,
+          kind: 'inventory_large_loss',
+          title: `Large ${movementType} recorded`,
+          body: `${Math.abs(quantity)} × ${item.name} — est. $${(lossCents / 100).toFixed(2)} loss`,
+        });
+      }
+    }
+  }
+
   private async getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({ where: { userId: user.sub }, include: { venue: true } });
+    return this.prisma.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
   }
 
   private async requireManagerProfile(user: AuthUser) {
+    const profile = await this.requireVenueProfile(user);
+    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
+    return profile;
+  }
+
+  // Any active member of a venue — used for read-only inventory access. Edits
+  // still go through requireManagerProfile.
+  private async requireVenueProfile(user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
-    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
+    if (profile.membershipStatus !== null && profile.membershipStatus !== 'active') {
+      throw new ForbiddenException('Profile is not active for this venue');
+    }
     return profile;
   }
 }

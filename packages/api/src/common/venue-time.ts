@@ -38,6 +38,27 @@ function tzOffsetMs(timeZone: string, at: Date): number {
   return wallClockAsUtc - at.getTime();
 }
 
+/** The venue-local day-of-week (0 = Sunday … 6 = Saturday) at the given instant. */
+export function zonedDayOfWeek(timeZone: string | null | undefined, ts: number): number {
+  const tz = safeTimeZone(timeZone);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).formatToParts(new Date(ts)).map((p) => [p.type, p.value]),
+  );
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[parts.weekday] ?? new Date(ts).getUTCDay();
+}
+
+/** Minutes since midnight (0–1439) in the venue's local time at the given instant. */
+export function zonedMinutesOfDay(timeZone: string | null | undefined, ts: number): number {
+  const tz = safeTimeZone(timeZone);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false })
+      .formatToParts(new Date(ts))
+      .map((p) => [p.type, p.value]),
+  );
+  return (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+}
+
 /** The venue-local calendar date (YYYY-MM-DD) of the given instant. */
 export function zonedIsoDate(timeZone: string | null | undefined, ts: number): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -46,6 +67,20 @@ export function zonedIsoDate(timeZone: string | null | undefined, ts: number): s
     month: '2-digit',
     day: '2-digit',
   }).format(new Date(ts));
+}
+
+/** UTC instant range [start, end) for a specific local YYYY-MM-DD date. */
+export function zonedDateBounds(
+  timeZone: string | null | undefined,
+  isoDate: string,
+): { start: number; end: number } {
+  const tz = safeTimeZone(timeZone);
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const boundary = (dayOffset: number) => {
+    const utcGuess = Date.UTC(y, m - 1, d + dayOffset);
+    return utcGuess - tzOffsetMs(tz, new Date(utcGuess - tzOffsetMs(tz, new Date(utcGuess))));
+  };
+  return { start: boundary(0), end: boundary(1) };
 }
 
 /**
@@ -59,9 +94,6 @@ export function zonedDayBounds(
   const tz = safeTimeZone(timeZone);
   const todayIso = zonedIsoDate(tz, Date.now());
   const [y, m, d] = todayIso.split('-').map(Number);
-  const startUtcGuess = Date.UTC(y, m - 1, d + offsetDays);
-  const start = startUtcGuess - tzOffsetMs(tz, new Date(startUtcGuess - tzOffsetMs(tz, new Date(startUtcGuess))));
-  const endUtcGuess = Date.UTC(y, m - 1, d + offsetDays + 1);
-  const end = endUtcGuess - tzOffsetMs(tz, new Date(endUtcGuess - tzOffsetMs(tz, new Date(endUtcGuess))));
-  return { start, end };
+  const targetIso = new Date(Date.UTC(y, m - 1, d + offsetDays)).toISOString().slice(0, 10);
+  return zonedDateBounds(tz, targetIso);
 }

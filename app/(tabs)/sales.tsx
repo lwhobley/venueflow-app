@@ -1,36 +1,21 @@
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Card, Chip, SegmentedButtons, Text } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
+import { AnimatedTab, SectionHeader } from '../../components/AppCard';
+import { useI18n } from '../../lib/i18n';
 import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { accents, colors, spacing } from '../../lib/theme';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
-import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { canManageVenue } from '../../lib/permissions';
+import { accents, colors, radius, spacing } from '../../lib/theme';
+import { useVenueAuth } from '../../lib/useVenueAuth';
+import { formatMoney, formatPct, formatDuration } from '../../lib/format';
 import { ScheduleSkeleton } from '../../components/schedule/ScheduleSkeleton';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
+import { ManagerGate } from '../../components/ManagerGate';
 import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 
-function dollars(cents: number) {
-  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
-function pct(part: number, whole: number) {
-  if (!whole) return '—';
-  return `${Math.round((part / whole) * 100)}%`;
-}
-
-function mins(m: number | null) {
-  if (m == null) return '—';
-  return m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)}h ${Math.round(m % 60)}m`;
-}
-
-function minsToHours(m: number) {
-  const h = Math.floor(m / 60);
-  const rem = Math.round(m % 60);
-  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
-}
 
 // A simple bar chart rendered as relative-width View bands.
 function MiniBar({ value, max, color }: { value: number; max: number; color: string }) {
@@ -44,11 +29,11 @@ function MiniBar({ value, max, color }: { value: number; max: number; color: str
 
 function KpiTile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent: typeof accents[number] }) {
   return (
-    <Card style={{ backgroundColor: accent.bg, borderRadius: 14, minWidth: '47%', flexGrow: 1 }}>
+    <Card style={{ backgroundColor: accent.bg, borderRadius: radius.sharp, minWidth: '47%', flexGrow: 1 }}>
       <Card.Content style={{ gap: 2 }}>
         <Text style={{ fontSize: 22, fontWeight: '800', color: accent.fg }}>{value}</Text>
-        {sub ? <Text style={{ fontSize: 12, color: colors.muted }}>{sub}</Text> : null}
-        <Text style={{ fontSize: 12, color: colors.muted }}>{label}</Text>
+        {sub ? <Text style={{ fontSize: 12, color: colors.charcoal }}>{sub}</Text> : null}
+        <Text style={{ fontSize: 12, color: colors.charcoal }}>{label}</Text>
       </Card.Content>
     </Card>
   );
@@ -57,15 +42,16 @@ function KpiTile({ label, value, sub, accent }: { label: string; value: string; 
 type SalesTabProps = { venueId: Id<'venues'>; days: number; startTs: number; endTs: number };
 
 function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const { t } = useI18n();
   const dashboard = useQuery(api.pos.getSalesSummaryDashboard, { venueId, windowDays: days, startTs, endTs }) as any;
 
   if (dashboard === undefined) return <ScheduleSkeleton rows={5} />;
 
   if (!dashboard || dashboard.summary.checkCount === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content>
-          <Text style={{ color: colors.muted }}>No sales data for this period. Connect a POS integration to start receiving data.</Text>
+          <Text style={{ color: colors.muted }}>{t('sales.summary.empty')}</Text>
         </Card.Content>
       </Card>
     );
@@ -79,32 +65,32 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
     <View style={{ gap: spacing.md }}>
       {/* KPI grid */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <KpiTile label="Gross sales" value={dollars(summary.salesCents)} accent={accents[0]} />
-        <KpiTile label="Net sales" value={dollars(netSales)} sub={`after ${dollars(summary.discountCents + summary.compCents + summary.promoCents)} off`} accent={accents[2]} />
-        <KpiTile label="Tips collected" value={dollars(summary.tipCents)} sub={pct(summary.tipCents, summary.salesCents) + ' of sales'} accent={accents[1]} />
-        <KpiTile label="Tax" value={dollars(summary.taxCents)} accent={accents[4]} />
-        <KpiTile label="Checks" value={String(summary.checkCount)} sub={`avg ${dollars(summary.avgCheckCents)}`} accent={accents[3]} />
-        <KpiTile label="Covers" value={String(summary.coverCount)} sub={summary.coverCount ? `avg ${dollars(Math.round(summary.salesCents / summary.coverCount))}/cover` : undefined} accent={accents[0]} />
+        <KpiTile label={t('sales.summary.kpi.grossSales')} value={formatMoney(summary.salesCents)} accent={accents[0]} />
+        <KpiTile label={t('sales.summary.kpi.netSales')} value={formatMoney(netSales)} sub={t('sales.summary.kpi.netSalesSub', { amount: formatMoney(summary.discountCents + summary.compCents + summary.promoCents) })} accent={accents[2]} />
+        <KpiTile label={t('sales.summary.kpi.tips')} value={formatMoney(summary.tipCents)} sub={t('sales.summary.kpi.tipsSub', { pct: formatPct(summary.tipCents, summary.salesCents) })} accent={accents[1]} />
+        <KpiTile label={t('sales.summary.kpi.tax')} value={formatMoney(summary.taxCents)} accent={accents[4]} />
+        <KpiTile label={t('sales.summary.kpi.checks')} value={String(summary.checkCount)} sub={t('sales.summary.kpi.checksSub', { amount: formatMoney(summary.avgCheckCents) })} accent={accents[3]} />
+        <KpiTile label={t('sales.summary.kpi.covers')} value={String(summary.coverCount)} sub={summary.coverCount ? t('sales.summary.kpi.coversSub', { amount: formatMoney(Math.round(summary.salesCents / summary.coverCount)) }) : undefined} accent={accents[0]} />
       </View>
 
       {/* Discounts / comps / promos */}
       {(summary.discountCents + summary.compCents + summary.promoCents) > 0 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleSmall" style={{ fontWeight: '700' }}>Discounts & voids</Text>
+            <Text variant="titleSmall" style={{ fontWeight: '700' }}>{t('sales.summary.discounts.title')}</Text>
             {[
-              { label: 'Discounts', value: summary.discountCents },
-              { label: 'Comps', value: summary.compCents },
-              { label: 'Promos', value: summary.promoCents },
+              { key: 'discounts', label: t('sales.summary.discounts.discountsLabel'), value: summary.discountCents },
+              { key: 'comps', label: t('sales.summary.discounts.compsLabel'), value: summary.compCents },
+              { key: 'promos', label: t('sales.summary.discounts.promosLabel'), value: summary.promoCents },
             ].filter((r) => r.value > 0).map((r) => (
-              <View key={r.label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <View key={r.key} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ color: colors.muted }}>{r.label}</Text>
-                <Text style={{ color: colors.danger, fontWeight: '700' }}>-{dollars(r.value)}</Text>
+                <Text style={{ color: colors.danger, fontWeight: '700' }}>-{formatMoney(r.value)}</Text>
               </View>
             ))}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.xs }}>
-              <Text style={{ fontWeight: '700' }}>Total off</Text>
-              <Text style={{ color: colors.danger, fontWeight: '800' }}>-{dollars(summary.discountCents + summary.compCents + summary.promoCents)}</Text>
+              <Text style={{ fontWeight: '700' }}>{t('sales.summary.discounts.totalOff')}</Text>
+              <Text style={{ color: colors.danger, fontWeight: '800' }}>-{formatMoney(summary.discountCents + summary.compCents + summary.promoCents)}</Text>
             </View>
           </Card.Content>
         </Card>
@@ -112,14 +98,14 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Daily sparkline */}
       {byDay.length > 1 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleSmall" style={{ fontWeight: '700' }}>Sales by day</Text>
+            <Text variant="titleSmall" style={{ fontWeight: '700' }}>{t('sales.summary.dailySales.title')}</Text>
             {byDay.map((d) => (
               <View key={d.date} style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.muted, fontSize: 12 }}>{d.date}</Text>
-                  <Text style={{ fontSize: 12, fontWeight: '700' }}>{dollars(d.salesCents)}</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700' }}>{formatMoney(d.salesCents)}</Text>
                 </View>
                 <MiniBar value={d.salesCents} max={maxDay} color={colors.primary} />
               </View>
@@ -130,16 +116,16 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Tender mix */}
       {byTender.length > 0 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleSmall" style={{ fontWeight: '700' }}>Tender mix</Text>
+            <Text variant="titleSmall" style={{ fontWeight: '700' }}>{t('sales.summary.tenderMix.title')}</Text>
             {byTender.map((t, i) => (
               <View key={t.tenderType} style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.charcoal }}>{t.tenderType}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{dollars(t.salesCents)} · {pct(t.salesCents, summary.salesCents)}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{formatMoney(t.salesCents)} · {formatPct(t.salesCents, summary.salesCents)}</Text>
                 </View>
-                <MiniBar value={t.salesCents} max={summary.salesCents} color={accents[i % accents.length].fg} />
+                <MiniBar value={t.salesCents} max={summary.salesCents} color={accents[i % accents.length].icon} />
               </View>
             ))}
           </Card.Content>
@@ -148,16 +134,16 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Revenue centers */}
       {byRevenueCenter.length > 1 ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleSmall" style={{ fontWeight: '700' }}>Revenue centers</Text>
+            <Text variant="titleSmall" style={{ fontWeight: '700' }}>{t('sales.summary.revenueCenters.title')}</Text>
             {byRevenueCenter.map((r, i) => (
               <View key={r.revenueCenter} style={{ gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.charcoal }}>{r.revenueCenter}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{dollars(r.salesCents)} · {r.checkCount} checks</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{formatMoney(r.salesCents)} · {t('sales.summary.revenueCenters.checksCount', { count: r.checkCount })}</Text>
                 </View>
-                <MiniBar value={r.salesCents} max={summary.salesCents} color={accents[i % accents.length].fg} />
+                <MiniBar value={r.salesCents} max={summary.salesCents} color={accents[i % accents.length].icon} />
               </View>
             ))}
           </Card.Content>
@@ -166,11 +152,11 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 
       {/* Avg check time */}
       {summary.avgCheckTimeMins != null ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
           <Card.Content>
-            <Text variant="titleSmall" style={{ fontWeight: '700' }}>Avg table turn</Text>
-            <Text style={{ fontSize: 28, fontWeight: '800', color: colors.primary, marginTop: 4 }}>{mins(summary.avgCheckTimeMins)}</Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>From check open to close on paid checks</Text>
+            <Text variant="titleSmall" style={{ fontWeight: '700' }}>{t('sales.summary.avgTableTurn.title')}</Text>
+            <Text style={{ fontSize: 28, fontWeight: '800', color: colors.primary, marginTop: 4 }}>{formatDuration(summary.avgCheckTimeMins)}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{t('sales.summary.avgTableTurn.sub')}</Text>
           </Card.Content>
         </Card>
       ) : null}
@@ -179,13 +165,14 @@ function SummaryTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 }
 
 function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const { t } = useI18n();
   const data = useQuery(api.pos.getSalesByServer, { venueId, windowDays: days, startTs, endTs }) as any[] | undefined;
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content><Text style={{ color: colors.muted }}>No server data for this period.</Text></Card.Content>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
+        <Card.Content><Text style={{ color: colors.muted }}>{t('sales.servers.empty')}</Text></Card.Content>
       </Card>
     );
   }
@@ -193,34 +180,34 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   const maxSales = Math.max(...data.map((r) => r.salesCents), 1);
 
   return (
-    <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+    <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.md }}>
-        <Text variant="titleMedium" style={{ fontWeight: '700' }}>By server</Text>
+        <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('sales.servers.title')}</Text>
         {data.map((r, i) => (
           <View key={r.serverName} style={{ gap: 6, paddingBottom: spacing.sm, borderBottomWidth: i < data.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={{ fontWeight: '700', flex: 1 }} numberOfLines={1}>{r.serverName}</Text>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: colors.primary }}>{dollars(r.salesCents)}</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: colors.primary }}>{formatMoney(r.salesCents)}</Text>
             </View>
-            <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].fg} />
+            <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].icon} />
             <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
               <Chip compact style={{ backgroundColor: accents[0].bg }}>
-                <Text style={{ fontSize: 11, color: accents[0].fg }}>{r.checkCount} checks</Text>
+                <Text style={{ fontSize: 11, color: accents[0].fg }}>{t('sales.servers.checksCount', { count: r.checkCount })}</Text>
               </Chip>
               <Chip compact style={{ backgroundColor: accents[2].bg }}>
-                <Text style={{ fontSize: 11, color: accents[2].fg }}>{r.coverCount} covers</Text>
+                <Text style={{ fontSize: 11, color: accents[2].fg }}>{t('sales.servers.coversCount', { count: r.coverCount })}</Text>
               </Chip>
               <Chip compact style={{ backgroundColor: accents[1].bg }}>
-                <Text style={{ fontSize: 11, color: accents[1].fg }}>avg {dollars(r.avgCheckCents)}</Text>
+                <Text style={{ fontSize: 11, color: accents[1].fg }}>{t('sales.servers.avgCheck', { amount: formatMoney(r.avgCheckCents) })}</Text>
               </Chip>
               {r.tipCents > 0 ? (
                 <Chip compact style={{ backgroundColor: accents[3].bg }}>
-                  <Text style={{ fontSize: 11, color: accents[3].fg }}>{dollars(r.tipCents)} tips</Text>
+                  <Text style={{ fontSize: 11, color: accents[3].fg }}>{t('sales.servers.tipsAmount', { amount: formatMoney(r.tipCents) })}</Text>
                 </Chip>
               ) : null}
               {r.compCents + r.discountCents > 0 ? (
-                <Chip compact style={{ backgroundColor: '#FDE7E9' }}>
-                  <Text style={{ fontSize: 11, color: colors.danger }}>-{dollars(r.compCents + r.discountCents)} off</Text>
+                <Chip compact style={{ backgroundColor: `${colors.danger}1A` }}>
+                  <Text style={{ fontSize: 11, color: colors.danger }}>{t('sales.servers.off', { amount: formatMoney(r.compCents + r.discountCents) })}</Text>
                 </Chip>
               ) : null}
             </View>
@@ -232,13 +219,14 @@ function ServersTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 }
 
 function ItemsTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const { t } = useI18n();
   const data = useQuery(api.pos.getTopMenuItems, { venueId, windowDays: days, limit: 30, startTs, endTs }) as any[] | undefined;
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.length === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content><Text style={{ color: colors.muted }}>No menu item data yet. Make sure your POS integration transmits line-item detail.</Text></Card.Content>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
+        <Card.Content><Text style={{ color: colors.muted }}>{t('sales.items.empty')}</Text></Card.Content>
       </Card>
     );
   }
@@ -247,9 +235,9 @@ function ItemsTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   const categories = Array.from(new Set(data.map((r) => r.category).filter(Boolean))) as string[];
 
   return (
-    <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+    <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
       <Card.Content style={{ gap: spacing.md }}>
-        <Text variant="titleMedium" style={{ fontWeight: '700' }}>Top items by revenue</Text>
+        <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('sales.items.title')}</Text>
         {categories.length > 1
           ? categories.map((cat) => (
             <View key={cat} style={{ gap: spacing.sm }}>
@@ -267,26 +255,28 @@ function ItemsTab({ venueId, days, startTs, endTs }: SalesTabProps) {
 }
 
 function ItemRow({ r, i, maxSales }: { r: { name: string; category: string | null; quantity: number; salesCents: number }; i: number; maxSales: number }) {
+  const { t } = useI18n();
   return (
     <View style={{ gap: 4 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={{ flex: 1, color: colors.charcoal }} numberOfLines={1}>{r.name}</Text>
-        <Text style={{ fontSize: 13, fontWeight: '700' }}>{dollars(r.salesCents)}</Text>
+        <Text style={{ fontSize: 13, fontWeight: '700' }}>{formatMoney(r.salesCents)}</Text>
       </View>
-      <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].fg} />
-      <Text style={{ color: colors.muted, fontSize: 11 }}>Qty {r.quantity} · avg {dollars(Math.round(r.salesCents / r.quantity))}</Text>
+      <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].icon} />
+      <Text style={{ color: colors.muted, fontSize: 11 }}>{t('sales.items.qtyAvg', { qty: r.quantity, amount: formatMoney(Math.round(r.salesCents / r.quantity)) })}</Text>
     </View>
   );
 }
 
 function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
+  const { t } = useI18n();
   const data = useQuery(api.pos.getLaborSummary, { venueId, windowDays: days, startTs, endTs }) as any;
 
   if (data === undefined) return <ScheduleSkeleton rows={4} />;
   if (!data || data.byEmployee.length === 0) {
     return (
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content><Text style={{ color: colors.muted }}>No labor data for this period. Configure the /pos/labor webhook endpoint to receive punch data.</Text></Card.Content>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
+        <Card.Content><Text style={{ color: colors.muted }}>{t('sales.labor.empty')}</Text></Card.Content>
       </Card>
     );
   }
@@ -294,15 +284,15 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   return (
     <View style={{ gap: spacing.md }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-        <KpiTile label="Regular hours" value={minsToHours(data.totalRegularMins)} accent={accents[0]} />
-        <KpiTile label="Overtime hours" value={minsToHours(data.totalOvertimeMins)} sub={data.totalOvertimeMins > 0 ? 'review scheduling' : undefined} accent={data.totalOvertimeMins > 0 ? accents[5] : accents[4]} />
-        <KpiTile label="Total pay" value={dollars(data.totalPayCents)} accent={accents[2]} />
-        <KpiTile label="Tips paid out" value={dollars(data.totalTipsCents)} accent={accents[1]} />
+        <KpiTile label={t('sales.labor.kpi.regularHours')} value={formatDuration(data.totalRegularMins)} accent={accents[0]} />
+        <KpiTile label={t('sales.labor.kpi.overtimeHours')} value={formatDuration(data.totalOvertimeMins)} sub={data.totalOvertimeMins > 0 ? t('sales.labor.kpi.overtimeSub') : undefined} accent={data.totalOvertimeMins > 0 ? accents[5] : accents[4]} />
+        <KpiTile label={t('sales.labor.kpi.totalPay')} value={formatMoney(data.totalPayCents)} accent={accents[2]} />
+        <KpiTile label={t('sales.labor.kpi.tipsPaidOut')} value={formatMoney(data.totalTipsCents)} accent={accents[1]} />
       </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+      <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
         <Card.Content style={{ gap: spacing.md }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>By employee</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('sales.labor.byEmployee')}</Text>
           {((data.byEmployee ?? []) as any[]).map((emp, i) => (
             <View key={emp.employeeName + i} style={{ gap: 6, paddingBottom: spacing.sm, borderBottomWidth: i < data.byEmployee.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -310,20 +300,20 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
                   <Text style={{ fontWeight: '700' }} numberOfLines={1}>{emp.employeeName}</Text>
                   {emp.jobTitle ? <Text style={{ color: colors.muted, fontSize: 12 }}>{emp.jobTitle}</Text> : null}
                 </View>
-                <Text style={{ fontWeight: '800', color: colors.primary }}>{dollars(emp.payCents)}</Text>
+                <Text style={{ fontWeight: '800', color: colors.primary }}>{formatMoney(emp.payCents)}</Text>
               </View>
               <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                 <Chip compact style={{ backgroundColor: accents[0].bg }}>
-                  <Text style={{ fontSize: 11, color: accents[0].fg }}>{minsToHours(emp.regularMins)} reg</Text>
+                  <Text style={{ fontSize: 11, color: accents[0].fg }}>{t('sales.labor.regHours', { duration: formatDuration(emp.regularMins) })}</Text>
                 </Chip>
                 {emp.overtimeMins > 0 ? (
-                  <Chip compact style={{ backgroundColor: '#FDE7E9' }}>
-                    <Text style={{ fontSize: 11, color: colors.danger }}>{minsToHours(emp.overtimeMins)} OT</Text>
+                  <Chip compact style={{ backgroundColor: `${colors.danger}1A` }}>
+                    <Text style={{ fontSize: 11, color: colors.danger }}>{t('sales.labor.otHours', { duration: formatDuration(emp.overtimeMins) })}</Text>
                   </Chip>
                 ) : null}
                 {emp.tipsCents > 0 ? (
                   <Chip compact style={{ backgroundColor: accents[1].bg }}>
-                    <Text style={{ fontSize: 11, color: accents[1].fg }}>{dollars(emp.tipsCents)} tips</Text>
+                    <Text style={{ fontSize: 11, color: accents[1].fg }}>{t('sales.labor.tipsAmount', { amount: formatMoney(emp.tipsCents) })}</Text>
                   </Chip>
                 ) : null}
               </View>
@@ -335,36 +325,33 @@ function LaborTab({ venueId, days, startTs, endTs }: SalesTabProps) {
   );
 }
 
-export default function SalesScreen() {
-  const venue = useAuthStore((state: AuthState) => state.venue);
-  const { isReady, user } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+export default function SalesScreenWrapper() {
+  return <ScreenErrorBoundary><SalesScreen /></ScreenErrorBoundary>;
+}
+
+function SalesScreen() {
+  const { t } = useI18n();
+  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
 
   const [tab, setTab] = useState<'summary' | 'servers' | 'items' | 'labor'>('summary');
   const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
 
-  if (!canManage) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Sales analytics are available to managers and admins.</Text>
-      </ScrollView>
-    );
-  }
-
   if (!venue?.id) {
     return (
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
-        <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-          <Card.Content>
-            <Text style={{ color: colors.muted }}>No venue assigned to your account yet.</Text>
-          </Card.Content>
-        </Card>
-      </ScrollView>
+      <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('sales.managerGate.feature')}>
+        <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
+            <Card.Content>
+              <Text style={{ color: colors.muted }}>{t('sales.noVenue')}</Text>
+            </Card.Content>
+          </Card>
+        </ScrollView>
+      </ManagerGate>
     );
   }
 
   return (
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('sales.managerGate.feature')}>
     <PremiumFeatureGate feature="pos_analytics">
       <ScrollView
         style={{ flex: 1, backgroundColor: colors.background }}
@@ -372,13 +359,12 @@ export default function SalesScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: spacing.sm }}>
-          <View style={{ gap: 4 }}>
-            <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Sales</Text>
-            <Text style={{ color: colors.muted }}>{venue.name ?? 'Venue'} · POS analytics</Text>
-          </View>
-          <DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />
-        </View>
+        <SectionHeader
+          kicker={t('sales.header.kicker')}
+          title={t('sales.header.title')}
+          subtitle={t('sales.header.subtitle', { venue: venue.name ?? t('sales.header.venueFallback') })}
+          trailing={<DateRangeBar selected={dateRange} presets={presets} onSelect={setDateRange} />}
+        />
 
         {/* Tab switcher */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ minWidth: 620 }}>
@@ -387,20 +373,23 @@ export default function SalesScreen() {
             onValueChange={(v) => setTab(v as typeof tab)}
             style={{ minWidth: 620 }}
             buttons={[
-              { value: 'summary', label: 'Summary' },
-              { value: 'servers', label: 'Servers' },
-              { value: 'items', label: 'Items' },
-              { value: 'labor', label: 'Labor' },
+              { value: 'summary', label: t('sales.tabs.summary') },
+              { value: 'servers', label: t('sales.tabs.servers') },
+              { value: 'items', label: t('sales.tabs.items') },
+              { value: 'labor', label: t('sales.tabs.labor') },
             ]}
           />
         </ScrollView>
 
         {/* Content */}
-        {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
-        {tab === 'servers' && <ServersTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
-        {tab === 'items' && <ItemsTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
-        {tab === 'labor' && <LaborTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+        <AnimatedTab tabKey={tab}>
+          {tab === 'summary' && <SummaryTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+          {tab === 'servers' && <ServersTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+          {tab === 'items' && <ItemsTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+          {tab === 'labor' && <LaborTab venueId={venue.id} days={dateRange.days} startTs={dateRange.startTs} endTs={dateRange.endTs} />}
+        </AnimatedTab>
       </ScrollView>
     </PremiumFeatureGate>
+    </ManagerGate>
   );
 }

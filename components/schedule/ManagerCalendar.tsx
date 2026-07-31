@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View, Modal } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, Snackbar, Text, TextInput } from 'react-native-paper';
+import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, SegmentedButtons, Snackbar, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
@@ -10,6 +10,7 @@ import { accents, colors, spacing } from '../../lib/theme';
 import { useIsDesktop } from '../../lib/responsive';
 import { AutoScheduleModal } from './AutoScheduleModal';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
+import { CollapsibleSection } from '../AppCard';
 
 type ShiftSnapshot = {
   dayIndex: number;
@@ -96,6 +97,21 @@ type Staff = {
 };
 type Template = { _id: Id<'scheduleTemplates'>; name: string; shiftCount: number };
 type StaffRequest = { _id: Id<'staffRequests'>; kind: string; status: string; title: string; details: string };
+type LaborForecastDay = {
+  dayIndex: number;
+  dayLabel: string;
+  covers: number;
+  privateEvents: number;
+  scheduledPeople: number;
+  scheduledHours: number;
+  suggestedHours: number;
+  gapHours: number;
+  status: 'under' | 'over' | 'balanced';
+};
+type LaborForecast = {
+  days: LaborForecastDay[];
+  totals: { covers: number; scheduledHours: number; suggestedHours: number; gapHours: number };
+};
 type PanelMode = 'create' | 'edit';
 
 function roleKey(role: string) {
@@ -124,6 +140,7 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
 export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const isDesktop = useIsDesktop();
   const data = useQuery(api.scheduling.getManagerSchedule, { venueId });
+  const forecast = useQuery(api.scheduling.getLaborForecast, { venueId }) as LaborForecast | undefined;
   const templates = useQuery(api.scheduling.listScheduleTemplates, { venueId });
   const requestRows = useQuery(api.app.listStaffRequests, { venueId });
 
@@ -143,6 +160,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const openDm = useMutation(api.chat.openDm);
 
   const [weekOffset, setWeekOffset] = useState(0);
+  const [subTab, setSubTab] = useState<'planner' | 'analytics' | 'staffing'>('planner');
 
   const weekStart = useMemo(() => {
     const today = new Date();
@@ -176,6 +194,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   };
 
   const [selectedShiftId, setSelectedShiftId] = useState<Id<'scheduleShifts'> | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
   const [panelMode, setPanelMode] = useState<PanelMode>('create');
   const [pickedStaff, setPickedStaff] = useState<Id<'profiles'> | null>(null);
   const [day, setDay] = useState(1);
@@ -219,6 +238,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const totalHours = data?.totalScheduledHours ?? 0;
   const laborBudget = data?.laborBudgetHours ?? null;
   const overBudget = laborBudget != null && totalHours > laborBudget;
+  const forecastTotals = forecast?.totals;
 
   useEffect(() => {
     if (!selectedShift) return;
@@ -230,6 +250,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     setStation(selectedShift.station);
     setNotes(selectedShift.notes ?? '');
     setPickedStaff(selectedShift.profileId);
+    setShowEditor(true);
   }, [selectedShift]);
 
   // Keyboard shortcuts (web): ⌘/Ctrl+S saves the open shift panel, ⌘/Ctrl+Z
@@ -258,8 +279,6 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     setTimeout(() => setActionMsg(null), 2600);
   };
 
-  // Runs a mutation and surfaces thrown errors (e.g. double-booking) as a
-  // toast instead of an unhandled rejection.
   const safe = async (action: () => Promise<unknown>, ok?: string) => {
     try {
       await action();
@@ -271,8 +290,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
 
   const messageStaff = (profileId: Id<'profiles'>) =>
     safe(async () => {
-      const id = await openDm({ venueId, otherProfileId: profileId });
-      router.push(`/chat/${id}`);
+      const result = await openDm({ venueId, targetProfileId: profileId });
+      router.push(`/chat/${result?.conversationId ?? result}`);
     });
 
   const runUndo = () => {
@@ -294,6 +313,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     setStart(toInputTime(nextStart));
     setEnd(toInputTime(Math.min(gridEnd, nextStart + 4 * 60)));
     setNotes('');
+    setPickedStaff(null);
+    setShowEditor(true);
   };
 
   const savePanel = async () => {
@@ -316,6 +337,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
       });
       markEdited();
       flash('Shift updated.');
+      setShowEditor(false);
+      setSelectedShiftId(null);
       return;
     }
     await safe(async () => {
@@ -331,6 +354,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
       setSelectedShiftId(shiftId);
       markEdited();
       flash(pickedStaff ? 'Assigned shift created.' : 'Open shift created.');
+      setShowEditor(false);
+      setSelectedShiftId(null);
     });
   };
 
@@ -385,259 +410,124 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     return <ScheduleSkeleton rows={5} />;
   }
 
-  const topButtonStyle = isDesktop ? { minWidth: 136 } : {};
+  const topButtonStyle = isDesktop ? { minWidth: 120 } : {};
   const panelInputStyle = { backgroundColor: colors.surface };
 
   return (
     <View style={{ gap: spacing.md }}>
+      {/* Header Card */}
       <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
         <Card.Content style={{ gap: spacing.md }}>
-          <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: spacing.sm, alignItems: isDesktop ? 'center' : 'stretch' }}>
+          <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: spacing.sm, alignItems: isDesktop ? 'center' : 'stretch', justifyContent: 'space-between' }}>
             <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
               <Button compact mode="outlined" textColor={colors.primary} icon="chevron-left" onPress={() => setWeekOffset((o) => o - 1)}>Prev</Button>
-              <View style={{ minWidth: isDesktop ? 210 : 0 }}>
+              <View style={{ minWidth: isDesktop ? 180 : 0 }}>
                 <Text style={{ color: colors.primary, fontWeight: '800' }}>Weekly Schedule</Text>
-                <Text style={{ color: colors.muted }}>{weekRangeLabel()} | Draft planner</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>{weekRangeLabel()}</Text>
               </View>
               <Button compact mode="outlined" textColor={colors.primary} icon="chevron-right" onPress={() => setWeekOffset((o) => o + 1)}>Next</Button>
             </View>
-            <Searchbar
-              placeholder="Search employees or roles"
-              value={search}
-              onChangeText={setSearch}
-              style={{ flex: isDesktop ? 1 : undefined, height: 44, backgroundColor: colors.background, borderRadius: 8 }}
-              inputStyle={{ fontSize: 14 }}
-            />
-            <Chip compact style={{ backgroundColor: status === 'Published' ? '#E1FBF3' : status === 'Edited after publish' ? '#FFF5DA' : colors.cream }}>
-              {status}
-            </Chip>
-            <Button mode="contained" buttonColor={colors.primary} icon="plus" style={topButtonStyle} accessibilityLabel="Add a new shift" onPress={() => openCreatePanel()}>
-              Add Shift
-            </Button>
-            <Button
-              mode="contained"
-              buttonColor={accents[0].fg}
-              icon="auto-fix"
-              style={topButtonStyle}
-              disabled={openShifts.length === 0}
-              accessibilityLabel="Auto-schedule open shifts"
-              onPress={() => setAutoOpen(true)}
-            >
-              Auto-schedule
-            </Button>
-            <Button
-              mode="contained"
-              buttonColor={colors.secondary}
-              icon="send"
-              style={topButtonStyle}
-              accessibilityLabel="Publish schedule and notify staff"
-              onPress={() => void safe(async () => {
-                const r = await publishSchedule({ venueId });
-                setStatus('Published');
-                flash(`Published and notified ${r.notified} staff.`);
-              })}
-            >
-              Publish
-            </Button>
-          </View>
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' }}>
-            {roleOptions.slice(0, 8).map((role) => (
-              <Chip key={role} compact selected={roleFilter === role} onPress={() => setRoleFilter(role)}>
-                {role}
+            <View style={{ flexDirection: 'row', gap: spacing.xs, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Chip compact style={{ backgroundColor: status === 'Published' ? '#E1FBF3' : status === 'Edited after publish' ? '#FFF5DA' : colors.cream, marginRight: 4 }}>
+                {status}
               </Chip>
-            ))}
-            <Menu
-              visible={menuOpen}
-              onDismiss={() => setMenuOpen(false)}
-              anchor={<Button compact mode="outlined" textColor={colors.primary} icon="auto-fix" onPress={() => setMenuOpen(true)}>Tools</Button>}
-            >
-              <Menu.Item
-                title="Duplicate Monday to week"
-                onPress={async () => {
-                  setMenuOpen(false);
-                  const r = await copyDayShifts({ venueId, fromDay: 1, toDays: [0, 2, 3, 4, 5, 6] });
-                  markEdited();
-                  flash(`Copied ${r.added} shifts.`);
-                }}
-              />
-              <Menu.Item
-                title="Auto-fill from first template"
-                onPress={async () => {
-                  setMenuOpen(false);
-                  const first = templateList[0];
-                  if (!first) {
-                    flash('Save a template first.');
-                    return;
-                  }
-                  const r = await applyTemplate({ venueId, templateId: first._id, replace: false });
-                  markEdited();
-                  flash(`Added ${r.added} open shifts.`);
-                }}
-              />
-              <Menu.Item
-                title="Clear week"
-                onPress={async () => {
-                  setMenuOpen(false);
-                  await safe(async () => {
-                    const r = await clearWeek({ venueId });
-                    markEdited();
-                    if (r.removed > 0) setUndo({ label: `Cleared ${r.removed} shifts.`, shifts: r.shifts as ShiftSnapshot[] });
-                    else flash('Nothing to clear.');
-                  });
-                }}
-              />
-            </Menu>
-            <TextInput
-              dense
-              label="Labor budget"
-              value={budgetInput}
-              onChangeText={setBudgetInput}
-              keyboardType="number-pad"
-              mode="outlined"
-              style={{ width: isDesktop ? 150 : 160, backgroundColor: colors.surface }}
-            />
-            <Button compact mode="outlined" textColor={colors.primary} onPress={async () => { await setLaborBudget({ venueId, weeklyLaborBudgetHours: budgetInput.trim() ? Number(budgetInput) : null }); setBudgetInput(''); flash('Budget saved.'); }}>
-              Set
-            </Button>
+              <Button mode="contained" buttonColor={colors.primary} icon="plus" style={topButtonStyle} labelStyle={{ fontSize: 12 }} onPress={() => openCreatePanel()}>
+                Add Shift
+              </Button>
+              <Button
+                mode="contained"
+                buttonColor={accents[0].fg}
+                icon="auto-fix"
+                style={topButtonStyle}
+                labelStyle={{ fontSize: 12 }}
+                disabled={openShifts.length === 0}
+                onPress={() => setAutoOpen(true)}
+              >
+                Auto
+              </Button>
+              <Button
+                mode="contained"
+                buttonColor={colors.secondary}
+                icon="send"
+                style={topButtonStyle}
+                labelStyle={{ fontSize: 12 }}
+                onPress={() => void safe(async () => {
+                  const r = await publishSchedule({ venueId });
+                  setStatus('Published');
+                  flash(`Published and notified ${r.notified} staff.`);
+                })}
+              >
+                Publish
+              </Button>
+            </View>
           </View>
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            {[
-              { label: 'Scheduled hours', value: `${totalHours}h`, tone: overBudget ? colors.danger : colors.primary },
-              { label: 'Open shifts', value: String(openShifts.length), tone: openShifts.length ? colors.warning : colors.success },
-              { label: 'Conflicts', value: String(conflicts.length), tone: conflicts.length ? colors.danger : colors.success },
-              { label: 'Pending approvals', value: String(requests.length), tone: requests.length ? colors.warning : colors.primary },
-            ].map((metric) => (
-              <View key={metric.label} style={{ minWidth: 145, flexGrow: 1, padding: spacing.sm, borderRadius: 8, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
-                <Text style={{ color: metric.tone, fontSize: 20, fontWeight: '800' }}>{metric.value}</Text>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>{metric.label}</Text>
-              </View>
-            ))}
-          </View>
-          {actionMsg ? <Text style={{ color: colors.success, fontWeight: '700' }}>{actionMsg}</Text> : null}
+          {/* Sub-tab segmented button */}
+          <SegmentedButtons
+            value={subTab}
+            onValueChange={(v) => setSubTab(v as 'planner' | 'analytics' | 'staffing')}
+            buttons={[
+              { value: 'planner', label: 'Planner (Grid)' },
+              { value: 'analytics', label: 'Analytics' },
+              { value: 'staffing', label: 'Staffing' },
+            ]}
+          />
         </Card.Content>
       </Card>
 
-      <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: spacing.md, alignItems: 'flex-start' }}>
-        <View style={{ width: isDesktop ? 280 : '100%', gap: spacing.md }}>
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Employees</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Pick a person, then drop or assign a shift.</Text>
-              {filteredStaff.map((row) => {
-                const accent = roleAccent(row.jobTitle || row.role);
-                const selected = pickedStaff === row._id;
-                return (
-                  <Pressable
-                    key={row._id}
-                    onPress={() => setPickedStaff(selected ? null : row._id)}
-                    {...({
-                      onDragOver: (event: any) => event.preventDefault(),
-                      onDrop: async (event: any) => {
-                        event.preventDefault();
-                        const shiftId = (event.dataTransfer?.getData('text/plain') || dragShiftId) as Id<'scheduleShifts'> | null;
-                        if (!shiftId) return;
-                        await safe(async () => {
-                          await assignShift({ venueId, shiftId, profileId: row._id });
-                          setDragShiftId(null);
-                          markEdited();
-                        }, `Assigned to ${row.fullName}.`);
-                      },
-                    } as any)}
-                    style={{
-                      borderWidth: 1,
-                      borderColor: selected ? accent.fg : colors.border,
-                      backgroundColor: selected ? accent.bg : colors.surface,
-                      borderRadius: 8,
-                      padding: spacing.sm,
-                      gap: 4,
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
-                      <Text style={{ color: colors.charcoal, fontWeight: '800', flex: 1 }}>{row.fullName}</Text>
-                      <Text style={{ color: row.overtime ? colors.danger : colors.muted, fontWeight: '700' }}>{row.weeklyHours}h</Text>
-                      <IconButton
-                        icon="message-outline"
-                        size={16}
-                        iconColor={colors.primary}
-                        style={{ margin: 0 }}
-                        accessibilityLabel={`Message ${row.fullName}`}
-                        onPress={() => void messageStaff(row._id)}
-                      />
-                    </View>
-                    <Text style={{ color: accent.fg, fontSize: 12 }}>{row.jobTitle || row.role}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>{availabilityLabel(row.availability, day)}</Text>
-                  </Pressable>
-                );
-              })}
-            </Card.Content>
-          </Card>
+      {/* Primary Metrics Summary Bar */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+        {[
+          { label: 'Scheduled Hours', value: `${totalHours}h`, tone: overBudget ? colors.danger : colors.primary },
+          { label: 'Open Shifts', value: String(openShifts.length), tone: openShifts.length ? colors.warning : colors.success },
+          { label: 'Conflicts', value: String(conflicts.length), tone: conflicts.length ? colors.danger : colors.success },
+          { label: 'Pending Approvals', value: String(requests.length), tone: requests.length ? colors.warning : colors.primary },
+        ].map((metric) => (
+          <View key={metric.label} style={{ minWidth: 145, flex: 1, padding: spacing.sm, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View>
+              <Text style={{ color: colors.muted, fontSize: 11 }}>{metric.label}</Text>
+              <Text style={{ color: metric.tone, fontSize: 18, fontWeight: '800' }}>{metric.value}</Text>
+            </View>
+            <MaterialCommunityIcons 
+              name={
+                metric.label.includes('Hours') ? 'clock-outline' :
+                metric.label.includes('Open') ? 'account-plus-outline' :
+                metric.label.includes('Conflicts') ? 'alert-circle-outline' : 'checkbox-marked-circle-outline'
+              } 
+              size={20} 
+              color={metric.tone} 
+            />
+          </View>
+        ))}
+      </View>
 
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Open Shifts</Text>
-              {openShifts.length === 0 ? <Text style={{ color: colors.muted }}>No open shifts.</Text> : null}
-              {openShifts.slice(0, 5).map((shift) => (
-                <Pressable key={shift._id} onPress={() => setSelectedShiftId(shift._id)} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: accents[4].bg }}>
-                  <Text style={{ color: accents[4].fg, fontWeight: '800' }}>{dayLabels[shift.dayIndex]} {formatDayDate(shift.dayIndex)} {shift.startTime}</Text>
-                  <Text style={{ color: colors.charcoal }}>{shift.jobTitle} | {shift.station}</Text>
-                </Pressable>
-              ))}
-              <Divider />
-              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Approvals</Text>
-              {requests.length === 0 ? <Text style={{ color: colors.muted }}>No time-off or swap requests pending.</Text> : null}
-              {requests.slice(0, 3).map((request) => (
-                <View key={request._id} style={{ gap: 2 }}>
-                  <Text style={{ color: colors.charcoal, fontWeight: '700' }}>{request.title}</Text>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{request.kind.replace('_', ' ')}</Text>
-                </View>
-              ))}
-            </Card.Content>
-          </Card>
-        </View>
+      {actionMsg ? (
+        <Card style={{ backgroundColor: '#E1FBF3', padding: 4 }}>
+          <Text style={{ color: colors.charcoal, fontWeight: '800', textAlign: 'center' }}>{actionMsg}</Text>
+        </Card>
+      ) : null}
 
-        <View style={{ flex: 1, width: isDesktop ? undefined : '100%', gap: spacing.md }}>
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
-                <View>
-                  <Text variant="titleMedium" style={{ fontWeight: '800' }}>Coverage</Text>
-                  <Text style={{ color: colors.muted }}>Role coverage by daypart</Text>
-                </View>
-                {overBudget ? <Chip compact textStyle={{ color: colors.danger }}>Over labor budget</Chip> : <Chip compact>On budget</Chip>}
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                  {coverageRows.map((row) => {
-                    const bg = row.state === 'Under' ? '#FDE7E9' : row.state === 'Over' ? '#FFF5DA' : '#E1FBF3';
-                    const fg = row.state === 'Under' ? colors.danger : row.state === 'Over' ? colors.warning : colors.success;
-                    return (
-                      <View key={row.key} style={{ width: 138, padding: spacing.sm, borderRadius: 8, backgroundColor: bg }}>
-                        <Text style={{ color: fg, fontWeight: '800' }}>{row.state}</Text>
-                        <Text style={{ color: colors.charcoal }}>{row.role}</Text>
-                        <Text style={{ color: colors.muted, fontSize: 12 }}>{row.part}: {row.count}/{row.target}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            </Card.Content>
-          </Card>
-
+      {/* ─── Planner Sub-tab ─── */}
+      {subTab === 'planner' && (
+        <View style={{ gap: spacing.md }}>
           <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
             <Card.Content style={{ gap: spacing.sm }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text variant="titleMedium" style={{ fontWeight: '800' }}>Week Grid</Text>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>{pickedName ? `Assigning: ${pickedName}` : 'Click an hour to create. Drag shifts on desktop.'}</Text>
+                <Text style={{ color: colors.muted, fontSize: 11 }}>
+                  {pickedName ? `Assigning: ${pickedName}` : 'Click an hour to create. Drag shifts on desktop.'}
+                </Text>
               </View>
+              
               <ScrollView horizontal={!isDesktop} showsHorizontalScrollIndicator={false}>
-                <View style={{ minWidth: isDesktop ? 760 : 860, gap: spacing.sm }}>
+                <View style={{ minWidth: isDesktop ? 760 : 860, gap: spacing.sm, paddingVertical: spacing.xs }}>
                   <View style={{ flexDirection: 'row', paddingLeft: 64 }}>
                     {hourTicks.map((hour) => (
                       <Text key={hour} style={{ flex: 1, color: colors.muted, fontSize: 11 }}>{timeLabel(hour * 60)}</Text>
                     ))}
                   </View>
+                  
                   {dayLabels.map((label, dayIndex) => {
                     const dayShifts = shifts.filter((shift) => shift.dayIndex === dayIndex);
                     const today = isToday(dayIndex);
@@ -660,6 +550,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                           </View>
                           <Text style={{ color: colors.muted, fontSize: 11 }}>{dayShifts.length} shifts</Text>
                         </Pressable>
+                        
                         <View style={{ flex: 1, minHeight: 92, borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: 'hidden', position: 'relative', backgroundColor: colors.background }}>
                           <View style={{ position: 'absolute', inset: 0 as any, flexDirection: 'row' }}>
                             {hourTicks.map((hour) => (
@@ -677,6 +568,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                               />
                             ))}
                           </View>
+                          
                           {dayShifts.map((shift) => {
                             const accent = roleAccent(shift.jobTitle);
                             const left = pct(shift.startMinutes);
@@ -706,10 +598,10 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                                   borderColor: shift.conflict ? colors.danger : accent.fg,
                                 }}
                               >
-                                <Text numberOfLines={1} style={{ color: shift.conflict ? colors.danger : accent.fg, fontWeight: '800', fontSize: 12 }}>
+                                <Text numberOfLines={1} style={{ color: shift.conflict ? colors.danger : accent.fg, fontWeight: '800', fontSize: 11 }}>
                                   {shift.jobTitle} {shift.conflict ? '!' : ''}
                                 </Text>
-                                <Text numberOfLines={1} style={{ color: colors.charcoal, fontSize: 11 }}>
+                                <Text numberOfLines={1} style={{ color: colors.charcoal, fontSize: 10 }}>
                                   {shift.memberName ?? 'Open'} | {shift.startTime}
                                 </Text>
                               </Pressable>
@@ -724,65 +616,325 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             </Card.Content>
           </Card>
 
-          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Templates</Text>
+          <CollapsibleSection
+            title="Templates"
+            subtitle={templateList.length ? `${templateList.length} saved templates` : 'Save and reuse weekly patterns'}
+          >
+            <View style={{ gap: spacing.md }}>
               <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
-                <TextInput dense label="Template name" value={templateName} onChangeText={setTemplateName} mode="outlined" style={{ width: isDesktop ? 260 : '100%', backgroundColor: colors.surface }} />
-                <Button mode="outlined" textColor={colors.primary} onPress={async () => { if (!templateName.trim()) return; await saveTemplate({ venueId, name: templateName.trim() }); setTemplateName(''); flash('Template saved.'); }}>
-                  Save week
+                <TextInput dense label="Template name" value={templateName} onChangeText={setTemplateName} mode="outlined" style={{ flex: 1, minWidth: 200, backgroundColor: colors.surface }} />
+                <Button mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim() }); setTemplateName(''); }, 'Template saved.')}>
+                  Save current week
                 </Button>
               </View>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-                {templateList.length === 0 ? <Text style={{ color: colors.muted }}>No saved schedule templates yet.</Text> : null}
-                {templateList.slice(0, 4).map((template) => (
-                  <Chip
-                    key={template._id}
-                    icon="calendar-import"
-                    onPress={async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true }); markEdited(); flash(`Applied ${r.added} shifts.`); }}
-                    onClose={() => void deleteTemplate({ venueId, templateId: template._id })}
-                  >
-                    {template.name} ({template.shiftCount})
-                  </Chip>
+              <View style={{ gap: spacing.sm }}>
+                {templateList.length === 0 ? <Text style={{ color: colors.muted }}>No saved templates yet.</Text> : null}
+                {templateList.map((template) => (
+                  <View key={template._id} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm, padding: spacing.sm, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
+                    <View style={{ flex: 1, minWidth: 150 }}>
+                      <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{template.name}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>{template.shiftCount} open shifts</Text>
+                    </View>
+                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
+                      Add
+                    </Button>
+                    <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
+                      Replace
+                    </Button>
+                    <IconButton
+                      icon="trash-can-outline"
+                      size={18}
+                      iconColor={colors.danger}
+                      accessibilityLabel={`Delete ${template.name} template`}
+                      onPress={() => void safe(() => deleteTemplate({ venueId, templateId: template._id }), 'Template deleted.')}
+                    />
+                  </View>
                 ))}
+              </View>
+            </View>
+          </CollapsibleSection>
+        </View>
+      )}
+
+      {/* ─── Analytics Sub-tab ─── */}
+      {subTab === 'analytics' && (
+        <View style={{ gap: spacing.md }}>
+          {/* Budget configuration Card */}
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Labor Budget Config</Text>
+              <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
+                <TextInput
+                  dense
+                  label="Weekly Labor Budget (Hours)"
+                  value={budgetInput}
+                  onChangeText={setBudgetInput}
+                  keyboardType="number-pad"
+                  mode="outlined"
+                  style={{ flex: 1, backgroundColor: colors.surface }}
+                />
+                <Button mode="contained" buttonColor={colors.primary} onPress={async () => { await setLaborBudget({ venueId, weeklyLaborBudgetHours: budgetInput.trim() ? Number(budgetInput) : null }); setBudgetInput(''); flash('Budget saved.'); }}>
+                  Save
+                </Button>
               </View>
             </Card.Content>
           </Card>
-        </View>
 
-        <View style={{ width: isDesktop ? 310 : '100%' }}>
+          <CollapsibleSection
+            title="Labor Forecast"
+            subtitle="Next 7 days from bookings, events, and hours."
+            rightAdornment={forecastTotals ? (
+              <Chip compact style={{ backgroundColor: forecastTotals.gapHours > 0 ? '#FFF5DA' : forecastTotals.gapHours < 0 ? '#E1FBF3' : colors.cream }}>
+                {forecastTotals.gapHours > 0 ? `${forecastTotals.gapHours}h short` : forecastTotals.gapHours < 0 ? `${Math.abs(forecastTotals.gapHours)}h cushion` : 'Balanced'}
+              </Chip>
+            ) : null}
+          >
+            <View style={{ gap: spacing.md }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                {[
+                  { label: 'Forecasted Covers', value: String(forecastTotals?.covers ?? 0), tone: colors.primary },
+                  { label: 'Scheduled Hours', value: `${forecastTotals?.scheduledHours ?? 0}h`, tone: colors.secondary },
+                  { label: 'Suggested Hours', value: `${forecastTotals?.suggestedHours ?? 0}h`, tone: colors.warning },
+                ].map((metric) => (
+                  <View key={metric.label} style={{ minWidth: 135, flexGrow: 1, padding: spacing.sm, borderRadius: 8, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+                    <Text style={{ color: metric.tone, fontSize: 18, fontWeight: '800' }}>{metric.value}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 11 }}>{metric.label}</Text>
+                  </View>
+                ))}
+              </View>
+              
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  {(forecast?.days ?? []).map((row) => {
+                    const bg = row.status === 'under' ? '#FFF5DA' : row.status === 'over' ? '#FDE7E9' : '#E1FBF3';
+                    const fg = row.status === 'under' ? colors.warning : row.status === 'over' ? colors.danger : colors.success;
+                    return (
+                      <View key={row.dayIndex} style={{ width: 160, padding: spacing.sm, borderRadius: 8, backgroundColor: bg, gap: 4 }}>
+                        <Text style={{ color: fg, fontWeight: '800', fontSize: 12 }}>{row.dayLabel} - {row.status.toUpperCase()}</Text>
+                        <Text style={{ color: colors.charcoal, fontSize: 12 }}>{row.covers} covers | {row.privateEvents} events</Text>
+                        <Text style={{ color: colors.muted, fontSize: 11 }}>{row.scheduledPeople} staff ({row.scheduledHours}h)</Text>
+                        <Text style={{ color: fg, fontSize: 11, fontWeight: '800' }}>
+                          {row.gapHours > 0 ? `${row.gapHours}h short` : row.gapHours < 0 ? `${Math.abs(row.gapHours)}h cushion` : 'On target'}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </View>
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Shift Coverage"
+            subtitle="Role coverage by daypart"
+            rightAdornment={overBudget ? <Chip compact textStyle={{ color: colors.danger }}>Over labor budget</Chip> : <Chip compact>On budget</Chip>}
+          >
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                {coverageRows.map((row) => {
+                  const bg = row.state === 'Under' ? '#FDE7E9' : row.state === 'Over' ? '#FFF5DA' : '#E1FBF3';
+                  const fg = row.state === 'Under' ? colors.danger : row.state === 'Over' ? colors.warning : colors.success;
+                  return (
+                    <View key={row.key} style={{ width: 138, padding: spacing.sm, borderRadius: 8, backgroundColor: bg }}>
+                      <Text style={{ color: fg, fontWeight: '800', fontSize: 12 }}>{row.state}</Text>
+                      <Text style={{ color: colors.charcoal, fontWeight: '600' }}>{row.role}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 11 }}>{row.part}: {row.count}/{row.target}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </CollapsibleSection>
+        </View>
+      )}
+
+      {/* ─── Staffing Sub-tab ─── */}
+      {subTab === 'staffing' && (
+        <View style={{ gap: spacing.md }}>
+          {/* Employee Directory Card */}
           <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
             <Card.Content style={{ gap: spacing.sm }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text variant="titleMedium" style={{ fontWeight: '800' }}>{panelMode === 'edit' ? 'Shift Details' : 'Add Shift'}</Text>
-                <MaterialCommunityIcons name={panelMode === 'edit' ? 'calendar-edit' : 'calendar-plus'} color={colors.primary} size={22} />
+              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Employees</Text>
+              
+              <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
+                <Searchbar
+                  placeholder="Search employees or roles"
+                  value={search}
+                  onChangeText={setSearch}
+                  style={{ flex: 1, height: 44, backgroundColor: colors.background, borderRadius: 8 }}
+                  inputStyle={{ fontSize: 14 }}
+                />
+                <Menu
+                  visible={menuOpen}
+                  onDismiss={() => setMenuOpen(false)}
+                  anchor={<Button mode="outlined" compact textColor={colors.primary} icon="menu" onPress={() => setMenuOpen(true)}>Tools</Button>}
+                >
+                  <Menu.Item
+                    title="Duplicate Monday to week"
+                    onPress={async () => {
+                      setMenuOpen(false);
+                      const r = await copyDayShifts({ venueId, fromDay: 1, toDays: [0, 2, 3, 4, 5, 6] });
+                      markEdited();
+                      flash(`Copied ${r.added} shifts.`);
+                    }}
+                  />
+                  <Menu.Item
+                    title="Auto-fill from first template"
+                    onPress={async () => {
+                      setMenuOpen(false);
+                      const first = templateList[0];
+                      if (!first) {
+                        flash('Save a template first.');
+                        return;
+                      }
+                      const r = await applyTemplate({ venueId, templateId: first._id, replace: false });
+                      markEdited();
+                      flash(`Added ${r.added} open shifts.`);
+                    }}
+                  />
+                  <Menu.Item
+                    title="Clear week"
+                    onPress={async () => {
+                      setMenuOpen(false);
+                      await safe(async () => {
+                        const r = await clearWeek({ venueId });
+                        markEdited();
+                        if (r.removed > 0) setUndo({ label: `Cleared ${r.removed} shifts.`, shifts: r.shifts as ShiftSnapshot[] });
+                        else flash('Nothing to clear.');
+                      });
+                    }}
+                  />
+                </Menu>
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: spacing.xs }}>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {roleOptions.slice(0, 8).map((role) => (
+                    <Chip key={role} compact selected={roleFilter === role} onPress={() => setRoleFilter(role)} style={{ height: 32 }}>
+                      {role}
+                    </Chip>
+                  ))}
+                </View>
+              </ScrollView>
+
+              <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
+                {filteredStaff.map((row) => {
+                  const accent = roleAccent(row.jobTitle || row.role);
+                  const selected = pickedStaff === row._id;
+                  return (
+                    <Pressable
+                      key={row._id}
+                      onPress={() => setPickedStaff(selected ? null : row._id)}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: selected ? accent.fg : colors.border,
+                        backgroundColor: selected ? accent.bg : colors.background,
+                        borderRadius: 8,
+                        padding: spacing.sm,
+                        gap: 4,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                        <Text style={{ color: colors.charcoal, fontWeight: '800', flex: 1 }}>{row.fullName}</Text>
+                        <Text style={{ color: row.overtime ? colors.danger : colors.muted, fontWeight: '700' }}>{row.weeklyHours}h</Text>
+                        <IconButton
+                          icon="message-outline"
+                          size={16}
+                          iconColor={colors.primary}
+                          style={{ margin: 0 }}
+                          accessibilityLabel={`Message ${row.fullName}`}
+                          onPress={() => void messageStaff(row._id)}
+                        />
+                      </View>
+                      <Text style={{ color: accent.fg, fontSize: 12 }}>{row.jobTitle || row.role}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 11 }}>{availabilityLabel(row.availability, day)}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </Card.Content>
+          </Card>
+
+          {/* Open Shifts & Approvals lists */}
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 10 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Open Shifts</Text>
+              {openShifts.length === 0 ? <Text style={{ color: colors.muted }}>No open shifts.</Text> : null}
+              {openShifts.slice(0, 5).map((shift) => (
+                <Pressable key={shift._id} onPress={() => setSelectedShiftId(shift._id)} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: accents[4].bg }}>
+                  <Text style={{ color: accents[4].fg, fontWeight: '800' }}>{dayLabels[shift.dayIndex]} {formatDayDate(shift.dayIndex)} {shift.startTime}</Text>
+                  <Text style={{ color: colors.charcoal }}>{shift.jobTitle} | {shift.station}</Text>
+                </Pressable>
+              ))}
+              <Divider style={{ marginVertical: spacing.xs }} />
+              
+              <Text variant="titleMedium" style={{ fontWeight: '800' }}>Approvals queue</Text>
+              {requests.length === 0 ? <Text style={{ color: colors.muted }}>No time-off or swap requests pending.</Text> : null}
+              {requests.slice(0, 3).map((request) => (
+                <View key={request._id} style={{ gap: 2, paddingVertical: 4 }}>
+                  <Text style={{ color: colors.charcoal, fontWeight: '700' }}>{request.title}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{request.kind.replace('_', ' ')} · {request.details}</Text>
+                </View>
+              ))}
+            </Card.Content>
+          </Card>
+        </View>
+      )}
+
+      {/* ─── Shift Editor Modal ─── */}
+      <Modal
+        visible={showEditor}
+        animationType="slide"
+        transparent
+        onRequestClose={() => { setShowEditor(false); setSelectedShiftId(null); }}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: spacing.lg }}>
+          <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
+            <Card.Content style={{ gap: spacing.sm }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text variant="titleMedium" style={{ fontWeight: '800' }}>
+                  {panelMode === 'edit' ? 'Shift Details' : 'Add Shift'}
+                </Text>
+                <IconButton
+                  icon="close"
+                  size={20}
+                  onPress={() => { setShowEditor(false); setSelectedShiftId(null); }}
+                  style={{ margin: 0 }}
+                />
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: 6, paddingVertical: 4 }}>
                   {dayLabels.map((label, index) => (
                     <Chip key={label} compact selected={day === index} onPress={() => setDay(index)}>{label} {formatDayNum(index)}</Chip>
                   ))}
                 </View>
               </ScrollView>
+
               <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                 <TextInput dense label="Start" value={start} onChangeText={setStart} mode="outlined" style={{ flex: 1, ...panelInputStyle }} />
                 <TextInput dense label="End" value={end} onChangeText={setEnd} mode="outlined" style={{ flex: 1, ...panelInputStyle }} />
               </View>
+              
               <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                 <TextInput dense label="Break" value="30m" editable={false} mode="outlined" style={{ flex: 1, ...panelInputStyle }} />
                 <TextInput dense label="Cost" value={`$${Math.round((durationHours(parseTime(start) ?? 0, parseTime(end) ?? 0) * 18) || 0)}`} editable={false} mode="outlined" style={{ flex: 1, ...panelInputStyle }} />
               </View>
+              
               <TextInput dense label="Role" value={jobTitle} onChangeText={setJobTitle} mode="outlined" style={panelInputStyle} />
               <TextInput dense label="Station" value={station} onChangeText={setStation} mode="outlined" style={panelInputStyle} />
               <TextInput dense label="Notes" value={notes} onChangeText={setNotes} mode="outlined" multiline style={panelInputStyle} />
+
               {selectedShift?.conflict ? (
                 <View style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: '#FDE7E9' }}>
-                  <Text style={{ color: colors.danger, fontWeight: '800' }}>Availability conflict</Text>
-                  <Text style={{ color: colors.danger, fontSize: 12 }}>This employee is unavailable or not fully available for the selected shift.</Text>
+                  <Text style={{ color: colors.charcoal, fontWeight: '800' }}>Availability conflict</Text>
+                  <Text style={{ color: colors.charcoal, fontSize: 12 }}>This employee is unavailable or not fully available for the selected shift.</Text>
                 </View>
               ) : null}
+
               <Text style={{ color: colors.muted, fontSize: 12 }}>Assign employee</Text>
-              <ScrollView style={{ maxHeight: 175 }}>
+              
+              <ScrollView style={{ maxHeight: 120 }}>
                 <View style={{ gap: 6 }}>
                   <Chip selected={!pickedStaff} onPress={async () => { setPickedStaff(null); if (selectedShift) await unassignShift({ venueId, shiftId: selectedShift._id }); }}>
                     Open shift
@@ -794,12 +946,14 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                   ))}
                 </View>
               </ScrollView>
-              <Button mode="contained" buttonColor={colors.primary} icon="content-save" accessibilityLabel={panelMode === 'edit' ? 'Save shift' : 'Create shift'} onPress={() => void savePanel()}>
+
+              <Button mode="contained" buttonColor={colors.primary} icon="content-save" style={{ marginTop: 8 }} accessibilityLabel={panelMode === 'edit' ? 'Save shift' : 'Create shift'} onPress={() => void savePanel()}>
                 {panelMode === 'edit' ? 'Save shift' : 'Create shift'}
               </Button>
+
               {selectedShift ? (
                 <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                  <Button compact mode="outlined" textColor={colors.primary} style={{ flex: 1 }} onPress={() => void unassignShift({ venueId, shiftId: selectedShift._id })}>Open</Button>
+                  <Button compact mode="outlined" textColor={colors.primary} style={{ flex: 1 }} onPress={async () => { await unassignShift({ venueId, shiftId: selectedShift._id }); setShowEditor(false); setSelectedShiftId(null); }}>Open</Button>
                   <Button compact mode="outlined" textColor={colors.danger} style={{ flex: 1 }} accessibilityLabel="Delete shift" onPress={async () => {
                     const snap: ShiftSnapshot = {
                       dayIndex: selectedShift.dayIndex,
@@ -814,6 +968,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                     await safe(async () => {
                       await deleteShift({ venueId, shiftId: selectedShift._id });
                       setSelectedShiftId(null);
+                      setShowEditor(false);
                       markEdited();
                       setUndo({ label: 'Shift deleted.', shifts: [snap] });
                     });
@@ -823,7 +978,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             </Card.Content>
           </Card>
         </View>
-      </View>
+      </Modal>
 
       <AutoScheduleModal
         venueId={venueId}

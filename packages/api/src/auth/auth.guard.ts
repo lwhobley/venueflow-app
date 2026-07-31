@@ -2,22 +2,35 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
+import { createHash } from 'crypto';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { enterTenant } from '../prisma/tenant-context';
+
+// Enforced by default (fail-closed); set to 'false' to roll back instantly.
+const TENANT_ISOLATION_ENFORCED = process.env['TENANT_ISOLATION_ENFORCED'] !== 'false';
 
 export type AuthUser = {
   sub: string;
   email?: string;
   name?: string;
   role?: string;
-  // Session id (present on tokens issued after revocable sessions shipped). When
-  // set, the matching Session row must still exist and be unexpired.
   sid?: string;
+  profileId?: string;
+  venueId?: string | null;
+  venueName?: string | null;
+  allAccess?: boolean;
+  trialEndsAt?: string | null;
+  venueStatus?: string | null;
 };
 
 export type AuthenticatedRequest = Request & {
   user?: AuthUser;
 };
+
+// Session lookup queries the database directly to ensure instant revocation
+// across all replicas when a session is invalidated (e.g. logout).
+// Neon connection pooling handles this efficiently.
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -59,15 +72,65 @@ export class AuthGuard implements CanActivate {
     if (!payload.sid) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
-    const session = await this.prisma.session.findUnique({
+    const now = Date.now();
+    const row = await this.prisma.session.findUnique({
       where: { id: payload.sid },
-      select: { userId: true, expiresAt: true },
+      select: { userId: true, expiresAt: true, tokenHash: true },
     });
-    if (!session || session.userId !== payload.sub || session.expiresAt.getTime() <= Date.now()) {
+    const session = row
+      ? { userId: row.userId, expiresAt: row.expiresAt.getTime(), tokenHash: row.tokenHash }
+      : null;
+
+    if (!session || session.userId !== payload.sub || session.expiresAt <= now) {
+      throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
+    }
+    if (session.tokenHash && session.tokenHash !== createHash('sha256').update(token).digest('hex')) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 
-    request.user = payload;
+    const liveProfile = await this.prisma.profile.findUnique({
+      where: { userId: payload.sub },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        allAccess: true,
+        trialEndsAt: true,
+        venueId: true,
+        venue: {
+          select: {
+            name: true,
+            subscriptionStatus: true,
+          },
+        },
+      },
+    });
+    // Privilege claims come only from the live profile. When the profile row is
+    // gone, clear role/allAccess/profileId rather than trusting stale JWT fields
+    // (venueId already cleared to null in that case).
+    const resolvedUser: AuthUser = {
+      ...payload,
+      email: liveProfile?.email ?? payload.email,
+      name: liveProfile?.fullName ?? payload.name,
+      profileId: liveProfile?.id,
+      role: liveProfile?.role,
+      allAccess: liveProfile?.allAccess ?? false,
+      trialEndsAt: liveProfile?.trialEndsAt?.toISOString() ?? null,
+      venueId: liveProfile?.venueId ?? null,
+      venueName: liveProfile?.venue?.name ?? null,
+      venueStatus: liveProfile?.venue?.subscriptionStatus ?? null,
+    };
+
+    request.user = resolvedUser;
+
+    // Bind tenant context for the rest of the request. Inert unless the env
+    // flag is on AND the token carries a venueId (auth flows, webhooks, and
+    // venueless system tasks legitimately have none and remain unscoped).
+    if (TENANT_ISOLATION_ENFORCED && resolvedUser.venueId) {
+      enterTenant(resolvedUser.venueId);
+    }
+
     return true;
   }
 

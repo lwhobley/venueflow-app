@@ -44,6 +44,7 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router, Nes
 
 1. **Deploy the NestJS Backend** (e.g. to Railway):
    - Set the required database variables (and `JWT_SECRET`) on your Railway dashboard.
+   - Set `CORS_ORIGINS` to explicit web origins such as `https://venuewrangler.com,https://www.venuewrangler.com`; do not use `*` with credentialed CORS.
 2. **Point the build at prod**: set `EXPO_PUBLIC_API_URL` in `eas.json` to the deployed server URL. Also set `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (iOS in-app purchases).
 3. **Build & submit**:
    - `eas build -p ios --profile production`

@@ -6,7 +6,9 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import type { Request, Response } from 'express';
+import { captureException } from '../observability/sentry';
 
 /**
  * Global exception filter: logs every error with request context and returns a
@@ -21,6 +23,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+    const requestId = String(request.headers['x-request-id'] ?? randomUUID());
+    response.setHeader('x-request-id', requestId);
 
     const status =
       exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
@@ -32,15 +36,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error(
-        `${request.method} ${request.url} -> ${status}`,
+        `[${requestId}] ${request.method} ${request.url} -> ${status}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      // Report 5xx to Sentry (no-op unless SENTRY_DSN is configured).
+      captureException(exception, { requestId, method: request.method, url: request.url });
     } else {
-      this.logger.warn(`${request.method} ${request.url} -> ${status}`);
+      this.logger.warn(`[${requestId}] ${request.method} ${request.url} -> ${status}`);
     }
 
     const body =
-      typeof message === 'string' ? { statusCode: status, message } : (message as object);
+      typeof message === 'string' ? { statusCode: status, message, requestId } : { ...(message as object), requestId };
 
     response.status(status).json(body);
   }

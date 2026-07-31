@@ -22,7 +22,7 @@ export function useAuthenticatedSession() {
   }, [me?.profile?.role, me?.profile?.allAccess]);
 
   const role = me?.profile.role ?? lastRole.current;
-  const allAccess = me?.profile.allAccess ?? lastAllAccess.current ?? user?.all_access ?? false;
+  const allAccess = me?.profile.allAccess ?? lastAllAccess.current ?? false;
   const canManage = canManageVenue(role, allAccess);
   const canViewBilling = canManageBilling(role, allAccess);
 

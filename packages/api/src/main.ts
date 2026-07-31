@@ -1,44 +1,72 @@
 import 'reflect-metadata';
 import helmet from 'helmet';
+import type { Request, Response, NextFunction } from 'express';
 import { json, urlencoded } from 'express';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { jsonBodyLimitForPath } from './common/body-limit';
+import { initSentry } from './observability/sentry';
+
+const DEFAULT_CORS_ORIGINS = [
+  'https://www.venuewrangler.com',
+  'https://venuewrangler.com',
+];
 
 async function bootstrap() {
+  // Error tracking — no-op unless SENTRY_DSN is set.
+  initSentry();
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.enableShutdownHooks();
-  // Behind Railway's proxy: trust the first hop so req.ip and X-Forwarded-For
-  // reflect the real client (used for rate-limit keys), not the proxy.
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
   const config = app.get(ConfigService);
+  // Behind the platform's proxy: trust exactly as many hops as sit in front of
+  // this process so req.ip reflects the real client (used for rate-limit
+  // keys), not the proxy — and so a client-supplied X-Forwarded-For entry
+  // beyond that hop count can't be spoofed into req.ip. Configurable because
+  // the actual hop count depends on the deployment topology; verify it against
+  // the platform's proxy chain rather than assuming a single hop.
+  const rawTrustProxyHops = config.get<string>('TRUST_PROXY_HOPS', '1');
+  const trustProxyHops = Number(rawTrustProxyHops);
+  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
+    throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
+  }
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
+  // Only accept fully-qualified http(s) origins. Reject wildcards — the server
+  // sends credentials (cookies), and a wildcard origin with credentials is both
+  // spec-violating and dangerous if the middleware ever reflects the requester.
+  const isValidOrigin = (o: string) => /^https?:\/\//i.test(o);
   const origins = config
     .get<string>('CORS_ORIGINS', '')
     .split(',')
     .map((origin) => origin.trim())
-    .filter(Boolean);
+    .filter((origin) => origin && isValidOrigin(origin));
+  const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
 
   app.use(helmet());
-  app.use(
+  const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const url = req.originalUrl ?? req.url ?? '';
+    const path = url.split('?')[0].replace(/\/+$/, '');
+    const limit = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '8mb'));
     json({
-      limit: config.get<string>('JSON_BODY_LIMIT', '8mb'),
-      // Stash the raw bytes only for the Stripe webhook, which needs them to
-      // verify the signature (the parsed JSON is not byte-identical).
-      verify: (req: any, _res, buf) => {
-        if (typeof req.url === 'string' && req.url.includes('/billing/stripe/webhook')) {
+      limit,
+      verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
+        const urlInner = req.originalUrl ?? req.url ?? '';
+        const pathInner = urlInner.split('?')[0].replace(/\/+$/, '');
+        if (pathInner === STRIPE_WEBHOOK_PATH) {
           req.rawBody = buf;
         }
       },
-    }),
-  );
+    })(req, res, next);
+  });
   app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
   // Fail closed: only origins explicitly listed in CORS_ORIGINS are allowed.
   // Native mobile clients don't send an Origin header, so this does not affect
   // them; it only restricts browsers. Set CORS_ORIGINS for web/dev.
   app.enableCors({
-    origin: origins.length > 0 ? origins : false,
+    origin: allowedOrigins,
     credentials: true,
   });
   app.useGlobalFilters(new AllExceptionsFilter());

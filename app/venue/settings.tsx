@@ -1,23 +1,26 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Card, IconButton, Text, TextInput } from 'react-native-paper';
+import { Button, IconButton, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { accents, colors, spacing } from '../../lib/theme';
+import { colors, spacing, type } from '../../lib/theme';
+import { AppCard, SectionHeader } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { getPreciseLocation } from '../../lib/location';
 import { canManageVenue } from '../../lib/permissions';
+import { useI18n } from '../../lib/i18n';
 
 export default function VenueSettingsScreen() {
+  const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
   const setVenue = useAuthStore((state: AuthState) => state.setVenue);
   const updateVenue = useMutation(api.app.updateVenue);
 
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
-  const canManage = canManageVenue(me?.profile.role ?? user?.role, me?.profile.allAccess ?? user?.all_access);
+  const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   const [name, setName] = useState(venue?.name ?? '');
   const [lat, setLat] = useState(venue ? String(venue.latitude) : '');
@@ -44,7 +47,7 @@ export default function VenueSettingsScreen() {
       setLat(loc.latitude.toFixed(6));
       setLng(loc.longitude.toFixed(6));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not read your location.');
+      setError(e instanceof Error ? e.message : t('venueSettings.couldNotReadLocation'));
     } finally {
       setLocating(false);
     }
@@ -54,13 +57,13 @@ export default function VenueSettingsScreen() {
     setError(null);
     setSaved(false);
     if (!venue?.id) {
-      setError('No venue assigned to your account.');
+      setError(t('venueSettings.noVenueAssigned'));
       return;
     }
     const latitude = Number(lat);
     const longitude = Number(lng);
     if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-      setError('Enter valid latitude and longitude (decimal degrees).');
+      setError(t('venueSettings.invalidCoordinates'));
       return;
     }
     setSaving(true);
@@ -76,7 +79,7 @@ export default function VenueSettingsScreen() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save venue.');
+      setError(e instanceof Error ? e.message : t('venueSettings.couldNotSaveVenue'));
     } finally {
       setSaving(false);
     }
@@ -85,7 +88,7 @@ export default function VenueSettingsScreen() {
   if (!canManage) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
-        <Text style={{ color: colors.muted }}>Only managers and admins can edit venue settings.</Text>
+        <Text style={{ color: colors.muted }}>{t('venueSettings.onlyManagersCanEdit')}</Text>
       </View>
     );
   }
@@ -99,44 +102,42 @@ export default function VenueSettingsScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View>
-          <Text variant="headlineMedium" style={{ color: colors.primary, fontWeight: '800' }}>Venue settings</Text>
-          <Text style={{ color: colors.muted }}>Set your location so geofenced clock-in works.</Text>
+          <Text style={{ ...type.title, color: colors.charcoal }}>{t('venueSettings.title')}</Text>
+          <Text style={{ color: colors.muted }}>{t('venueSettings.subtitle')}</Text>
         </View>
       </View>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Details</Text>
-          <TextInput label="Venue name" value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-        </Card.Content>
-      </Card>
+      <AppCard>
+          <SectionHeader title={t('venueSettings.detailsSection')} />
+          <TextInput label={t('venueSettings.venueNameLabel')} value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+      </AppCard>
 
-      <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
-        <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Location</Text>
+      <AppCard>
+          <SectionHeader title={t('venueSettings.locationSection')} />
+          <View style={{ gap: spacing.sm }}>
           <Text style={{ color: colors.muted }}>
-            Staff can only clock in within the geofence radius of this point. Stand at your venue and tap below.
+            {t('venueSettings.geofenceNotice')}
           </Text>
           <Button mode="contained" buttonColor={colors.primary} icon="crosshairs-gps" loading={locating} onPress={() => void useMyLocation()}>
-            Use my current location
+            {t('venueSettings.useMyLocation')}
           </Button>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <TextInput label="Latitude" value={lat} onChangeText={setLat} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
-            <TextInput label="Longitude" value={lng} onChangeText={setLng} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <TextInput label={t('venueSettings.latitudeLabel')} value={lat} onChangeText={setLat} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <TextInput label={t('venueSettings.longitudeLabel')} value={lng} onChangeText={setLng} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ width: 110 }}>Geofence radius</Text>
+            <Text style={{ width: 110 }}>{t('venueSettings.geofenceRadius')}</Text>
             <IconButton icon="minus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.max(20, r - 20))} />
             <Text style={{ minWidth: 56, textAlign: 'center' }}>{radius} m</Text>
             <IconButton icon="plus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.min(2000, r + 20))} />
           </View>
-        </Card.Content>
-      </Card>
+          </View>
+      </AppCard>
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-      {saved ? <Text style={{ color: accents[2].fg, textAlign: 'center' }}>Saved ✓</Text> : null}
+      {saved ? <Text style={{ color: colors.success, textAlign: 'center' }}>{t('venueSettings.saved')}</Text> : null}
       <Button mode="contained" buttonColor={colors.primary} icon="content-save" loading={saving} onPress={() => void onSave()}>
-        Save venue location
+        {t('venueSettings.saveVenueLocation')}
       </Button>
     </ScrollView>
   );

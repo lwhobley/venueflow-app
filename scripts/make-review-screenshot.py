@@ -2,7 +2,7 @@
 Matches the app's clean white theme and uses the requested App Store
 iPhone portrait resolution (1242x2688).
 
-Product: Venue Wrangler $99/month for teams of 1-50 people - one 'pro'
+Product: Venue Wrangler $99.99/month for teams of 1-50 people - one 'pro'
 entitlement unlocks the whole app.
 """
 from PIL import Image, ImageDraw, ImageFont

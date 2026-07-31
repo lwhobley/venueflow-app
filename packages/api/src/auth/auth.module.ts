@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthGuard } from './auth.guard';
+import { AuthService } from './auth.service';
 
 @Global()
 @Module({
@@ -18,7 +19,7 @@ import { AuthGuard } from './auth.guard';
       },
     }),
   ],
-  providers: [AuthGuard],
-  exports: [AuthGuard, JwtModule],
+  providers: [AuthGuard, AuthService],
+  exports: [AuthGuard, JwtModule, AuthService],
 })
 export class AuthModule {}

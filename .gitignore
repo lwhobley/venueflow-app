@@ -7,6 +7,7 @@ node_modules/
 .expo/
 dist/
 web-build/
+web-dist/
 expo-env.d.ts
 packages/*/dist/
 
@@ -50,3 +51,8 @@ scripts/.auth-keys.json
 .claude/
 .codex/
 .agents/
+
+# Build artifacts and assets
+builds/
+facebook-assets/
+screenshots/

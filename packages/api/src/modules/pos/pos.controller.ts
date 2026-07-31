@@ -1,7 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import * as crypto from 'crypto';
 import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
 import type { Request } from 'express';
 import { isAdminRole } from '../../auth/roles';
@@ -9,7 +8,7 @@ import { Public } from '../../auth/public.decorator';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { zonedDayBounds, zonedIsoDate } from '../../common/venue-time';
-import { secretsMatch } from '../../common/webhook-auth';
+import { generateWebhookSecret, secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -19,9 +18,20 @@ type Scope = VenueScopedRequest['venueScope'];
 
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 const MAX_INGEST_ROWS = 1000;
+const INGEST_CHUNK_SIZE = 100;
 const INGEST_RATE_LIMIT_MAX = 120;
 const INGEST_RATE_LIMIT_WINDOW_MS = 60_000;
-const POS_PROVIDERS = ['toast', 'square', 'clover', 'generic'] as const;
+// Source of truth for which POS providers can register a webhook connection.
+// Must stay in sync with the PosProvider enum in prisma/schema.prisma.
+const POS_PROVIDERS = [
+  'toast',
+  'square',
+  'clover',
+  'shopify_pos',
+  'lightspeed_restaurant',
+  'spoton',
+  'generic',
+] as const;
 const POS_CHECK_STATUSES = ['open', 'paid', 'void'] as const;
 
 class SalesWindowQueryDto {
@@ -51,7 +61,7 @@ class TopItemsQueryDto extends SalesWindowQueryDto {
 }
 
 class UpsertPosConnectionDto {
-  @IsIn(['toast', 'square', 'clover', 'generic'])
+  @IsIn([...POS_PROVIDERS])
   provider!: string;
 
   @IsOptional()
@@ -176,8 +186,11 @@ export class PosController {
       throw new UnauthorizedException('Invalid webhook secret');
     }
 
-    // Batch all upserts into a single transaction to eliminate per-row roundtrips.
-    await this.prisma.$transaction([
+    // Batch upserts into chunked transactions (not one single transaction for
+    // the whole payload) so a large delivery (up to MAX_INGEST_ROWS checks +
+    // MAX_INGEST_ROWS labor punches) can't hold one transaction's locks for an
+    // extended period.
+    const operations = [
       ...( body.checks ?? []).map((check) => {
         const data = {
           tableLabel: check.tableLabel ?? null,
@@ -231,7 +244,10 @@ export class PosController {
           update: data,
         });
       }),
-    ]);
+    ];
+    for (let i = 0; i < operations.length; i += INGEST_CHUNK_SIZE) {
+      await this.prisma.$transaction(operations.slice(i, i + INGEST_CHUNK_SIZE));
+    }
 
     const checksUpserted = (body.checks ?? []).length;
     const laborUpserted = (body.laborPunches ?? []).length;
@@ -520,33 +536,33 @@ export class PosController {
     });
 
     if (existing) {
-      const freshSecret = existing.webhookSecret ? null : crypto.randomBytes(32).toString('hex');
+      const freshSecret = existing.webhookSecret ? null : generateWebhookSecret();
       const updated = await this.prisma.posConnection.update({
         where: { id: existing.id },
         data: {
           status: body.status as any,
           externalLocationId,
           updatedAt: now,
-          ...(freshSecret ? { webhookSecret: freshSecret } : {}),
+          ...(freshSecret ? { webhookSecret: freshSecret.hashedSecret } : {}),
         },
       });
-      return { ...this.mapConnection(updated), webhookSecret: freshSecret };
+      return { ...this.mapConnection(updated), webhookSecret: freshSecret?.secret ?? null };
     }
 
-    const secret = crypto.randomBytes(32).toString('hex');
+    const freshSecret = generateWebhookSecret();
     const created = await this.prisma.posConnection.create({
       data: {
         venueId,
         provider: body.provider as any,
         externalLocationId,
         status: body.status as any,
-        webhookSecret: secret,
+        webhookSecret: freshSecret.hashedSecret,
         createdAt: now,
         updatedAt: now,
       },
     });
 
-    return { ...this.mapConnection(created), webhookSecret: secret };
+    return { ...this.mapConnection(created), webhookSecret: freshSecret.secret };
   }
 
   private mapConnection(conn: {

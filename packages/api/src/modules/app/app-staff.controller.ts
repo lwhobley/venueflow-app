@@ -1,16 +1,28 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
-import { IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
-import { Role } from '@prisma/client';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { Prisma, Role } from '@prisma/client';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mapProfile } from './app-mappers';
 import { ProfileService } from './profile.service';
+import { StaffImportParserService } from './staff-import-parser.service';
+
+const MAX_STAFF_IMPORT_ROWS = 100;
+const AI_PARSE_RATE_LIMIT_MAX = 20;
+const AI_PARSE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 class StaffDto {
+  @IsString()
+  @IsOptional()
+  staffId?: string;
+
   @IsString()
   venueId!: string;
 
@@ -48,14 +60,67 @@ class StaffDto {
   certifications?: string[];
 }
 
+class ParseStaffImportDto {
+  @IsString()
+  text!: string;
+}
+
+class StaffImportRowDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  fullName!: string;
+
+  @IsIn(['manager', 'staff'])
+  role!: 'manager' | 'staff';
+
+  @IsString()
+  jobTitle!: string;
+
+  @IsString()
+  @IsOptional()
+  phone?: string;
+}
+
+class CommitStaffImportDto {
+  @IsString()
+  venueId!: string;
+
+  @IsArray()
+  @ArrayMaxSize(MAX_STAFF_IMPORT_ROWS)
+  @ValidateNested({ each: true })
+  @Type(() => StaffImportRowDto)
+  items!: StaffImportRowDto[];
+}
+
+const ONBOARDING_TASK_STATUSES = ['open', 'done', 'cancelled'] as const;
+
+class UpdateOnboardingTaskDto {
+  @IsIn(ONBOARDING_TASK_STATUSES)
+  status!: (typeof ONBOARDING_TASK_STATUSES)[number];
+}
+
+const DEFAULT_ONBOARDING_TASKS = [
+  { title: 'Confirm profile details', category: 'profile', details: 'Verify name, phone, emergency contact, and job title.' },
+  { title: 'Collect required certifications', category: 'compliance', details: 'Add food handler, alcohol server, safety, or local permits.' },
+  { title: 'Review handbook and policies', category: 'training', details: 'Confirm workplace expectations, scheduling rules, and conduct policies.' },
+  { title: 'Train on clock-in and scheduling', category: 'training', details: 'Show the staff member how to clock in, set availability, and request changes.' },
+  { title: 'First shift readiness check', category: 'service', details: 'Confirm uniform, station assignment, POS access, and opening checklist.' },
+] as const;
+
 // Venue-staff roster CRUD for /v1/app/staff*. Split out of AppController;
-// routes, role checks, and response shapes are unchanged.
+// routes, role checks, and response shapes are unchanged. Subscription-gated
+// at the class level (matching the sibling /v1/staff StaffController) so an
+// expired venue can't keep reading staff PII / mutating the roster.
+@RequireSubscription()
 @Controller('v1/app')
 export class AppStaffController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly profiles: ProfileService,
+    private readonly staffImportParser: StaffImportParserService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -68,17 +133,167 @@ export class AppStaffController {
   }
 
   @UseGuards(AuthGuard)
+  @Get('staff/onboarding')
+  async listOnboardingTasks(@CurrentUser() user: AuthUser, @Query('profileId') profileId?: string) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    const venueId = viewer.venueId!;
+    const profiles = await this.prisma.profile.findMany({
+      where: { venueId, ...(profileId ? { id: profileId } : {}) },
+      select: { id: true, fullName: true, email: true, role: true, jobTitle: true },
+      orderBy: { fullName: 'asc' },
+      take: profileId ? 1 : 200,
+    });
+    await this.ensureOnboardingTasksForProfiles(venueId, profiles.map((profile) => profile.id));
+    const tasks = await this.prisma.staffOnboardingTask.findMany({
+      where: { venueId, ...(profileId ? { profileId } : {}) },
+      orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+      take: 1000,
+    });
+    const tasksByProfile = new Map<string, typeof tasks>();
+    for (const task of tasks) {
+      const list = tasksByProfile.get(task.profileId) ?? [];
+      list.push(task);
+      tasksByProfile.set(task.profileId, list);
+    }
+    return {
+      staff: profiles.map((profile) => {
+        const profileTasks = tasksByProfile.get(profile.id) ?? [];
+        return {
+          _id: profile.id,
+          fullName: profile.fullName,
+          email: profile.email,
+          role: profile.role,
+          jobTitle: profile.jobTitle,
+          completedCount: profileTasks.filter((task) => task.status === 'done').length,
+          totalCount: profileTasks.filter((task) => task.status !== 'cancelled').length,
+          tasks: profileTasks.map(mapOnboardingTask),
+        };
+      }),
+    };
+  }
+
+  @UseGuards(AuthGuard)
+  @Patch('staff/onboarding/:id')
+  async updateOnboardingTask(@CurrentUser() user: AuthUser, @Param('id') taskId: string, @Body() body: UpdateOnboardingTaskDto) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    const venueId = viewer.venueId!;
+    const task = await this.prisma.staffOnboardingTask.findFirst({ where: { id: taskId, venueId } });
+    if (!task) throw new NotFoundException('Onboarding task not found');
+    const target = await this.prisma.profile.findFirst({ where: { id: task.profileId, venueId } });
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedTask = await tx.staffOnboardingTask.update({
+        where: { id: task.id },
+        data: {
+          status: body.status,
+          completedBy: body.status === 'done' ? viewer.id : null,
+          completedAt: body.status === 'done' ? now : null,
+          updatedAt: now,
+        },
+      });
+      await this.writeAuditLog(
+        {
+          venueId,
+          actor: viewer,
+          target,
+          entityType: 'onboarding_task',
+          entityId: task.id,
+          action: body.status === 'done' ? 'onboarding_task_completed' : 'onboarding_task_updated',
+          summary: `${viewer.fullName} marked "${task.title}" ${body.status}${target ? ` for ${target.fullName}` : ''}.`,
+          metadata: { taskTitle: task.title, previousStatus: task.status, nextStatus: body.status },
+        },
+        tx,
+      );
+      return updatedTask;
+    });
+    return mapOnboardingTask(updated);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('staff/audit-log')
+  async listAuditLog(@CurrentUser() user: AuthUser) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    const rows = await this.prisma.auditLog.findMany({
+      where: { venueId: viewer.venueId! },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return { entries: rows.map(mapAuditLog) };
+  }
+
+  @UseGuards(AuthGuard)
   @Post('staff')
   async upsertVenueStaff(@CurrentUser() user: AuthUser, @Body() body: StaffDto) {
     const viewer = await this.profiles.requireManagerProfile(user);
     if (viewer.venueId !== body.venueId) throw new ForbiddenException('Not authorized');
-    const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess;
-    if (!viewerIsOwnerOrAdmin && ['admin', 'owner', 'manager'].includes(body.role)) {
-      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
+    const row = await this.upsertOneStaffMember(viewer, body);
+    return mapProfile(row);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('staff/import/parse')
+  async parseStaffImport(@CurrentUser() user: AuthUser, @Body() body: ParseStaffImportDto) {
+    const profile = await this.profiles.requireManagerProfile(user);
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `ai-parse:staff-import:${profile.venueId}`,
+      AI_PARSE_RATE_LIMIT_MAX,
+      AI_PARSE_RATE_LIMIT_WINDOW_MS,
+      'Too many AI parse requests. Try again in a few minutes.',
+    );
+    return this.staffImportParser.parse(body.text);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('staff/import/commit')
+  async commitStaffImport(@CurrentUser() user: AuthUser, @Body() body: CommitStaffImportDto) {
+    const viewer = await this.profiles.requireManagerProfile(user);
+    if (viewer.venueId !== body.venueId) throw new ForbiddenException('Not authorized');
+    const created: string[] = [];
+    const updated: string[] = [];
+    const failed: Array<{ email: string; error: string }> = [];
+    for (const item of body.items) {
+      try {
+        const existingBefore = await this.prisma.profile.findFirst({
+          where: { venueId: body.venueId, email: item.email.toLowerCase() },
+          select: { id: true },
+        });
+        const row = await this.upsertOneStaffMember(viewer, {
+          venueId: body.venueId,
+          email: item.email,
+          fullName: item.fullName,
+          role: item.role,
+          jobTitle: item.jobTitle,
+          phone: item.phone,
+        });
+        (existingBefore ? updated : created).push(row.email);
+      } catch (error) {
+        failed.push({ email: item.email, error: error instanceof Error ? error.message : 'Import failed' });
+      }
     }
-    const existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
-    if (existing) {
-      await this.assertCanManageLegacyStaffTarget(viewer, existing);
+    return { created: created.length, updated: updated.length, failed };
+  }
+
+  /** Core create-or-update logic for a single roster row, shared by the single-staff endpoint and bulk import. */
+  private async upsertOneStaffMember(
+    viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null; fullName: string; venue?: { name: string } | null },
+    body: Pick<StaffDto, 'venueId' | 'staffId' | 'email' | 'fullName' | 'role' | 'jobTitle' | 'phone' | 'altPhone' | 'address' | 'dateOfBirth' | 'certifications'>,
+  ) {
+    let existing;
+    if (body.staffId) {
+      existing = await this.prisma.profile.findFirst({ where: { id: body.staffId, venueId: body.venueId } });
+      if (!existing) throw new NotFoundException('Staff member not found');
+    } else {
+      existing = await this.prisma.profile.findFirst({ where: { venueId: body.venueId, email: body.email.toLowerCase() } });
+    }
+    // Managers cannot grant roles at or above their own level. Only applies
+    // when the role is actually changing — resubmitting a member's existing
+    // role (e.g. a manager editing their own phone number) is not a grant and
+    // must not be blocked here.
+    const viewerIsOwnerOrAdmin = viewer.role === 'owner' || viewer.role === 'admin' || viewer.allAccess;
+    const roleChanged = !existing || existing.role !== body.role;
+    if (!viewerIsOwnerOrAdmin && roleChanged && ['admin', 'owner', 'manager'].includes(body.role)) {
+      throw new ForbiddenException('Managers cannot assign admin, owner, or manager roles');
     }
     const employeeFields = {
       phone: body.phone?.trim() || null,
@@ -87,22 +302,69 @@ export class AppStaffController {
       dateOfBirth: body.dateOfBirth ? parseDateOfBirth(body.dateOfBirth) : null,
       certifications: body.certifications ?? [],
     };
-    const row = existing
-      ? await this.prisma.profile.update({
+    const row = await this.prisma.$transaction(async (tx) => {
+      let created;
+      if (existing) {
+        const isDemoting = isOwnerOrAdminRole(existing.role) && !isOwnerOrAdminRole(body.role);
+        await this.assertCanManageLegacyStaffTarget(viewer, existing, isDemoting, tx);
+        const roleChanged = existing.role !== body.role || existing.venueId !== body.venueId;
+        created = await tx.profile.update({
           where: { id: existing.id },
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
-        })
-      : await this.prisma.profile.create({
+        });
+        if (roleChanged && existing.userId) {
+          await tx.session.deleteMany({ where: { userId: existing.userId } });
+        }
+      } else {
+        created = await tx.profile.create({
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         });
+        await this.ensureOnboardingTasks(body.venueId, created.id, tx);
+      }
+      await this.writeAuditLog(
+        {
+          venueId: body.venueId,
+          actor: viewer,
+          target: created,
+          entityType: 'profile',
+          entityId: created.id,
+          action: existing ? 'staff_updated' : 'staff_created',
+          summary: existing
+            ? `${viewer.fullName} updated ${created.fullName}${existing.role !== created.role ? ` from ${existing.role} to ${created.role}` : ''}.`
+            : `${viewer.fullName} added ${created.fullName} as ${created.role}.`,
+          metadata: existing
+            ? { previousRole: existing.role, nextRole: created.role, previousJobTitle: existing.jobTitle, nextJobTitle: created.jobTitle }
+            : { role: created.role, jobTitle: created.jobTitle },
+        },
+        tx,
+      );
+      return created;
+    });
+    const venueName = viewer.venue?.name ?? 'your venue';
     void this.email.send({
       to: row.email,
-      subject: existing ? 'Your Venue Wrangler team profile was updated' : `You were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'}`,
+      subject: existing ? 'Your Venue Wrangler Profile Has Been Updated' : `Invitation: Join the Team at ${venueName} on Venue Wrangler`,
       text: existing
-        ? `Hi ${row.fullName},\n\nYour team profile for ${viewer.venue?.name ?? 'your venue'} was updated.\n\nRole: ${row.role}\nJob title: ${row.jobTitle}`
-        : `Hi ${row.fullName},\n\nYou were added to ${viewer.venue?.name ?? 'a Venue Wrangler team'} as ${row.jobTitle}.\n\nCreate an account or sign in with this email address to join the team.`,
+        ? `Hi ${row.fullName},\n\n` +
+          `Your team profile for ${venueName} was updated. Here are your current profile details:\n\n` +
+          `Updated Profile Details\n` +
+          `Detail\tInfo\n` +
+          `Name\t${row.fullName}\n` +
+          `Role\t${row.role}\n` +
+          `Job Title\t${row.jobTitle}\n\n` +
+          `If you did not request these changes or have any questions, please contact your venue administrator.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`
+        : `Hi ${row.fullName},\n\n` +
+          `Welcome! You have been added to the team at ${venueName} as a ${row.jobTitle}.\n\n` +
+          `To view your schedule, manage your availability, and request shift swaps, please join the venue using the steps below:\n\n` +
+          `1. Create a Venue Wrangler account or sign in using your email: ${row.email}\n` +
+          `2. You will be automatically linked to the venue and can access your dashboard right away.\n\n` +
+          `We're excited to have you on board!\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
     });
-    return mapProfile(row);
+    return row;
   }
 
   @UseGuards(AuthGuard)
@@ -111,28 +373,137 @@ export class AppStaffController {
     const viewer = await this.profiles.requireManagerProfile(user);
     const staff = await this.prisma.profile.findFirst({ where: { id: staffId, venueId: viewer.venueId! } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    await this.assertCanManageLegacyStaffTarget(viewer, staff);
-    const updated = await this.prisma.profile.update({ where: { id: staff.id }, data: { venueId: null } });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertCanManageLegacyStaffTarget(viewer, staff, true, tx);
+      const u = await tx.profile.update({ where: { id: staff.id }, data: { venueId: null } });
+      if (staff.userId) {
+        await tx.session.deleteMany({ where: { userId: staff.userId } });
+      }
+      await this.writeAuditLog(
+        {
+          venueId: viewer.venueId!,
+          actor: viewer,
+          target: staff,
+          entityType: 'profile',
+          entityId: staff.id,
+          action: 'staff_deactivated',
+          summary: `${viewer.fullName} deactivated ${staff.fullName}.`,
+          metadata: { role: staff.role, jobTitle: staff.jobTitle },
+        },
+        tx,
+      );
+      return u;
+    });
     return mapProfile(updated);
   }
 
   private async assertCanManageLegacyStaffTarget(
     viewer: { id: string; role: Role; allAccess: boolean; venueId: string | null },
     target: { id: string; role: Role; venueId: string | null },
+    demotingOrRemoving = false,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
     // Editing your own profile is always allowed; the last-owner guard below
     // still prevents a sole owner from self-demoting out of access.
     if (target.id !== viewer.id && !canManageRole(viewer.role, target.role, viewer.allAccess)) {
       throw new ForbiddenException('You cannot modify this staff member');
     }
-    if (isOwnerOrAdminRole(target.role)) {
-      const ownerAdminCount = await this.prisma.profile.count({
+    // Only enforce the last-owner/admin guard when the operation would actually
+    // remove or demote the target. Harmless edits (name, phone, job title) on
+    // the sole owner/admin are safe and should not be blocked.
+    if (demotingOrRemoving && isOwnerOrAdminRole(target.role)) {
+      // Advisory-lock the venue so two concurrent demotions/removals can't both
+      // read the same pre-write count and both pass the guard.
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${viewer.venueId}`}))`;
+      const ownerAdminCount = await db.profile.count({
         where: { venueId: viewer.venueId, role: { in: ['owner', 'admin'] } },
       });
       if (ownerAdminCount <= 1) {
         throw new ForbiddenException('You cannot remove the last owner or admin from the venue');
       }
     }
+  }
+
+  /**
+   * Seeds onboarding tasks for whichever of the given profiles don't already
+   * have any, in a single existence check + single batched insert — instead of
+   * one createMany round-trip per profile, which made every GET
+   * /staff/onboarding load do up to 200 DB writes even when nothing changed.
+   */
+  private async ensureOnboardingTasksForProfiles(venueId: string, profileIds: string[]) {
+    if (profileIds.length === 0) return;
+    const existing = await this.prisma.staffOnboardingTask.findMany({
+      where: { venueId, profileId: { in: profileIds } },
+      select: { profileId: true },
+      distinct: ['profileId'],
+    });
+    const seeded = new Set(existing.map((row) => row.profileId));
+    const missing = profileIds.filter((id) => !seeded.has(id));
+    if (missing.length === 0) return;
+    const now = new Date();
+    await this.prisma.staffOnboardingTask.createMany({
+      data: missing.flatMap((profileId) =>
+        DEFAULT_ONBOARDING_TASKS.map((task) => ({
+          venueId,
+          profileId,
+          title: task.title,
+          details: task.details,
+          category: task.category,
+          status: 'open',
+          createdAt: now,
+          updatedAt: now,
+        })),
+      ),
+      skipDuplicates: true,
+    });
+  }
+
+  private async ensureOnboardingTasks(venueId: string, profileId: string, tx: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const now = new Date();
+    await tx.staffOnboardingTask.createMany({
+      data: DEFAULT_ONBOARDING_TASKS.map((task) => ({
+        venueId,
+        profileId,
+        title: task.title,
+        details: task.details,
+        category: task.category,
+        status: 'open',
+        createdAt: now,
+        updatedAt: now,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  private async writeAuditLog(
+    args: {
+      venueId: string;
+      actor: { id: string; fullName: string; role: Role };
+      target: { id: string; fullName: string; role: Role } | null;
+      entityType: string;
+      entityId?: string | null;
+      action: string;
+      summary: string;
+      metadata?: Prisma.InputJsonObject;
+    },
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    await tx.auditLog.create({
+      data: {
+        venueId: args.venueId,
+        actorProfileId: args.actor.id,
+        actorName: args.actor.fullName,
+        actorRole: args.actor.role,
+        targetProfileId: args.target?.id ?? null,
+        targetName: args.target?.fullName ?? null,
+        targetRole: args.target?.role ?? null,
+        entityType: args.entityType,
+        entityId: args.entityId ?? null,
+        action: args.action,
+        summary: args.summary,
+        metadata: args.metadata ?? undefined,
+      },
+    });
   }
 }
 
@@ -146,4 +517,56 @@ function parseDateOfBirth(value: string): Date {
     throw new BadRequestException('dateOfBirth is not a valid date.');
   }
   return date;
+}
+
+function mapOnboardingTask(task: {
+  id: string;
+  profileId: string;
+  title: string;
+  details: string | null;
+  category: string;
+  dueDate: string | null;
+  status: string;
+  completedBy: string | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    _id: task.id,
+    profileId: task.profileId,
+    title: task.title,
+    details: task.details,
+    category: task.category,
+    dueDate: task.dueDate,
+    status: task.status,
+    completedBy: task.completedBy,
+    completedAt: task.completedAt?.getTime() ?? null,
+    createdAt: task.createdAt.getTime(),
+    updatedAt: task.updatedAt.getTime(),
+  };
+}
+
+function mapAuditLog(entry: {
+  id: string;
+  actorName: string | null;
+  actorRole: string | null;
+  targetName: string | null;
+  targetRole: string | null;
+  entityType: string;
+  action: string;
+  summary: string;
+  createdAt: Date;
+}) {
+  return {
+    _id: entry.id,
+    actorName: entry.actorName,
+    actorRole: entry.actorRole,
+    targetName: entry.targetName,
+    targetRole: entry.targetRole,
+    entityType: entry.entityType,
+    action: entry.action,
+    summary: entry.summary,
+    createdAt: entry.createdAt.getTime(),
+  };
 }

@@ -5,13 +5,15 @@ import {
   Get,
   Post,
 } from '@nestjs/common';
-import { IsBoolean, IsNumber } from 'class-validator';
+import { IsBoolean, IsNumber, IsString, IsIn } from 'class-validator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
+import { unpaidBreakMs } from '../../common/break-duration';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
+import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -32,6 +34,12 @@ class ClockPunchDto {
   mocked!: boolean;
 }
 
+class BreakStartDto {
+  @IsString()
+  @IsIn(['paid', 'unpaid'])
+  type!: 'paid' | 'unpaid';
+}
+
 @Controller('v1/time-clock')
 export class TimeClockController {
   constructor(private readonly prisma: PrismaService) {}
@@ -40,6 +48,7 @@ export class TimeClockController {
   @Get('board')
   async getClockBoard(@VenueScope() scope: Scope) {
     if (!scope) return null;
+    const managerView = isAdminRole(scope.role);
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) return null;
 
@@ -50,10 +59,13 @@ export class TimeClockController {
       include: { profile: true },
     });
 
-    const openEntries = entries
-      .flatMap((entry) => (entry.isOpen && entry.profile ? [mapClockEntry(entry, entry.profile, venue)] : []));
-
-    const myOpenEntry = openEntries.find((item) => item.memberId === scope.profileId) ?? null;
+    const myRawEntry = entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile);
+    const myOpenEntry = myRawEntry ? mapClockEntry(myRawEntry, myRawEntry.profile!, venue) : null;
+    const activeClockEntries = managerView
+      ? entries.flatMap((entry) => (entry.isOpen && entry.profile ? [mapClockEntry(entry, entry.profile, venue, { includeLocation: false })] : []))
+      : myOpenEntry
+        ? [myOpenEntry]
+        : [];
 
     const managerAlerts: Array<{
       kind: 'late_clock_in' | 'missed_clock_out';
@@ -65,8 +77,9 @@ export class TimeClockController {
 
     if (isAdminRole(scope.role)) {
       const now = Date.now();
-      const today = new Date().getDay();
-      const minutesNow = new Date().getHours() * 60 + new Date().getMinutes();
+      const tz = venue.timezone ?? null;
+      const today = zonedDayOfWeek(tz, now);
+      const minutesNow = zonedMinutesOfDay(tz, now);
       const openByProfile = new Set(
         entries.filter((entry) => entry.isOpen).map((entry) => entry.profileId),
       );
@@ -115,15 +128,19 @@ export class TimeClockController {
         subscriptionStatus: venue.subscriptionStatus ?? null,
         subscriptionPlatform: venue.subscriptionPlatform ?? null,
       },
-      activeClockEntries: openEntries,
+      activeClockEntries,
       employeeEntry: myOpenEntry,
       managerAlerts: managerAlerts.slice(0, 8),
     };
   }
 
+  @RequireSubscription()
   @Get('me')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
-    const profile = await this.prisma.profile.findFirst({ where: { userId: user.sub } });
+    const profile = await this.prisma.profile.findUnique({
+      where: { userId: user.sub },
+      include: { venue: { select: { timezone: true } } },
+    });
     if (!profile) return null;
 
     // Only today's punches and the last week of hours are reported, so bound
@@ -136,7 +153,8 @@ export class TimeClockController {
     const open = all.filter((entry) => entry.isOpen);
     const closed = all.filter((entry) => !entry.isOpen);
 
-    const startOfToday = new Date().setHours(0, 0, 0, 0);
+    const tz = profile.venue?.timezone ?? null;
+    const startOfToday = zonedDayBounds(tz, 0).start;
     const now = Date.now();
     const punches: { type: 'in' | 'out'; at: number }[] = [];
     for (const entry of all) {
@@ -151,7 +169,14 @@ export class TimeClockController {
     const regularHours = closed.reduce((sum, entry) => {
       const outAt = entry.clockOutAt?.getTime();
       if (!outAt || now - outAt > weekMs) return sum;
-      return sum + (outAt - entry.clockInAt.getTime()) / 3600000;
+      let durationMs = outAt - entry.clockInAt.getTime();
+      const breaks = (entry.breaks as any[]) || [];
+      for (const b of breaks) {
+        if (b.type === 'unpaid' && b.startAt && b.endAt) {
+          durationMs -= unpaidBreakMs(b.startAt, b.endAt);
+        }
+      }
+      return sum + Math.max(0, durationMs) / 3600000;
     }, 0);
     const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -159,7 +184,8 @@ export class TimeClockController {
       isClockedIn: open.length > 0,
       openSince: open[0]?.clockInAt.getTime() ?? null,
       regularHours: round1(regularHours),
-      sickHours: 0,
+      sickHours: profile.sickHoursAccrued,
+      ptoHours: profile.ptoHoursAccrued,
       totalHours: round1(regularHours),
       punches,
     };
@@ -179,6 +205,31 @@ export class TimeClockController {
     if (active) throw new BadRequestException('Already clocked in');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+
+    if (!isAdminRole(scope.role)) {
+      const nowMs = Date.now();
+      const today = zonedDayOfWeek(venue.timezone, nowMs);
+      const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
+      const shift = await this.prisma.scheduleShift.findFirst({
+        where: {
+          venueId: venue.id,
+          profileId: profile.id,
+          dayIndex: today,
+          status: 'scheduled',
+        },
+        orderBy: { startMinutes: 'asc' },
+      });
+      if (shift) {
+        const earlyWindow = venue.earlyClockInWindowMin ?? 10;
+        if (minutesNow < shift.startMinutes - earlyWindow) {
+          const formattedStart = minutesToTime(shift.startMinutes);
+          throw new BadRequestException(
+            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
+          );
+        }
+      }
+    }
+
     try {
       const entry = await this.prisma.timeEntry.create({
         data: {
@@ -215,8 +266,8 @@ export class TimeClockController {
     if (!active) throw new BadRequestException('No active clock-in found');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const entry = await this.prisma.timeEntry.update({
-      where: { id: active.id },
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: active.id, isOpen: true, updatedAt: active.updatedAt },
       data: {
         clockOutAt: new Date(),
         clockOutLat: body.lat,
@@ -226,6 +277,67 @@ export class TimeClockController {
         isOpen: false,
       },
     });
+    if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');
+    const entry = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: active.id } });
     return mapClockEntry(entry, profile, venue);
+  }
+
+  @RequireSubscription()
+  @Post('break-start')
+  async startBreak(@VenueScope() scope: Scope, @Body() body: BreakStartDto) {
+    if (!scope) throw new BadRequestException('Profile is not initialized');
+    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
+    if (!venue) throw new BadRequestException('Assigned venue not found');
+
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: scope.profileId, isOpen: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreak = breaks.find((b: any) => b.endAt === null);
+    if (activeBreak) throw new BadRequestException('Already on a break');
+
+    const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
+      data: { breaks: newBreaks },
+    });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    return mapClockEntry(updated, profile, venue);
+  }
+
+  @RequireSubscription()
+  @Post('break-end')
+  async endBreak(@VenueScope() scope: Scope) {
+    if (!scope) throw new BadRequestException('Profile is not initialized');
+    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
+    if (!venue) throw new BadRequestException('Assigned venue not found');
+
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { profileId: scope.profileId, isOpen: true },
+    });
+    if (!entry) throw new BadRequestException('No active clock-in found');
+
+    const breaks = (entry.breaks as any[]) || [];
+    const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
+    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
+
+    const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+    const newBreaks = [...breaks];
+    newBreaks[activeBreakIndex] = {
+      ...newBreaks[activeBreakIndex],
+      endAt: Date.now(),
+    };
+
+    const count = await this.prisma.timeEntry.updateMany({
+      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
+      data: { breaks: newBreaks },
+    });
+    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
+    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    return mapClockEntry(updated, profile, venue);
   }
 }

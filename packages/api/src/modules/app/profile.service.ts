@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { isAdminRole } from '../../auth/roles';
 import type { AuthUser } from '../../auth/auth.guard';
+import { isActiveMembership } from '../../common/membership';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -14,7 +15,7 @@ export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
   getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({
+    return this.prisma.profile.findUnique({
       where: { userId: user.sub },
       include: { venue: true },
     });
@@ -36,6 +37,9 @@ export class ProfileService {
   async requireVenueProfile(user: AuthUser) {
     const profile = await this.getProfile(user);
     if (!profile?.venue) throw new ForbiddenException('Profile is not initialized');
+    if (!isActiveMembership(profile.membershipStatus)) {
+      throw new ForbiddenException('Profile is not active for this venue');
+    }
     return profile;
   }
 

@@ -13,7 +13,7 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import type { Request } from 'express';
@@ -23,10 +23,13 @@ import { RequireSubscription } from '../../billing/require-subscription.decorato
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { zonedDateBounds } from '../../common/venue-time';
 import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { ReservationMutationService } from './reservation-mutation.service';
+import { ReservationNotifierService } from './reservation-notifier.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 const RESERVATION_STATUSES = ['requested', 'confirmed', 'checked_in', 'seated', 'completed', 'no_show', 'cancelled'] as const;
@@ -50,6 +53,11 @@ class SaveReservationDto {
 
   @IsString()
   reservationTime!: string;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  durationMinutes?: number;
 
   @IsIn(RESERVATION_STATUSES)
   @IsOptional()
@@ -84,16 +92,78 @@ class SaveReservationDto {
   @IsString()
   @IsOptional()
   email?: string;
+
+  @IsString()
+  @IsOptional()
+  guestCompany?: string;
+
+  @IsString()
+  @IsOptional()
+  occasion?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isPrivateEvent?: boolean;
+
+  @IsString()
+  @IsOptional()
+  eventName?: string;
+
+  @IsString()
+  @IsOptional()
+  eventStatus?: string;
+
+  @IsString()
+  @IsOptional()
+  eventSpace?: string;
+
+  @IsString()
+  @IsOptional()
+  setupStyle?: string;
+
+  @IsString()
+  @IsOptional()
+  menuNotes?: string;
+
+  @IsString()
+  @IsOptional()
+  beverageNotes?: string;
+
+  @IsString()
+  @IsOptional()
+  billingNotes?: string;
+
+  @IsString()
+  @IsOptional()
+  contractStatus?: string;
+
+  @IsString()
+  @IsOptional()
+  beoStatus?: string;
+
+  @IsInt()
+  @IsOptional()
+  estimatedValueCents?: number;
+
+  @IsInt()
+  @IsOptional()
+  depositDueCents?: number;
 }
 
 class ReservationSyncEventDto {
+  // Non-empty: both ids key the idempotency/dedup uniqueness, so an empty
+  // string would collapse distinct events onto one row.
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
   externalEventId!: string;
 
   @IsString()
   eventType!: string;
 
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
   externalId!: string;
 
   @IsString()
@@ -107,6 +177,7 @@ class ReservationSyncEventDto {
   reservationTime!: number;
 
   @IsInt()
+  @Min(1)
   @IsOptional()
   durationMinutes?: number;
 
@@ -130,9 +201,24 @@ class ReservationIngestDto {
   events!: ReservationSyncEventDto[];
 }
 
+class ReservationHoldDto {
+  @IsString()
+  startsAt!: string;
+
+  @IsString()
+  endsAt!: string;
+
+  @IsString()
+  reason!: string;
+}
+
 @Controller('v1/reservations')
 export class ReservationsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifier: ReservationNotifierService,
+    private readonly mutations: ReservationMutationService,
+  ) {}
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
     if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
@@ -150,108 +236,122 @@ export class ReservationsController {
     @Body() body: ReservationIngestDto,
   ) {
     await assertWithinSharedRateLimit(this.prisma, `reservation-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
+    if (body.events.length > MAX_INGEST_EVENTS) {
+      throw new BadRequestException(`A single sync request can include at most ${MAX_INGEST_EVENTS} events.`);
+    }
     const provider = body.provider as ReservationSource;
     const connection = await this.prisma.reservationConnection.findFirst({ where: { venueId, provider } });
     if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
     }
+    if (connection.status !== 'connected') {
+      throw new BadRequestException('This reservation integration is not currently connected.');
+    }
 
-    const events = body.events.slice(0, MAX_INGEST_EVENTS);
     const now = new Date();
+    let duplicates = 0;
+    let processed = 0;
+    let failed = 0;
 
-    // Phase 1: Claim sync event IDs in bulk (idempotent on unique key).
-    // skipDuplicates silently skips rows whose (venueId, provider, externalEventId) already exist.
-    const { count: claimedCount } = await this.prisma.reservationSyncEvent.createMany({
-      data: events.map((event) => ({
-        venueId,
-        provider,
-        externalEventId: event.externalEventId,
-        eventType: event.eventType,
-        payload: event as unknown as Prisma.InputJsonValue,
-        processedAt: now,
-        status: 'processed',
-      })),
-      skipDuplicates: true,
-    });
-    const duplicates = events.length - claimedCount;
+    for (const event of body.events) {
+      // 1) Claim the idempotency row in its OWN committed transaction, before
+      //    any processing. If processing later fails and its transaction rolls
+      //    back, this row survives so the failure stays recorded (and the event
+      //    can be retried) — the previous single-transaction structure rolled
+      //    the row away on failure, so the "mark failed" update matched nothing.
+      try {
+        await this.prisma.reservationSyncEvent.create({
+          data: {
+            venueId,
+            provider,
+            externalEventId: event.externalEventId,
+            eventType: event.eventType,
+            payload: event as unknown as Prisma.InputJsonValue,
+            processedAt: now,
+            status: 'processing',
+          },
+        });
+      } catch (error: any) {
+        if (error?.code !== 'P2002') throw error;
+        // Already seen: skip only if it previously succeeded; otherwise
+        // fall through and reprocess (retry a prior failed/interrupted attempt).
+        const prior = await this.prisma.reservationSyncEvent.findFirst({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          select: { status: true },
+        });
+        if (prior?.status === 'processed') {
+          duplicates += 1;
+          continue;
+        }
+        await this.prisma.reservationSyncEvent.updateMany({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          data: { status: 'processing', errorMessage: null, processedAt: now },
+        });
+      }
 
-    // Identify which events are genuinely new (just claimed).
-    const claimedRecords = await this.prisma.reservationSyncEvent.findMany({
-      where: { venueId, provider, processedAt: now },
-      select: { externalEventId: true },
-    });
-    const claimedIds = new Set(claimedRecords.map((r) => r.externalEventId));
-    const newEvents = events.filter((e) => claimedIds.has(e.externalEventId));
+      // 2) Process the reservation in a separate transaction.
+      try {
+        const reservationTime = new Date(event.reservationTime);
+        if (isNaN(reservationTime.getTime())) {
+          throw new BadRequestException('Invalid reservationTime');
+        }
+        const reservationId = await this.prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-sync:${venueId}:${provider}:${event.externalId}`}))`;
+          const fields: Prisma.ReservationUpdateInput = {
+            guestName: event.guestName,
+            partySize: event.partySize,
+            reservationTime,
+            durationMinutes: event.durationMinutes ?? 90,
+            status: (event.status ?? 'confirmed') as ReservationStatus,
+            guestPhone: event.phone?.trim() ?? null,
+            guestEmail: event.email?.trim() ?? null,
+            notes: event.notes?.trim() ?? null,
+            specialRequests: event.specialRequests?.trim() ?? null,
+          };
+          const existing = await tx.reservation.findFirst({
+            where: { venueId, source: provider, externalId: event.externalId },
+            select: { id: true },
+          });
+          return existing
+            ? (await tx.reservation.update({ where: { id: existing.id }, data: fields, select: { id: true } })).id
+            : (await tx.reservation.create({
+                data: {
+                  venueId,
+                  source: provider,
+                  externalId: event.externalId,
+                  guestName: event.guestName,
+                  partySize: event.partySize,
+                  reservationTime,
+                  durationMinutes: event.durationMinutes ?? 90,
+                  status: (event.status ?? 'confirmed') as ReservationStatus,
+                  guestPhone: event.phone?.trim() ?? null,
+                  guestEmail: event.email?.trim() ?? null,
+                  notes: event.notes?.trim() ?? null,
+                  specialRequests: event.specialRequests?.trim() ?? null,
+                },
+                select: { id: true },
+              })).id;
+        });
 
-    // Phase 2: Resolve existing reservations in one query.
-    const externalIds = [...new Set(newEvents.map((e) => e.externalId))];
-    const existingReservations = externalIds.length
-      ? await this.prisma.reservation.findMany({
-          where: { venueId, externalId: { in: externalIds } },
-          select: { id: true, externalId: true },
-        })
-      : [];
-    const existingByExternalId = new Map(existingReservations.map((r) => [r.externalId, r.id]));
-
-    // Phase 3: Partition into creates and updates, execute in a transaction.
-    const toCreate: Prisma.ReservationCreateManyInput[] = [];
-    const toUpdate: Array<{ id: string; data: Prisma.ReservationUpdateInput; externalEventId: string }> = [];
-
-    for (const event of newEvents) {
-      const fields = {
-        guestName: event.guestName,
-        partySize: event.partySize,
-        reservationTime: new Date(event.reservationTime),
-        durationMinutes: event.durationMinutes ?? 90,
-        status: (event.status ?? 'confirmed') as ReservationStatus,
-        guestPhone: event.phone?.trim() ?? null,
-        guestEmail: event.email?.trim() ?? null,
-        notes: event.notes?.trim() ?? null,
-        specialRequests: event.specialRequests?.trim() ?? null,
-      };
-      const existingId = existingByExternalId.get(event.externalId);
-      if (existingId) {
-        toUpdate.push({ id: existingId, data: fields, externalEventId: event.externalEventId });
-      } else {
-        toCreate.push({ venueId, source: provider, externalId: event.externalId, ...fields });
+        // 3) Mark processed (committed independently of the processing tx).
+        await this.prisma.reservationSyncEvent.updateMany({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          data: { reservationId, processedAt: new Date(), status: 'processed', errorMessage: null },
+        });
+        processed += 1;
+      } catch (error: any) {
+        // The 'processing' row was committed in step 1, so this update matches it.
+        await this.prisma.reservationSyncEvent.updateMany({
+          where: { venueId, provider, externalEventId: event.externalEventId },
+          data: { status: 'failed', errorMessage: String(error?.message ?? error).slice(0, 500) },
+        });
+        failed += 1;
       }
     }
 
-    const reservationIdByExternalEventId = new Map<string, string>();
-    await this.prisma.$transaction(async (tx) => {
-      if (toCreate.length) {
-        await tx.reservation.createMany({ data: toCreate, skipDuplicates: true });
-        const created = await tx.reservation.findMany({
-          where: { venueId, externalId: { in: toCreate.map((c) => c.externalId as string) } },
-          select: { id: true, externalId: true },
-        });
-        const createdById = new Map(created.map((r) => [r.externalId, r.id]));
-        for (const event of newEvents) {
-          const id = createdById.get(event.externalId);
-          if (id && !existingByExternalId.has(event.externalId)) {
-            reservationIdByExternalEventId.set(event.externalEventId, id);
-          }
-        }
-      }
-      for (const { id, data, externalEventId } of toUpdate) {
-        await tx.reservation.update({ where: { id }, data });
-        reservationIdByExternalEventId.set(externalEventId, id);
-      }
-    });
-
-    // Back-fill reservationId on newly-processed sync events.
-    await Promise.all(
-      [...reservationIdByExternalEventId.entries()].map(([externalEventId, reservationId]) =>
-        this.prisma.reservationSyncEvent.updateMany({
-          where: { venueId, provider, externalEventId },
-          data: { reservationId },
-        }),
-      ),
-    );
-
-    const processed = newEvents.length;
     await this.prisma.reservationConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });
-    return { ok: true, processed, duplicates };
+
+    return { ok: true, processed, duplicates, failed };
   }
 
   @RequireSubscription('active')
@@ -272,9 +372,9 @@ export class ReservationsController {
     };
     if (date) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Invalid date');
-      const start = new Date(`${date}T00:00:00.000Z`);
-      const end = new Date(`${date}T23:59:59.999Z`);
-      where['reservationTime'] = { gte: start, lte: end };
+      const timezone = await this.getVenueTimezone(scope.venueId);
+      const { start, end } = zonedDateBounds(timezone, date);
+      where['reservationTime'] = { gte: new Date(start), lt: new Date(end) };
     }
     if (status) {
       if (!RESERVATION_STATUSES.includes(status as any)) throw new BadRequestException('Invalid status');
@@ -297,11 +397,26 @@ export class ReservationsController {
         guestName: r.guestName,
         partySize: r.partySize,
         reservationTime: r.reservationTime.getTime(),
+        durationMinutes: r.durationMinutes,
         status: r.status,
         source: r.source,
         tags: r.tags,
+        guestCompany: r.guestCompany ?? null,
+        occasion: r.occasion ?? null,
         notes: r.notes ?? null,
         specialRequests: r.specialRequests ?? null,
+        isPrivateEvent: r.isPrivateEvent ?? false,
+        eventName: r.eventName ?? null,
+        eventStatus: r.eventStatus ?? null,
+        eventSpace: r.eventSpace ?? null,
+        setupStyle: r.setupStyle ?? null,
+        menuNotes: r.menuNotes ?? null,
+        beverageNotes: r.beverageNotes ?? null,
+        billingNotes: r.billingNotes ?? null,
+        contractStatus: r.contractStatus ?? null,
+        beoStatus: r.beoStatus ?? null,
+        estimatedValueCents: r.estimatedValueCents ?? null,
+        depositDueCents: r.depositDueCents ?? null,
         phone: r.guestPhone ?? null,
         email: r.guestEmail ?? null,
         createdAt: r.createdAt.getTime(),
@@ -315,55 +430,206 @@ export class ReservationsController {
   @Post()
   async saveReservation(@VenueScope() scope: Scope, @Body() body: SaveReservationDto) {
     this.requireManager(scope);
-    const guestName = body.guestName.trim();
-    if (!guestName) throw new BadRequestException('Guest name is required');
-    if (!body.reservationTime) throw new BadRequestException('Reservation time is required');
-    const reservationTime = new Date(body.reservationTime);
-    if (isNaN(reservationTime.getTime())) throw new BadRequestException('Invalid reservation time');
-
-    const data = {
+    const { reservation, previousStatus } = await this.mutations.saveReservation({
       venueId: scope.venueId,
-      guestName,
+      reservationId: body.reservationId,
+      guestName: body.guestName,
       partySize: body.partySize,
-      reservationTime,
-      status: (body.status ?? 'confirmed') as any,
-      source: (body.source ?? 'direct') as any,
-      tags: body.tags ?? [],
-      notes: body.notes?.trim() ?? null,
-      specialRequests: body.specialRequests?.trim() ?? null,
-      guestPhone: body.phone?.trim() ?? null,
-      guestEmail: body.email?.trim() ?? null,
-      durationMinutes: 90,
-    };
+      reservationTime: body.reservationTime,
+      durationMinutes: body.durationMinutes,
+      status: body.status,
+      notes: body.notes,
+      source: body.source,
+      tags: body.tags,
+      specialRequests: body.specialRequests,
+      tableNumbers: body.tableNumbers,
+      phone: body.phone,
+      email: body.email,
+      guestCompany: body.guestCompany,
+      occasion: body.occasion,
+      isPrivateEvent: body.isPrivateEvent,
+      eventName: body.eventName,
+      eventStatus: body.eventStatus,
+      eventSpace: body.eventSpace,
+      setupStyle: body.setupStyle,
+      menuNotes: body.menuNotes,
+      beverageNotes: body.beverageNotes,
+      billingNotes: body.billingNotes,
+      contractStatus: body.contractStatus,
+      beoStatus: body.beoStatus,
+      estimatedValueCents: body.estimatedValueCents,
+      depositDueCents: body.depositDueCents,
+    });
+    if (
+      reservation.guestEmail &&
+      reservation.status === 'confirmed' &&
+      (!body.reservationId || previousStatus !== 'confirmed') &&
+      !reservation.confirmationSentAt
+    ) {
+      void this.notifier.sendConfirmation(reservation.id);
+    }
+    return { id: reservation.id };
+  }
 
-    if (body.reservationId) {
-      const existing = await this.prisma.reservation.findFirst({
-        where: { id: body.reservationId, venueId: scope.venueId },
-      });
-      if (!existing) throw new BadRequestException('Reservation not found');
-      const updated = await this.prisma.reservation.update({
-        where: { id: existing.id },
-        data,
-      });
-      return { id: updated.id };
+  // ============================================================
+  // Cover-pacing: 15-min buckets of booked covers for a given date.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('cover-pacing')
+  async getCoverPacing(@VenueScope() scope: Scope, @Query('date') date?: string) {
+    this.requireManager(scope);
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException('Pass ?date=YYYY-MM-DD');
+    }
+    const timezone = await this.getVenueTimezone(scope.venueId);
+    const bounds = zonedDateBounds(timezone, date);
+    const start = new Date(bounds.start);
+    const end = new Date(bounds.end);
+
+    const [reservations, plan] = await Promise.all([
+      this.prisma.reservation.findMany({
+        where: {
+          venueId: scope.venueId,
+          deletedAt: null,
+          status: { notIn: ['cancelled', 'no_show'] },
+          reservationTime: { gte: start, lt: end },
+        },
+        select: { reservationTime: true, partySize: true, durationMinutes: true },
+      }),
+      this.prisma.floorPlan.findFirst({
+        where: { venueId: scope.venueId, isActive: true },
+        include: { tables: { select: { seats: true, isReservable: true } } },
+      }),
+    ]);
+
+    const seatingCapacity = (plan?.tables ?? [])
+      .filter((t) => t.isReservable)
+      .reduce((sum, t) => sum + t.seats, 0);
+
+    const bucketCount = Math.ceil((end.getTime() - start.getTime()) / (15 * 60 * 1000));
+    const buckets: Array<{ slot: number; startsAt: number; covers: number }> = [];
+    for (let i = 0; i < bucketCount; i += 1) {
+      buckets.push({ slot: i, startsAt: start.getTime() + i * 15 * 60 * 1000, covers: 0 });
+    }
+    for (const r of reservations) {
+      // Count a reservation in every 15-min slot it overlaps so a 7pm party
+      // of 6 with a 90-min turn shows up in 6 buckets, accurately reflecting
+      // kitchen load.
+      const startMs = r.reservationTime.getTime();
+      const endMs = startMs + r.durationMinutes * 60 * 1000;
+      const firstSlot = Math.max(0, Math.floor((startMs - start.getTime()) / (15 * 60 * 1000)));
+      const lastSlot = Math.min(bucketCount - 1, Math.floor((endMs - 1 - start.getTime()) / (15 * 60 * 1000)));
+      for (let i = firstSlot; i <= lastSlot; i += 1) {
+        buckets[i].covers += r.partySize;
+      }
     }
 
-    const created = await this.prisma.reservation.create({ data });
+    const peak = buckets.reduce((max, b) => Math.max(max, b.covers), 0);
+    return {
+      date,
+      seatingCapacity,
+      peakCovers: peak,
+      totalReservations: reservations.length,
+      buckets: buckets.filter((b) => b.covers > 0 || (b.slot >= 40 && b.slot <= 92)).map((b) => ({
+        startsAt: b.startsAt,
+        covers: b.covers,
+      })),
+    };
+  }
+
+  // ============================================================
+  // Guest preference autofill: lookup by email or phone.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('guest-autofill')
+  async guestAutofill(
+    @VenueScope() scope: Scope,
+    @Query('email') email?: string,
+    @Query('phone') phone?: string,
+  ) {
+    this.requireManager(scope);
+    const cleanEmail = email?.trim().toLowerCase();
+    const cleanPhone = phone?.replace(/[^\d+]/g, '');
+    if (!cleanEmail && !cleanPhone) return { guest: null };
+    const guest = await this.prisma.guest.findFirst({
+      where: {
+        venueId: scope.venueId,
+        deletedAt: null,
+        OR: [
+          ...(cleanEmail ? [{ email: cleanEmail }] : []),
+          ...(cleanPhone ? [{ phone: cleanPhone }] : []),
+        ],
+      },
+    });
+    if (!guest) return { guest: null };
+    const recent = await this.prisma.reservation.findFirst({
+      where: { venueId: scope.venueId, deletedAt: null, guestId: guest.id, completedAt: { not: null } },
+      orderBy: { completedAt: 'desc' },
+      select: { completedAt: true, partySize: true },
+    });
+    return {
+      guest: {
+        id: guest.id,
+        fullName: guest.fullName,
+        email: guest.email,
+        phone: guest.phone,
+        favoriteTable: guest.favoriteTable,
+        preferredServer: guest.preferredServer,
+        dietaryNotes: guest.dietaryNotes,
+        tags: guest.tags,
+        lifecycleStage: guest.lifecycleStage,
+        lastVisitAt: recent?.completedAt?.getTime() ?? null,
+        lastPartySize: recent?.partySize ?? null,
+      },
+    };
+  }
+
+  // ============================================================
+  // Reservation holds: block off date/time windows.
+  // ============================================================
+  @RequireSubscription('active')
+  @Get('holds')
+  async listHolds(@VenueScope() scope: Scope) {
+    this.requireManager(scope);
+    const now = new Date();
+    const rows = await this.prisma.reservationHold.findMany({
+      where: { venueId: scope.venueId, endsAt: { gte: now } },
+      orderBy: { startsAt: 'asc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      startsAt: row.startsAt.getTime(),
+      endsAt: row.endsAt.getTime(),
+      reason: row.reason,
+    }));
+  }
+
+  @RequireSubscription('active')
+  @Post('holds')
+  async createHold(@VenueScope() scope: Scope, @Body() body: ReservationHoldDto) {
+    this.requireManager(scope);
+    const created = await this.mutations.createHold({
+      venueId: scope.venueId,
+      startsAt: body.startsAt,
+      endsAt: body.endsAt,
+      reason: body.reason,
+    });
     return { id: created.id };
+  }
+
+  @RequireSubscription('active')
+  @Delete('holds/:id')
+  async deleteHold(@VenueScope() scope: Scope, @Param('id') id: string) {
+    this.requireManager(scope);
+    await this.mutations.deleteHold({ venueId: scope.venueId, holdId: id });
+    return { ok: true };
   }
 
   @RequireSubscription('active')
   @Delete(':id')
   async removeReservation(@VenueScope() scope: Scope, @Param('id') id: string) {
     this.requireManager(scope);
-    const reservation = await this.prisma.reservation.findFirst({
-      where: { id, venueId: scope.venueId },
-    });
-    if (!reservation) throw new BadRequestException('Reservation not found');
-    await this.prisma.reservation.update({
-      where: { id: reservation.id },
-      data: { deletedAt: new Date() },
-    });
+    await this.mutations.removeReservation({ venueId: scope.venueId, reservationId: id });
     return { ok: true };
   }
 
@@ -385,11 +651,13 @@ export class ReservationsController {
       const timeFilter: Record<string, Date> = {};
       if (startDate) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new BadRequestException('Invalid start date');
-        timeFilter['gte'] = new Date(`${startDate}T00:00:00.000Z`);
+        const timezone = await this.getVenueTimezone(scope.venueId);
+        timeFilter['gte'] = new Date(zonedDateBounds(timezone, startDate).start);
       }
       if (endDate) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new BadRequestException('Invalid end date');
-        timeFilter['lte'] = new Date(`${endDate}T23:59:59.999Z`);
+        const timezone = await this.getVenueTimezone(scope.venueId);
+        timeFilter['lt'] = new Date(zonedDateBounds(timezone, endDate).end);
       }
       where['reservationTime'] = timeFilter;
     }
@@ -411,5 +679,10 @@ export class ReservationsController {
       ].join(','));
     }
     return rows.join('\n');
+  }
+
+  private async getVenueTimezone(venueId: string): Promise<string | null> {
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } });
+    return venue?.timezone ?? null;
   }
 }

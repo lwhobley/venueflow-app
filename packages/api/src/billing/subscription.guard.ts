@@ -69,11 +69,12 @@ export class SubscriptionGuard implements CanActivate {
     const user = request.user;
     if (!user?.sub) return null;
 
-    const profile = await this.prisma.profile.findFirst({
+    const profile = await this.prisma.profile.findUnique({
       where: { userId: user.sub },
       include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
     });
     if (!profile?.venueId || !profile.venue) return null;
+    if (!isActiveMembership(profile.membershipStatus)) return null;
 
     const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
       venueId: profile.venueId,
@@ -93,6 +94,10 @@ export class SubscriptionGuard implements CanActivate {
     };
     return request.venueScope;
   }
+}
+
+function isActiveMembership(status: string | null): boolean {
+  return status === null || status === 'active';
 }
 
 function reasonMessage(status: string | null): string {
