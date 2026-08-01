@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { ReservationMutationService } from './reservation-mutation.service';
 
 function withTransaction<T extends Record<string, any>>(prisma: T) {
-  return Object.assign(prisma, { $transaction: vi.fn((callback: (transaction: T) => unknown) => callback(prisma)) });
+  const transaction = Object.assign(prisma, {
+    $executeRaw: prisma.$executeRaw ?? vi.fn().mockResolvedValue(undefined),
+  });
+  return Object.assign(transaction, {
+    $transaction: vi.fn((callback: (transaction: typeof transaction) => unknown) => callback(transaction)),
+  });
 }
 
 describe('ReservationMutationService', () => {
@@ -144,11 +149,14 @@ describe('ReservationMutationService', () => {
 
   it('creates and trims a reservation hold', async () => {
     const created = { id: 'hold-1' };
-    const prisma = {
+    const prisma = withTransaction({
       reservationHold: {
         create: vi.fn().mockResolvedValue(created),
       },
-    };
+      reservation: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
     const service = new ReservationMutationService(prisma as any);
 
     const result = await service.createHold({
@@ -165,6 +173,28 @@ describe('ReservationMutationService', () => {
         reason: 'Staff training',
       }),
     });
+  });
+
+  it('rejects a hold that overlaps an existing reservation under the shared lock', async () => {
+    const prisma = withTransaction({
+      reservationHold: { create: vi.fn() },
+      reservation: {
+        findMany: vi.fn().mockResolvedValue([
+          { reservationTime: new Date('2026-06-28T19:00:00.000Z'), durationMinutes: 90 },
+        ]),
+      },
+    });
+    const service = new ReservationMutationService(prisma as any);
+
+    await expect(
+      service.createHold({
+        venueId: 'venue-1',
+        startsAt: '2026-06-28T20:00:00.000Z',
+        endsAt: '2026-06-28T21:00:00.000Z',
+        reason: 'Private buyout',
+      }),
+    ).rejects.toThrow('This hold overlaps an existing reservation');
+    expect(prisma.reservationHold.create).not.toHaveBeenCalled();
   });
 
   it('rejects deleting a missing hold', async () => {

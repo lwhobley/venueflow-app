@@ -257,7 +257,7 @@ export class SchedulingAssignmentService {
     const source = await this.prisma.scheduleShift.findMany({
       where: { venueId: args.venueId, dayIndex: args.fromDay },
     });
-    const creates = args.toDays
+    const creates = [...new Set(args.toDays)]
       .filter((day) => day !== args.fromDay)
       .flatMap((day) =>
         source.map((shift) =>

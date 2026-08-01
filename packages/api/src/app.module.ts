@@ -37,6 +37,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
 import { SchedulingAssignmentService } from './modules/scheduling/scheduling-assignment.service';
 import { AiSchedulerService } from './modules/scheduling/ai-scheduler.service';
+import { DocumentsModule } from './modules/documents/documents.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { AiSchedulerService } from './modules/scheduling/ai-scheduler.service';
     CrmModule,
     IntegrationsModule,
     WorkforceModule,
+    DocumentsModule,
   ],
   controllers: [
     HealthController,

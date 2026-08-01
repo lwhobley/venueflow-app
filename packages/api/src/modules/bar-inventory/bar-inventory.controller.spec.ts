@@ -145,6 +145,23 @@ describe('BarInventoryController', () => {
       const result = await controller.getBarStock(staffUser);
 
       expect(result.items).toHaveLength(1);
+      expect(prisma.barInventoryItem.findMany).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1' },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      });
+    });
+
+    it('calculates stock metrics across the complete result set', async () => {
+      const { controller, prisma } = makeController();
+      prisma.barInventoryItem.findMany.mockResolvedValue([
+        makeItem({ id: 'a', onHand: 2, parLevel: 4, unitCostCents: 1000 }),
+        makeItem({ id: 'b', onHand: 10, parLevel: 3, unitCostCents: 250 }),
+      ]);
+
+      const result = await controller.getBarStock(managerUser);
+
+      expect(result.lowStockCount).toBe(1);
+      expect(result.totalValueCents).toBe(4500);
     });
   });
 

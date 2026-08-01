@@ -32,6 +32,7 @@ function makeController() {
     },
     profile: {
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     venue: {
       findUnique: vi.fn().mockResolvedValue({ name: 'Test Venue' }),
@@ -230,6 +231,34 @@ describe('CrmController', () => {
   });
 
   describe('saveLead', () => {
+    it('rejects an assignee that is not an active member of the venue', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findFirst.mockResolvedValue(null);
+
+      await expect(
+        controller.saveLead(managerScope, { fullName: 'Jo Diner', assignedToId: 'other-venue-profile' } as any),
+      ).rejects.toThrow('Lead assignee must be an active member of this venue.');
+      expect(prisma.crmLead.create).not.toHaveBeenCalled();
+    });
+
+    it('persists a validated venue assignee', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findFirst.mockResolvedValue({ id: 'staff-1' });
+
+      await controller.saveLead(managerScope, { fullName: 'Jo Diner', assignedToId: 'staff-1' } as any);
+
+      expect(prisma.profile.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: 'staff-1',
+          venueId: 'venue-1',
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        select: { id: true },
+      });
+      expect(prisma.crmLead.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ assignedToId: 'staff-1' }) }),
+      );
+    });
     it('throws NotFoundException when updating a lead outside the venue', async () => {
       const { controller, prisma } = makeController();
       prisma.crmLead.findFirst.mockResolvedValue(null);

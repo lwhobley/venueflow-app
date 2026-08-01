@@ -76,6 +76,10 @@ export default function TabsLayout() {
         options={{ title: t('nav.inventory'), href: '/bar-stock', tabBarIcon: icon('clipboard-text-outline') }}
       />
       <Tabs.Screen
+        name="documents"
+        options={{ title: t('nav.documents'), href: '/documents', tabBarIcon: icon('file-document-multiple-outline') }}
+      />
+      <Tabs.Screen
         name="reports"
         options={{ title: t('nav.reports'), href: canManage ? '/reports' : null, tabBarIcon: icon('chart-box-outline') }}
       />

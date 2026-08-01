@@ -1,23 +1,18 @@
 import { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
-import { TextInput } from 'react-native-paper';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
-import { CommandButton, CommandSurface, CommandText, MiniTrend, StatusPill } from '../../components/FutureUI';
-import { CollapsibleSection } from '../../components/AppCard';
-import { AiCopilotPanel } from '../../components/AiCopilotPanel';
-import { AlertsPanel } from '../../components/AlertsPanel';
-import { CosmicInsights } from '../../components/CosmicInsights';
-import { OperationsAutopilotPanel } from '../../components/OperationsAutopilotPanel';
-import { ProfitabilityPulsePanel } from '../../components/ProfitabilityPulsePanel';
+import { CommandButton, CommandText } from '../../components/FutureUI';
 import { Skeleton } from '../../components/Skeleton';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { useAuthStore } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
-import { spacing, useAppearanceStore, useDesignTheme } from '../../lib/theme';
-import { LocaleCode, useI18n, useLocaleStore } from '../../lib/i18n';
+import { spacing, useDesignTheme } from '../../lib/theme';
+import { formatDuration, formatMoney } from '../../lib/format';
 import { canManageVenue } from '../../lib/permissions';
 
 type NotificationItem = {
@@ -27,443 +22,197 @@ type NotificationItem = {
   read: boolean;
 };
 
-const languageOptions: LocaleCode[] = ['en', 'es', 'fr', 'pseudo'];
+const todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
 export default function HomeScreen() {
   usePushNotifications();
-  const user = useAuthStore((state: AuthState) => state.user);
-  const venue = useAuthStore((state: AuthState) => state.venue);
+  const venue = useAuthStore((state) => state.venue);
   const { isReady } = useAuthenticatedSession();
+  const palette = useDesignTheme();
   const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
   const notifications = useQuery(api.app.getNotifications, isReady ? {} : 'skip');
   const markNotificationRead = useMutation(api.app.markNotificationRead);
   const upsertManagerGoal = useMutation(api.operations.upsertManagerGoal);
-  const updateExecutionTask = useMutation(api.operations.updateExecutionTask);
-  const palette = useDesignTheme();
-  const themeMode = useAppearanceStore((state) => state.mode);
-  const setThemeMode = useAppearanceStore((state) => state.setMode);
-  const setLocale = useLocaleStore((state) => state.setLocale);
-  const { locale, t, formatCurrency, formatDate, formatNumber } = useI18n();
-  const loading = dashboard === undefined;
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [goalTitle, setGoalTitle] = useState('');
 
-  const firstName = dashboard?.profile.fullName?.split(' ')[0] ?? user?.full_name?.split(' ')[0] ?? '';
-  const role = dashboard?.profile.role ?? 'staff';
-  const roleLabel = t(`roles.${role as 'owner' | 'admin' | 'manager' | 'staff'}`);
-  const venueName = dashboard?.venue.name ?? venue?.name ?? t('dashboard.individualAccountTitle');
-  const openShifts = dashboard?.analytics.openShiftCount ?? 0;
+  const venueName = dashboard?.venue.name ?? venue?.name ?? 'Venue Wrangler';
   const canManage = Boolean(dashboard && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
   const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const dailyBrief = useQuery(api.operations.getDailyBrief, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const commandCenter = useQuery(api.operations.getCommandCenter, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
-  const managerInsights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip');
-  const today = new Date();
-  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const [goalTitle, setGoalTitle] = useState('');
-  const [copilotOpen, setCopilotOpen] = useState(false);
-  const [alertsOpen, setAlertsOpen] = useState(false);
+  const notificationsList = (notifications ?? []) as NotificationItem[];
+  const unreadCount = notificationsList.filter((item) => !item.read).length;
+  const readiness = commandCenter?.readiness;
+  const blockers = commandCenter?.blockers ?? [];
+  const pulse = dailyBrief?.profitabilityPulse;
+  const firstPriority = blockers[0] ?? pulse?.recoveryActions?.[0] ?? null;
+  const events = commandCenter?.events?.slice(0, 4) ?? managerDashboard?.events?.slice(0, 4) ?? [];
+  const loading = dashboard === undefined;
 
-  const reservations = managerDashboard?.vipOrLargeReservations ?? [];
-  const reservationCount = managerDashboard?.totalReservations ?? 0;
-  const todayReservations = managerDashboard?.todayReservations ?? 0;
-  const vipCount = reservations.length ?? 0;
-  const eventCount = managerDashboard?.events?.length ?? 0;
-  const scheduledCount = dashboard?.analytics.scheduledCount ?? 0;
-  const clockedInCount = dashboard?.analytics.clockedInCount ?? 0;
-  const teamCount = dashboard?.analytics.teamCount ?? Math.max(clockedInCount, scheduledCount);
-  const readiness = teamCount > 0 ? Math.round((clockedInCount / teamCount) * 100) : 0;
+  const currentDate = todayLabel.format(new Date());
+  const readinessRows = useMemo(() => {
+    const values = readiness?.categories ?? {};
+    return [
+      ['Staffing', values.staffing ?? values['staffing'] ?? 0],
+      ['Setup', values.setup ?? values['setup'] ?? 0],
+      ['Floor', values.floor ?? values['floor'] ?? 0],
+      ['Approvals', values.approvals ?? values['approvals'] ?? 0],
+    ] as const;
+  }, [readiness?.categories]);
 
-  const kpis = useMemo(
-    () => [
-      { label: t('dashboard.covers'), value: formatNumber(todayReservations), delta: t('common.today'), icon: 'silverware-fork-knife' as const, trend: [0] },
-      { label: t('dashboard.revenue'), value: formatCurrency(0), delta: t('dashboard.pacingLabel'), icon: 'chart-line' as const, trend: [0] },
-      { label: t('dashboard.occupancy'), value: '0%', delta: t('dashboard.fullFloor'), icon: 'seat' as const, trend: [0] },
-      { label: t('dashboard.turns'), value: formatNumber(0, { maximumFractionDigits: 1 }), delta: t('dashboard.tableTurns'), icon: 'rotate-3d-variant' as const, trend: [0] },
-      { label: t('dashboard.guestSpend'), value: formatCurrency(0), delta: t('dashboard.vipLabel'), icon: 'account-star-outline' as const, trend: [0] },
-      { label: t('dashboard.staffReady'), value: `${readiness}%`, delta: openShifts ? t('dashboard.watch') : t('dashboard.clear'), icon: 'account-check-outline' as const, trend: [readiness] },
-    ],
-    [formatCurrency, formatNumber, openShifts, readiness, t, todayReservations],
-  );
-
-  const weeklyHighlights = dashboard
-    ? dashboard.schedule.slice(0, 5).map((shift: any) => ({
-        key: shift._id,
-        day: shift.dayLabel,
-        jobs: `${shift.memberName} · ${shift.jobTitle} · ${shift.startTime}-${shift.endTime}`,
-        isOpen: shift.status === 'open',
-      }))
-    : [];
-
-  const liveStaff = dashboard
-    ? dashboard.activeClockEntries.map((person: any) => ({
-        key: person._id,
-        name: person.memberName,
-        role: person.role,
-        job: person.jobTitle,
-      }))
-    : [];
-
-  const recentNotifications = (notifications ?? []) as NotificationItem[];
-  const unreadNotifications = recentNotifications.filter((item) => !item.read);
+  const markAllRead = async () => {
+    await Promise.all(notificationsList.filter((item) => !item.read).map((item) => markNotificationRead({ notificationId: item._id })));
+  };
 
   const addGoal = async () => {
     if (!venue?.id || !goalTitle.trim()) return;
-    await upsertManagerGoal({ venueId: venue.id, title: goalTitle.trim(), period: 'day', targetDate: todayKey, status: 'open' });
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    await upsertManagerGoal({ venueId: venue.id, title: goalTitle.trim(), period: 'day', targetDate: date, status: 'open' });
     setGoalTitle('');
   };
 
-  const markAllAlertsRead = async () => {
-    await Promise.all(unreadNotifications.map((item) => markNotificationRead({ notificationId: item._id })));
-  };
+  const priorityTitle = firstPriority?.title ?? (pulse?.headline || 'Service is on track');
+  const priorityDetail = firstPriority?.detail ?? firstPriority?.body ?? pulse?.detail ?? 'No urgent operational issues are blocking the shift.';
+  const priorityRoute = firstPriority?.route ?? '/reports';
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: palette.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={{ gap: spacing.md, paddingTop: spacing.sm }}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
-          <View style={{ minWidth: 220, flex: 1 }}>
-            <CommandText palette={palette} variant="label">{t('common.venueWrangler')}</CommandText>
-            <CommandText palette={palette} variant="hero">{t('dashboard.title')}</CommandText>
-            <CommandText palette={palette} variant="caption">
-              {t('dashboard.greeting', { name: firstName })} {t('dashboard.roleVenue', { role: roleLabel, venue: venueName })}
-            </CommandText>
+    <ScrollView style={{ flex: 1, backgroundColor: palette.background }} contentContainerStyle={{ paddingBottom: spacing.xxl }} showsVerticalScrollIndicator={false}>
+      <View style={{ backgroundColor: '#074426', paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.lg, gap: spacing.md }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md }}>
+          <View style={{ flex: 1 }}>
+            <CommandText palette={palette} variant="label" style={{ color: '#B6D6BE' }}>{venueName}</CommandText>
+            <CommandText palette={palette} variant="hero" style={{ color: '#FFFFFF' }}>Operations command</CommandText>
           </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: spacing.xs }}>
-            <CommandButton palette={palette} icon="calendar-today">{formatDate(today, { month: '2-digit', day: '2-digit' })}</CommandButton>
-            <CommandButton palette={palette} icon={unreadNotifications.length ? 'bell-ring-outline' : 'bell-outline'} selected={alertsOpen} onPress={() => setAlertsOpen((value) => !value)}>
-              {unreadNotifications.length ? `${t('command.alerts')} ${unreadNotifications.length}` : t('command.alerts')}
-            </CommandButton>
-            <CommandButton palette={palette} icon="creation" selected={copilotOpen} onPress={() => setCopilotOpen((value) => !value)}>
-              {copilotOpen ? t('dashboard.copilotActive') : t('command.ai')}
-            </CommandButton>
-          </View>
+          <Pressable onPress={() => setShowNotifications((value) => !value)} accessibilityRole="button" accessibilityLabel="Open notifications" style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, padding: 8 })}>
+            <View>
+              <MaterialCommunityIcons name={unreadCount ? 'bell-ring-outline' : 'bell-outline'} size={24} color="#FFFFFF" />
+              {unreadCount ? <View style={styles.notificationBadge}><CommandText palette={palette} variant="caption" style={{ color: '#FFFFFF' }}>{unreadCount}</CommandText></View> : null}
+            </View>
+          </Pressable>
         </View>
-
-        {!venue?.id ? (
-          <CommandSurface palette={palette} style={{ gap: spacing.xs }}>
-            <CommandText palette={palette} variant="title">{t('dashboard.individualAccountTitle')}</CommandText>
-            <CommandText palette={palette} variant="caption">
-              {t('dashboard.individualAccountBody')}
-            </CommandText>
-          </CommandSurface>
-        ) : null}
-
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-          <TextInput
-            accessibilityLabel={t('command.searchPlaceholder')}
-            placeholder={t('command.searchPlaceholder')}
-            mode="outlined"
-            dense
-            outlineColor={palette.border}
-            activeOutlineColor={palette.primary}
-            textColor={palette.charcoal}
-            placeholderTextColor={palette.muted}
-            style={{ flexGrow: 1, flexBasis: 220, backgroundColor: palette.surfaceSoft }}
-          />
-          <CommandButton palette={palette} icon="domain">{venueName || t('command.property')}</CommandButton>
-          {(['dark', 'light'] as const).map((mode) => (
-            <CommandButton
-              key={mode}
-              palette={palette}
-              selected={themeMode === mode}
-              onPress={() => setThemeMode(mode)}
-              accessibilityLabel={mode === 'dark' ? t('command.themeDark') : t('command.themeLight')}
-            >
-              {mode === 'dark' ? t('command.themeDark') : t('command.themeLight')}
-            </CommandButton>
-          ))}
-          {languageOptions.map((option) => (
-            <CommandButton key={option} palette={palette} selected={locale === option} onPress={() => setLocale(option)}>
-              {option.toUpperCase()}
-            </CommandButton>
-          ))}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <MaterialCommunityIcons name="calendar-blank-outline" size={16} color="#D9EBDD" />
+            <CommandText palette={palette} variant="body" style={{ color: '#D9EBDD' }}>{currentDate}</CommandText>
+          </View>
+          <View style={{ width: StyleSheet.hairlineWidth, height: 20, backgroundColor: '#70A381' }} />
+          <CommandText palette={palette} variant="body" style={{ color: '#D9EBDD' }}>
+            {readiness?.status === 'blocked' ? 'Needs attention' : readiness?.status === 'at-risk' ? 'Watch service' : 'All clear except one'}
+          </CommandText>
         </View>
       </View>
 
-      {alertsOpen ? (
-        <AlertsPanel
-          palette={palette}
-          notifications={recentNotifications}
-          onClose={() => setAlertsOpen(false)}
-          onMarkRead={(notificationId) => void markNotificationRead({ notificationId })}
-          onMarkAllRead={() => void markAllAlertsRead()}
-        />
-      ) : null}
-
-      {copilotOpen ? (
-        <AiCopilotPanel
-          palette={palette}
-          insights={managerInsights}
-          dashboard={dashboard}
-          onClose={() => setCopilotOpen(false)}
-        />
-      ) : null}
-
-      {openShifts > 0 ? (
-        <CommandSurface palette={palette} strong style={{ gap: spacing.sm, borderColor: palette.warning }}>
-          <StatusPill palette={palette} tone="warn">{t('dashboard.coverageAlert')}</StatusPill>
-          <CommandText palette={palette} variant="body">{t('dashboard.openShiftNotice', { count: openShifts })}</CommandText>
-        </CommandSurface>
-      ) : null}
-
-      {canManage && dailyBrief ? (
-        <OperationsAutopilotPanel
-          palette={palette}
-          priorityActions={dailyBrief.priorityActions}
-          commandCenter={commandCenter}
-          onResolveBlocker={(blocker) => {
-            if (blocker.targetId) void updateExecutionTask({ taskId: blocker.targetId, status: 'done' });
-          }}
-        />
-      ) : null}
-
-      {canManage && dailyBrief ? (
-        <ProfitabilityPulsePanel
-          palette={palette}
-          pulse={dailyBrief.profitabilityPulse}
-        />
-      ) : null}
-
-      {canManage && dailyBrief ? (
-        <CommandSurface palette={palette} style={{ gap: spacing.md }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
-            <View style={{ flex: 1, minWidth: 220 }}>
-              <CommandText palette={palette} variant="title">{t('dashboard.managerDailyBrief')}</CommandText>
-              <CommandText palette={palette} variant="caption">
-                {t('dashboard.serviceSnapshot', { date: dailyBrief.date, venue: venueName })}
-              </CommandText>
-            </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'flex-end' }}>
-              <StatusPill palette={palette}>{t('dashboard.coversCount', { count: formatNumber(dailyBrief.covers ?? 0) })}</StatusPill>
-              <StatusPill palette={palette} tone={(dailyBrief.openShiftCount ?? 0) > 0 ? 'warn' : 'good'}>
-                {t('dashboard.scheduledCount', { count: formatNumber(dailyBrief.scheduledCount ?? 0) })}
-              </StatusPill>
-              <StatusPill palette={palette} tone={(dailyBrief.eightySixCount ?? 0) > 0 ? 'warn' : 'neutral'}>
-                {formatNumber(dailyBrief.eightySixCount ?? 0)} 86
-              </StatusPill>
-            </View>
-          </View>
-
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            {[
-              { label: t('dashboard.posSales'), value: formatCurrency(dailyBrief.salesCents ?? 0) },
-              { label: t('dashboard.clockedInMetric'), value: formatNumber(dailyBrief.clockedInCount ?? 0) },
-              { label: t('dashboard.prepOpen'), value: formatNumber(dailyBrief.prepOpenCount ?? 0) },
-              { label: t('dashboard.lowStock'), value: formatNumber(dailyBrief.lowStockCount ?? 0) },
-            ].map((item) => (
-              <View key={item.label} style={{ flexGrow: 1, flexBasis: 120, gap: 2, padding: spacing.sm, borderWidth: 1, borderColor: palette.divider, borderRadius: 8 }}>
-                <CommandText palette={palette} variant="metric">{item.value}</CommandText>
-                <CommandText palette={palette} variant="caption">{item.label}</CommandText>
-              </View>
-            ))}
-          </View>
-
-          {(dailyBrief.alerts ?? []).length > 0 ? (
-            <View style={{ gap: spacing.xs }}>
-              {(dailyBrief.alerts ?? []).slice(0, 4).map((alert: string) => (
-                <View key={alert} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
-                  <MaterialCommunityIcons name="alert-circle-outline" size={16} color={palette.warning} />
-                  <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>{alert}</CommandText>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <CommandText palette={palette} variant="caption">{t('dashboard.noUrgentAlerts')}</CommandText>
-          )}
-
-          {(dailyBrief.reservations ?? []).length > 0 ? (
-            <View style={{ gap: spacing.xs }}>
-              <CommandText palette={palette} variant="label">{t('dashboard.nextArrivals')}</CommandText>
-              {(dailyBrief.reservations ?? []).slice(0, 3).map((reservation: any) => (
-                <View key={reservation._id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, borderTopWidth: 1, borderTopColor: palette.divider, paddingTop: spacing.xs }}>
-                  <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>
-                    {formatDate(reservation.reservationTime, { hour: 'numeric', minute: '2-digit' })} - {reservation.guestName}
-                  </CommandText>
-                  <StatusPill palette={palette}>{t('dashboard.partySizeTop', { count: formatNumber(reservation.partySize) })}</StatusPill>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </CommandSurface>
-      ) : null}
-
-      {(() => {
-        // Only render KPIs that have meaningful (non-zero) values. Six empty
-        // tiles for a brand-new venue is the single biggest source of "wall of
-        // dashboards" confusion on the home screen.
-        const meaningful = kpis.filter((item) => {
-          const raw = String(item.value).replace(/[^0-9.]/g, '');
-          return raw !== '' && Number(raw) > 0;
-        });
-        if (meaningful.length === 0) return null;
-        return (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            {meaningful.map((item) => (
-              <CommandSurface key={item.label} palette={palette} inset style={{ flexGrow: 1, flexBasis: 150, gap: spacing.sm, minHeight: 136 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
-                  <MaterialCommunityIcons name={item.icon} size={19} color={palette.primary} />
-                  <MiniTrend palette={palette} values={item.trend} />
-                </View>
-                <CommandText palette={palette} variant="metric">{item.value}</CommandText>
-                <View style={{ gap: 2 }}>
-                  <CommandText palette={palette} variant="label">{item.label}</CommandText>
-                  <CommandText palette={palette} variant="caption">{item.delta}</CommandText>
-                </View>
-              </CommandSurface>
-            ))}
-          </View>
-        );
-      })()}
-
-      {canManage ? (
-        <CommandSurface palette={palette} style={{ gap: spacing.md }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm }}>
-            <View style={{ flex: 1, minWidth: 210 }}>
-              <CommandText palette={palette} variant="title">{t('dashboard.managerCenter')}</CommandText>
-              <CommandText palette={palette} variant="caption">{t('dashboard.recentReservations', { count: reservationCount })}</CommandText>
-            </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
-              <StatusPill palette={palette}>{formatNumber(todayReservations)} {t('common.today')}</StatusPill>
-              <StatusPill palette={palette} tone="warn">{formatNumber(vipCount)} {t('dashboard.vipLabel')} / {t('dashboard.largeLabel')}</StatusPill>
-              <StatusPill palette={palette} tone="good">{formatNumber(eventCount)} {t('dashboard.eventsLabel')}</StatusPill>
-            </View>
-          </View>
-          <TextInput
-            label={t('dashboard.managerGoal')}
-            value={goalTitle}
-            onChangeText={setGoalTitle}
-            mode="outlined"
-            outlineColor={palette.border}
-            activeOutlineColor={palette.primary}
-            textColor={palette.charcoal}
-            style={{ backgroundColor: palette.surfaceSoft }}
-          />
-          <CommandButton palette={palette} icon="target" onPress={() => void addGoal()} style={{ alignSelf: 'flex-start' }}>
-            {t('dashboard.addGoal')}
-          </CommandButton>
-          {(managerDashboard?.goals ?? []).slice(0, 4).map((goal: any) => (
-            <View key={goal._id} style={{ borderTopWidth: 1, borderTopColor: palette.divider, paddingTop: spacing.sm, gap: 2 }}>
-              <CommandText palette={palette} variant="body">{goal.title}</CommandText>
-              <CommandText palette={palette} variant="caption">{goal.period} · {goal.targetDate} · {goal.status}</CommandText>
-            </View>
-          ))}
-        </CommandSurface>
-      ) : null}
-
-      {canManage ? (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-          <CommandSurface palette={palette} style={{ flexGrow: 2, flexBasis: 280, gap: spacing.md }}>
-            <CommandText palette={palette} variant="title">{t('dashboard.reservationsTimeline')}</CommandText>
-            {reservations.length === 0 ? (
-              <CommandText palette={palette} variant="caption">{t('dashboard.noNotifications')}</CommandText>
-            ) : (
-              reservations.slice(0, 5).map((reservation: any, index: number) => (
-                <View key={reservation._id} style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-                  <View style={{ width: 7, height: 42, borderRadius: 99, backgroundColor: index === 0 ? palette.primary : palette.border }} />
-                  <View style={{ flex: 1 }}>
-                    <CommandText palette={palette} variant="body">{reservation.guestName}</CommandText>
-                    <CommandText palette={palette} variant="caption">
-                      {formatDate(reservation.reservationTime, { hour: 'numeric', minute: '2-digit' })} · {formatNumber(reservation.partySize)} {t('dashboard.coversLabel')}
-                    </CommandText>
-                  </View>
-                  <StatusPill palette={palette} tone={reservation.partySize >= 8 ? 'warn' : 'neutral'}>{reservation.partySize >= 8 ? t('dashboard.largeLabel') : t('dashboard.arrivals')}</StatusPill>
-                </View>
-              ))
-            )}
-          </CommandSurface>
-
+      <View style={{ marginHorizontal: spacing.lg, marginTop: -1, backgroundColor: '#FFF4DE', borderLeftWidth: 3, borderLeftColor: palette.warning, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
+        <MaterialCommunityIcons name={firstPriority ? 'alert-outline' : 'check-circle-outline'} size={22} color={firstPriority ? palette.warning : palette.success} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <CommandText palette={palette} variant="body" style={{ fontWeight: '700' }}>{priorityTitle}</CommandText>
+          {pulse?.salesPerLaborHourCents != null ? <CommandText palette={palette} variant="caption">{formatMoney(pulse.salesPerLaborHourCents)}/hr</CommandText> : null}
         </View>
-      ) : (
-        <CosmicInsights />
-      )}
+        {firstPriority ? <Pressable onPress={() => router.push(priorityRoute)} accessibilityRole="button" style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, flexDirection: 'row', alignItems: 'center', gap: 2 })}>
+          <CommandText palette={palette} variant="body" style={{ color: palette.warning, fontWeight: '700' }}>Inspect</CommandText>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={palette.warning} />
+        </Pressable> : null}
+      </View>
 
-      <CollapsibleSection
-        title={t('dashboard.staffing')}
-        subtitle={weeklyHighlights.length ? t('dashboard.upcomingShifts', { count: weeklyHighlights.length }) : t('dashboard.noShifts')}
-      >
-        {loading ? (
-          <Skeleton height={64} />
-        ) : weeklyHighlights.length === 0 ? (
-          <CommandText palette={palette} variant="caption">{t('dashboard.noShifts')}</CommandText>
-        ) : (
-          weeklyHighlights.map((item: any) => (
-            <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
-              <CommandText palette={palette} variant="label" style={{ width: 42 }}>{item.day}</CommandText>
-              <CommandText palette={palette} variant="caption" style={{ flex: 1 }}>{item.jobs}</CommandText>
-              <StatusPill palette={palette} tone={item.isOpen ? 'warn' : 'good'}>{item.isOpen ? t('common.needsCoverage') : t('common.scheduled')}</StatusPill>
+      <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.xl }}>
+        {showNotifications ? (
+          <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider, paddingVertical: spacing.md, gap: spacing.sm }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <CommandText palette={palette} variant="title">Notifications</CommandText>
+              {unreadCount ? <CommandButton palette={palette} onPress={() => void markAllRead()}>Mark all read</CommandButton> : null}
             </View>
-          ))
-        )}
-      </CollapsibleSection>
+            {notificationsList.length ? notificationsList.slice(0, 4).map((item) => (
+              <Pressable key={item._id} onPress={() => !item.read && void markNotificationRead({ notificationId: item._id })} style={{ paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderColor: palette.divider }}>
+                <CommandText palette={palette} variant="body" style={{ fontWeight: item.read ? '500' : '800' }}>{item.title}</CommandText>
+                <CommandText palette={palette} variant="caption">{item.body}</CommandText>
+              </Pressable>
+            )) : <CommandText palette={palette} variant="caption">You are all caught up.</CommandText>}
+          </View>
+        ) : null}
 
-      {canManage && (managerDashboard?.events ?? []).length > 0 ? (
-        <CollapsibleSection
-          title={t('dashboard.eventRun')}
-          subtitle={t('dashboard.upcomingEvents', { count: (managerDashboard?.events ?? []).length })}
-        >
-          {(managerDashboard?.events ?? []).slice(0, 4).map((event: any) => (
-            <View key={event._id} style={{ borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm, gap: 2 }}>
-              <CommandText palette={palette} variant="body">{event.title}</CommandText>
-              <CommandText palette={palette} variant="caption">{event.eventDate} · {event.status}</CommandText>
+        <View style={{ gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            <CommandText palette={palette} variant="title">Readiness snapshot</CommandText>
+            <CommandText palette={palette} variant="body" style={{ color: readiness?.status === 'at-risk' ? palette.warning : palette.primary, fontWeight: '700' }}>
+              {readiness ? `${readiness.score}% ready` : 'Loading'}
+            </CommandText>
+          </View>
+          <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: palette.divider }}>
+            <View style={{ flexDirection: 'row', paddingVertical: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider }}>
+              <CommandText palette={palette} variant="label" style={{ flex: 1 }}>Area</CommandText>
+              <CommandText palette={palette} variant="label" style={{ width: 88 }}>Status</CommandText>
+              <CommandText palette={palette} variant="label" style={{ width: 80, textAlign: 'right' }}>Owner</CommandText>
             </View>
-          ))}
-        </CollapsibleSection>
-      ) : null}
+            {readinessRows.map(([label, value]) => {
+              const state = value >= 100 ? 'Clear' : value > 0 ? `${value}% watch` : 'Pending';
+              const color = value >= 100 ? palette.success : value > 0 ? palette.warning : palette.muted;
+              return (
+                <Pressable key={label} onPress={() => router.push(label === 'Staffing' ? '/staff' : label === 'Floor' ? '/floor' : '/checklist')} style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider })}>
+                  <CommandText palette={palette} variant="body" style={{ flex: 1 }}>{label}</CommandText>
+                  <View style={{ width: 88, flexDirection: 'row', alignItems: 'center', gap: 6 }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} /><CommandText palette={palette} variant="caption" style={{ color, fontWeight: '700' }}>{state}</CommandText></View>
+                  <CommandText palette={palette} variant="caption" style={{ width: 80, textAlign: 'right' }}>{label === 'Staffing' ? 'Manager' : 'Team'}</CommandText>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
-      {recentNotifications.length > 0 ? (
-        <CollapsibleSection
-          title={t('dashboard.notifications')}
-          subtitle={unreadNotifications.length ? t('dashboard.unreadCount', { count: unreadNotifications.length }) : t('dashboard.allCaughtUp')}
-          defaultOpen={unreadNotifications.length > 0}
-        >
-          {recentNotifications.slice(0, 4).map((item) => (
-            <View key={item._id} style={{ borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm, gap: 4 }}>
-              <CommandText palette={palette} variant="body" style={{ fontWeight: item.read ? '600' : '900' }}>{item.title}</CommandText>
-              <CommandText palette={palette} variant="caption">{item.body}</CommandText>
-              {!item.read ? (
-                <CommandButton palette={palette} onPress={() => void markNotificationRead({ notificationId: item._id })} style={{ alignSelf: 'flex-start' }}>
-                  {t('common.markRead')}
-                </CommandButton>
-              ) : null}
-            </View>
-          ))}
-        </CollapsibleSection>
-      ) : null}
+        <View style={{ gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <CommandText palette={palette} variant="title">Today’s flow</CommandText>
+            <CommandText palette={palette} variant="caption">Team on-site {dashboard?.analytics.clockedInCount ?? 0}</CommandText>
+          </View>
+          <View style={{ borderLeftWidth: 1, borderColor: palette.divider, marginLeft: 10, gap: 0 }}>
+            {(events.length ? events : managerDashboard?.goals?.slice(0, 3) ?? []).map((item: any, index: number) => (
+              <Pressable key={item._id ?? `${item.title}-${index}`} onPress={() => item._id && 'startsAt' in item ? router.push({ pathname: '/event-command-center', params: { eventId: item._id } }) : router.push('/schedule')} style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, marginLeft: -6, paddingLeft: spacing.lg, paddingBottom: spacing.lg, position: 'relative' })}>
+                <View style={{ position: 'absolute', top: 4, left: -5, width: 9, height: 9, borderRadius: 5, backgroundColor: index === 0 ? palette.primary : '#A9B0AA' }} />
+                <CommandText palette={palette} variant="caption">{'startsAt' in item ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(item.startsAt)) : item.targetDate ?? 'Today'}</CommandText>
+                <CommandText palette={palette} variant="body" style={{ fontWeight: '700', marginTop: 2 }}>{item.title}</CommandText>
+                <CommandText palette={palette} variant="caption">{'expectedGuests' in item ? `${item.expectedGuests ?? '—'} guests · ${item.readiness}` : item.status ?? 'Open goal'}</CommandText>
+              </Pressable>
+            ))}
+            {!events.length && !(managerDashboard?.goals?.length) ? <CommandText palette={palette} variant="caption" style={{ paddingLeft: spacing.lg }}>No upcoming events or goals yet.</CommandText> : null}
+          </View>
+        </View>
 
-      {canManage && reservations.length > 0 ? (
-        <CollapsibleSection
-          title={t('dashboard.vipInsights')}
-          subtitle={t('dashboard.vipBookings', { count: reservations.length })}
-        >
-          {reservations.slice(0, 3).map((reservation: any) => (
-            <View key={reservation._id} style={{ gap: 2, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
-              <CommandText palette={palette} variant="body">{reservation.guestName} · {formatNumber(reservation.partySize)}</CommandText>
-              <CommandText palette={palette} variant="caption">{formatDate(reservation.reservationTime, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</CommandText>
-              {reservation.notes ? <CommandText palette={palette} variant="caption">{reservation.notes}</CommandText> : null}
-            </View>
-          ))}
-        </CollapsibleSection>
-      ) : null}
-
-      {canManage && liveStaff.length > 0 ? (
-        <CollapsibleSection
-          title={t('dashboard.clockedIn')}
-          subtitle={t('dashboard.onShiftCount', { count: liveStaff.length })}
-        >
-          {liveStaff.map((person: any) => (
-            <View key={person.key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: palette.divider, paddingBottom: spacing.sm }}>
-              <View style={{ flex: 1 }}>
-                <CommandText palette={palette} variant="body">{person.name}</CommandText>
-                <CommandText palette={palette} variant="caption">{person.job}</CommandText>
-              </View>
-              <StatusPill palette={palette}>{person.role}</StatusPill>
+        <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider, flexDirection: 'row', paddingVertical: spacing.md }}>
+          {[
+            ['Sales', pulse ? formatMoney(pulse.salesCents) : '$0.00'],
+            ['Labor', pulse ? formatDuration(Math.round(pulse.laborHours * 60)) : '—'],
+            ['Open checks', String(pulse?.openChecks ?? dailyBrief?.prepOpenCount ?? 0)],
+            ['Active clocks', String(pulse?.activeClocks ?? dashboard?.analytics.clockedInCount ?? 0)],
+          ].map(([label, value], index) => (
+            <View key={label} style={{ flex: 1, paddingHorizontal: spacing.sm, gap: 3, borderLeftWidth: index ? StyleSheet.hairlineWidth : 0, borderColor: palette.divider }}>
+              <CommandText palette={palette} variant="body" style={{ fontWeight: '800' }}>{value}</CommandText>
+              <CommandText palette={palette} variant="caption">{label}</CommandText>
             </View>
           ))}
-        </CollapsibleSection>
-      ) : null}
+        </View>
 
+        {canManage ? <View style={{ gap: spacing.sm, paddingBottom: spacing.md }}>
+          <CommandText palette={palette} variant="title">Manager goal</CommandText>
+          <TextInput value={goalTitle} onChangeText={setGoalTitle} placeholder="Add a goal for today" mode="outlined" dense outlineColor={palette.border} activeOutlineColor={palette.primary} textColor={palette.charcoal} style={{ backgroundColor: palette.surface }} />
+          <CommandButton palette={palette} icon="plus" selected={Boolean(goalTitle.trim())} onPress={() => void addGoal()} style={{ alignSelf: 'flex-start' }}>Add goal</CommandButton>
+        </View> : null}
+
+        {loading ? <Skeleton height={60} /> : null}
+      </View>
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  notificationBadge: {
+    position: 'absolute',
+    right: -8,
+    top: -7,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#B8711B',
+  },
+});

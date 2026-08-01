@@ -15,6 +15,16 @@ enum Role {
   staff
 }
 
+enum DocumentCategory {
+  sop
+  manual
+  recipe
+  menu
+  training
+  form
+  other
+}
+
 enum SubscriptionStatus {
   trialing
   active
@@ -347,6 +357,7 @@ model Venue {
   invites                       Invite[]
   joinRequests                  WorkplaceJoinRequest[]
   eventExecutionWorkspaces      EventExecutionWorkspace[]
+  documents                     VenueDocument[]
 }
 
 model Profile {
@@ -389,6 +400,7 @@ model Profile {
   servedTables     TableState[]           @relation("ServerTables")
   assignedLeads    CrmLead[]              @relation("AssignedLeads")
   createdScheduleMemoryNotes ScheduleMemoryNote[] @relation("ScheduleMemoryCreatedBy")
+  uploadedDocuments VenueDocument[] @relation("DocumentUploader")
 
   @@index([venueId])
   @@index([email])
@@ -578,6 +590,27 @@ model ChatImage {
   @@index([venueId])
 }
 
+// Private venue document library. Object bytes stay in S3; this row carries
+// tenant ownership and display metadata used by the mobile app.
+model VenueDocument {
+  id           String           @id @default(cuid())
+  venueId      String
+  title        String
+  fileName     String
+  category     DocumentCategory
+  mimeType     String
+  sizeBytes    Int
+  s3Key        String           @unique
+  uploadedById String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  venue        Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  uploadedBy   Profile?         @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([venueId, createdAt])
+  @@index([venueId, category])
+}
+
 model NotificationEvent {
   id        String   @id @default(cuid())
   venueId   String
@@ -743,6 +776,9 @@ model Reservation {
   estimatedValueCents Int?
   depositDueCents     Int?
   externalId          String?
+  // Source-system update time for rejecting delayed webhook events that would
+  // otherwise overwrite newer reservation state.
+  lastExternalEventAt DateTime?
   toastCheckGuid      String?
   depositStatus       String?
   checkInAt           DateTime?

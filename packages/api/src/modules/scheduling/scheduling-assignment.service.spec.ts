@@ -399,7 +399,7 @@ describe('SchedulingAssignmentService', () => {
     const result = await service.copyDayShifts({
       venueId: 'venue-1',
       fromDay: 1,
-      toDays: [1, 3, 5],
+      toDays: [1, 3, 3, 5],
     });
 
     expect(result).toEqual({ added: 4 });

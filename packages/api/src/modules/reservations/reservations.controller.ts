@@ -161,6 +161,11 @@ class ReservationSyncEventDto {
   @IsString()
   eventType!: string;
 
+  // When the source system produced this update. Arrival order is not reliable
+  // for webhooks, so this is required to prevent stale events regressing state.
+  @IsNumber()
+  eventTimestamp!: number;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
@@ -273,13 +278,16 @@ export class ReservationsController {
         });
       } catch (error: any) {
         if (error?.code !== 'P2002') throw error;
-        // Already seen: skip only if it previously succeeded; otherwise
-        // fall through and reprocess (retry a prior failed/interrupted attempt).
+        // Already seen: a currently-processing delivery is also a duplicate.
+        // Only retry an explicitly failed event or a processing claim old enough
+        // to be considered abandoned after a worker crash.
         const prior = await this.prisma.reservationSyncEvent.findFirst({
           where: { venueId, provider, externalEventId: event.externalEventId },
-          select: { status: true },
+          select: { status: true, processedAt: true },
         });
-        if (prior?.status === 'processed') {
+        const activeProcessingClaim =
+          prior?.status === 'processing' && prior.processedAt.getTime() > Date.now() - 5 * 60 * 1000;
+        if (prior?.status === 'processed' || prior?.status === 'ignored_stale' || activeProcessingClaim) {
           duplicates += 1;
           continue;
         }
@@ -292,10 +300,14 @@ export class ReservationsController {
       // 2) Process the reservation in a separate transaction.
       try {
         const reservationTime = new Date(event.reservationTime);
+        const sourceEventAt = new Date(event.eventTimestamp);
         if (isNaN(reservationTime.getTime())) {
           throw new BadRequestException('Invalid reservationTime');
         }
-        const reservationId = await this.prisma.$transaction(async (tx) => {
+        if (isNaN(sourceEventAt.getTime())) {
+          throw new BadRequestException('Invalid eventTimestamp');
+        }
+        const result = await this.prisma.$transaction(async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-sync:${venueId}:${provider}:${event.externalId}`}))`;
           const fields: Prisma.ReservationUpdateInput = {
             guestName: event.guestName,
@@ -307,12 +319,16 @@ export class ReservationsController {
             guestEmail: event.email?.trim() ?? null,
             notes: event.notes?.trim() ?? null,
             specialRequests: event.specialRequests?.trim() ?? null,
+            lastExternalEventAt: sourceEventAt,
           };
           const existing = await tx.reservation.findFirst({
             where: { venueId, source: provider, externalId: event.externalId },
-            select: { id: true },
+            select: { id: true, lastExternalEventAt: true },
           });
-          return existing
+          if (existing?.lastExternalEventAt && existing.lastExternalEventAt > sourceEventAt) {
+            return { reservationId: existing.id, ignoredStale: true };
+          }
+          const reservationId = existing
             ? (await tx.reservation.update({ where: { id: existing.id }, data: fields, select: { id: true } })).id
             : (await tx.reservation.create({
                 data: {
@@ -328,17 +344,25 @@ export class ReservationsController {
                   guestEmail: event.email?.trim() ?? null,
                   notes: event.notes?.trim() ?? null,
                   specialRequests: event.specialRequests?.trim() ?? null,
+                  lastExternalEventAt: sourceEventAt,
                 },
                 select: { id: true },
               })).id;
+          return { reservationId, ignoredStale: false };
         });
 
         // 3) Mark processed (committed independently of the processing tx).
         await this.prisma.reservationSyncEvent.updateMany({
           where: { venueId, provider, externalEventId: event.externalEventId },
-          data: { reservationId, processedAt: new Date(), status: 'processed', errorMessage: null },
+          data: {
+            reservationId: result.reservationId,
+            processedAt: new Date(),
+            status: result.ignoredStale ? 'ignored_stale' : 'processed',
+            errorMessage: null,
+          },
         });
-        processed += 1;
+        if (result.ignoredStale) duplicates += 1;
+        else processed += 1;
       } catch (error: any) {
         // The 'processing' row was committed in step 1, so this update matches it.
         await this.prisma.reservationSyncEvent.updateMany({

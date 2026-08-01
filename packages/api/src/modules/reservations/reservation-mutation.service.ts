@@ -78,9 +78,12 @@ export class ReservationMutationService {
       durationMinutes: args.durationMinutes ?? 90,
     };
 
-    await this.assertNoHoldConflict(args.venueId, reservationTime, data.durationMinutes);
-
     return this.prisma.$transaction(async (transaction) => {
+      // Serialize reservation writes with hold creation for this venue. Without
+      // the shared lock a hold could be inserted after the conflict query but
+      // before this transaction committed.
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-holds:${args.venueId}`}))`;
+      await this.assertNoHoldConflict(transaction, args.venueId, reservationTime, data.durationMinutes);
       if (args.reservationId) {
         const existing = await transaction.reservation.findFirst({
           where: { id: args.reservationId, venueId: args.venueId },
@@ -117,8 +120,27 @@ export class ReservationMutationService {
     const reason = args.reason.trim();
     if (!reason) throw new BadRequestException('reason is required');
 
-    return this.prisma.reservationHold.create({
-      data: { venueId: args.venueId, startsAt, endsAt, reason },
+    return this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-holds:${args.venueId}`}))`;
+      const candidates = await transaction.reservation.findMany({
+        where: {
+          venueId: args.venueId,
+          deletedAt: null,
+          status: { notIn: ['cancelled', 'no_show'] },
+          reservationTime: { lt: endsAt },
+        },
+        select: { reservationTime: true, durationMinutes: true },
+      });
+      const overlapsReservation = candidates.some(
+        (reservation) =>
+          reservation.reservationTime.getTime() + reservation.durationMinutes * 60 * 1000 > startsAt.getTime(),
+      );
+      if (overlapsReservation) {
+        throw new BadRequestException('This hold overlaps an existing reservation. Move or cancel the reservation first.');
+      }
+      return transaction.reservationHold.create({
+        data: { venueId: args.venueId, startsAt, endsAt, reason },
+      });
     });
   }
 
@@ -149,9 +171,14 @@ export class ReservationMutationService {
     });
   }
 
-  private async assertNoHoldConflict(venueId: string, reservationTime: Date, durationMinutes: number) {
+  private async assertNoHoldConflict(
+    transaction: Prisma.TransactionClient,
+    venueId: string,
+    reservationTime: Date,
+    durationMinutes: number,
+  ) {
     const endTime = new Date(reservationTime.getTime() + durationMinutes * 60 * 1000);
-    const hold = await this.prisma.reservationHold.findFirst({
+    const hold = await transaction.reservationHold.findFirst({
       where: {
         venueId,
         startsAt: { lt: endTime },

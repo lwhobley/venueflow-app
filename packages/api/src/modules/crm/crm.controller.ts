@@ -25,6 +25,7 @@ import {
 import { Type } from 'class-transformer';
 import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
 import { isAdminRole } from '../../auth/roles';
+import { ACTIVE_MEMBERSHIP } from '../../common/membership';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -526,6 +527,7 @@ export class CrmController {
   async saveLead(@VenueScope() scope: Scope, @Body() body: SaveLeadDto) {
     requireManager(scope);
     const now = new Date();
+    const assignedToId = await this.resolveVenueMemberId(scope.venueId, body.assignedToId, 'Lead assignee');
 
     if (body.leadId) {
       const existing = await this.prisma.crmLead.findFirst({
@@ -541,7 +543,7 @@ export class CrmController {
       if (body.source !== undefined) patch.source = body.source;
       if (body.status !== undefined) patch.status = body.status as CrmLeadStatus;
       if (body.tags !== undefined) patch.tags = body.tags;
-      if (body.assignedToId !== undefined) patch.assignedToId = body.assignedToId;
+      if (body.assignedToId !== undefined) patch.assignedToId = assignedToId;
       if (body.estimatedValueCents !== undefined) patch.estimatedValueCents = body.estimatedValueCents;
 
       await this.prisma.crmLead.update({ where: { id: body.leadId }, data: patch });
@@ -563,7 +565,7 @@ export class CrmController {
         source: body.source ?? null,
         status: (body.status ?? 'new') as CrmLeadStatus,
         tags: body.tags ?? [],
-        assignedToId: body.assignedToId ?? null,
+        assignedToId: assignedToId ?? null,
         estimatedValueCents: body.estimatedValueCents ?? null,
         lastActivityAt: now,
         createdAt: now,
@@ -631,6 +633,7 @@ export class CrmController {
   async saveBeo(@VenueScope() scope: Scope, @Body() body: SaveBeoDto) {
     requireManager(scope);
     const now = new Date();
+    const assignedRepId = await this.resolveVenueMemberId(scope.venueId, body.assignedRepId, 'Assigned representative');
 
     if (body.leadId) {
       const lead = await this.prisma.crmLead.findFirst({
@@ -656,7 +659,7 @@ export class CrmController {
       menuBarPackage: body.menuBarPackage ?? null,
       specialRequirements: body.specialRequirements ?? null,
       internalNotes: body.internalNotes ?? null,
-      assignedRepId: body.assignedRepId ?? null,
+      assignedRepId: assignedRepId ?? null,
       updatedAt: now,
     };
 
@@ -1107,6 +1110,22 @@ export class CrmController {
   // ============================================================
   // Helpers
   // ============================================================
+  private async resolveVenueMemberId(
+    venueId: string,
+    rawProfileId: string | undefined,
+    label: string,
+  ): Promise<string | null | undefined> {
+    if (rawProfileId === undefined) return undefined;
+    const profileId = rawProfileId.trim();
+    if (!profileId) return null;
+    const member = await this.prisma.profile.findFirst({
+      where: { id: profileId, venueId, OR: ACTIVE_MEMBERSHIP },
+      select: { id: true },
+    });
+    if (!member) throw new BadRequestException(`${label} must be an active member of this venue.`);
+    return member.id;
+  }
+
   private async logActivity(venueId: string, leadId: string, actorId: string | null, kind: string, detail: string | null) {
     try {
       await this.prisma.crmActivityLog.create({
