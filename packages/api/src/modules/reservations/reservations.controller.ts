@@ -11,6 +11,7 @@ import {
   Post,
   Query,
   Req,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
@@ -371,6 +372,10 @@ export class ReservationsController {
         });
         failed += 1;
       }
+    }
+
+    if (failed > 0) {
+      throw new ServiceUnavailableException(`Reservation sync failed for ${failed} event${failed === 1 ? '' : 's'}.`);
     }
 
     await this.prisma.reservationConnection.update({ where: { id: connection.id }, data: { lastSyncAt: new Date() } });

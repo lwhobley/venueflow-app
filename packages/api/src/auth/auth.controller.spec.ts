@@ -209,6 +209,12 @@ describe('AuthController recovery and logout safety', () => {
       session: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
     const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          passwordResetCodeHash: codeHash,
+          passwordResetExpiresAt: new Date(Date.now() + 60_000),
+        }),
+      },
       $transaction: vi.fn(async (callback: (db: typeof tx) => Promise<unknown>) => {
         const previous = transactionTail;
         let release!: () => void;
@@ -239,6 +245,30 @@ describe('AuthController recovery and logout safety', () => {
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
     expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
     expect(tx.passwordCredential.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an invalid reset code before running the password KDF', async () => {
+    const hashPassword = vi.fn();
+    const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          passwordResetCodeHash: 'stored-code',
+          passwordResetExpiresAt: new Date(Date.now() + 60_000),
+        }),
+      },
+    };
+    const authService = {
+      hashPassword,
+      hashOneTimeCode: vi.fn().mockReturnValue('wrong-code'),
+      oneTimeCodeHashesMatch: vi.fn().mockReturnValue(false),
+    };
+    const controller = new AuthController(prisma as any, {} as any, {} as any, authService as any);
+
+    await expect(controller.resetPassword(
+      { ip: '127.0.0.1' } as any,
+      { email: 'staff@example.com', code: 'bad-code', newPassword: 'password123' },
+    )).rejects.toThrow('invalid or expired');
+    expect(hashPassword).not.toHaveBeenCalled();
   });
 
   it('does not issue an unfiltered push-token deletion without a profile id', async () => {

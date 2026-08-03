@@ -460,6 +460,23 @@ export class AuthController {
     await assertWithinSharedRateLimit(this.prisma, `reset-password:ip:${getClientIp(request)}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `reset-password:email:${email}`, 8, AUTH_RATE_LIMIT_WINDOW_MS);
 
+    // Reject invalid requests before running the expensive password KDF. The
+    // transaction below repeats this check while holding the account lock so
+    // concurrent requests cannot redeem the same one-time code twice.
+    const candidateCodeHash = this.authService.hashOneTimeCode(body.code);
+    const candidateAccount = await this.prisma.user.findUnique({
+      where: { email },
+      select: { passwordResetCodeHash: true, passwordResetExpiresAt: true },
+    });
+    if (
+      !candidateAccount?.passwordResetCodeHash ||
+      !candidateAccount.passwordResetExpiresAt ||
+      candidateAccount.passwordResetExpiresAt.getTime() < Date.now() ||
+      !this.authService.oneTimeCodeHashesMatch(candidateAccount.passwordResetCodeHash, candidateCodeHash)
+    ) {
+      throw new BadRequestException('That password reset code is invalid or expired.');
+    }
+
     const next = await this.authService.hashPassword(body.newPassword);
     await this.prisma.$transaction(async (tx) => {
       // Serialize attempts for this account and validate only after acquiring

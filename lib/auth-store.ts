@@ -29,43 +29,22 @@ const secureStorage = {
   removeItem: async (key: string) => SecureStore.deleteItemAsync(key),
 };
 
-const memoryStorage = new Map<string, string>();
-const webStorage = {
+const memoryStorage = {
   getItem: async (key: string) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        return window.localStorage.getItem(key);
-      } catch {
-        // Fall back to memoryStorage if localStorage is restricted
-      }
-    }
-    return memoryStorage.get(key) ?? null;
+    return memoryStorage.values.get(key) ?? null;
   },
   setItem: async (key: string, value: string) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        window.localStorage.setItem(key, value);
-        return;
-      } catch {
-        // Fall back to memoryStorage if localStorage is restricted
-      }
-    }
-    memoryStorage.set(key, value);
+    memoryStorage.values.set(key, value);
   },
   removeItem: async (key: string) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        window.localStorage.removeItem(key);
-        return;
-      } catch {
-        // Fall back to memoryStorage if localStorage is restricted
-      }
-    }
-    memoryStorage.delete(key);
+    memoryStorage.values.delete(key);
   },
+  values: new Map<string, string>(),
 };
 
-const storage = Platform.OS === 'web' ? webStorage : secureStorage;
+// Web sessions stay in memory until an HttpOnly cookie-based session is available.
+// This prevents a script injection from reading a long-lived bearer token.
+const storage = Platform.OS === 'web' ? memoryStorage : secureStorage;
 
 const createAuthStore = (set: any): AuthState => ({
   authEpoch: 0,

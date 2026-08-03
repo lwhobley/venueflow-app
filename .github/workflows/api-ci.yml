@@ -5,11 +5,19 @@ on:
     branches: [main]
     paths:
       - 'packages/api/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'vitest.config.ts'
       - '.github/workflows/api-ci.yml'
   pull_request:
     branches: [main]
     paths:
       - 'packages/api/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'vitest.config.ts'
       - '.github/workflows/api-ci.yml'
 
 jobs:

@@ -18,9 +18,9 @@ type ActiveClockEntry = {
   jobTitle: string;
   venueName: string;
   clockInAt: number;
-  clockInLat?: number;
-  clockInLng?: number;
-  clockInAccuracyM?: number;
+  clockInLat?: number | null;
+  clockInLng?: number | null;
+  clockInAccuracyM?: number | null;
   breaks?: any[];
 };
 
@@ -58,14 +58,15 @@ export default function ClockScreen() {
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState(false);
 
-  const { data: clockBoard } = useApiQuery<any | null>(['app', 'clock-board'], '/v1/app/clock-board', isReady);
+  const { data: clockBoard } = useApiQuery<any | null>(['time-clock', 'board'], '/v1/time-clock/board', isReady);
   const { data: dashboard } = useApiQuery<any | null>(['app', 'dashboard'], '/v1/app/dashboard', isReady);
-  const { data: timeClock } = useApiQuery<any | null>(['app', 'time-clock'], '/v1/app/time-clock', isReady);
+  const { data: timeClock } = useApiQuery<any | null>(['time-clock', 'me'], '/v1/time-clock/me', isReady);
 
-  const clockIn = useApiMutation(appApi.clockIn, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
-  const clockOut = useApiMutation(appApi.clockOut, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
-  const breakStart = useApiMutation(appApi.breakStart, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
-  const breakEnd = useApiMutation(appApi.breakEnd, [['app', 'clock-board'], ['app', 'dashboard'], ['app', 'time-clock']]);
+  const clockInvalidations = [['time-clock', 'board'], ['time-clock', 'me'], ['app', 'dashboard']];
+  const clockIn = useApiMutation(appApi.clockIn, clockInvalidations);
+  const clockOut = useApiMutation(appApi.clockOut, clockInvalidations);
+  const breakStart = useApiMutation(appApi.breakStart, clockInvalidations);
+  const breakEnd = useApiMutation(appApi.breakEnd, clockInvalidations);
   const createCorrectionRequest = useApiMutation(appApi.createStaffRequest, [['app', 'listStaffRequests']]);
 
   const [showCorrection, setShowCorrection] = useState(false);
@@ -513,7 +514,7 @@ export default function ClockScreen() {
                       </View>
                       <Text style={{ color: colors.muted }}>{t('clock.inTimeValue', { time: formatTime(e.clockInAt) })}</Text>
                     </View>
-                    {e.clockInLat !== undefined && e.clockInLat !== 0 && (
+                    {Number.isFinite(e.clockInLat) && Number.isFinite(e.clockInLng) && e.clockInLat !== 0 && e.clockInLng !== 0 && (
                       <Pressable
                         onPress={() => {
                           const url = `https://www.google.com/maps/search/?api=1&query=${e.clockInLat},${e.clockInLng}`;

@@ -232,7 +232,7 @@ export class WorkforceController {
     const [byCode, byText] = await Promise.all([
       this.prisma.venue.findMany({
         where: { code: { equals: term, mode: 'insensitive' } },
-        select: { id: true, name: true, address: true, code: true },
+        select: { id: true, name: true, address: true },
         take: 3,
       }),
       this.prisma.venue.findMany({
@@ -242,7 +242,7 @@ export class WorkforceController {
             { address: { contains: term, mode: 'insensitive' } },
           ],
         },
-        select: { id: true, name: true, address: true, code: true },
+        select: { id: true, name: true, address: true },
         take: 10,
       }),
     ]);

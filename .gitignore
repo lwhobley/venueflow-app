@@ -53,6 +53,9 @@ scripts/.auth-keys.json
 .agents/
 .vs/
 
+# Supabase CLI link metadata
+supabase/.temp/
+
 # Build artifacts and assets
 builds/
 facebook-assets/
