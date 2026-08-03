@@ -25,7 +25,7 @@ After rollback, verify `/api/health`, `/api/v1/documents` (expect `401` without 
 
 ## Database backups and restore
 
-The production database is Supabase project `dhgyezfkgbzzsuyrdpek`. Supabase provides managed daily backups; point-in-time recovery (PITR) must be enabled in the project dashboard for the selected paid plan before launch. Verify it under **Database → Backups** and perform a restore drill against a separate project before the first customer migration.
+The production database is Supabase project `dhgyezfkgbzzsuyrdpek`. It is currently on Supabase's **Free plan**, which does **not** include scheduled backups. Point-in-time recovery (PITR) is also unavailable until the project is upgraded to Pro and the PITR add-on is enabled. Upgrade before launch, then verify **Database → Backups** and perform a restore drill against a separate project before the first customer migration.
 
 Never store a database password in this repository. For a restore, pause Cloud Run traffic, restore or clone the Supabase project, update `DATABASE_URL` as a new Cloud Run revision, run Prisma migrations, smoke-test, and then shift traffic back.
 
