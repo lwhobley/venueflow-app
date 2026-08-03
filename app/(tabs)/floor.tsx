@@ -139,6 +139,8 @@ function FloorScreen() {
   const { t } = useI18n();
   const [section, setSection] = useState<(typeof sectionFilters)[number]>('all');
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'dirty' | 'reserved' | 'seated'>('all');
+  const [focusMode, setFocusMode] = useState(false);
 
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as FloorData | null | undefined;
   const stats = useQuery(api.floor.getFloorStats, isReady && venue?.id ? { venueId: venue.id } : 'skip');
@@ -192,14 +194,36 @@ function FloorScreen() {
 
   const filteredTables = useMemo(() => {
     if (!activeFloor) return [];
-    return activeFloor.tables.filter((item: FloorTableRow) => section === 'all' || item.table.section === section);
-  }, [activeFloor, section]);
+    return activeFloor.tables.filter((item: FloorTableRow) => {
+      const sectionMatches = section === 'all' || item.table.section === section;
+      const state = item.state?.status ?? 'available';
+      const statusMatches = statusFilter === 'all' || state === statusFilter;
+      const focusMatches = !focusMode || state === 'dirty' || item.activeAssignments.length > 0 || Boolean(item.nextAssignment);
+      return sectionMatches && statusMatches && focusMatches;
+    });
+  }, [activeFloor, focusMode, section, statusFilter]);
 
   const selected = filteredTables.find((item: FloorTableRow) => item.table._id === selectedTableId) ?? filteredTables[0] ?? null;
   const selectedState = selected?.state ?? null;
   const selectedAssignments = selected?.activeAssignments ?? [];
   const selectedNextAssignment = selected?.nextAssignment ?? null;
   const needsAssignmentCount = reservationQueue.length;
+  const sectionLoad = useMemo(() => sectionFilters.slice(1).map((key) => {
+    const tables = (activeFloor?.tables ?? []).filter((item: FloorTableRow) => item.table.section === key);
+    const occupied = tables.filter((item: FloorTableRow) => ['seated', 'reserved'].includes(item.state?.status ?? '')).length;
+    return { key, occupied, total: tables.length };
+  }), [activeFloor]);
+  const floorExceptions = useMemo(() => {
+    const now = Date.now();
+    const dirty = (activeFloor?.tables ?? []).filter((item: FloorTableRow) => item.state?.status === 'dirty').map((item: FloorTableRow) => `${item.table.label} needs cleaning`);
+    const overdue = (activeFloor?.tables ?? []).flatMap((item: FloorTableRow) => item.activeAssignments.filter((assignment) => assignment.endsAt < now).map((assignment) => `${assignment.guestName} is past the expected turn at ${item.table.label}`));
+    return [...reservationQueue.slice(0, 2).map((item) => `${item.guestName} needs a table`), ...dirty, ...overdue].slice(0, 5);
+  }, [activeFloor, reservationQueue]);
+  const nextParty = reservationQueue[0] ?? waitlistQueue[0] ?? null;
+  const recommendedForNext = useMemo(() => {
+    if (!nextParty) return [];
+    return mergeableTables.filter((item) => item.table.seats >= nextParty.partySize).sort((a, b) => (a.table.seats - nextParty.partySize) - (b.table.seats - nextParty.partySize)).slice(0, 3);
+  }, [mergeableTables, nextParty]);
 
   const onRelease = async (assignmentId: string) => {
     if (!venue?.id) return;
@@ -287,11 +311,60 @@ function FloorScreen() {
         </Card.Content>
       </Card>
 
+      <Card style={{ backgroundColor: colors.surface }}>
+        <Card.Content style={{ gap: spacing.sm }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+            <View style={{ flex: 1 }}>
+              <Text variant="titleMedium">Next 30 minutes</Text>
+              <Text style={{ color: colors.muted }}>Arrivals and waitlist parties that can be seated now.</Text>
+            </View>
+            <Button compact mode="text" textColor={colors.primary} onPress={() => router.push('/reservations')}>Open reservations</Button>
+          </View>
+          {nextParty ? (
+            <>
+              <View style={{ paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                <Text style={{ fontWeight: '700' }}>{nextParty.guestName} · {nextParty.partySize}</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>{'reservationTime' in nextParty ? `Reservation at ${formatTime(nextParty.reservationTime)}` : 'Waiting for a table'}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {recommendedForNext.length ? recommendedForNext.map((item) => (
+                  <Chip key={item.table._id} onPress={() => { setSelectedTableId(item.table._id); setStatusFilter('all'); }}>
+                    {item.table.label} · {item.table.seats} seats
+                  </Chip>
+                )) : <Text style={{ color: colors.warning }}>No single open table fits this party. Consider a merge.</Text>}
+              </View>
+            </>
+          ) : <Text style={{ color: colors.muted }}>No upcoming unassigned arrivals or waitlist parties.</Text>}
+        </Card.Content>
+      </Card>
+
+      {floorExceptions.length ? (
+        <Card style={{ backgroundColor: '#FFF4DE', borderLeftWidth: 3, borderLeftColor: colors.warning }}>
+          <Card.Content style={{ gap: spacing.xs }}>
+            <Text variant="titleMedium">Floor exceptions</Text>
+            {floorExceptions.map((item) => <Text key={item} style={{ color: colors.charcoal }}>• {item}</Text>)}
+          </Card.Content>
+        </Card>
+      ) : null}
+
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {sectionFilters.map((filter) => (
           <Chip key={filter} selected={section === filter} onPress={() => setSection(filter)}>
             {filter === 'all' ? t('floor.allSections') : filter}
           </Chip>
+        ))}
+      </View>
+
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        {(['all', 'available', 'dirty', 'reserved', 'seated'] as const).map((filter) => (
+          <Chip key={filter} selected={statusFilter === filter} onPress={() => setStatusFilter(filter)}>{filter === 'all' ? 'All states' : statusLabels[filter]}</Chip>
+        ))}
+        <Chip selected={focusMode} onPress={() => setFocusMode((value) => !value)}>Focus active</Chip>
+      </View>
+
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: spacing.xs }}>
+        {sectionLoad.map((item) => (
+          <Text key={item.key} style={{ color: colors.muted, fontSize: 12 }}>{item.key.toUpperCase()} {item.occupied}/{item.total}</Text>
         ))}
       </View>
 

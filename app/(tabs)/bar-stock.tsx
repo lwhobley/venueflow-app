@@ -782,7 +782,7 @@ export default function BarStockScreen() {
           <TextInput label={t('barStock.form.nameLabel')} value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {(activeTab === 'beverage' 
-              ? [...beverageCategories, 'supply', 'other'] 
+              ? (['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const) 
               : foodCategories
             ).map((item) => (
               <Chip key={item} selected={category === item} onPress={() => setCategory(item)}>{item}</Chip>

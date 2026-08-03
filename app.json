@@ -3,7 +3,7 @@
     "name": "Venue Wrangler",
     "slug": "venue-wrangler",
     "owner": "loungeabilityllc",
-    "version": "1.10",
+    "version": "1.10.1",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "light",

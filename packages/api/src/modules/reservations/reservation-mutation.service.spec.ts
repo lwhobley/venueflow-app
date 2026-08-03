@@ -7,7 +7,7 @@ function withTransaction<T extends Record<string, any>>(prisma: T) {
     $executeRaw: prisma.$executeRaw ?? vi.fn().mockResolvedValue(undefined),
   });
   return Object.assign(transaction, {
-    $transaction: vi.fn((callback: (transaction: typeof transaction) => unknown) => callback(transaction)),
+    $transaction: vi.fn((callback: (tx: any) => unknown) => callback(transaction)),
   });
 }
 
