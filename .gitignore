@@ -51,8 +51,10 @@ scripts/.auth-keys.json
 .claude/
 .codex/
 .agents/
+.vs/
 
 # Build artifacts and assets
 builds/
 facebook-assets/
 screenshots/
+

@@ -91,6 +91,10 @@ type PrepBoard = {
   prepCount: number;
 };
 
+const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm };
+const addItemWideField = { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 136, backgroundColor: colors.surface };
+const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidth: 112, backgroundColor: colors.surface };
+
 export default function BarStockScreen() {
   const { t } = useI18n();
   const { venue, isReady, canManage, profileLoading } = useVenueAuth();
@@ -109,9 +113,6 @@ export default function BarStockScreen() {
   const sendDigest = useMutation(api.barInventory.sendInventoryDigest);
   const upsertPrepBoardItem = useMutation(api.barInventory.upsertPrepBoardItem);
   const updatePrepBoardItemStatus = useMutation(api.barInventory.updatePrepBoardItemStatus);
-  const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm };
-  const addItemWideField = { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 136, backgroundColor: colors.surface };
-  const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidth: 112, backgroundColor: colors.surface };
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState<Category>('spirit');
