@@ -27,6 +27,8 @@ After rollback, verify `/api/health`, `/api/v1/documents` (expect `401` without 
 
 The production database is Supabase project `dhgyezfkgbzzsuyrdpek`. It is currently on Supabase's **Free plan**, which does **not** include scheduled backups. Point-in-time recovery (PITR) is also unavailable until the project is upgraded to Pro and the PITR add-on is enabled. Upgrade before launch, then verify **Database → Backups** and perform a restore drill against a separate project before the first customer migration.
 
+Until an upgrade is possible, `.github/workflows/database-backup.yml` provides a nightly logical backup to S3 with SSE-S3 encryption. Configure these repository secrets before relying on it: `PRODUCTION_DATABASE_URL`, `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`, `BACKUP_AWS_REGION`, and `BACKUP_S3_BUCKET`. Apply an S3 lifecycle rule to retain at least 30 days of backups, and perform a restore drill before launch.
+
 Never store a database password in this repository. For a restore, pause Cloud Run traffic, restore or clone the Supabase project, update `DATABASE_URL` as a new Cloud Run revision, run Prisma migrations, smoke-test, and then shift traffic back.
 
 ## Release checklist
