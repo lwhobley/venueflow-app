@@ -196,6 +196,8 @@ export const appApi = {
     apiRequest<{ redeemed: boolean; profile?: ApiProfile; venue?: ApiVenue | null }>('/v1/app/redeem-my-invite', { method: 'POST' }),
   getMe: () => apiRequest<{ profile: ApiProfile; venue: ApiVenue | null } | null>('/v1/app/me'),
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
+  createStripeCheckout: () => apiRequest<{ url: string }>('/v1/app/billing/stripe/checkout', { method: 'POST', body: {} }),
+  createStripePortal: () => apiRequest<{ url: string }>('/v1/app/billing/stripe/portal', { method: 'POST', body: {} }),
   syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
     apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),
