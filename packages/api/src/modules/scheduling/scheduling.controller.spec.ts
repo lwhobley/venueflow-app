@@ -776,6 +776,13 @@ describe('SchedulingController', () => {
       );
     });
 
+    it('rejects a calendar date that does not exist', async () => {
+      const { controller } = makeController();
+      await expect(
+        controller.addBlackout(managerScope, { startDate: '2026-02-31', reason: 'x' } as any),
+      ).rejects.toThrow('Dates must be in YYYY-MM-DD format');
+    });
+
     it('rejects an end date before the start date', async () => {
       const { controller } = makeController();
       await expect(
@@ -879,6 +886,27 @@ describe('SchedulingController', () => {
       expect(result).toEqual({ added: 3 });
     });
 
+    it('rejects copy-day values outside the weekly calendar', async () => {
+      const { controller, assignments } = makeController();
+
+      await expect(controller.copyDayShifts(managerScope, { fromDay: 7, toDays: [2] })).rejects.toThrow(
+        'fromDay must be between 0 and 6.',
+      );
+      await expect(controller.copyDayShifts(managerScope, { fromDay: 1, toDays: [2, 99] })).rejects.toThrow(
+        'toDays must contain days between 0 and 6.',
+      );
+      expect(assignments.copyDayShifts).not.toHaveBeenCalled();
+    });
+
+    it('deduplicates destination days before copying', async () => {
+      const { controller, assignments } = makeController();
+      assignments.copyDayShifts.mockResolvedValue({ added: 1 });
+
+      await controller.copyDayShifts(managerScope, { fromDay: 1, toDays: [2, 2] });
+
+      expect(assignments.copyDayShifts).toHaveBeenCalledWith({ venueId: 'venue-1', fromDay: 1, toDays: [2] });
+    });
+
     it('delegates clearWeek scoped to the venue', async () => {
       const { controller, assignments } = makeController();
       assignments.clearWeek.mockResolvedValue({ removed: 5, shifts: [] });
@@ -913,6 +941,15 @@ describe('SchedulingController', () => {
   });
 
   describe('labor budget and labor forecast', () => {
+    it('rejects a negative labor budget', async () => {
+      const { controller, prisma } = makeController();
+
+      await expect(controller.setLaborBudget(managerScope, { weeklyLaborBudgetHours: -1 })).rejects.toThrow(
+        'Weekly labor budget cannot be negative.',
+      );
+      expect(prisma.venue.update).not.toHaveBeenCalled();
+    });
+
     it('sets the labor budget to null when omitted', async () => {
       const { controller, prisma } = makeController();
 

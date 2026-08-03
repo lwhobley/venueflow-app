@@ -49,7 +49,7 @@ async function bootstrap() {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl ?? req.url ?? '';
     const path = url.split('?')[0].replace(/\/+$/, '');
-    const limit = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '8mb'));
+    const limit = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '16mb'));
     json({
       limit,
       verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {

@@ -13,6 +13,7 @@ type Route = {
   method?: Method;
   body?: (args: any) => any;
   invalidate?: unknown[][];
+  timeoutMs?: number;
 };
 
 const queryRoutes: Record<string, Route> = {
@@ -101,6 +102,7 @@ const queryRoutes: Record<string, Route> = {
   },
   'reservations.listHolds': { path: '/v1/reservations/holds' },
   'reservationIntegrations.getReservationIntegrationOverview': { path: '/v1/integrations/reservations' },
+  'documents.list': { path: '/v1/documents' },
 };
 
 const mutationRoutes: Record<string, Route> = {
@@ -481,6 +483,23 @@ const mutationRoutes: Record<string, Route> = {
     method: 'POST',
     body: ({ token, platform }) => ({ token, platform }),
   },
+  'documents.upload': {
+    path: '/v1/documents',
+    method: 'POST',
+    body: ({ title, fileName, mimeType, category, dataBase64 }) => ({ title, fileName, mimeType, category, dataBase64 }),
+    invalidate: [['documents', 'list']],
+    timeoutMs: 120_000,
+  },
+  'documents.access': {
+    path: (args) => `/v1/documents/${args.documentId ?? args.id}/access`,
+    method: 'POST',
+    body: () => ({}),
+  },
+  'documents.remove': {
+    path: (args) => `/v1/documents/${args.documentId ?? args.id}`,
+    method: 'DELETE',
+    invalidate: [['documents', 'list']],
+  },
 };
 
 export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T | undefined {
@@ -568,6 +587,7 @@ function requestRoute<T>(route: Route, args: any, signal?: AbortSignal): Promise
   return apiRequest<T>(path, {
     method: route.method ?? 'GET',
     signal,
+    timeoutMs: route.timeoutMs,
     body: route.method && route.method !== 'GET' && route.method !== 'DELETE' ? route.body?.(args ?? {}) ?? args ?? {} : undefined,
   });
 }

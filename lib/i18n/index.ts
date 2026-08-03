@@ -5,6 +5,7 @@ import * as scheduleOps from './namespaces/scheduleOps';
 import * as guestOps from './namespaces/guestOps';
 import * as settingsBilling from './namespaces/settingsBilling';
 import * as misc from './namespaces/misc';
+import * as documents from './namespaces/documents';
 
 export type LocaleCode = 'en' | 'es' | 'fr' | 'pseudo';
 
@@ -15,6 +16,7 @@ const en = {
   ...guestOps.en,
   ...settingsBilling.en,
   ...misc.en,
+  ...documents.en,
 };
 
 const es = {
@@ -24,6 +26,7 @@ const es = {
   ...guestOps.es,
   ...settingsBilling.es,
   ...misc.es,
+  ...documents.es,
 };
 
 const fr = {
@@ -33,6 +36,7 @@ const fr = {
   ...guestOps.fr,
   ...settingsBilling.fr,
   ...misc.fr,
+  ...documents.fr,
 };
 
 type Dictionary = typeof en;

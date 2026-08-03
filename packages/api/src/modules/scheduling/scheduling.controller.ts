@@ -16,6 +16,8 @@ import { Availability, Prisma, ShiftStatus } from '@prisma/client';
 import { Type, plainToInstance } from 'class-transformer';
 import {
   IsArray,
+  ArrayMaxSize,
+  ArrayMinSize,
   IsBoolean,
   IsIn,
   IsInt,
@@ -160,6 +162,7 @@ class AssignShiftDto {
 
 class LaborBudgetDto {
   @IsInt()
+  @Min(0)
   @IsOptional()
   weeklyLaborBudgetHours?: number;
 }
@@ -203,9 +206,16 @@ class ApplyTemplateDto {
 
 class CopyDayDto {
   @IsInt()
+  @Min(0)
+  @Max(6)
   fromDay!: number;
 
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(6)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
   toDays!: number[];
 }
 
@@ -507,7 +517,7 @@ export class SchedulingController {
     this.requireManager(scope);
     const startDate = body.startDate.trim();
     const endDate = body.endDate?.trim() || startDate;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
       throw new BadRequestException('Dates must be in YYYY-MM-DD format');
     }
     if (endDate < startDate) throw new BadRequestException('End date must be on or after the start date');
@@ -1025,6 +1035,9 @@ export class SchedulingController {
   @Patch('labor-budget')
   async setLaborBudget(@VenueScope() scope: Scope, @Body() body: LaborBudgetDto) {
     this.requireManager(scope);
+    if (body.weeklyLaborBudgetHours !== undefined && body.weeklyLaborBudgetHours < 0) {
+      throw new BadRequestException('Weekly labor budget cannot be negative.');
+    }
     await this.prisma.venue.update({
       where: { id: scope!.venueId },
       data: { weeklyLaborBudgetHours: body.weeklyLaborBudgetHours ?? null },
@@ -1102,10 +1115,20 @@ export class SchedulingController {
   @Post('copy-day')
   async copyDayShifts(@VenueScope() scope: Scope, @Body() body: CopyDayDto) {
     this.requireManager(scope);
+    if (!Number.isInteger(body.fromDay) || body.fromDay < 0 || body.fromDay > 6) {
+      throw new BadRequestException('fromDay must be between 0 and 6.');
+    }
+    if (
+      !Array.isArray(body.toDays) ||
+      body.toDays.length === 0 ||
+      body.toDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)
+    ) {
+      throw new BadRequestException('toDays must contain days between 0 and 6.');
+    }
     return this.assignments.copyDayShifts({
       venueId: scope!.venueId,
       fromDay: body.fromDay,
-      toDays: body.toDays,
+      toDays: [...new Set(body.toDays)],
     });
   }
 

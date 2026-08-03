@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { Pressable, StyleProp, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { DesignPalette, fontFamily, radius, spacing } from '../lib/theme';
+import { DesignPalette, radius, spacing } from '../lib/theme';
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
 type CommandTextVariant = 'hero' | 'title' | 'label' | 'body' | 'caption' | 'metric';
@@ -54,12 +54,12 @@ export function CommandText({
   style?: StyleProp<TextStyle>;
 }) {
   const styles: Record<CommandTextVariant, TextStyle> = {
-    hero: { color: palette.charcoal, fontSize: 32, lineHeight: 37, letterSpacing: -0.5, fontFamily: fontFamily.display },
-    title: { color: palette.charcoal, fontSize: 18, lineHeight: 24, letterSpacing: -0.2, fontFamily: fontFamily.displayMedium },
+    hero: { color: palette.charcoal, fontSize: 30, lineHeight: 36, letterSpacing: -0.5, fontWeight: '800' },
+    title: { color: palette.charcoal, fontSize: 19, lineHeight: 25, letterSpacing: -0.2, fontWeight: '700' },
     label: { color: palette.muted, fontSize: 11, lineHeight: 15, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
     body: { color: palette.charcoal, fontSize: 14, lineHeight: 20, fontWeight: '500' },
     caption: { color: palette.muted, fontSize: 12, lineHeight: 17, fontWeight: '500' },
-    metric: { color: palette.charcoal, fontSize: 30, lineHeight: 34, letterSpacing: -0.4, fontFamily: fontFamily.display },
+    metric: { color: palette.charcoal, fontSize: 28, lineHeight: 33, letterSpacing: -0.4, fontWeight: '700' },
   };
 
   return <Text style={[styles[variant], style]}>{children}</Text>;

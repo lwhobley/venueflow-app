@@ -1,7 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fontFamily, useDesignTheme } from '../lib/theme';
+import { useDesignTheme } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
 
 type TabRoute = BottomTabBarProps['state']['routes'][number];
@@ -77,7 +77,7 @@ export function CarouselTabBar({ state, descriptors, navigation }: BottomTabBarP
           );
         })}
         <View style={{ paddingHorizontal: 16, alignItems: 'flex-start', justifyContent: 'center', minHeight: 54 }}>
-          <Text style={{ color: palette.charcoal, fontFamily: fontFamily.displayMedium, fontSize: 13 }}>
+          <Text style={{ color: palette.charcoal, fontWeight: '700', fontSize: 13 }}>
             {t('common.venueWrangler')}
           </Text>
           <Text style={{ color: palette.muted, fontSize: 9, fontStyle: 'italic' }}>{t('common.loungeability')}</Text>

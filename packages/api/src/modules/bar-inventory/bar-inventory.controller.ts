@@ -312,9 +312,12 @@ export class BarInventoryController {
     const profile = await this.requireVenueProfile(user);
     const items = await this.prisma.barInventoryItem.findMany({
       where: { venueId: profile.venueId! },
-      take: 300,
+      // Do not silently truncate inventory: totals and count workflows must be
+      // based on the full venue catalog. Deterministic ordering also keeps the
+      // count sequence stable between refreshes.
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
     });
-    const sorted = items.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const sorted = items.slice().sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return {
       items: sorted.map(mapItem),
       lowStockCount: items.filter((item) => item.onHand <= item.parLevel).length,

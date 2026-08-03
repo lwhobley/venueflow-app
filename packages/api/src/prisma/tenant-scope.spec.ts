@@ -10,6 +10,7 @@ describe('isVenueScoped', () => {
     expect(isVenueScoped('ScheduleShift')).toBe(true);
     expect(isVenueScoped('BarInventoryItem')).toBe(true);
     expect(isVenueScoped('Profile')).toBe(true);
+    expect(isVenueScoped('VenueDocument')).toBe(true);
   });
 
   it('recognises the models added for the ops (daily-brief/staff-readiness) feature', () => {

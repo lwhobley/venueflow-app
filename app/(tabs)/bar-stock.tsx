@@ -31,6 +31,11 @@ import {
 } from '../../components/bar-stock/InventoryCards';
 import { InlineMessage } from '../../components/InlineMessage';
 import { SectionHeader } from '../../components/AppCard';
+import {
+  INVENTORY_RENDER_BATCH_SIZE,
+  inventoryRowsForWindow,
+  nextInventoryWindow,
+} from '../../lib/inventory-window';
 
 const beverageCategories = ['spirit', 'wine', 'beer', 'mixer', 'garnish'] as const;
 const foodCategories = ['protein', 'produce', 'dairy', 'dry_goods', 'bakery', 'frozen'] as const;
@@ -86,6 +91,10 @@ type PrepBoard = {
   prepCount: number;
 };
 
+const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm };
+const addItemWideField = { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 136, backgroundColor: colors.surface };
+const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidth: 112, backgroundColor: colors.surface };
+
 export default function BarStockScreen() {
   const { t } = useI18n();
   const { venue, isReady, canManage, profileLoading } = useVenueAuth();
@@ -104,9 +113,6 @@ export default function BarStockScreen() {
   const sendDigest = useMutation(api.barInventory.sendInventoryDigest);
   const upsertPrepBoardItem = useMutation(api.barInventory.upsertPrepBoardItem);
   const updatePrepBoardItemStatus = useMutation(api.barInventory.updatePrepBoardItemStatus);
-  const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm };
-  const addItemWideField = { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 136, backgroundColor: colors.surface };
-  const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidth: 112, backgroundColor: colors.surface };
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState<Category>('spirit');
@@ -140,6 +146,7 @@ export default function BarStockScreen() {
   const [editCostItemId, setEditCostItemId] = useState<string | null>(null);
   const [editCostValue, setEditCostValue] = useState('');
   const [showAgingReport, setShowAgingReport] = useState(false);
+  const [visibleItemCount, setVisibleItemCount] = useState(INVENTORY_RENDER_BATCH_SIZE);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [prepKind, setPrepKind] = useState<PrepBoardKind>('prep');
   const [prepTitle, setPrepTitle] = useState('');
@@ -776,7 +783,7 @@ export default function BarStockScreen() {
           <TextInput label={t('barStock.form.nameLabel')} value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {(activeTab === 'beverage' 
-              ? [...beverageCategories, 'supply', 'other'] 
+              ? (['spirit', 'wine', 'beer', 'mixer', 'garnish', 'supply', 'other'] as const) 
               : foodCategories
             ).map((item) => (
               <Chip key={item} selected={category === item} onPress={() => setCategory(item)}>{item}</Chip>
@@ -814,7 +821,7 @@ export default function BarStockScreen() {
           {items.length === 0 ? (
             <Text style={{ color: colors.muted }}>{t('barStock.list.empty')}</Text>
           ) : (
-            items.map((item) => (
+            inventoryRowsForWindow(items, visibleItemCount).map((item) => (
               <View key={item._id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm, gap: 4 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm }}>
                   <View style={{ flex: 1 }}>
@@ -892,6 +899,15 @@ export default function BarStockScreen() {
               </View>
             ))
           )}
+          {visibleItemCount < items.length ? (
+            <Button
+              mode="outlined"
+              textColor={colors.primary}
+              onPress={() => setVisibleItemCount((count) => nextInventoryWindow(count, items.length))}
+            >
+              {t('barStock.list.showMore', { remaining: items.length - visibleItemCount })}
+            </Button>
+          ) : null}
         </Card.Content>
       </Card>
     </ScrollView>

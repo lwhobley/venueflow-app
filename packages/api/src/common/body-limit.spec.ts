@@ -6,6 +6,7 @@ describe('jsonBodyLimitForPath', () => {
     '/api/v1/chat/images',
     '/api/v1/bar-inventory/parse',
     '/api/v1/operations/checklist/complete/completion-1',
+    '/api/v1/documents',
   ])('allows the configured image limit for %s', (path) => {
     expect(jsonBodyLimitForPath(path, '8mb')).toBe('8mb');
   });

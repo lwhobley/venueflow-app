@@ -63,6 +63,7 @@ function makeEvent(overrides: Record<string, any> = {}) {
     guestName: 'Alex Guest',
     partySize: 4,
     reservationTime: Date.now(),
+    eventTimestamp: Date.now(),
     ...overrides,
   };
 }
@@ -209,6 +210,45 @@ describe('ReservationsController', () => {
       } as any);
 
       expect(result).toEqual({ ok: true, processed: 0, duplicates: 1, failed: 0 });
+    });
+
+    it('ignores an event older than the reservation state already applied', async () => {
+      const { controller, prisma } = makeController();
+      const secret = 'correct-secret';
+      prisma.reservationConnection.findFirst.mockResolvedValue({
+        id: 'conn-1',
+        status: 'connected',
+        webhookSecret: hashWebhookSecret(secret),
+      });
+      prisma.$transaction.mockImplementation(async (fn: any) =>
+        fn({
+          $executeRaw: vi.fn().mockResolvedValue(undefined),
+          reservation: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: 'res-1',
+              lastExternalEventAt: new Date('2026-07-31T12:00:00.000Z'),
+            }),
+            update: vi.fn(),
+            create: vi.fn(),
+          },
+        }),
+      );
+
+      const result = await controller.ingest(makeRequest(), 'venue-1', secret, {
+        provider: 'opentable',
+        events: [makeEvent({ eventTimestamp: new Date('2026-07-31T11:00:00.000Z').getTime() })],
+      } as any);
+
+      expect(result).toEqual({ ok: true, processed: 0, duplicates: 1, failed: 0 });
+      expect(prisma.reservationSyncEvent.updateMany).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1', provider: 'opentable', externalEventId: 'evt-1' },
+        data: {
+          reservationId: 'res-1',
+          processedAt: expect.any(Date),
+          status: 'ignored_stale',
+          errorMessage: null,
+        },
+      });
     });
   });
 

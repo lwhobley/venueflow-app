@@ -91,6 +91,7 @@ function ReservationsScreen() {
   const page = useQuery(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const waitlistData = useQuery(api.floorBinding.getOpenWaitlist, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const unassignedData = useQuery(api.floorBinding.getUnassignedReservations, isReady && venue?.id ? { venueId: venue.id, withinMinutes: 120 } : 'skip') as any;
   const holds = useQuery(api.reservations.listHolds, isReady && venue?.id ? { venueId: venue.id } : 'skip') as Array<{ id: string; startsAt: number; endsAt: number; reason: string }> | undefined;
   const saveReservation = useMutation(api.reservations.saveReservation);
   const removeReservation = useMutation(api.reservations.removeReservation);
@@ -205,6 +206,8 @@ function ReservationsScreen() {
   const [assignError, setAssignError] = useState<string | null>(null);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [reservationFilter, setReservationFilter] = useState<'all' | 'now' | 'unseated' | 'vip' | 'large'>('all');
+  const [guestContextId, setGuestContextId] = useState<string | null>(null);
 
   // Pacing chart bound to the create-form date so the manager sees the load
   // they're about to add to.
@@ -255,6 +258,28 @@ function ReservationsScreen() {
       .filter((r) => r.reservationTime >= startTs && r.reservationTime <= endTs)
       .sort((a, b) => a.reservationTime - b.reservationTime);
   }, [reservations, listDateRange]);
+
+  const unassignedIds = useMemo(() => new Set((unassignedData ?? []).map((item: { id: string }) => item.id)), [unassignedData]);
+  const actionReservations = useMemo(() => {
+    const cutoff = Date.now() + 90 * 60 * 1000;
+    return reservations
+      .filter((item) => unassignedIds.has(item.id) || (item.reservationTime <= cutoff && !['seated', 'completed', 'cancelled', 'no_show'].includes(item.status)))
+      .sort((a, b) => a.reservationTime - b.reservationTime)
+      .slice(0, 4);
+  }, [reservations, unassignedIds]);
+  const visibleReservations = useMemo(() => {
+    const nowTs = Date.now();
+    return sorted.filter((item) => {
+      if (reservationFilter === 'now') return item.reservationTime >= nowTs - 30 * 60 * 1000 && item.reservationTime <= nowTs + 90 * 60 * 1000;
+      if (reservationFilter === 'unseated') return unassignedIds.has(item.id);
+      if (reservationFilter === 'vip') return item.tags.some((tag) => /vip|regular|priority/i.test(tag));
+      if (reservationFilter === 'large') return item.partySize >= 8;
+      return true;
+    });
+  }, [reservationFilter, sorted, unassignedIds]);
+  const recommendedTables = useCallback((party: number) => (
+    [...openTables].filter((item) => item.table.seats >= party).sort((a, b) => (a.table.seats - party) - (b.table.seats - party))
+  ), [openTables]);
 
   const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   const dateOptions = useMemo(() => {
@@ -384,7 +409,7 @@ function ReservationsScreen() {
 
   return (
     <FlatList
-      data={sorted}
+      data={visibleReservations}
       keyExtractor={(item) => item.id}
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
@@ -416,6 +441,22 @@ function ReservationsScreen() {
           </Card>
         ))}
       </View>
+
+      <AppCard>
+        <SectionHeader title="Resolve next" subtitle="Reservations that need a decision before service gets busier." />
+        {actionReservations.length === 0 ? (
+          <Text style={{ color: colors.muted }}>No unassigned or imminent reservations right now.</Text>
+        ) : actionReservations.map((item) => (
+          <View key={item.id} style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: unassignedIds.has(item.id) ? colors.warning : colors.primary }} />
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={{ fontWeight: '700' }}>{item.guestName} · {item.partySize}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>{formatTime(item.reservationTime)} · {unassignedIds.has(item.id) ? 'Needs a table' : 'Arriving soon'}</Text>
+            </View>
+            <Button compact mode="text" textColor={colors.primary} onPress={() => setAssigningId(item.id)}>Seat</Button>
+          </View>
+        ))}
+      </AppCard>
 
       {/* Cover pacing */}
       {pacing && pacing.buckets.length > 0 ? (
@@ -514,7 +555,7 @@ function ReservationsScreen() {
                       {openTables.length === 0 ? (
                         <Text style={{ color: colors.danger }}>{t('reservations.waitlist.noOpenTables')}</Text>
                       ) : (
-                        openTables.map((t) => (
+                        recommendedTables(w.partySize).map((t) => (
                           <Chip key={t.table._id} onPress={() => void seatWaitlist(w.id, t.table._id)}>{t.table.label} · {t.table.seats}</Chip>
                         ))
                       )}
@@ -692,10 +733,17 @@ function ReservationsScreen() {
             <Text style={{ ...type.heading, color: colors.charcoal }}>{t('reservations.list.title')}</Text>
             <DateRangeBar selected={listDateRange} presets={listPresets} onSelect={setListDateRange} />
           </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.sm }}>
+            {([
+              ['all', 'All'], ['now', 'Now'], ['unseated', `Unseated ${unassignedIds.size || ''}`.trim()], ['vip', 'VIP'], ['large', 'Large party'],
+            ] as const).map(([value, label]) => (
+              <Chip key={value} selected={reservationFilter === value} onPress={() => setReservationFilter(value)}>{label}</Chip>
+            ))}
+          </View>
           {deleteError ? <Text style={{ color: colors.danger, marginTop: spacing.sm }}>{deleteError}</Text> : null}
           {page === undefined ? (
             <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.loading')}</Text>
-          ) : sorted.length === 0 ? (
+          ) : visibleReservations.length === 0 ? (
             <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.empty', { range: listDateRange.shortLabel.toLowerCase() })}</Text>
           ) : null}
       </AppCard>
@@ -716,6 +764,17 @@ function ReservationsScreen() {
               </View>
               <Text>{t('reservations.item.partyOf', { name: res.guestName, size: res.partySize })}</Text>
               <Text style={{ color: colors.muted }}>{res.source.replace('_', ' ')}</Text>
+              <Button compact mode="text" textColor={colors.primary} onPress={() => setGuestContextId(guestContextId === res.id ? null : res.id)}>
+                {guestContextId === res.id ? 'Hide guest context' : 'Guest context'}
+              </Button>
+              {guestContextId === res.id ? (
+                <View style={{ gap: 3, paddingLeft: spacing.sm, borderLeftWidth: 2, borderLeftColor: colors.primary }}>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{res.guestCompany || 'No company on file'}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{res.occasion ? `Occasion: ${res.occasion}` : 'No occasion recorded'}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{res.specialRequests || res.notes || 'No service notes recorded'}</Text>
+                  {res.tags?.length ? <Text style={{ color: colors.muted, fontSize: 12 }}>Signals: {res.tags.join(' · ')}</Text> : null}
+                </View>
+              ) : null}
               {res.guestCompany ? <Text style={{ color: colors.muted }}>{res.guestCompany}</Text> : null}
               {res.occasion ? <Chip compact style={{ alignSelf: 'flex-start' }}>{res.occasion}</Chip> : null}
               {res.isPrivateEvent ? (
@@ -756,7 +815,7 @@ function ReservationsScreen() {
                     <Text style={{ color: colors.danger }}>{t('reservations.item.noOpenTablesBuild')}</Text>
                   ) : (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {openTables.map((tbl) => (
+                      {recommendedTables(res.partySize).map((tbl) => (
                         <View key={tbl.table._id} style={{ gap: 4, alignItems: 'center' }}>
                           <Chip onPress={() => void assignToTable(res, tbl.table._id, false)}>
                             {tbl.table.label} · {tbl.table.seats}

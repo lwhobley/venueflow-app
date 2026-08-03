@@ -3,7 +3,7 @@
     "name": "Venue Wrangler",
     "slug": "venue-wrangler",
     "owner": "loungeabilityllc",
-    "version": "1.10",
+    "version": "1.10.1",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "light",
@@ -36,8 +36,7 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -46,7 +45,7 @@
     "scheme": "venuewrangler",
     "description": "Venue Wrangler restaurant operations and venue management.",
     "extra": {
-      "EXPO_PUBLIC_API_URL": "https://venue-wranglerapi-production.up.railway.app/api",
+      "EXPO_PUBLIC_API_URL": "https://venue-wrangler-api-c57mm72zpa-ue.a.run.app/api",
       "router": {},
       "eas": {
         "projectId": "eb8d41ff-6e88-48cf-a75a-d4399e442c28"

@@ -162,7 +162,7 @@ export type InviteCheckResult =
   | { status: 'not_found' | 'expired' | 'used' };
 
 export type JoinRequestResult = { requestId: string; status: 'pending'; venueName: string };
-export type VenueSearchResult = { id: string; name: string; address: string | null; code: string | null };
+export type VenueSearchResult = { id: string; name: string; address: string | null };
 
 export const appApi = {
   passwordAuth: (body: {

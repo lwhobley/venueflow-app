@@ -46,7 +46,8 @@ export function AppCard({
         {
           backgroundColor: background,
           borderRadius: tone === 'soft' ? radius.soft : radius.sharp,
-          borderWidth: tone === 'default' ? StyleSheet.hairlineWidth : 0,
+          borderTopWidth: tone === 'default' ? StyleSheet.hairlineWidth : 0,
+          borderBottomWidth: tone === 'default' ? StyleSheet.hairlineWidth : 0,
           borderColor: palette.border,
           padding: padded ? spacing.lg : 0,
           overflow: 'hidden',
