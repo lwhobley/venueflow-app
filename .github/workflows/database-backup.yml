@@ -42,7 +42,8 @@ jobs:
           dump="/tmp/venue-wrangler-${timestamp}.dump"
           archive="${dump}.gz"
 
-          docker run --rm --network host --env DATABASE_URL="$DATABASE_URL" --volume /tmp:/backup \
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            --env DATABASE_URL="$DATABASE_URL" --volume /tmp:/backup \
             postgres:17-alpine pg_dump "$DATABASE_URL" --format=custom --no-owner --no-acl \
             --file="/backup/$(basename "$dump")"
           gzip --best "$dump"
