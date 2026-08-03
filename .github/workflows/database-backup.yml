@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      DATABASE_URL: ${{ secrets.PRODUCTION_POOLER_DATABASE_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          : "${DATABASE_URL:?PRODUCTION_DATABASE_URL is not configured}"
+          : "${DATABASE_URL:?PRODUCTION_POOLER_DATABASE_URL is not configured}"
           : "${AWS_ACCESS_KEY_ID:?BACKUP_AWS_ACCESS_KEY_ID is not configured}"
           : "${AWS_SECRET_ACCESS_KEY:?BACKUP_AWS_SECRET_ACCESS_KEY is not configured}"
           : "${AWS_DEFAULT_REGION:?BACKUP_AWS_REGION is not configured}"
