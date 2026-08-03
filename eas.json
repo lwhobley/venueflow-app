@@ -7,7 +7,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://venue-wranglerapi-production.up.railway.app/api",
+        "EXPO_PUBLIC_API_URL": "https://venue-wrangler-api-c57mm72zpa-ue.a.run.app/api",
         "EXPO_PUBLIC_BILLING_ENABLED": "true",
         "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT": "pro",
         "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_zWzTInPrAkVZmynlSnvxtbjHEpe"
@@ -16,7 +16,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://venue-wranglerapi-production.up.railway.app/api",
+        "EXPO_PUBLIC_API_URL": "https://venue-wrangler-api-c57mm72zpa-ue.a.run.app/api",
         "EXPO_PUBLIC_BILLING_ENABLED": "true",
         "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT": "pro",
         "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_zWzTInPrAkVZmynlSnvxtbjHEpe"
