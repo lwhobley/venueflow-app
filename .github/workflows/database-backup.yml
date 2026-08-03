@@ -23,7 +23,10 @@ jobs:
       - name: Install backup tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends postgresql-client awscli
+          sudo apt-get install --yes --no-install-recommends postgresql-client unzip curl
+          curl --fail --silent --show-error --location https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip --output /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install --update
 
       - name: Create and upload encrypted database dump
         shell: bash
