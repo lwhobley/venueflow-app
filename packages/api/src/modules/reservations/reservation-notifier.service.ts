@@ -57,11 +57,23 @@ export class ReservationNotifierService {
       (reservation.specialRequests ? `Notes\t${reservation.specialRequests}\n` : '') + '\n' +
       `If your plans change, please reply to this email so we can offer the table to another guest.\n\n` +
       `— The Team at ${venueName}`;
-    await this.email.send({
-      to: reservation.guestEmail,
-      subject,
-      text,
-    });
+    try {
+      await this.email.sendOrThrow({
+        to: reservation.guestEmail,
+        subject,
+        text,
+      });
+    } catch (err) {
+      this.logger.warn(`Reservation confirmation failed for ${reservation.id}: ${(err as Error).message}`);
+      try {
+        await this.prisma.reservation.update({
+          where: { id: reservation.id },
+          data: { confirmationSentAt: null },
+        });
+      } catch (revertErr) {
+        this.logger.error(`Failed to revert confirmation claim for ${reservation.id}: ${(revertErr as Error).message}`);
+      }
+    }
   }
 
   /**

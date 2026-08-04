@@ -622,7 +622,6 @@ function FloorScreen() {
         </Card>
       ) : null}
 
-      {canEdit && waitlistQueue.length > 0 ? null : null}
     </ScrollView>
   );
 }

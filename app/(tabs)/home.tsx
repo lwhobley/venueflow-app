@@ -23,6 +23,7 @@ type NotificationItem = {
 };
 
 const todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const allowedPriorityRoutes = new Set(['/reports', '/schedule', '/reservations', '/guests', '/sales', '/operations', '/event-command-center']);
 
 export default function HomeScreen() {
   usePushNotifications();
@@ -75,7 +76,7 @@ export default function HomeScreen() {
 
   const priorityTitle = firstPriority?.title ?? (pulse?.headline || 'Service is on track');
   const priorityDetail = firstPriority?.detail ?? firstPriority?.body ?? pulse?.detail ?? 'No urgent operational issues are blocking the shift.';
-  const priorityRoute = firstPriority?.route ?? '/reports';
+  const priorityRoute = allowedPriorityRoutes.has(firstPriority?.route) ? firstPriority.route : '/reports';
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: palette.background }} contentContainerStyle={{ paddingBottom: spacing.xxl }} showsVerticalScrollIndicator={false}>

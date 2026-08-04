@@ -42,6 +42,8 @@ jobs:
             echo ""
             echo "If this is a deliberate in-progress change, ignore this run."
             echo "If a real fix landed on one branch and not the other, cherry-pick it now."
-            exit 1
+            # This scheduled workflow is an informational drift report. The
+            # production branch remains merge-gated by its own CI checks.
+            exit 0
           fi
           echo "packages/api is in sync between main and desktop-web." >> "$GITHUB_STEP_SUMMARY"

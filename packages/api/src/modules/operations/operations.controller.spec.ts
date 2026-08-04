@@ -502,6 +502,19 @@ describe('OperationsController', () => {
       expect(executionAutopilot.ensureWorkspace).toHaveBeenCalledWith(expect.objectContaining({ venueId: 'venue-1', sourceType: 'venue-event', sourceId: 'evt-1', title: 'Gala' }));
     });
 
+    it('creates incidents from the source event id rather than treating it as a workspace id', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      prisma.venueEvent.findFirst.mockResolvedValue({ id: 'evt-1', title: 'Gala', startsAt: new Date('2026-07-15T20:00:00Z'), endsAt: new Date('2026-07-15T23:00:00Z'), reservationId: null });
+      prisma.eventExecutionWorkspace.findFirst.mockResolvedValue({ id: 'workspace-1' });
+      prisma.eventExecutionIncident.create.mockResolvedValue({ id: 'incident-1', title: 'Power issue', status: 'open', severity: 'high', blocksReadiness: true });
+
+      const result = await controller.createExecutionIncident(managerUser, 'evt-1', { title: 'Power issue', severity: 'high', blocksReadiness: true });
+
+      expect(result).toEqual(expect.objectContaining({ _id: 'incident-1', title: 'Power issue' }));
+      expect(prisma.eventExecutionWorkspace.findFirst).toHaveBeenCalledWith({ where: { venueId: 'venue-1', sourceType: 'venue-event', sourceId: 'evt-1' } });
+    });
+
     it('returns a persistent event workspace with timeline, vendor, and incident readiness', async () => {
       const { controller, prisma } = makeController();
       prisma.profile.findUnique.mockResolvedValue(makeProfile());

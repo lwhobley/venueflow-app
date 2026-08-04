@@ -74,7 +74,7 @@ describe('buildDailyBriefPriorityActions', () => {
         kind: 'stock',
         tone: 'warn',
         title: '1 low-stock item needs attention',
-        body: "1 low-stock item is low and 2 items are already 86'd. Refill before they interrupt service.",
+        body: "1 low-stock item needs attention and 2 items are already 86'd. Refill before they interrupt service.",
         cta: 'Open inventory',
         route: '/bar-stock',
       },

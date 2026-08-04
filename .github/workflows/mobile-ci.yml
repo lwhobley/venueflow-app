@@ -43,3 +43,5 @@ jobs:
       - run: npm run api:prisma:generate
       - run: npm run typecheck
       - run: npm test -- --run
+      - name: Verify Expo web bundle
+        run: npx expo export --platform web

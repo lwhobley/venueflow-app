@@ -214,7 +214,7 @@ function parseLeadLines(value: string, defaultSource: string): LeadImportRow[] {
         company: company || undefined,
         tags: tagsText ? splitTags(tagsText.replaceAll('|', ',')) : undefined,
         notes: notes || undefined,
-        marketingOptIn: true,
+        marketingOptIn: false,
       };
     })
     .filter((row) => row.fullName);

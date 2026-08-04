@@ -197,7 +197,7 @@ export default function EventCommandCenterScreen() {
         ))}
         <TextInput mode="outlined" label="Add incident" value={incidentTitle} onChangeText={setIncidentTitle} style={{ backgroundColor: palette.surfaceSoft }} />
         <Button mode="contained" buttonColor={palette.primary} textColor={colors.surface} disabled={!incidentTitle.trim() || pendingAction !== null} onPress={() => void (async () => {
-          const saved = await runAction('new-incident', () => createIncident({ eventId: workspace.workspaceId, title: incidentTitle.trim(), severity: 'high', blocksReadiness: true }));
+          const saved = await runAction('new-incident', () => createIncident({ eventId, title: incidentTitle.trim(), severity: 'high', blocksReadiness: true }));
           if (saved) setIncidentTitle('');
         })()}>Log blocking incident</Button>
       </CommandSurface>

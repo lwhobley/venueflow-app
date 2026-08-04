@@ -2,7 +2,7 @@
 
 ## Health and monitoring
 
-- API: `https://venue-wrangler-api-922889404273.us-east1.run.app/api/health`
+- API: `https://venue-wrangler-api-c57mm72zpa-ue.a.run.app/api/health`
 - Cloud Run service: `venue-wrangler-api` in `us-east1`
 - The `venue_wrangler_5xx` log-based metric counts HTTP 5xx responses.
 - Alert policy: `Venue Wrangler API 5xx errors` (`projects/venuewrangler/alertPolicies/7994759751285739344`).

@@ -1,4 +1,4 @@
-import { Body, Controller, Post, ForbiddenException } from '@nestjs/common';
+import { Body, ConflictException, Controller, ForbiddenException, Post } from '@nestjs/common';
 import { IsIn, IsString } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { VenueScope } from '../venue/venue-scope.decorator';
@@ -33,10 +33,17 @@ export class PushController {
       lastSeenAt: new Date(),
     };
 
-    const pushToken = await this.prisma.pushToken.upsert({
-      where: { token },
-      create: { token, ...data },
-      update: data,
+    const pushToken = await this.prisma.$transaction(async (tx) => {
+      // Serialize registration by token so a token already owned by another
+      // profile cannot be rebound during a concurrent request.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${token}))`;
+      const existing = await tx.pushToken.findUnique({ where: { token } });
+      if (existing && (existing.profileId !== scope.profileId || existing.venueId !== scope.venueId)) {
+        throw new ConflictException('This device token is already registered to another profile.');
+      }
+      return existing
+        ? tx.pushToken.update({ where: { token }, data })
+        : tx.pushToken.create({ data: { token, ...data } });
     });
 
     return { id: pushToken.id, ok: true };
