@@ -18,6 +18,7 @@ type SeatLabelStyle = 'number' | 'letter' | 'none';
 
 type DraftTable = {
   key: string;
+  id?: string;
   label: string;
   shape: Shape;
   seats: number;
@@ -419,6 +420,7 @@ export default function FloorEditorScreen() {
     setTables(
       (floor.tables ?? []).map((t: any, i: number) => ({
         key: `t${i}`,
+        id: t.table.id ?? t.table._id,
         label: t.table.label,
         shape: t.table.shape,
         seats: t.table.seats,
@@ -528,6 +530,7 @@ export default function FloorEditorScreen() {
         height: venueH,
         backgroundImageUrl: null,
         tables: tables.map((t) => ({
+          id: t.id,
           label: t.label,
           shape: t.shape,
           seats: t.seats,

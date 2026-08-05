@@ -186,6 +186,7 @@ export class FloorService {
     height?: number;
     backgroundImageUrl?: string | null;
     tables: Array<{
+      id?: string;
       label: string;
       x: number;
       y: number;
@@ -204,60 +205,31 @@ export class FloorService {
   }) {
     const tables = input.tables ?? [];
     await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.floorPlan.findFirst({ where: { venueId, isActive: true } });
-      if (existing) {
-        await tx.floorPlan.update({ where: { id: existing.id }, data: { isActive: false } });
+      let plan = await tx.floorPlan.findFirst({ where: { venueId, isActive: true } });
+      if (plan) {
+        plan = await tx.floorPlan.update({ where: { id: plan.id }, data: { name: input.name?.trim() || 'Floor Plan', width: input.width ?? plan.width, height: input.height ?? plan.height, backgroundImageUrl: input.backgroundImageUrl ?? null } });
+      } else {
+        plan = await tx.floorPlan.create({ data: { venueId, name: input.name?.trim() || 'Floor Plan', width: input.width ?? 800, height: input.height ?? 600, backgroundImageUrl: input.backgroundImageUrl ?? null, isActive: true } });
+      }
+      const existingTables = await tx.floorTable.findMany({ where: { floorPlanId: plan.id }, select: { id: true } });
+      const existingIds = new Set(existingTables.map((table) => table.id));
+      const submittedIds = new Set(tables.map((table) => table.id).filter((id): id is string => Boolean(id)));
+      const removedIds = [...existingIds].filter((id) => !submittedIds.has(id));
+      if (removedIds.length) {
+        const activeAssignments = await tx.tableAssignment.count({ where: { venueId, tableId: { in: removedIds }, releasedAt: null } });
+        if (activeAssignments) throw new ConflictException('Release active table assignments before removing tables from the floor plan');
+        await tx.floorTable.deleteMany({ where: { id: { in: removedIds } } });
+      }
+      for (const table of tables) {
+        const data = { label: table.label, shape: (table.shape as TableShape) ?? 'square', seats: table.capacity, seatLabelStyle: table.seatLabelStyle ?? null, x: table.x, y: table.y, width: table.width, height: table.height, rotation: table.rotation ?? 0, section: (table.section as TableSection) ?? 'main', minSpend: table.minSpend ?? 0, isReservable: table.isReservable ?? true };
+        if (table.id && existingIds.has(table.id)) await tx.floorTable.update({ where: { id: table.id }, data });
+        else {
+          const created = await tx.floorTable.create({ data: { ...data, floorPlanId: plan.id } });
+          await tx.tableState.create({ data: { venueId, tableId: created.id, status: 'available', lastActivityAt: new Date() } });
+        }
       }
 
-      const plan = await tx.floorPlan.create({
-        data: {
-          venueId,
-          name: input.name?.trim() || 'Floor Plan',
-          width: input.width ?? 800,
-          height: input.height ?? 600,
-          backgroundImageUrl: input.backgroundImageUrl ?? null,
-          isActive: true,
-        },
-      });
-
-      // Batch-create tables, states, and chairs to avoid N+1 round-trips that
-      // hold the transaction lock. A 30-table floor plan drops from 60+ sequential
-      // queries to 4 batched ones.
-      if (tables.length > 0) {
-        await tx.floorTable.createMany({
-          data: tables.map((table) => ({
-            floorPlanId: plan.id,
-            label: table.label,
-            shape: (table.shape as TableShape) ?? 'square',
-            seats: table.capacity,
-            seatLabelStyle: table.seatLabelStyle ?? null,
-            x: table.x,
-            y: table.y,
-            width: table.width,
-            height: table.height,
-            rotation: table.rotation ?? 0,
-            section: (table.section as TableSection) ?? 'main',
-            minSpend: table.minSpend ?? 0,
-            isReservable: table.isReservable ?? true,
-          })),
-        });
-
-        const createdTables = await tx.floorTable.findMany({
-          where: { floorPlanId: plan.id },
-          select: { id: true },
-        });
-
-        await tx.tableState.createMany({
-          data: createdTables.map((t) => ({
-            venueId,
-            tableId: t.id,
-            status: 'available' as const,
-            lastActivityAt: new Date(),
-          })),
-        });
-
-      }
-
+      await tx.floorChair.deleteMany({ where: { floorPlanId: plan.id } });
       const allChairs = [
         ...tables.flatMap(
           (table) =>
@@ -419,15 +391,19 @@ export class FloorService {
       where: { venueId, tableId: { in: tableIds } },
     });
     if (states.length !== tableIds.length) throw new BadRequestException('One or more tables are missing live state');
-    const blocked = states.find((state) => state.status !== 'available' && state.status !== 'dirty');
+    const seatedStates = states.filter((state) => state.status === 'seated');
+    const canMerge = states.every((state) => ['available', 'dirty', 'seated'].includes(state.status))
+      && (seatedStates.length === 0 || new Set(seatedStates.map((state) => state.partySize)).size === 1);
+    const blocked = canMerge ? undefined : states.find((state) => !['available', 'dirty', 'seated'].includes(state.status)) ?? seatedStates[0];
     if (blocked) throw new ConflictException(`Table ${blocked.tableId} is not available to merge`);
 
     const mergeGroupId = randomUUID();
+    const seatedPartySize = seatedStates[0]?.partySize ?? partySize ?? null;
     await this.prisma.tableState.updateMany({
       where: { venueId, tableId: { in: tableIds } },
       data: {
         mergeGroupId,
-        partySize: partySize ?? null,
+        ...(seatedStates.length ? { status: 'seated' as const, partySize: seatedPartySize, seatedAt: seatedStates[0]?.seatedAt ?? new Date() } : { partySize: partySize ?? null }),
         lastActivityAt: new Date(),
       },
     });
@@ -443,7 +419,7 @@ export class FloorService {
     return { ok: true, splitTables: result.count };
   }
 
-  async assignReservationToTables(venueId: string, reservationId: string, tableIds: string[]) {
+  async assignReservationToTables(venueId: string, reservationId: string, tableIds: string[], options: { holdType?: string; startsAt?: number; endsAt?: number } = {}) {
     if (!tableIds.length) throw new BadRequestException('No tables specified');
 
     const reservation = await this.prisma.reservation.findFirst({
@@ -457,7 +433,10 @@ export class FloorService {
     const unknown = tableIds.filter((id) => !validTableIds.has(id));
     if (unknown.length) throw new BadRequestException('One or more tables are not on this venue\'s floor plan');
 
-    const endsAt = new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60 * 1000);
+    const holdType = options.holdType === 'seated' ? 'seated' : 'reserved';
+    const startsAt = options.startsAt ? new Date(options.startsAt) : reservation.reservationTime;
+    const endsAt = options.endsAt ? new Date(options.endsAt) : new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60 * 1000);
+    if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) throw new BadRequestException('Invalid seating window');
     // Release prior assignments for THIS reservation, then check each requested
     // table for active overlaps from OTHER reservations, then create the new
     // holds — all inside a Serializable transaction so two managers can't
@@ -473,7 +452,7 @@ export class FloorService {
           tableId: { in: tableIds },
           releasedAt: null,
           startsAt: { lt: endsAt },
-          endsAt: { gt: reservation.reservationTime },
+          endsAt: { gt: startsAt },
           NOT: { reservationId },
         },
         select: { tableId: true },
@@ -487,11 +466,15 @@ export class FloorService {
             venueId,
             reservationId,
             tableId,
-            holdType: 'reserved',
-            startsAt: reservation.reservationTime,
+            holdType,
+            startsAt,
             endsAt,
           },
         });
+      }
+      if (holdType === 'seated') {
+        await tx.tableState.updateMany({ where: { venueId, tableId: { in: tableIds } }, data: { status: 'seated', partySize: reservation.partySize, seatedAt: startsAt, lastActivityAt: new Date() } });
+        await tx.reservation.update({ where: { id: reservation.id }, data: { status: 'seated' } });
       }
     });
     return { ok: true };

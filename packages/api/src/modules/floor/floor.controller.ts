@@ -164,6 +164,19 @@ class AssignReservationDto {
   @IsArray()
   @IsString({ each: true })
   tableIds!: string[];
+
+  @IsString()
+  @IsIn(HOLD_TYPES)
+  @IsOptional()
+  holdType?: string;
+
+  @IsNumber()
+  @IsOptional()
+  startsAt?: number;
+
+  @IsNumber()
+  @IsOptional()
+  endsAt?: number;
 }
 
 class AssignWaitlistDto {
@@ -295,7 +308,7 @@ export class FloorController {
   @Post('assign-reservation')
   async assignReservationToTables(@VenueScope() scope: Scope, @Body() body: AssignReservationDto) {
     requireManager(scope);
-    return this.floor.assignReservationToTables(scope.venueId, body.reservationId, body.tableIds);
+    return this.floor.assignReservationToTables(scope.venueId, body.reservationId, body.tableIds, body);
   }
 
   @RequireSubscription('active')
