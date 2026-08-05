@@ -126,10 +126,12 @@ function roleAccent(role: string) {
 
 function availabilityLabel(rows: AvailabilityRow[] | undefined, dayIndex: number) {
   const dayRows = (rows ?? []).filter((row) => row.dayIndex === dayIndex);
-  if (dayRows.length === 0) return 'No availability set';
+  if (dayRows.length === 0) return 'Available unless an unavailable-day request is approved';
   return dayRows
     .slice(0, 2)
-    .map((row) => `${row.available ? 'Avail' : 'Blocked'} ${timeLabel(row.startMinutes)}-${timeLabel(row.endMinutes)}`)
+    .map((row) => row.available
+      ? 'Available unless an unavailable-day request is approved'
+      : `Unavailable ${timeLabel(row.startMinutes)}-${timeLabel(row.endMinutes)}`)
     .join(' | ');
 }
 
