@@ -351,7 +351,7 @@ export function MyShifts() {
 
       <Card style={{ backgroundColor: colors.surface, borderRadius: 16 }}>
         <Card.Content style={{ gap: spacing.sm }}>
-          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Request time off</Text>
+          <Text variant="titleMedium" style={{ fontWeight: '700' }}>Request unavailable days</Text>
           {blackouts.length > 0 ? (
             <View style={{ gap: 4 }}>
               <Text style={{ color: colors.muted }}>Blackout dates (can't request off):</Text>
@@ -372,7 +372,7 @@ export function MyShifts() {
           {offError ? <Text style={{ color: colors.danger }}>{offError}</Text> : null}
           {offOk ? <Text style={{ color: accents[2].fg }}>Request submitted ✓</Text> : null}
           <Button mode="contained" buttonColor={colors.primary} onPress={() => void submitTimeOff()}>
-            Submit time-off request
+            Submit unavailable-days request
           </Button>
         </Card.Content>
       </Card>
