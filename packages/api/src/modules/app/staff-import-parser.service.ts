@@ -3,7 +3,7 @@ import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../common/ai-jso
 
 const MAX_IMPORT_ROWS = 200;
 const MAX_TEXT_CHARS = 40_000;
-const DEFAULT_MODEL = 'google/gemini-2.5-flash';
+const DEFAULT_MODEL = 'gemini-flash-latest';
 
 const PROMPT =
   'Extract a staff roster from this export. It may come from Homebase, When I Work, ' +
@@ -30,9 +30,6 @@ export type ParsedStaffResult = {
 @Injectable()
 export class StaffImportParserService {
   async parse(text: string): Promise<ParsedStaffResult> {
-    const apiKey = resolveAiApiKey();
-    if (!apiKey) throw new BadRequestException('AI parsing requires AI_API_KEY configuration');
-
     const trimmed = text?.trim() ?? '';
     if (!trimmed) {
       throw new BadRequestException('Paste a staff list or CSV export to parse');
@@ -40,10 +37,12 @@ export class StaffImportParserService {
     if (trimmed.length > MAX_TEXT_CHARS) {
       throw new BadRequestException(`Staff imports are limited to ${MAX_TEXT_CHARS.toLocaleString()} characters`);
     }
+    const apiKey = resolveAiApiKey();
+    if (!apiKey) throw new BadRequestException('AI parsing requires GEMINI_API_KEY configuration');
 
     const parsed = await callAiJson({
       apiKey,
-      model: resolveAiModel(process.env.AI_STAFF_IMPORT_MODEL, DEFAULT_MODEL),
+      model: resolveAiModel(process.env.GEMINI_STAFF_IMPORT_MODEL, DEFAULT_MODEL),
       prompt: PROMPT,
       userText: trimmed,
     });

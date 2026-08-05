@@ -562,10 +562,10 @@ describe('BarInventoryController', () => {
 
     it('propagates errors thrown by the parser (e.g. missing API key)', async () => {
       const { controller, parser } = makeController();
-      parser.parse.mockRejectedValue(new BadRequestException('AI parsing requires OPENAI_API_KEY configuration'));
+      parser.parse.mockRejectedValue(new BadRequestException('AI parsing requires GEMINI_API_KEY configuration'));
 
       await expect(controller.parseBarInventoryInput(managerUser, { text: 'Gin' })).rejects.toThrow(
-        'AI parsing requires OPENAI_API_KEY configuration',
+        'AI parsing requires GEMINI_API_KEY configuration',
       );
     });
   });

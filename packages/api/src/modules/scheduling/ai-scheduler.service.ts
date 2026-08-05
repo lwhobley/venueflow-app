@@ -3,7 +3,7 @@ import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../common/ai-jso
 import { dayLabel, minutesToTime } from '../../common/mappers';
 import type { LaborForecast } from './labor-forecast';
 
-const DEFAULT_MODEL = 'google/gemini-2.5-flash';
+const DEFAULT_MODEL = 'gemini-flash-latest';
 const MAX_PROPOSED_SHIFTS = 60;
 
 export type AiStaffMember = { id: string; fullName: string; jobTitle: string; role: string };
@@ -46,7 +46,7 @@ export class AiSchedulerService {
     memoryNotes: AiMemoryNote[];
   }): Promise<{ shifts: ProposedShift[] }> {
     const apiKey = resolveAiApiKey();
-    if (!apiKey) throw new BadRequestException('AI parsing requires AI_API_KEY configuration');
+    if (!apiKey) throw new BadRequestException('AI parsing requires GEMINI_API_KEY configuration');
     if (input.staff.length === 0) {
       throw new BadRequestException('Add staff to the roster before generating an AI schedule');
     }
@@ -54,7 +54,7 @@ export class AiSchedulerService {
     const userText = this.buildContext(input);
     const parsed = await callAiJson({
       apiKey,
-      model: resolveAiModel(process.env.AI_SCHEDULER_MODEL, DEFAULT_MODEL),
+      model: resolveAiModel(process.env.GEMINI_SCHEDULER_MODEL, DEFAULT_MODEL),
       prompt: PROMPT,
       userText,
     });
