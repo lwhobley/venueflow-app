@@ -190,7 +190,7 @@ export function MyShifts() {
                     <Text style={{ color: colors.charcoal, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    {s.conflict ? <Text style={{ color: colors.charcoal, fontWeight: '700' }}>⚠ Outside availability</Text> : null}
+                    {s.conflict ? <Text style={{ color: colors.charcoal, fontWeight: '700' }}>⚠ Approved unavailable-day request</Text> : null}
                     {(() => {
                       const coworkers = coworkersPerDay.get(s.dayIndex) ?? 0;
                       const label = coworkers >= 6 ? '🔥 High volume' : coworkers >= 3 ? 'Moderate' : coworkers > 0 ? 'Light day' : null;
@@ -337,7 +337,7 @@ export function MyShifts() {
                     <Text style={{ fontWeight: '800' }}>{s.dayLabel} · {shiftDate(s.dayIndex)}{s.dayIndex === todayDayIndex ? ' · Today' : ''}</Text>
                     <Text style={{ color: colors.charcoal, fontSize: 12 }}>{s.startTime} – {s.endTime}</Text>
                   </View>
-                  {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Outside your availability</Chip> : null}
+                  {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Approved unavailable-day request</Chip> : null}
                 </View>
                 <Text>{s.jobTitle} · {s.station}</Text>
                 <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => claimOpenShift({ shiftId: s._id }), 'Shift picked up.')}>
