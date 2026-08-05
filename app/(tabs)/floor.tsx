@@ -222,7 +222,10 @@ function FloorScreen() {
   const nextParty = reservationQueue[0] ?? waitlistQueue[0] ?? null;
   const recommendedForNext = useMemo(() => {
     if (!nextParty) return [];
-    return mergeableTables.filter((item) => item.table.seats >= nextParty.partySize).sort((a, b) => (a.table.seats - nextParty.partySize) - (b.table.seats - nextParty.partySize)).slice(0, 3);
+    return mergeableTables
+      .filter((item) => (item.state?.status ?? 'available') === 'available' && item.activeAssignments.length === 0 && !item.nextAssignment && item.table.seats >= nextParty.partySize)
+      .sort((a, b) => (a.table.seats - nextParty.partySize) - (b.table.seats - nextParty.partySize))
+      .slice(0, 3);
   }, [mergeableTables, nextParty]);
 
   const onRelease = async (assignmentId: string) => {

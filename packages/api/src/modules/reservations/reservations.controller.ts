@@ -18,7 +18,7 @@ import { IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsSt
 import { Type } from 'class-transformer';
 import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import type { Request } from 'express';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell } from '../../common/csv';
@@ -227,7 +227,7 @@ export class ReservationsController {
   ) {}
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
-    if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+    if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
   }
 
   // External reservation providers (OpenTable, Resy, ...) POST sync events here,

@@ -20,7 +20,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -213,7 +213,7 @@ class MergeTablesDto {
 }
 
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
-  if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+  if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
 }
 
 @Controller('v1/floor')

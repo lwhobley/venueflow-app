@@ -1,7 +1,7 @@
 import { Body, Controller, ForbiddenException, Get, Post } from '@nestjs/common';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { IntegrationStatus, ReservationSource } from '@prisma/client';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { generateWebhookSecret } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -34,7 +34,7 @@ export class IntegrationsController {
   @RequireSubscription('active')
   @Get('reservations')
   async getReservationIntegrationOverview(@VenueScope() scope: Scope) {
-    if (!scope || !isAdminRole(scope.role)) {
+    if (!scope || !canManageVenue(scope.role, scope.allAccess)) {
       throw new ForbiddenException('Not authorized');
     }
     const [rawConnections, rawEvents] = await Promise.all([
@@ -53,7 +53,7 @@ export class IntegrationsController {
   @RequireSubscription('active')
   @Post('reservations')
   async upsertReservationConnection(@VenueScope() scope: Scope, @Body() body: UpsertReservationConnectionDto) {
-    if (!scope || !isAdminRole(scope.role)) {
+    if (!scope || !canManageVenue(scope.role, scope.allAccess)) {
       throw new ForbiddenException('Not authorized');
     }
     const existing = await this.prisma.reservationConnection.findFirst({

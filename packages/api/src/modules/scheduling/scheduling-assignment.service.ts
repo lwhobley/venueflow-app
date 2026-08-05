@@ -7,6 +7,7 @@ import {
 import { Prisma, ShiftStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { withSerializableRetry } from '../../common/tx-retry';
+import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
 
 @Injectable()
 export class SchedulingAssignmentService {
@@ -37,6 +38,7 @@ export class SchedulingAssignmentService {
             dayIndex: args.dayIndex,
           },
         ]);
+        await this.assertNotUnavailable(tx, args.venueId, args.profileId, args.dayIndex);
         await this.assertNoDoubleBookTx(
           tx,
           args.venueId,
@@ -100,6 +102,7 @@ export class SchedulingAssignmentService {
             dayIndex: args.dayIndex,
           },
         ]);
+        await this.assertNotUnavailable(tx, args.venueId, current.profileId, args.dayIndex);
         await this.assertNoDoubleBookTx(
           tx,
           args.venueId,
@@ -151,7 +154,8 @@ export class SchedulingAssignmentService {
       return { shift, nextProfileId: null };
     }
 
-    await this.assertVenueMember(args.venueId, args.profileId);
+    const profileId = args.profileId;
+    await this.assertVenueMember(args.venueId, profileId);
     await withSerializableRetry(this.prisma, async (tx) => {
       const current = await tx.scheduleShift.findFirst({
         where: { id: shift.id, venueId: args.venueId },
@@ -161,14 +165,15 @@ export class SchedulingAssignmentService {
       await this.lockAssignmentKeys(tx, [
         {
           venueId: args.venueId,
-          profileId: args.profileId!,
+          profileId,
           dayIndex: current.dayIndex,
         },
       ]);
+      await this.assertNotUnavailable(tx, args.venueId, profileId, current.dayIndex);
       await this.assertNoDoubleBookTx(
         tx,
         args.venueId,
-        args.profileId!,
+        profileId,
         current.dayIndex,
         current.startMinutes,
         current.endMinutes,
@@ -176,7 +181,7 @@ export class SchedulingAssignmentService {
       );
       await tx.scheduleShift.update({
         where: { id: current.id },
-        data: { profileId: args.profileId, status: 'scheduled' },
+        data: { profileId, status: 'scheduled' },
       });
       await tx.venue.update({
         where: { id: args.venueId },
@@ -426,6 +431,11 @@ export class SchedulingAssignmentService {
           throw new NotFoundException('Shift not found');
         }
 
+        await this.assertNotUnavailable(tx, args.venueId, swap.targetProfileId, requesterShift.dayIndex);
+        if (targetShift) {
+          await this.assertNotUnavailable(tx, args.venueId, swap.requesterProfileId, targetShift.dayIndex);
+        }
+
         await this.lockAssignmentKeys(tx, [
           {
             venueId: args.venueId,
@@ -506,27 +516,16 @@ export class SchedulingAssignmentService {
       throw new BadRequestException('This shift is no longer open');
     }
 
-    await this.assertNoDoubleBook(
-      args.venueId,
-      args.profileId,
-      shift.dayIndex,
-      shift.startMinutes,
-      shift.endMinutes,
-      shift.id,
-    );
-
-    const claimed = await this.prisma.scheduleShift.updateMany({
-      where: {
-        id: shift.id,
-        venueId: args.venueId,
-        status: 'open',
-        profileId: null,
-      },
-      data: { profileId: args.profileId, status: 'covered' },
+    await withSerializableRetry(this.prisma, async (tx) => {
+      const current = await tx.scheduleShift.findFirst({
+        where: { id: shift.id, venueId: args.venueId, status: 'open', profileId: null },
+      });
+      if (!current) throw new BadRequestException('This shift is no longer open');
+      await this.lockAssignmentKeys(tx, [{ venueId: args.venueId, profileId: args.profileId, dayIndex: current.dayIndex }]);
+      await this.assertNotUnavailable(tx, args.venueId, args.profileId, current.dayIndex);
+      await this.assertNoDoubleBookTx(tx, args.venueId, args.profileId, current.dayIndex, current.startMinutes, current.endMinutes, current.id);
+      await tx.scheduleShift.update({ where: { id: current.id }, data: { profileId: args.profileId, status: 'covered' } });
     });
-    if (claimed.count === 0) {
-      throw new BadRequestException('This shift is no longer open');
-    }
 
     await this.markScheduleEdited(args.venueId);
     return shift;
@@ -584,6 +583,7 @@ export class SchedulingAssignmentService {
           if (!current || current.profileId || current.status !== 'open') {
             throw new BadRequestException('Shift is no longer open.');
           }
+          await this.assertNotUnavailable(tx, args.venueId, assignment.profileId, current.dayIndex);
           await this.lockAssignmentKeys(tx, [
             {
               venueId: args.venueId,
@@ -640,6 +640,40 @@ export class SchedulingAssignmentService {
     });
     if (!member) throw new BadRequestException('Staff member is not in this venue');
     return member;
+  }
+
+  /** Approved time-off/sick-leave requests are the single source of truth for
+   * the current recurring schedule week. Legacy positive-availability rows are
+   * deliberately not consulted. */
+  private async assertNotUnavailable(
+    db: Prisma.TransactionClient | PrismaService,
+    venueId: string,
+    profileId: string,
+    dayIndex: number,
+  ) {
+    // Keep lightweight service unit doubles usable; real Prisma clients always
+    // expose both delegates below.
+    if (!db.venue?.findUnique || !db.staffRequest?.findMany) return;
+    const venue = await db.venue.findUnique({ where: { id: venueId }, select: { timezone: true } });
+    const weekStart = weekStartFor(todayInZone(venue?.timezone ?? null));
+    const date = addDays(weekStart, dayIndex);
+    const requests = await db.staffRequest.findMany({
+      where: {
+        venueId,
+        profileId,
+        status: 'approved',
+        kind: { in: ['time_off', 'sick_leave'] },
+        OR: [
+          { requestedForDate: date },
+          { requestedRangeStart: { lte: date }, requestedRangeEnd: { gte: date } },
+        ],
+      },
+      select: { title: true },
+      take: 1,
+    });
+    if (requests.length > 0) {
+      throw new BadRequestException('This employee has an approved unavailable-day request for this shift.');
+    }
   }
 
   async getVenueShift(venueId: string, shiftId: string) {

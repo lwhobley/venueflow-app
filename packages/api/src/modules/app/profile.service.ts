@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isActiveMembership } from '../../common/membership';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -45,7 +45,7 @@ export class ProfileService {
 
   async requireManagerProfile(user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
-    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
+    if (!canManageVenue(profile.role, profile.allAccess)) throw new ForbiddenException('Not authorized');
     return profile;
   }
 

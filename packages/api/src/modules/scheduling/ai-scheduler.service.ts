@@ -23,12 +23,12 @@ export type ProposedShift = {
 
 const PROMPT = `You are a restaurant shift-scheduling assistant. You are given a week's demand
 forecast (covers and suggested labor hours per day), the current staff roster with job
-titles and weekly availability, shifts already on the schedule, and a weekly labor-budget
+titles and approved unavailable dates, shifts already on the schedule, and a weekly labor-budget
 hours cap. Propose NEW shifts to close the gap between suggested and scheduled hours —
-do not repeat coverage that already exists. Assign a profileId only when that person is
-marked available for that exact time window in the availability you were given; otherwise
-leave profileId null (an open shift). Keep total scheduled hours at or under the labor
-budget when one is given. Spread hours reasonably across available staff rather than
+do not repeat coverage that already exists. Staff are available by default. Assign a
+profileId unless that person is unavailable for that exact day in the approved unavailable
+dates you were given; otherwise leave profileId null (an open shift). Keep total scheduled
+hours at or under the labor budget when one is given. Spread hours reasonably across staff rather than
 stacking one person. Each shift's jobTitle should match a role actually present on the
 roster. Return STRICT JSON matching schema: {"shifts": [{"dayIndex": number (0-6, 0=Sunday),
 "startMinutes": number (0-1440), "endMinutes": number (0-1440, > startMinutes), "jobTitle":
@@ -84,10 +84,10 @@ export class AiSchedulerService {
 
     lines.push('Staff roster:');
     for (const member of input.staff) {
-      const windows = (input.availabilityByProfile.get(member.id) ?? []).filter((row) => row.available);
-      const availabilityText = windows.length
-        ? windows.map((w) => `${dayLabel(w.dayIndex)} ${minutesToTime(w.startMinutes)}-${minutesToTime(w.endMinutes)}`).join(', ')
-        : 'no availability submitted';
+      const unavailable = (input.availabilityByProfile.get(member.id) ?? []).filter((row) => !row.available);
+      const availabilityText = unavailable.length
+        ? `unavailable ${unavailable.map((w) => `${dayLabel(w.dayIndex)} ${minutesToTime(w.startMinutes)}-${minutesToTime(w.endMinutes)}`).join(', ')}`
+        : 'available unless an approved request is added';
       // Deliberately no staff name here: the model only needs `id` to assign a
       // shift, and the caller re-resolves display names locally from `id` on
       // the response — no reason to send staff PII to a third-party model.

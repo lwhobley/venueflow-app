@@ -392,6 +392,23 @@ export class FloorService {
     });
     if (states.length !== tableIds.length) throw new BadRequestException('One or more tables are missing live state');
     const seatedStates = states.filter((state) => state.status === 'seated');
+    if (seatedStates.length > 0) {
+      const now = new Date();
+      const assignments = this.prisma.tableAssignment?.findMany
+        ? await this.prisma.tableAssignment.findMany({
+            where: { venueId, tableId: { in: tableIds }, releasedAt: null, startsAt: { lte: now }, endsAt: { gt: now } },
+            select: { tableId: true, reservationId: true, waitlistId: true },
+          })
+        : [];
+      const identityByTable = new Map(assignments.map((assignment) => [
+        assignment.tableId,
+        assignment.reservationId ? `reservation:${assignment.reservationId}` : assignment.waitlistId ? `waitlist:${assignment.waitlistId}` : null,
+      ]));
+      const identities = seatedStates.map((state) => identityByTable.get(state.tableId));
+      if (identities.some((identity) => !identity) || new Set(identities).size !== 1) {
+        throw new ConflictException('Seated tables can only be merged when they belong to the same reservation or waitlist party');
+      }
+    }
     const canMerge = states.every((state) => ['available', 'dirty', 'seated'].includes(state.status))
       && (seatedStates.length === 0 || new Set(seatedStates.map((state) => state.partySize)).size === 1);
     const blocked = canMerge ? undefined : states.find((state) => !['available', 'dirty', 'seated'].includes(state.status)) ?? seatedStates[0];
@@ -411,12 +428,25 @@ export class FloorService {
   }
 
   async splitMergedTables(venueId: string, mergeGroupId: string) {
-    const result = await this.prisma.tableState.updateMany({
-      where: { venueId, mergeGroupId },
-      data: { mergeGroupId: null, partySize: null, lastActivityAt: new Date() },
-    });
-    if (result.count === 0) throw new NotFoundException('Merged table group not found');
-    return { ok: true, splitTables: result.count };
+    const states = await this.prisma.tableState.findMany({ where: { venueId, mergeGroupId } });
+    if (states.length === 0) throw new NotFoundException('Merged table group not found');
+    const now = new Date();
+    const assignments = this.prisma.tableAssignment?.findMany
+      ? await this.prisma.tableAssignment.findMany({
+          where: { venueId, tableId: { in: states.map((state) => state.tableId) }, releasedAt: null, startsAt: { lte: now }, endsAt: { gt: now } },
+          include: { reservation: { select: { partySize: true } }, waitlist: { select: { partySize: true } } },
+        })
+      : [];
+    const partySizeByTable = new Map(assignments.map((assignment) => [assignment.tableId, assignment.reservation?.partySize ?? assignment.waitlist?.partySize ?? null]));
+    await Promise.all(states.map((state) => this.prisma.tableState.update({
+      where: { id: state.id },
+      data: {
+        mergeGroupId: null,
+        partySize: state.status === 'seated' ? (partySizeByTable.get(state.tableId) ?? state.partySize) : null,
+        lastActivityAt: now,
+      },
+    })));
+    return { ok: true, splitTables: states.length };
   }
 
   async assignReservationToTables(venueId: string, reservationId: string, tableIds: string[], options: { holdType?: string; startsAt?: number; endsAt?: number } = {}) {
@@ -472,8 +502,13 @@ export class FloorService {
           },
         });
       }
+      await tx.tableState.updateMany({ where: { venueId, tableId: { in: tableIds } }, data: {
+        status: holdType === 'seated' ? 'seated' : 'reserved',
+        partySize: reservation.partySize,
+        seatedAt: holdType === 'seated' ? startsAt : null,
+        lastActivityAt: new Date(),
+      } });
       if (holdType === 'seated') {
-        await tx.tableState.updateMany({ where: { venueId, tableId: { in: tableIds } }, data: { status: 'seated', partySize: reservation.partySize, seatedAt: startsAt, lastActivityAt: new Date() } });
         await tx.reservation.update({ where: { id: reservation.id }, data: { status: 'seated' } });
       }
     });
@@ -544,7 +579,7 @@ export class FloorService {
         data: {
           status: body.holdType === 'held' ? 'held' : 'seated',
           partySize: waitlist.partySize,
-          seatedAt: startsAt,
+          seatedAt: body.holdType === 'held' ? null : startsAt,
           lastActivityAt: new Date(),
         },
       });
@@ -568,10 +603,7 @@ export class FloorService {
           data: { releasedAt: new Date(), releasedReason: 'manual' },
         });
     if (released.count === 0) throw new NotFoundException('Assignment not found');
-    await this.prisma.tableState.updateMany({
-      where: { venueId, tableId: { in: tableIds } },
-      data: { status: 'available', partySize: null, seatedAt: null, lastActivityAt: new Date() },
-    });
+    await this.refreshTableStates(venueId, tableIds);
     // Find seats freed up by the released table so we can match a waitlist
     // entry whose party fits. Best-effort; fire-and-forget so the manager
     // action returns immediately.
@@ -603,6 +635,37 @@ export class FloorService {
       include: { tables: { select: { id: true } } },
     });
     return new Set((plan?.tables ?? []).map((table) => table.id));
+  }
+
+  private async refreshTableStates(venueId: string, tableIds: string[]) {
+    if (!this.prisma.tableAssignment?.findMany) {
+      await this.prisma.tableState.updateMany({
+        where: { venueId, tableId: { in: tableIds } },
+        data: { status: 'available', partySize: null, seatedAt: null, lastActivityAt: new Date() },
+      });
+      return;
+    }
+    const now = new Date();
+    const assignments = await this.prisma.tableAssignment.findMany({
+      where: { venueId, tableId: { in: tableIds }, releasedAt: null, startsAt: { lte: now }, endsAt: { gt: now } },
+      include: { reservation: { select: { partySize: true } }, waitlist: { select: { partySize: true } } },
+    });
+    const byTable = new Map<string, (typeof assignments)[number]>();
+    for (const assignment of assignments) byTable.set(assignment.tableId, assignment);
+    await Promise.all(tableIds.map((tableId) => {
+      const assignment = byTable.get(tableId);
+      const seated = assignment?.holdType === 'seated';
+      const status = seated ? 'seated' : assignment?.holdType === 'held' ? 'held' : assignment ? 'reserved' : 'available';
+      return this.prisma.tableState.updateMany({
+        where: { venueId, tableId },
+        data: {
+          status,
+          partySize: assignment?.reservation?.partySize ?? assignment?.waitlist?.partySize ?? null,
+          seatedAt: seated ? assignment!.startsAt : null,
+          lastActivityAt: now,
+        },
+      });
+    }));
   }
 
   private mapAssignment(

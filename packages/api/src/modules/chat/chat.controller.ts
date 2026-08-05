@@ -17,7 +17,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
@@ -88,7 +88,7 @@ class UploadImageDto {
 }
 
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
-  if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+  if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
 }
 
 @Controller('v1/chat')
@@ -132,7 +132,7 @@ export class ChatController {
       }),
     ]);
 
-    const managerIds = profiles.filter((p) => isAdminRole(p.role) || p.allAccess).map((p) => p.id);
+    const managerIds = profiles.filter((p) => canManageVenue(p.role, p.allAccess)).map((p) => p.id);
 
     // Group existing by roleName/shiftDate
     const existingRolesMap = new Map(existingConvs.filter((c) => c.type === 'role' && c.roleName).map((c) => [c.roleName!, c]));

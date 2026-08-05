@@ -7,7 +7,7 @@ import { AuthGuard } from '../../auth/auth.guard';
 import { Public } from '../../auth/public.decorator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
-import { isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
+import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
 import { unpaidBreakMs } from '../../common/break-duration';
@@ -335,7 +335,7 @@ export class AppController {
   async getDashboard(@CurrentUser() user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
     if (!profile?.venue) return null;
-    const canManage = isAdminRole(profile.role);
+    const canManage = canManageVenue(profile.role, profile.allAccess);
     const shiftWhere = {
       venueId: profile.venueId!,
       ...(canManage ? {} : { OR: [{ profileId: profile.id }, { status: 'open' as const }] }),
@@ -384,7 +384,7 @@ export class AppController {
   @Get('manager-insights')
   async getManagerInsights(@CurrentUser() user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
-    if (!profile?.venueId || !isAdminRole(profile.role)) return null;
+    if (!profile?.venueId || !canManageVenue(profile.role, profile.allAccess)) return null;
     const venueId = profile.venueId;
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const [completedEntries, scheduledShifts, openRequests] = await Promise.all([
@@ -442,7 +442,7 @@ export class AppController {
         venueId: profile.venueId!,
         OR: [
           { audience: 'staff' },
-          ...(isAdminRole(profile.role) ? [{ audience: 'managers' }] : []),
+          ...(canManageVenue(profile.role, profile.allAccess) ? [{ audience: 'managers' }] : []),
           { audience: 'profile', profileId: profile.id },
         ],
       },
@@ -470,7 +470,7 @@ export class AppController {
     if (!profile?.venueId) throw new ForbiddenException('Profile is not initialized');
     const row = await this.prisma.notificationEvent.findFirst({ where: { id: notificationId, venueId: profile.venueId } });
     if (!row) throw new NotFoundException('Notification not found');
-    const canRead = row.audience === 'staff' || (row.audience === 'managers' && isAdminRole(profile.role)) || (row.audience === 'profile' && row.profileId === profile.id);
+    const canRead = row.audience === 'staff' || (row.audience === 'managers' && canManageVenue(profile.role, profile.allAccess)) || (row.audience === 'profile' && row.profileId === profile.id);
     if (!canRead) throw new ForbiddenException('Not authorized');
     await this.prisma.notificationRead.upsert({
       where: { notificationId_profileId: { notificationId, profileId: profile.id } },
@@ -494,7 +494,7 @@ export class AppController {
     const openEntries = entries.map((entry) => mapClockEntry(entry, entry.profile, entry.venue));
     return {
       venue: mapVenue(profile.venue!),
-      activeClockEntries: isAdminRole(profile.role) ? openEntries : [],
+      activeClockEntries: canManageVenue(profile.role, profile.allAccess) ? openEntries : [],
       employeeEntry: openEntries.find((entry) => entry.memberId === profile.id) ?? null,
       managerAlerts: [],
     };
@@ -553,7 +553,7 @@ export class AppController {
     const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
     if (existing) throw new BadRequestException('Already clocked in');
 
-    if (!isAdminRole(profile.role)) {
+    if (!canManageVenue(profile.role, profile.allAccess)) {
       const nowMs = Date.now();
       const today = zonedDayOfWeek(venue.timezone, nowMs);
       const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
