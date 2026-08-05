@@ -25,6 +25,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/api/dist packages/api/dist
 COPY --from=build /app/packages/api/prisma packages/api/prisma
 
+# Prisma migrations run at startup as the non-root node user.
+RUN chown -R node:node /app
 USER node
 EXPOSE 8080
 CMD ["sh", "-c", "npx prisma migrate deploy --schema packages/api/prisma/schema.prisma && exec node packages/api/dist/main.js"]
