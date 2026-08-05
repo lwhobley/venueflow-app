@@ -24,7 +24,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { ACTIVE_MEMBERSHIP } from '../../common/membership';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
@@ -240,7 +240,7 @@ class CrmListQueryDto {
 }
 
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
-  if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+  if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
 }
 
 function toMs(date: Date | null | undefined): number | null {

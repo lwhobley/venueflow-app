@@ -263,7 +263,7 @@ function ItemRow({ r, i, maxSales }: { r: { name: string; category: string | nul
         <Text style={{ fontSize: 13, fontWeight: '700' }}>{formatMoney(r.salesCents)}</Text>
       </View>
       <MiniBar value={r.salesCents} max={maxSales} color={accents[i % accents.length].icon} />
-      <Text style={{ color: colors.muted, fontSize: 11 }}>{t('sales.items.qtyAvg', { qty: r.quantity, amount: formatMoney(Math.round(r.salesCents / r.quantity)) })}</Text>
+      <Text style={{ color: colors.muted, fontSize: 11 }}>{t('sales.items.qtyAvg', { qty: r.quantity, amount: formatMoney(r.quantity > 0 ? Math.round(r.salesCents / r.quantity) : 0) })}</Text>
     </View>
   );
 }

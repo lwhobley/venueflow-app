@@ -5,6 +5,11 @@ export function isAdminRole(role?: string | null): boolean {
   return role === 'admin' || role === 'owner' || role === 'manager';
 }
 
+/** Venue-level manager access, including internal/support profiles. */
+export function canManageVenue(role?: string | null, allAccess = false): boolean {
+  return allAccess || isAdminRole(role);
+}
+
 const ROLE_RANK: Record<string, number> = {
   staff: 0,
   server: 1,

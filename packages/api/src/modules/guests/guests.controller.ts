@@ -15,7 +15,7 @@ import {
 import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { getClientIp } from '../../common/http';
@@ -148,7 +148,7 @@ export class GuestsController {
   constructor(private readonly prisma: PrismaService) {}
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
-    if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+    if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
   }
 
   @RequireSubscription('active')

@@ -89,11 +89,13 @@ DECLARE
   v_has_active_membership BOOLEAN;
   v_request_id            TEXT;
 BEGIN
-  -- Block if the user already has an active (or uncategorised) membership.
+  PERFORM pg_advisory_xact_lock(hashtext('workforce-user:' || p_user_id));
+  -- A profile may belong to only one active venue at a time. Do not silently
+  -- move an existing member to a second venue through the join workflow.
   SELECT EXISTS (
     SELECT 1 FROM "Profile"
     WHERE "userId" = p_user_id
-      AND "venueId" = p_venue_id
+      AND "venueId" IS NOT NULL
       AND ("membershipStatus" IS NULL OR "membershipStatus" = 'active')
   ) INTO v_has_active_membership;
 
@@ -165,6 +167,8 @@ BEGIN
     RAISE EXCEPTION 'not_authorized' USING ERRCODE = 'P0005';
   END IF;
 
+  PERFORM pg_advisory_xact_lock(hashtext('workforce-user:' || v_request."userId"));
+
   -- Mark request approved.
   UPDATE "WorkplaceJoinRequest"
   SET "status"      = 'approved',
@@ -176,6 +180,7 @@ BEGIN
   -- Activate the user's profile membership (profile was created at signup).
   UPDATE "Profile"
   SET "venueId"          = v_request."venueId",
+      "role"             = 'staff',
       "membershipStatus" = 'active',
       "updatedAt"        = NOW()
   WHERE "userId" = v_request."userId";

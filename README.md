@@ -18,7 +18,7 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router, Nes
 - Floor plan and table management with drag-and-drop editor for admins/managers
 - Staff management screen for admins/managers to add people and assign roles to a venue
 - Profile page shortcut to open staff management for privileged roles
-- Billing shell with a 7-day trial and venue plans at $149/$249/$399 per month
+- Billing shell with Stripe-backed venue subscriptions
 
 ## Local setup
 
@@ -42,8 +42,8 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router, Nes
 
 ## Production deploy
 
-1. **Deploy the NestJS Backend** (e.g. to Railway):
-   - Set the required database variables (and `JWT_SECRET`) on your Railway dashboard.
+1. **Deploy the NestJS Backend** (for example, to Google Cloud Run):
+   - Set `DATABASE_URL` to the Supabase pooler connection, `DATABASE_DIRECT_URL` when available, and `JWT_SECRET` in the service configuration.
    - Set `CORS_ORIGINS` to explicit web origins such as `https://venuewrangler.com,https://www.venuewrangler.com`; do not use `*` with credentialed CORS.
 2. **Point the build at prod**: set `EXPO_PUBLIC_API_URL` in `eas.json` to the deployed server URL. Also set `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (iOS in-app purchases).
 3. **Build & submit**:
@@ -57,7 +57,7 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router, Nes
 
 ## Backend
 
-- NestJS server backed by Prisma and PostgreSQL (running on Railway in production)
+- NestJS server backed by Prisma and PostgreSQL on Supabase, deployed to Cloud Run
 - Push notifications registered via `POST /v1/push/token` and stored in the database
 
 ## Floor sync

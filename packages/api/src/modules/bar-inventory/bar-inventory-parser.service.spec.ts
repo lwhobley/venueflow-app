@@ -3,14 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BarInventoryParserService } from './bar-inventory-parser.service';
 
 describe('BarInventoryParserService', () => {
-  const originalApiKey = process.env.OPENAI_API_KEY;
-  const originalSharedApiKey = process.env.AI_API_KEY;
+  const originalGeminiApiKey = process.env.GEMINI_API_KEY;
 
   afterEach(() => {
-    if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = originalApiKey;
-    if (originalSharedApiKey === undefined) delete process.env.AI_API_KEY;
-    else process.env.AI_API_KEY = originalSharedApiKey;
+    if (originalGeminiApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalGeminiApiKey;
     vi.unstubAllGlobals();
   });
 
@@ -62,28 +59,26 @@ describe('BarInventoryParserService', () => {
 
   it('validates input before provider calls', async () => {
     const service = new BarInventoryParserService();
-    delete process.env.AI_API_KEY;
-    process.env.OPENAI_API_KEY = 'sk-test';
+    process.env.GEMINI_API_KEY = 'gemini-test';
     await expect(service.parse({})).rejects.toThrow('Add pasted text');
     await expect(service.parse({ text: 'x'.repeat(20_001) })).rejects.toThrow('Text imports are limited');
     await expect(service.parse({ imageBase64: 'abc', imageMimeType: 'application/pdf' })).rejects.toThrow('Photo imports');
   });
 
-  it('prefers AI_API_KEY while retaining OPENAI_API_KEY as a fallback', async () => {
-    process.env.AI_API_KEY = 'sk-or-primary';
-    process.env.OPENAI_API_KEY = 'sk-legacy';
+  it('calls Gemini with the configured key', async () => {
+    process.env.GEMINI_API_KEY = 'gemini-key';
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ choices: [{ message: { content: '{"notes":"","items":[]}' } }] }),
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '{"notes":"","items":[]}' }] } }] }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
     await new BarInventoryParserService().parse({ text: 'two bottles of gin' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://openrouter.ai/api/v1/chat/completions',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
       expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer sk-or-primary' }),
+        headers: expect.objectContaining({ 'x-goog-api-key': 'gemini-key' }),
       }),
     );
   });

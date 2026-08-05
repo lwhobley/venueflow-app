@@ -17,7 +17,7 @@ import { Type } from 'class-transformer';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell } from '../../common/csv';
 import { htmlEscape } from '../../common/html-escape';
@@ -1014,7 +1014,7 @@ export class BarInventoryController {
 
   private async requireManagerProfile(user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
-    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
+    if (!canManageVenue(profile.role, profile.allAccess)) throw new ForbiddenException('Not authorized');
     return profile;
   }
 

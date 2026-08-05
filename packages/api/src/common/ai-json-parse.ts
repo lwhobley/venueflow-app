@@ -1,8 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
 
-// Shared JSON-mode call to an OpenRouter-hosted model (Gemini, Kimi, etc).
-// Used anywhere we turn free-form text/photos into structured rows — bar
-// inventory imports, staff roster imports, and future AI parsers.
 export type AiJsonCallInput = {
   apiKey: string;
   model: string;
@@ -12,39 +9,29 @@ export type AiJsonCallInput = {
   imageMimeType?: string;
 };
 
+/** Calls Gemini in JSON mode for every structured AI feature. */
 export async function callAiJson(input: AiJsonCallInput): Promise<unknown> {
-  const content: Array<Record<string, unknown>> = [{ type: 'text', text: input.prompt }];
-  if (input.userText) {
-    content.push({ type: 'text', text: input.userText });
-  }
+  const parts: Array<Record<string, unknown>> = [{ text: input.prompt }];
+  if (input.userText) parts.push({ text: input.userText });
   if (input.imageBase64) {
-    content.push({
-      type: 'image_url',
-      image_url: { url: `data:${input.imageMimeType ?? 'image/jpeg'};base64,${input.imageBase64}` },
-    });
+    parts.push({ inline_data: { mime_type: input.imageMimeType ?? 'image/jpeg', data: input.imageBase64 } });
   }
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${input.apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://venuewrangler.com',
-      'X-Title': 'Venue Wrangler',
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'x-goog-api-key': input.apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+      signal: AbortSignal.timeout(30_000),
     },
-    body: JSON.stringify({
-      model: input.model,
-      messages: [{ role: 'user', content }],
-      response_format: { type: 'json_object' },
-    }),
-    signal: AbortSignal.timeout(30000),
-  });
-
-  if (!response.ok) {
-    throw new BadRequestException('AI parsing failed. Try again or enter the details manually.');
-  }
+  );
+  if (!response.ok) throw new BadRequestException('AI parsing failed. Try again or enter the details manually.');
   const json: any = await response.json();
-  const rawText = json?.choices?.[0]?.message?.content ?? '{}';
+  const rawText = json?.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('') ?? '{}';
   try {
     return JSON.parse(rawText);
   } catch {
@@ -52,17 +39,10 @@ export async function callAiJson(input: AiJsonCallInput): Promise<unknown> {
   }
 }
 
-// Resolve the AI provider key/model with backward-compatible env var names —
-// this used to be OpenAI-only; AI_API_KEY / AI_*_MODEL are the current names.
 export function resolveAiApiKey(): string | undefined {
-  if (process.env.AI_API_KEY) return process.env.AI_API_KEY;
-  // Only reuse the legacy OPENAI_API_KEY var if it's actually shaped like an
-  // OpenRouter key — this helper only ever calls the OpenRouter endpoint, so
-  // a real OpenAI-format key must never be forwarded there.
-  const legacy = process.env.OPENAI_API_KEY;
-  return legacy?.startsWith('sk-or-') ? legacy : undefined;
+  return process.env.GEMINI_API_KEY;
 }
 
 export function resolveAiModel(specificEnvVar: string | undefined, fallback: string): string {
-  return specificEnvVar || process.env.AI_MODEL || fallback;
+  return specificEnvVar || process.env.GEMINI_MODEL || fallback;
 }

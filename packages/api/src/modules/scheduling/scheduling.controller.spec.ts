@@ -64,6 +64,7 @@ function makeController() {
     },
     reservation: { findMany: vi.fn().mockResolvedValue([]) },
     venueEvent: { findMany: vi.fn().mockResolvedValue([]) },
+    staffRequest: { findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn().mockImplementation((ops: any[]) => Promise.all(ops)),
   } as any;
 
@@ -558,9 +559,9 @@ describe('SchedulingController', () => {
 
     it('propagates the AI service error (e.g. missing API key) unchanged', async () => {
       const { controller, aiScheduler } = makeController();
-      aiScheduler.generateDraft.mockRejectedValue(new BadRequestException('AI parsing requires AI_API_KEY configuration'));
+      aiScheduler.generateDraft.mockRejectedValue(new BadRequestException('AI parsing requires GEMINI_API_KEY configuration'));
 
-      await expect(controller.previewAiSchedule(managerScope)).rejects.toThrow('AI parsing requires AI_API_KEY configuration');
+      await expect(controller.previewAiSchedule(managerScope)).rejects.toThrow('AI parsing requires GEMINI_API_KEY configuration');
     });
   });
 
@@ -580,9 +581,9 @@ describe('SchedulingController', () => {
       expect(assignments.createShift).toHaveBeenCalledWith(expect.objectContaining({ profileId: 'staff-1', notes: 'Created by AI schedule builder' }));
     });
 
-    it('drops the proposed profile to an open shift when availability does not cover it', async () => {
+    it('drops the proposed profile to an open shift when an approved unavailable-days request covers it', async () => {
       const { controller, prisma, assignments } = makeController();
-      prisma.availability.findMany.mockResolvedValue([]); // no availability submitted for staff-1
+      prisma.staffRequest.findMany.mockResolvedValue([{ profileId: 'staff-1', requestedRangeStart: '2000-01-01', requestedRangeEnd: '2099-01-01', requestedForDate: null }]);
       assignments.createShift.mockResolvedValue({ id: 'shift-1' });
 
       await controller.commitAiSchedule(managerScope, {
@@ -658,7 +659,7 @@ describe('SchedulingController', () => {
   });
 
   describe('applyAutoSchedule', () => {
-    it('delegates to applyOpenAssignments with a canAssign gate backed by availability', async () => {
+    it('delegates to applyOpenAssignments with a canAssign gate that defaults to available', async () => {
       const { controller, prisma, assignments } = makeController();
       prisma.availability.findMany.mockResolvedValue([
         { profileId: 'staff-1', dayIndex: 1, startMinutes: 0, endMinutes: 1440, available: true },
@@ -675,7 +676,7 @@ describe('SchedulingController', () => {
       }));
       const { canAssign } = assignments.applyOpenAssignments.mock.calls[0][0];
       expect(canAssign({ shift: { dayIndex: 1, startMinutes: 600, endMinutes: 900 }, profileId: 'staff-1' })).toBe(true);
-      expect(canAssign({ shift: { dayIndex: 2, startMinutes: 600, endMinutes: 900 }, profileId: 'staff-1' })).toBe(false);
+      expect(canAssign({ shift: { dayIndex: 2, startMinutes: 600, endMinutes: 900 }, profileId: 'staff-1' })).toBe(true);
     });
 
     it('emails each newly assigned staff member once', async () => {

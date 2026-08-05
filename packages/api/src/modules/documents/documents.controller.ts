@@ -5,9 +5,11 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Post,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { IsIn, IsString, MaxLength } from 'class-validator';
 import { isAdminRole } from '../../auth/roles';
@@ -58,6 +60,7 @@ function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
 
 @Controller('v1/documents')
 export class DocumentsController {
+  private readonly logger = new Logger(DocumentsController.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: S3DocumentService,
@@ -102,7 +105,13 @@ export class DocumentsController {
     if (data.length > MAX_DOCUMENT_BYTES) throw new BadRequestException('Document is too large (max 10MB)');
     const mimeType = assertAllowedDocumentBytes(data, body.mimeType, fileName);
 
-    const s3Key = await this.storage.upload(data, mimeType, scope.venueId);
+    let s3Key: string;
+    try {
+      s3Key = await this.storage.upload(data, mimeType, scope.venueId);
+    } catch (error) {
+      this.logger.error(`Document upload storage failed for venue ${scope.venueId}`, error instanceof Error ? error.stack : undefined);
+      throw new ServiceUnavailableException('Document storage is temporarily unavailable. Please try again.');
+    }
     try {
       const document = await this.prisma.venueDocument.create({
         data: {
@@ -131,7 +140,13 @@ export class DocumentsController {
       where: { id, venueId: scope.venueId },
     });
     if (!document) throw new NotFoundException('Document not found');
-    const url = await this.storage.getPresignedUrl(document.s3Key, document.fileName, document.mimeType);
+    let url: string;
+    try {
+      url = await this.storage.getPresignedUrl(document.s3Key, document.fileName, document.mimeType);
+    } catch (error) {
+      this.logger.error(`Document access storage failed for document ${document.id}`, error instanceof Error ? error.stack : undefined);
+      throw new ServiceUnavailableException('Document storage is temporarily unavailable. Please try again.');
+    }
     return { url, expiresInSeconds: 300 };
   }
 

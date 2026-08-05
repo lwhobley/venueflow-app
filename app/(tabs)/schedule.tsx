@@ -13,7 +13,6 @@ import { useVenueAuth } from '../../lib/useVenueAuth';
 import { errorMessage } from '../../lib/format';
 import { ManagerCalendar } from '../../components/schedule/ManagerCalendar';
 import { MyShifts } from '../../components/schedule/MyShifts';
-import { AvailabilityEditor } from '../../components/schedule/AvailabilityEditor';
 import { BlackoutManager } from '../../components/schedule/BlackoutManager';
 import { LaborForecastPanel } from '../../components/schedule/LaborForecastPanel';
 
@@ -105,7 +104,6 @@ function ScheduleScreen() {
   const { t } = useI18n();
 
   const [managerTab, setManagerTab] = useState<'calendar' | 'forecast' | 'requests' | 'blackouts'>('calendar');
-  const [staffTab, setStaffTab] = useState<'shifts' | 'availability'>('shifts');
   const contentContainerStyle = useDesktopContentStyle({ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl });
 
   return (
@@ -150,21 +148,7 @@ function ScheduleScreen() {
             )}
           </AnimatedTab>
         </>
-      ) : (
-        <>
-          <SegmentedButtons
-            value={staffTab}
-            onValueChange={(v) => setStaffTab(v as 'shifts' | 'availability')}
-            buttons={[
-              { value: 'shifts', label: t('schedule.tabMyShifts') },
-              { value: 'availability', label: t('schedule.tabAvailability') },
-            ]}
-          />
-          <AnimatedTab tabKey={staffTab}>
-            {staffTab === 'shifts' ? <MyShifts /> : <AvailabilityEditor />}
-          </AnimatedTab>
-        </>
-      )}
+      ) : <MyShifts />}
     </ScrollView>
   );
 }

@@ -75,7 +75,7 @@ type FloorTableRow = {
 type FloorChair = { _id: string; x: number; y: number; rotation: number; label: string | null };
 
 type FloorData = {
-  floorPlan: { name: string };
+  floorPlan: { name: string; width: number; height: number };
   tables: FloorTableRow[];
   chairs?: FloorChair[];
 };
@@ -164,7 +164,7 @@ function FloorScreen() {
   const waitlistQueue = openWaitlist ?? [];
 
   const mergeableTables = useMemo(
-    () => (activeFloor?.tables ?? []).filter((t: FloorTableRow) => !t.state || t.state.status === 'available' || t.state.status === 'dirty'),
+    () => (activeFloor?.tables ?? []).filter((t: FloorTableRow) => !t.state || t.state.status === 'available' || t.state.status === 'dirty' || t.state.status === 'seated'),
     [activeFloor],
   );
   const mergeGroups = useMemo(() => {
@@ -222,7 +222,10 @@ function FloorScreen() {
   const nextParty = reservationQueue[0] ?? waitlistQueue[0] ?? null;
   const recommendedForNext = useMemo(() => {
     if (!nextParty) return [];
-    return mergeableTables.filter((item) => item.table.seats >= nextParty.partySize).sort((a, b) => (a.table.seats - nextParty.partySize) - (b.table.seats - nextParty.partySize)).slice(0, 3);
+    return mergeableTables
+      .filter((item) => (item.state?.status ?? 'available') === 'available' && item.activeAssignments.length === 0 && !item.nextAssignment && item.table.seats >= nextParty.partySize)
+      .sort((a, b) => (a.table.seats - nextParty.partySize) - (b.table.seats - nextParty.partySize))
+      .slice(0, 3);
   }, [mergeableTables, nextParty]);
 
   const onRelease = async (assignmentId: string) => {
@@ -393,7 +396,7 @@ function FloorScreen() {
                 </Button>
               ) : null}
             </View>
-            <View
+            <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: activeFloor.floorPlan.width }}
               style={{
                 height: 560,
                 borderRadius: radius.soft,
@@ -401,9 +404,10 @@ function FloorScreen() {
                 borderWidth: 1,
                 borderColor: '#2C241D',
                 overflow: 'hidden',
-                position: 'relative',
               }}
             >
+              <ScrollView nestedScrollEnabled showsVerticalScrollIndicator contentContainerStyle={{ minHeight: activeFloor.floorPlan.height }}>
+              <View style={{ width: activeFloor.floorPlan.width, height: activeFloor.floorPlan.height, minHeight: 560, position: 'relative' }}>
               {filteredTables.map(({ table, state, activeAssignments, nextAssignment }: FloorTableRow) => {
                 const status = state?.status ?? 'available';
                 const isSelected = selected?.table._id === table._id;
@@ -488,7 +492,9 @@ function FloorScreen() {
                   ) : null}
                 </View>
               ))}
-            </View>
+              </View>
+              </ScrollView>
+            </ScrollView>
           </Card.Content>
         </Card>
       )}
@@ -622,7 +628,6 @@ function FloorScreen() {
         </Card>
       ) : null}
 
-      {canEdit && waitlistQueue.length > 0 ? null : null}
     </ScrollView>
   );
 }

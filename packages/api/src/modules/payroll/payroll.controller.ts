@@ -9,7 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell } from '../../common/csv';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -141,7 +141,7 @@ export class PayrollController {
   constructor(private readonly prisma: PrismaService) {}
 
   private requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
-    if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+    if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
   }
 
   @RequireSubscription('paid')

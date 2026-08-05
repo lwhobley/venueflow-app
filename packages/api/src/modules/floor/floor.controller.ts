@@ -20,7 +20,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -164,6 +164,19 @@ class AssignReservationDto {
   @IsArray()
   @IsString({ each: true })
   tableIds!: string[];
+
+  @IsString()
+  @IsIn(HOLD_TYPES)
+  @IsOptional()
+  holdType?: string;
+
+  @IsNumber()
+  @IsOptional()
+  startsAt?: number;
+
+  @IsNumber()
+  @IsOptional()
+  endsAt?: number;
 }
 
 class AssignWaitlistDto {
@@ -200,7 +213,7 @@ class MergeTablesDto {
 }
 
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
-  if (!scope || !isAdminRole(scope.role)) throw new ForbiddenException('Not authorized');
+  if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
 }
 
 @Controller('v1/floor')
@@ -295,7 +308,7 @@ export class FloorController {
   @Post('assign-reservation')
   async assignReservationToTables(@VenueScope() scope: Scope, @Body() body: AssignReservationDto) {
     requireManager(scope);
-    return this.floor.assignReservationToTables(scope.venueId, body.reservationId, body.tableIds);
+    return this.floor.assignReservationToTables(scope.venueId, body.reservationId, body.tableIds, body);
   }
 
   @RequireSubscription('active')

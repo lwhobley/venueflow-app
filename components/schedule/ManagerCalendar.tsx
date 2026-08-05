@@ -325,20 +325,22 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
       return;
     }
     if (panelMode === 'edit' && selectedShift) {
-      await updateShift({
-        venueId,
-        shiftId: selectedShift._id,
-        dayIndex: day,
-        startMinutes,
-        endMinutes,
-        jobTitle: jobTitle.trim() || 'Staff',
-        station: station.trim() || 'Floor',
-        notes: notes.trim() || undefined,
+      await safe(async () => {
+        await updateShift({
+          venueId,
+          shiftId: selectedShift._id,
+          dayIndex: day,
+          startMinutes,
+          endMinutes,
+          jobTitle: jobTitle.trim() || 'Staff',
+          station: station.trim() || 'Floor',
+          notes: notes.trim() || undefined,
+        });
+        markEdited();
+        flash('Shift updated.');
+        setShowEditor(false);
+        setSelectedShiftId(null);
       });
-      markEdited();
-      flash('Shift updated.');
-      setShowEditor(false);
-      setSelectedShiftId(null);
       return;
     }
     await safe(async () => {

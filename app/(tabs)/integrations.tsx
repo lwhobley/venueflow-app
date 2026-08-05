@@ -216,6 +216,12 @@ function IntegrationsScreenInner() {
           <Button mode="contained" buttonColor={colors.primary} loading={pending === 'leads'} disabled={pending !== null} onPress={() => void generateLeadsSecret()}>
             {t('integrations.leads.generate')}
           </Button>
+          <InlineMessage message={message} />
+          {newSecret ? (
+            <Text selectable style={{ fontFamily: 'monospace', color: colors.charcoal, backgroundColor: colors.surfaceSoft, padding: spacing.sm, borderRadius: radius.sharp }}>
+              {newSecret}
+            </Text>
+          ) : null}
         </Card.Content>
       </Card>
 

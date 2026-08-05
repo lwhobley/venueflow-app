@@ -833,7 +833,7 @@ export default function BarStockScreen() {
                   </Chip>
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordInventoryMovement(item._id, 'count', item.onHand)}>{t('barStock.list.count')}</Button>
+                  <Button compact mode="outlined" textColor={colors.primary} onPress={() => { setCountMode(true); setCountIndex(Math.max(0, countItems.findIndex((row) => row._id === item._id))); setCountValue(String(item.onHand)); setMessage(null); }}>{t('barStock.list.count')}</Button>
                   <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordInventoryMovement(item._id, 'received', 1)}>{t('barStock.list.plusOne')}</Button>
                   <Button compact mode="outlined" textColor={colors.primary} onPress={() => void recordInventoryMovement(item._id, 'waste', -1)}>{t('barStock.list.minusOne')}</Button>
                   <Button compact mode="outlined" textColor={colors.muted} onPress={() => setHistoryItemId(historyItemId === item._id ? null : item._id)}>

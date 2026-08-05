@@ -183,7 +183,7 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         status: 'new',
         tags: splitTags(leadTags),
         estimatedValueCents: dollarsToCents(leadValue),
-        marketingOptIn: true,
+        marketingOptIn: false,
       });
       setSelectedLeadId(leadId);
       setShowLeadForm(false);

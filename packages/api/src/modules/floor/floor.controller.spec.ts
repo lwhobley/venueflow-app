@@ -205,7 +205,7 @@ describe('FloorController', () => {
     it('assigns a reservation to tables', async () => {
       const { controller, floor } = makeController();
       await controller.assignReservationToTables(managerScope, { reservationId: 'res-1', tableIds: ['t1'] } as any);
-      expect(floor.assignReservationToTables).toHaveBeenCalledWith('venue-1', 'res-1', ['t1']);
+      expect(floor.assignReservationToTables).toHaveBeenCalledWith('venue-1', 'res-1', ['t1'], expect.objectContaining({ reservationId: 'res-1' }));
     });
 
     it('assigns a waitlist entry to tables', async () => {

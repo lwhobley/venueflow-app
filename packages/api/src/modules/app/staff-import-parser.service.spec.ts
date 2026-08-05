@@ -3,12 +3,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { StaffImportParserService } from './staff-import-parser.service';
 
 describe('StaffImportParserService', () => {
-  const originalApiKey = process.env.OPENAI_API_KEY;
-  const originalAiApiKey = process.env.AI_API_KEY;
+  const originalGeminiApiKey = process.env.GEMINI_API_KEY;
 
   afterEach(() => {
-    process.env.OPENAI_API_KEY = originalApiKey;
-    process.env.AI_API_KEY = originalAiApiKey;
+    process.env.GEMINI_API_KEY = originalGeminiApiKey;
   });
 
   it('normalizes parsed staff rows and drops rows without an email or name', () => {
@@ -47,15 +45,14 @@ describe('StaffImportParserService', () => {
 
   it('validates input before provider calls', async () => {
     const service = new StaffImportParserService();
-    process.env.AI_API_KEY = 'sk-or-test';
+    process.env.GEMINI_API_KEY = 'gemini-test';
     await expect(service.parse('')).rejects.toThrow('Paste a staff list');
     await expect(service.parse('x'.repeat(40_001))).rejects.toThrow('Staff imports are limited');
   });
 
   it('requires an AI key before parsing', async () => {
     const service = new StaffImportParserService();
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.AI_API_KEY;
-    await expect(service.parse('Alex Morgan, alex@example.com, Bartender')).rejects.toThrow('AI_API_KEY');
+    delete process.env.GEMINI_API_KEY;
+    await expect(service.parse('Alex Morgan, alex@example.com, Bartender')).rejects.toThrow('GEMINI_API_KEY');
   });
 });

@@ -699,7 +699,9 @@ export class OperationsController {
   @Post('command-center/events/:eventId/incidents')
   async createExecutionIncident(@CurrentUser() user: AuthUser, @Param('eventId') eventId: string, @Body() body: CreateExecutionIncidentDto) {
     const profile = await this.requireManagerProfile(user);
-    const workspace = await this.prisma.eventExecutionWorkspace.findFirst({ where: { venueId: profile.venueId!, id: eventId } });
+    const source = await this.getExecutionSource(profile.venueId!, eventId);
+    if (!source) throw new NotFoundException('Event not found');
+    const workspace = await this.prisma.eventExecutionWorkspace.findFirst({ where: { venueId: profile.venueId!, sourceType: source.input.sourceType, sourceId: source.input.sourceId } });
     if (!workspace) throw new NotFoundException('Execution workspace not found');
     const title = body.title.trim();
     if (!title) throw new BadRequestException('Incident title is required');

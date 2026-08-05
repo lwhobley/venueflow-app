@@ -10,6 +10,11 @@ RUN npm run build -w @venue-wrangler/api
 
 FROM node:20-bookworm-slim AS runtime
 
+# Prisma requires OpenSSL at runtime for the native query engine.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 ENV PORT=8080
 WORKDIR /app
@@ -22,4 +27,4 @@ COPY --from=build /app/packages/api/prisma packages/api/prisma
 
 USER node
 EXPOSE 8080
-CMD ["node", "packages/api/dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema packages/api/prisma/schema.prisma && exec node packages/api/dist/main.js"]

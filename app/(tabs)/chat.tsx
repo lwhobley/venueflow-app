@@ -168,7 +168,9 @@ export default function ChatScreen() {
     setError(null);
     try {
       const result = await openDm({ venueId: venue.id, targetProfileId: otherId as Id<'profiles'> });
-      router.push(`/chat/${result?.conversationId ?? result}`);
+      const conversationId = result?.conversationId ?? result;
+      if (!conversationId) throw new Error(t('chat.errorOpenDm'));
+      router.push(`/chat/${conversationId}`);
     } catch (e) {
       setError(errorMessage(e, t('chat.errorOpenDm')));
     }
@@ -180,9 +182,11 @@ export default function ChatScreen() {
     setError(null);
     try {
       const result = await createGroup({ venueId: venue.id, name: groupName.trim() });
+      const conversationId = result?.conversationId ?? result;
+      if (!conversationId) throw new Error(t('chat.errorCreateGroup'));
       setGroupName('');
       setShowNewGroup(false);
-      router.push(`/chat/${result?.conversationId ?? result}`);
+      router.push(`/chat/${conversationId}`);
     } catch (e) {
       setError(errorMessage(e, t('chat.errorCreateGroup')));
     } finally {

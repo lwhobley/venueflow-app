@@ -26,7 +26,7 @@ function guestSummary(event: DailyBriefEvent) {
 }
 
 function lowStockSummary(count: number) {
-  return count === 1 ? '1 low-stock item is low' : `${count} low-stock items are low`;
+  return count === 1 ? '1 low-stock item needs attention' : `${count} low-stock items need attention`;
 }
 
 function eightySixSummary(count: number) {
