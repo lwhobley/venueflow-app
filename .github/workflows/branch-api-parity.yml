@@ -1,7 +1,7 @@
 name: Branch API Parity Check
 
-# packages/api is meant to be identical between `main` (deployed to Railway)
-# and `desktop-web` (deployed to Cloudflare Pages, but sharing the same
+# packages/api is meant to be identical between `main` (deployed to Cloud
+# Run) and `desktop-web` (deployed to Cloudflare Pages, but sharing the same
 # backend source so EAS/mobile builds taken from that branch stay correct).
 # A real production bug (floor module routes + response shapes) shipped
 # because a fix landed on desktop-web and was never ported to main — this
@@ -17,6 +17,9 @@ on:
   schedule:
     - cron: '0 13 * * *'
   workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   check-parity:

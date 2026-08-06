@@ -493,6 +493,9 @@ model Availability {
   venue        Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
   profile      Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
+  // One availability row per profile per day per week — the app upserts per
+  // day, so this turns retry/race duplicates into a constraint violation.
+  @@unique([profileId, weekStart, dayIndex])
   @@index([profileId])
   @@index([venueId])
   @@index([profileId, weekStart])
@@ -634,7 +637,10 @@ model NotificationEvent {
   body      String
   createdAt DateTime           @default(now())
   venue     Venue              @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  profile   Profile?           @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  // SetNull (not Cascade): deleting a profile must not erase venue-wide
+  // notification history already delivered to other staff — mirrors
+  // Message.senderId.
+  profile   Profile?           @relation(fields: [profileId], references: [id], onDelete: SetNull)
   reads     NotificationRead[]
 
   @@index([venueId, createdAt])
@@ -900,6 +906,8 @@ model FloorTable {
   height           Float
   rotation         Float
   section          TableSection
+  // Whole cents (25000 = $250.00), matching the *Cents convention used
+  // everywhere else; the field name predates that convention.
   minSpend         Int
   isReservable     Boolean
   floorPlan        FloorPlan           @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
@@ -1717,6 +1725,9 @@ model Invite {
   createdAt DateTime @default(now())
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  // NOTE: a partial SQL-only index (Invite_phone_idx) exists on top of this
+  // schema. Prisma can't represent partial indexes; if `prisma migrate dev`
+  // ever generates a DROP for it, delete that statement before applying.
   @@index([email])
   @@index([venueId])
 }
@@ -1736,6 +1747,12 @@ model WorkplaceJoinRequest {
   decidedBy    User?                       @relation("WorkplaceJoinRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
   events       WorkplaceJoinRequestEvent[]
 
+  // NOTE: a partial SQL-only unique index
+  // (WorkplaceJoinRequest_one_pending_per_user_venue_idx, WHERE status =
+  // 'pending') exists on top of this schema. Prisma can't represent partial
+  // indexes; if `prisma migrate dev` ever generates a DROP for it, delete
+  // that statement before applying — dropping it re-opens duplicate pending
+  // request races.
   @@index([venueId])
   @@index([userId])
   @@index([status])

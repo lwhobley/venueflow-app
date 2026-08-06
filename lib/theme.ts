@@ -37,6 +37,8 @@ export const designPalettes = {
     cream: '#283B2D',
     glow: '#283B2D',
     shadow: '#000000',
+    // Text/icons drawn on top of `primary` fills (light-green in dark mode).
+    buttonText: '#172019',
   },
   light: {
     mode: 'light' as const,
@@ -59,6 +61,8 @@ export const designPalettes = {
     cream: '#EEF5F0',
     glow: '#EEF5F0',
     shadow: '#69736B',
+    // Text/icons drawn on top of `primary` fills (dark-green in light mode).
+    buttonText: '#FFFFFF',
   },
 } as const;
 
@@ -140,6 +144,7 @@ export const fontFamily = {
 export const type = {
   micro: { fontSize: 12, lineHeight: 16, letterSpacing: 0.2 },
   label: { fontSize: 13, lineHeight: 18, letterSpacing: 0.4 },
+  subtitle: { fontSize: 14, lineHeight: 20, letterSpacing: 0.1 },
   body: { fontSize: 15, lineHeight: 22, letterSpacing: 0 },
   bodyLarge: { fontSize: 17, lineHeight: 24, letterSpacing: 0 },
   heading: { fontSize: 20, lineHeight: 26, letterSpacing: -0.2, fontWeight: '700' },

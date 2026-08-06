@@ -74,13 +74,27 @@ afterEach(() => {
 
 describe('ReservationsController', () => {
   describe('ingest webhook', () => {
-    it('applies a per-venue, per-IP rate limit before touching auth', async () => {
+    it('verifies the webhook secret before touching the rate limiter', async () => {
       const { controller, prisma } = makeController();
       prisma.reservationConnection.findFirst.mockResolvedValue(null);
 
       await expect(
         controller.ingest(makeRequest(), 'venue-1', 'secret', { provider: 'opentable', events: [] } as any),
       ).rejects.toThrow(UnauthorizedException);
+
+      // An unauthenticated spray of random venueIds must not churn buckets.
+      expect(assertWithinSharedRateLimit).not.toHaveBeenCalled();
+    });
+
+    it('applies a per-venue, per-IP rate limit once the secret is verified', async () => {
+      const { controller, prisma } = makeController();
+      prisma.reservationConnection.findFirst.mockResolvedValue({
+        id: 'conn-1',
+        status: 'connected',
+        webhookSecret: hashWebhookSecret('secret'),
+      });
+
+      await controller.ingest(makeRequest(), 'venue-1', 'secret', { provider: 'opentable', events: [] } as any);
 
       expect(assertWithinSharedRateLimit).toHaveBeenCalledWith(
         prisma,

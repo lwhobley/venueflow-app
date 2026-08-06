@@ -29,6 +29,9 @@ on:
       - 'vitest.config.ts'
       - '.github/workflows/mobile-ci.yml'
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Typecheck and tests

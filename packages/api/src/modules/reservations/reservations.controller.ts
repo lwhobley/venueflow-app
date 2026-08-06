@@ -241,15 +241,17 @@ export class ReservationsController {
     @Headers('x-webhook-secret') secret: string | undefined,
     @Body() body: ReservationIngestDto,
   ) {
-    await assertWithinSharedRateLimit(this.prisma, `reservation-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     if (body.events.length > MAX_INGEST_EVENTS) {
       throw new BadRequestException(`A single sync request can include at most ${MAX_INGEST_EVENTS} events.`);
     }
     const provider = body.provider as ReservationSource;
+    // Verify the per-connection secret before touching the rate limiter so an
+    // unauthenticated spray of random venueIds can't churn RateLimitBucket rows.
     const connection = await this.prisma.reservationConnection.findFirst({ where: { venueId, provider } });
     if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
     }
+    await assertWithinSharedRateLimit(this.prisma, `reservation-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     if (connection.status !== 'connected') {
       throw new BadRequestException('This reservation integration is not currently connected.');
     }
