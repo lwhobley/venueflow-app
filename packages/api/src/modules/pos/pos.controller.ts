@@ -531,14 +531,13 @@ export class PosController {
       where: {
         venueId,
         provider: body.provider as any,
-        ...(externalLocationId ? { externalLocationId } : {}),
       },
     });
 
-    if (existing) {
-      const freshSecret = existing.webhookSecret ? null : generateWebhookSecret();
+    const updateExisting = async (connection: NonNullable<typeof existing>) => {
+      const freshSecret = connection.webhookSecret ? null : generateWebhookSecret();
       const updated = await this.prisma.posConnection.update({
-        where: { id: existing.id },
+        where: { id: connection.id },
         data: {
           status: body.status as any,
           externalLocationId,
@@ -547,22 +546,33 @@ export class PosController {
         },
       });
       return { ...this.mapConnection(updated), webhookSecret: freshSecret?.secret ?? null };
-    }
+    };
+
+    if (existing) return updateExisting(existing);
 
     const freshSecret = generateWebhookSecret();
-    const created = await this.prisma.posConnection.create({
-      data: {
-        venueId,
-        provider: body.provider as any,
-        externalLocationId,
-        status: body.status as any,
-        webhookSecret: freshSecret.hashedSecret,
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
+    try {
+      const created = await this.prisma.posConnection.create({
+        data: {
+          venueId,
+          provider: body.provider as any,
+          externalLocationId,
+          status: body.status as any,
+          webhookSecret: freshSecret.hashedSecret,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
 
-    return { ...this.mapConnection(created), webhookSecret: freshSecret.secret };
+      return { ...this.mapConnection(created), webhookSecret: freshSecret.secret };
+    } catch (error: any) {
+      if (error?.code !== 'P2002') throw error;
+      const winner = await this.prisma.posConnection.findFirst({
+        where: { venueId, provider: body.provider as any },
+      });
+      if (!winner) throw error;
+      return updateExisting(winner);
+    }
   }
 
   private mapConnection(conn: {

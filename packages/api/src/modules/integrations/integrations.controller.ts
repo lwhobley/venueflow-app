@@ -61,10 +61,10 @@ export class IntegrationsController {
       select: { id: true, webhookSecret: true },
     });
     const mapConnection = ({ id, webhookSecret: _, ...rest }: any) => ({ _id: id, ...rest });
-    if (existing) {
-      const freshSecret = existing.webhookSecret ? null : generateWebhookSecret();
+    const updateExisting = async (connection: NonNullable<typeof existing>) => {
+      const freshSecret = connection.webhookSecret ? null : generateWebhookSecret();
       const row = await this.prisma.reservationConnection.update({
-        where: { id: existing.id },
+        where: { id: connection.id },
         data: {
           externalVenueId: body.externalVenueId ?? null,
           status: body.status,
@@ -72,17 +72,30 @@ export class IntegrationsController {
         },
       });
       return { ...mapConnection(row), webhookSecret: freshSecret?.secret ?? null };
-    }
+    };
+
+    if (existing) return updateExisting(existing);
+
     const freshSecret = generateWebhookSecret();
-    const row = await this.prisma.reservationConnection.create({
-      data: {
-        venueId: scope.venueId,
-        provider: body.provider,
-        externalVenueId: body.externalVenueId ?? null,
-        status: body.status,
-        webhookSecret: freshSecret.hashedSecret,
-      },
-    });
-    return { ...mapConnection(row), webhookSecret: freshSecret.secret };
+    try {
+      const row = await this.prisma.reservationConnection.create({
+        data: {
+          venueId: scope.venueId,
+          provider: body.provider,
+          externalVenueId: body.externalVenueId ?? null,
+          status: body.status,
+          webhookSecret: freshSecret.hashedSecret,
+        },
+      });
+      return { ...mapConnection(row), webhookSecret: freshSecret.secret };
+    } catch (error: any) {
+      if (error?.code !== 'P2002') throw error;
+      const winner = await this.prisma.reservationConnection.findFirst({
+        where: { venueId: scope.venueId, provider: body.provider },
+        select: { id: true, webhookSecret: true },
+      });
+      if (!winner) throw error;
+      return updateExisting(winner);
+    }
   }
 }
