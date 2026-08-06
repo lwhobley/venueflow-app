@@ -113,14 +113,9 @@ export class WorkforceController {
       return this.reportStaleInviteStatus(undefined, phone);
     }
 
-    // The plaintext token is only ever needed for the instant it's embedded
-    // in the outgoing email — it's generated fresh here and never read back
-    // from a previously stored row (Invite.tokenHash is the only thing
-    // persisted), so a rotate happens on every check that has something to
-    // email, not just on first mint. Concurrent checks for the same email
-    // are serialized by the advisory lock below; a later one's rotation
-    // supersedes an earlier one's already-sent link, which is an acceptable
-    // trade-off for never persisting the plaintext.
+    // The plaintext token is only needed when minting a new invite. Existing
+    // links remain valid: rotating their hash here would let anyone who knows
+    // an address invalidate that address's emailed link.
     const freshToken = randomBytes(18).toString('base64url');
     const tokenHash = hashInviteToken(freshToken);
     const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -135,12 +130,7 @@ export class WorkforceController {
       });
 
       if (redeemable) {
-        const rotated = await tx.invite.update({
-          where: { id: redeemable.id },
-          data: { tokenHash, expiresAt: newExpiresAt },
-          include: { venue: { select: { name: true } } },
-        });
-        return { venueName: rotated.venue.name, jobTitle: rotated.jobTitle } as const;
+        return { venueName: redeemable.venue.name, jobTitle: redeemable.jobTitle, emailSent: false } as const;
       }
 
       const unclaimedProfile = await tx.profile.findFirst({
@@ -164,7 +154,7 @@ export class WorkforceController {
         },
         include: { venue: { select: { name: true } } },
       });
-      return { venueName: created.venue.name, jobTitle: created.jobTitle } as const;
+      return { venueName: created.venue.name, jobTitle: created.jobTitle, emailSent: true } as const;
     });
 
     if (!outcome) {
@@ -182,23 +172,25 @@ export class WorkforceController {
     // channel for the enumeration check above) and (b) turn a transient
     // email-provider outage into a 500 that still confirms "found" via the
     // error shape. The invite itself is already durable in the DB, so a
-    // failed send just means the user can retry the check.
-    void this.email
-      .sendOrThrow({
-        to: email,
-        subject: `Create your Venue Wrangler account for ${venueName}`,
-        text:
-          `Your email address has been invited to join ${venueName} on Venue Wrangler as ${outcome.jobTitle}.\n\n` +
-          `Create your account using this secure link:\n${signupUrl}\n\n` +
-          `Create your account with this invited email address and you will automatically join ${venueName}.\n\n` +
-          `This link expires on ${newExpiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
-          `Questions? support@venuewrangler.com\n\n` +
-          `— The Venue Wrangler Team`,
-      })
-      .catch((err: unknown) => {
-        this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    return { status: 'found', emailSent: true };
+    // failed send leaves the newly-created invite available for recovery.
+    if (outcome.emailSent) {
+      void this.email
+        .sendOrThrow({
+          to: email,
+          subject: `Create your Venue Wrangler account for ${venueName}`,
+          text:
+            `Your email address has been invited to join ${venueName} on Venue Wrangler as ${outcome.jobTitle}.\n\n` +
+            `Create your account using this secure link:\n${signupUrl}\n\n` +
+            `Create your account with this invited email address and you will automatically join ${venueName}.\n\n` +
+            `This link expires on ${newExpiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
+            `Questions? support@venuewrangler.com\n\n` +
+            `— The Venue Wrangler Team`,
+        })
+        .catch((err: unknown) => {
+          this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }
+    return { status: 'found', emailSent: outcome.emailSent };
   }
 
   // No redeemable invite and no roster row to fall back to — report the most

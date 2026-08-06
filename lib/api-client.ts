@@ -111,10 +111,15 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     if (response.status === 401 && token) {
       useAuthStore.getState().clearSession();
     }
-    const errorBody = await response.json().catch(async () => {
-      const text = await response.text().catch(() => '');
-      return text ? { message: text } : null;
-    });
+    const errorText = await response.text().catch(() => '');
+    let errorBody: { message?: string | string[] } | null = null;
+    if (errorText) {
+      try {
+        errorBody = JSON.parse(errorText) as { message?: string | string[] };
+      } catch {
+        errorBody = { message: errorText };
+      }
+    }
     const message =
       typeof errorBody?.message === 'string'
         ? errorBody.message

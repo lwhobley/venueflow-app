@@ -61,16 +61,14 @@ describe('VENUE_SCOPED_MODELS drift guard', () => {
 });
 
 describe('shouldScopeOperation', () => {
-  it('scopes filterable reads/writes and creates', () => {
-    for (const op of ['findFirst', 'findMany', 'count', 'aggregate', 'groupBy', 'updateMany', 'deleteMany', 'create', 'createMany']) {
+  it('scopes reads, writes, and creates', () => {
+    for (const op of ['findFirst', 'findMany', 'findUnique', 'findUniqueOrThrow', 'count', 'aggregate', 'groupBy', 'update', 'delete', 'upsert', 'updateMany', 'deleteMany', 'create', 'createMany']) {
       expect(shouldScopeOperation(op)).toBe(true);
     }
   });
 
-  it('does NOT scope unique-keyed operations (handled by call-site guards)', () => {
-    for (const op of ['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert']) {
-      expect(shouldScopeOperation(op)).toBe(false);
-    }
+  it('leaves unknown operations unscoped', () => {
+    expect(shouldScopeOperation('$queryRaw')).toBe(false);
   });
 });
 
@@ -129,9 +127,22 @@ describe('scopeArgs — security invariants', () => {
   });
 });
 
-describe('scopeArgs — pass-through operations', () => {
-  it.each(['findUnique', 'update', 'delete', 'upsert'])('leaves %s where untouched', (op) => {
+describe('scopeArgs — unique-keyed operations', () => {
+  it.each(['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert'])('adds venueId to %s where clauses', (op) => {
     const args = { where: { id: 'abc' }, data: { x: 1 } };
-    expect(scopeArgs(op, args, VENUE)).toEqual(args);
+    expect(scopeArgs(op, args, VENUE)).toEqual({ ...args, where: { id: 'abc', venueId: VENUE } });
+  });
+
+  it('forces the create branch of an upsert into the bound venue', () => {
+    const out = scopeArgs('upsert', {
+      where: { id: 'abc' },
+      create: { name: 'x', venueId: 'other-venue' },
+      update: { name: 'x' },
+    }, VENUE);
+    expect(out).toEqual({
+      where: { id: 'abc', venueId: VENUE },
+      create: { name: 'x', venueId: VENUE },
+      update: { name: 'x' },
+    });
   });
 });

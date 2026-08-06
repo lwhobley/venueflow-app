@@ -16,7 +16,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { Public } from '../../auth/public.decorator';
@@ -70,6 +70,7 @@ class SendMessageDto {
 
 class ReactDto {
   @IsString()
+  @MaxLength(32)
   emoji!: string;
 }
 
@@ -584,7 +585,13 @@ export class ChatController {
       const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
       if (!msg) throw new NotFoundException('Message not found');
 
-      const reactions = { ...(msg.reactions as Record<string, string[]> | null) };
+      const reactions: Record<string, string[]> = Object.assign(
+        Object.create(null),
+        msg.reactions ?? {},
+      );
+      if (!Object.prototype.hasOwnProperty.call(reactions, emoji) && Object.keys(reactions).length >= 20) {
+        throw new BadRequestException('A message can have at most 20 reaction types');
+      }
       let users = reactions[emoji] || [];
       if (users.includes(scope.profileId)) {
         users = users.filter((uid) => uid !== scope.profileId);

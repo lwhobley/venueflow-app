@@ -6,6 +6,58 @@ vi.mock('../common/rate-limit', () => ({
 }));
 
 describe('AuthController email invite signup', () => {
+  it('runs a dummy password verification for an unknown sign-in email', async () => {
+    const verifyPassword = vi.fn().mockResolvedValue(false);
+    const controller = new AuthController(
+      { user: { findUnique: vi.fn().mockResolvedValue(null) } } as any,
+      {} as any,
+      {} as any,
+      { verifyPassword } as any,
+    );
+
+    await expect((controller as any).password(
+      { ip: '127.0.0.1' },
+      { email: 'unknown@example.com', password: 'password123', flow: 'signIn' },
+    )).rejects.toThrow('Invalid email or password.');
+    expect(verifyPassword).toHaveBeenCalledWith(
+      'password123',
+      'not-a-real-user-salt',
+      600_000,
+      expect.any(String),
+    );
+  });
+
+  it('allows a correct password to clear an active lockout', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const verifyPassword = vi.fn().mockResolvedValue(true);
+    const controller = new AuthController(
+      {
+        user: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'user-1',
+            failedSignInCount: 0,
+            lockedUntil: new Date(Date.now() + 60_000),
+            password: { salt: 'salt', iterations: 600_000, passwordHash: 'hash' },
+          }),
+          update,
+        },
+      } as any,
+      {} as any,
+      {} as any,
+      { verifyPassword } as any,
+    );
+    (controller as any).issueSession = vi.fn().mockResolvedValue({ ok: true });
+
+    await expect((controller as any).password(
+      { ip: '127.0.0.1' },
+      { email: 'staff@example.com', password: 'password123', flow: 'signIn' },
+    )).resolves.toEqual({ ok: true });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { failedSignInCount: 0, lockedUntil: null },
+    });
+  });
+
   it('requires terms acceptance for every new account', async () => {
     const controller = new AuthController(
       { user: { findUnique: vi.fn().mockResolvedValue(null) } } as any,
