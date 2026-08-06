@@ -61,3 +61,19 @@ describe('apiRequest cancellation', () => {
     });
   });
 });
+
+describe('apiRequest error bodies', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('preserves a non-JSON error body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Service temporarily unavailable', { status: 503 })));
+
+    await expect(apiRequest('/unavailable')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 503,
+      message: 'Service temporarily unavailable',
+    });
+  });
+});

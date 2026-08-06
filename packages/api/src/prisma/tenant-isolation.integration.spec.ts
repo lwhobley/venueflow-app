@@ -64,6 +64,12 @@ describe('tenant isolation extension (integration)', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('findUnique cannot reach another tenant by id', async () => {
+    const otherTenantItem = await base.barInventoryItem.findFirstOrThrow({ where: { venueId: venueB } });
+    const row = await asTenant(venueA, () => db.barInventoryItem.findUnique({ where: { id: otherTenantItem.id } }));
+    expect(row).toBeNull();
+  });
+
   it('without a tenant context the extension is inert (sees all)', async () => {
     const rows = await db.barInventoryItem.findMany();
     expect(rows.length).toBeGreaterThanOrEqual(2);
