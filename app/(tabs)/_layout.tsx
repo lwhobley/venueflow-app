@@ -45,14 +45,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="home" options={{ title: t('nav.home'), tabBarIcon: icon('view-dashboard') }} />
       <Tabs.Screen name="clock" options={{ title: t('nav.clock'), tabBarIcon: icon('clock-outline') }} />
       <Tabs.Screen name="schedule" options={{ title: t('nav.schedule'), tabBarIcon: icon('calendar-week') }} />
-      <Tabs.Screen
-        name="availability"
-        options={{
-          title: t('nav.availability'),
-          href: null,
-          tabBarIcon: icon('calendar-check'),
-        }}
-      />
       <Tabs.Screen name="floor" options={{ title: t('nav.floor'), tabBarIcon: icon('floor-plan') }} />
       <Tabs.Screen name="reservations" options={{ title: t('nav.reservations'), tabBarIcon: icon('book-clock-outline') }} />
       <Tabs.Screen
