@@ -214,7 +214,7 @@ function AiScheduleBuilder() {
       <Card.Content style={{ gap: spacing.sm }}>
         <Text variant="titleMedium" style={{ fontWeight: '700' }}>AI schedule builder</Text>
         <Text style={{ color: colors.muted, fontSize: 12 }}>
-          Generates new shifts to close the demand gap above, respecting availability and the labor budget.
+          Generates new shifts to close the demand gap above, respecting approved unavailable days and the labor budget.
         </Text>
         <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void onGenerate()}>
           Generate AI draft

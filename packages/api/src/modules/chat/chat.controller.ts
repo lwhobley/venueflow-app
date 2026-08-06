@@ -22,6 +22,7 @@ import { RequireSubscription } from '../../billing/require-subscription.decorato
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
+import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -118,13 +119,17 @@ export class ChatController {
   }
 
   async ensureContextualConversations(venueId: string) {
+    const venue = this.prisma.venue?.findUnique
+      ? await this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } })
+      : null;
+    const weekStart = venue ? weekStartFor(todayInZone(venue.timezone)) : undefined;
     const [profiles, allShifts, existingConvs] = await Promise.all([
       this.prisma.profile.findMany({
         where: { venueId },
         select: { id: true, jobTitle: true, role: true, allAccess: true },
       }),
       this.prisma.scheduleShift.findMany({
-        where: { venueId },
+        where: { venueId, ...(weekStart ? { weekStart } : {}) },
         select: { profileId: true, dayIndex: true },
       }),
       this.prisma.conversation.findMany({

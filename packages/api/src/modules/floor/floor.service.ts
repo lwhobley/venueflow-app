@@ -97,6 +97,7 @@ export class FloorService {
             label: table.label,
             shape: table.shape,
             seats: table.seats,
+            seatLabelStyle: table.seatLabelStyle ?? null,
             x: table.x,
             y: table.y,
             width: table.width,
@@ -391,6 +392,9 @@ export class FloorService {
       where: { venueId, tableId: { in: tableIds } },
     });
     if (states.length !== tableIds.length) throw new BadRequestException('One or more tables are missing live state');
+    if (states.some((state) => state.mergeGroupId)) {
+      throw new ConflictException('Split already-merged tables before creating a new merge');
+    }
     const seatedStates = states.filter((state) => state.status === 'seated');
     if (seatedStates.length > 0) {
       const now = new Date();

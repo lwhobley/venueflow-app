@@ -4,7 +4,6 @@ import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
@@ -31,6 +30,7 @@ import {
 } from '../../components/bar-stock/InventoryCards';
 import { InlineMessage } from '../../components/InlineMessage';
 import { SectionHeader } from '../../components/AppCard';
+import { readPickedFileText } from '../../lib/picked-file';
 import {
   INVENTORY_RENDER_BATCH_SIZE,
   inventoryRowsForWindow,
@@ -230,7 +230,7 @@ export default function BarStockScreen() {
     try {
       const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
       if (doc.canceled || !doc.assets[0]?.uri) return;
-      const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
+      const text = await readPickedFileText(doc.assets[0]);
       setParseText(text);
       setMessage(t('barStock.messages.loadedForParsing', { name: doc.assets[0].name ?? t('barStock.messages.uploadFallback') }));
     } catch (e) { setMessage(errorMessage(e, t('barStock.messages.errorLoadCsv'))); }

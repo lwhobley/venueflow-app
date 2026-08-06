@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
 import { Button, Card, Chip, Menu, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
@@ -15,6 +14,7 @@ import { errorMessage } from '../../lib/format';
 import type { Role } from '../../lib/types';
 import { SectionHeader } from '../../components/AppCard';
 import { useI18n } from '../../lib/i18n';
+import { readPickedFileText } from '../../lib/picked-file';
 
 type VenueRole = { _id: string; name: string };
 type ParsedStaffImportRow = { fullName: string; email: string; phone?: string; jobTitle: string; role: 'manager' | 'staff' };
@@ -270,7 +270,7 @@ function StaffScreen() {
     try {
       const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
       if (doc.canceled || !doc.assets[0]?.uri) return;
-      const text = await FileSystem.readAsStringAsync(doc.assets[0].uri);
+      const text = await readPickedFileText(doc.assets[0]);
       setImportText(text);
       setImportMsg(t('staff.csvLoaded', { name: doc.assets[0].name ?? 'upload' }));
     } catch (e) {

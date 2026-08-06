@@ -16,6 +16,7 @@ import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
+import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -336,8 +337,10 @@ export class AppController {
     const profile = await this.requireVenueProfile(user);
     if (!profile?.venue) return null;
     const canManage = canManageVenue(profile.role, profile.allAccess);
+    const weekStart = weekStartFor(todayInZone(profile.venue.timezone));
     const shiftWhere = {
       venueId: profile.venueId!,
+      weekStart,
       ...(canManage ? {} : { OR: [{ profileId: profile.id }, { status: 'open' as const }] }),
     };
     // Counts come from aggregates over all matching rows; the display list is
@@ -386,13 +389,14 @@ export class AppController {
     const profile = await this.requireVenueProfile(user);
     if (!profile?.venueId || !canManageVenue(profile.role, profile.allAccess)) return null;
     const venueId = profile.venueId;
+    const weekStart = weekStartFor(todayInZone(profile.venue?.timezone));
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const [completedEntries, scheduledShifts, openRequests] = await Promise.all([
       this.prisma.timeEntry.findMany({
         where: { venueId, isOpen: false, clockOutAt: { gte: weekAgo } },
         select: { clockInAt: true, clockOutAt: true },
       }),
-      this.prisma.scheduleShift.count({ where: { venueId, status: 'scheduled' } }),
+      this.prisma.scheduleShift.count({ where: { venueId, weekStart, status: 'scheduled' } }),
       this.prisma.staffRequest.count({ where: { venueId, status: 'pending' } }),
     ]);
     const laborMs = completedEntries.reduce((sum, e) => sum + (e.clockOutAt!.getTime() - e.clockInAt.getTime()), 0);

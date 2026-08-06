@@ -12,7 +12,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PAY_PERIOD_ANCHOR = '2024-01-07';
 export const DEFAULT_PAY_PERIOD_LENGTH_DAYS = 14;
 // Pay periods are whole weeks (1–4) so period boundaries align to Sunday week
-// boundaries — staff availability is edited and locked a week at a time.
+// boundaries used by payroll and concrete weekly schedules.
 export const MIN_PAY_PERIOD_LENGTH_DAYS = 7;
 export const MAX_PAY_PERIOD_LENGTH_DAYS = 28;
 

@@ -30,11 +30,9 @@ const queryRoutes: Record<string, Route> = {
   'app.getManagerInsights': { path: '/v1/app/manager-insights' },
   'app.exportTimeEntriesCsv': { path: '/v1/app/time-entries/csv' },
   'staffAuth.listVenueRoles': { path: '/v1/app/venue-roles' },
-  'scheduling.getMyAvailability': { path: '/v1/scheduling/availability/me' },
-  'scheduling.getAvailabilitySettings': { path: '/v1/scheduling/availability/settings' },
   'scheduling.listBlackouts': { path: '/v1/scheduling/blackouts' },
-  'scheduling.getManagerSchedule': { path: '/v1/scheduling/manager' },
-  'scheduling.getLaborForecast': { path: '/v1/scheduling/labor-forecast' },
+  'scheduling.getManagerSchedule': { path: (args) => `/v1/scheduling/manager${args?.weekStart ? `?weekStart=${encodeURIComponent(args.weekStart)}` : ''}` },
+  'scheduling.getLaborForecast': { path: (args) => `/v1/scheduling/labor-forecast${args?.weekStart ? `?weekStart=${encodeURIComponent(args.weekStart)}` : ''}` },
   'scheduling.listScheduleMemory': { path: (args) => `/v1/scheduling/memory${args?.limit ? `?limit=${args.limit}` : ''}` },
   'scheduling.previewAutoSchedule': { path: (args) => `/v1/scheduling/auto-schedule/preview?weekStartDate=${encodeURIComponent(args.weekStartDate ?? '')}` },
   'scheduling.listScheduleTemplates': { path: '/v1/scheduling/templates' },
@@ -175,7 +173,8 @@ const mutationRoutes: Record<string, Route> = {
     method: 'POST',
     // Strip the preview-only display fields (dayLabel, startTime, endTime,
     // reason, memberName) — the API's ValidationPipe rejects unknown properties.
-    body: ({ shifts }) => ({
+    body: ({ shifts, weekStartDate }) => ({
+      weekStartDate,
       shifts: (shifts ?? []).map((s: any) => ({
         dayIndex: s.dayIndex,
         startMinutes: s.startMinutes,
@@ -263,18 +262,6 @@ const mutationRoutes: Record<string, Route> = {
     body: ({ status, responseNotes }) => ({ status, responseNotes }),
     invalidate: [['app', 'listStaffRequests'], ['staffRequests', 'list']],
   },
-  'scheduling.setMyAvailability': {
-    path: '/v1/scheduling/availability/me',
-    method: 'POST',
-    body: (args) => ({ weekStart: args.weekStart, rows: args.rows ?? args.availability ?? [] }),
-    invalidate: [['scheduling', 'getMyAvailability'], ['scheduling', 'getManagerSchedule']],
-  },
-  'scheduling.updateAvailabilitySettings': {
-    path: '/v1/scheduling/availability/settings',
-    method: 'PATCH',
-    body: ({ anchor, lengthDays, availabilityUnlocked }) => ({ anchor, lengthDays, availabilityUnlocked }),
-    invalidate: [['scheduling', 'getAvailabilitySettings'], ['scheduling', 'getMyAvailability'], ['scheduling', 'getManagerSchedule']],
-  },
   'scheduling.addBlackout': {
     path: '/v1/scheduling/blackouts',
     method: 'POST',
@@ -315,7 +302,7 @@ const mutationRoutes: Record<string, Route> = {
     method: 'DELETE',
     invalidate: scheduleInvalidations(),
   },
-  'scheduling.publishSchedule': { path: '/v1/scheduling/publish', method: 'POST', body: () => ({}), invalidate: scheduleInvalidations() },
+  'scheduling.publishSchedule': { path: '/v1/scheduling/publish', method: 'POST', body: ({ weekStart }) => ({ weekStart }), invalidate: scheduleInvalidations() },
   'scheduling.setLaborBudget': {
     path: '/v1/scheduling/labor-budget',
     method: 'PATCH',
@@ -325,13 +312,13 @@ const mutationRoutes: Record<string, Route> = {
   'scheduling.saveScheduleTemplate': {
     path: '/v1/scheduling/templates',
     method: 'POST',
-    body: ({ name }) => ({ name }),
+    body: ({ name, weekStart }) => ({ name, weekStart }),
     invalidate: [['scheduling', 'listScheduleTemplates']],
   },
   'scheduling.applyScheduleTemplate': {
     path: (args) => `/v1/scheduling/templates/${args.templateId ?? args.id}/apply`,
     method: 'POST',
-    body: ({ replace }) => ({ replace }),
+    body: ({ replace, weekStart }) => ({ replace, weekStart }),
     invalidate: scheduleInvalidations(),
   },
   'scheduling.deleteScheduleTemplate': {
@@ -340,8 +327,8 @@ const mutationRoutes: Record<string, Route> = {
     invalidate: [['scheduling', 'listScheduleTemplates']],
   },
   'scheduling.copyDayShifts': { path: '/v1/scheduling/copy-day', method: 'POST', body: stripVenue, invalidate: scheduleInvalidations() },
-  'scheduling.clearWeek': { path: '/v1/scheduling/clear-week', method: 'POST', body: () => ({}), invalidate: scheduleInvalidations() },
-  'scheduling.restoreShifts': { path: '/v1/scheduling/restore-shifts', method: 'POST', body: ({ shifts }) => ({ shifts }), invalidate: scheduleInvalidations() },
+  'scheduling.clearWeek': { path: '/v1/scheduling/clear-week', method: 'POST', body: ({ weekStart }) => ({ weekStart }), invalidate: scheduleInvalidations() },
+  'scheduling.restoreShifts': { path: '/v1/scheduling/restore-shifts', method: 'POST', body: ({ shifts, weekStart }) => ({ shifts, weekStart }), invalidate: scheduleInvalidations() },
   'scheduling.addScheduleMemoryNote': {
     path: '/v1/scheduling/memory',
     method: 'POST',

@@ -271,7 +271,7 @@ export class AuthController {
           `📅 Event Sales Inbox\n` +
           `Receive, qualify, and respond to event inquiries directly in the app. Track leads from first contact through proposal, booking, and confirmation — no more lost emails or missed opportunities.\n\n` +
           `🗓️ Staff Scheduling\n` +
-          `Build and publish staff schedules with ease. Manage employee availability, approve or deny time-off requests, handle open shift postings, and process shift swaps — all in one workflow modeled for speed and clarity.\n\n` +
+          `Build and publish staff schedules with ease. Approve or deny unavailable-day requests, handle open shift postings, and process shift swaps — all in one workflow modeled for speed and clarity.\n\n` +
           `👥 Team Management\n` +
           `Add and manage your entire staff roster. Assign roles (admin, manager, staff), control what each member can see and do, and keep your org structure clean as your team grows.\n\n` +
           `⏱️ Clock In / Clock Out & Timekeeping\n` +
@@ -296,9 +296,7 @@ export class AuthController {
           `Welcome to Venue Wrangler! Your manager has added you to the team. This is the app your venue uses to manage schedules, shifts, and day-to-day operations. Here's how to get the most out of it:\n\n` +
           `📆 View Your Schedule\n` +
           `See your upcoming shifts at any time, right from the app. Your schedule is updated in real time — the moment your manager publishes or makes changes, you'll see it instantly.\n\n` +
-          `✅ Set Your Availability\n` +
-          `Let your manager know when you're available to work. Submit your weekly or recurring availability so schedules are built around your life — not the other way around.\n\n` +
-          `🏖️ Request Time Off\n` +
+          `🏖️ Request Unavailable Days\n` +
           `Need a day off? Submit a time-off request directly through the app. You'll get notified as soon as your manager reviews it — no chasing anyone down.\n\n` +
           `🔄 Shift Swaps & Open Shifts\n` +
           `Life happens. If you need to swap a shift with a coworker or pick up extra hours, you can request swaps and claim open shifts — all subject to manager approval.\n\n` +
@@ -311,7 +309,7 @@ export class AuthController {
           `Getting started is simple:\n\n` +
           `Download Venue Wrangler from the App Store or Google Play\n\n` +
           `Sign in with the email your manager used to add you\n\n` +
-          `Set up your availability and you're ready to go\n\n` +
+          `Review your schedule and submit any unavailable-day requests\n\n` +
           `Questions? Ask your manager or reach us at support@venuewrangler.com\n\n` +
           `We're glad you're here. 👋\n\n` +
           `— The Venue Wrangler Team`,

@@ -36,7 +36,7 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
 
-const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'availability', 'shift_swap', 'open_shift', 'sick_leave', 'time_correction', 'other'];
+const REQUEST_KINDS = ['add_shift', 'drop_shift', 'time_off', 'shift_swap', 'open_shift', 'sick_leave', 'time_correction', 'other'];
 const REVIEW_STATUSES = ['approved', 'denied', 'cancelled'];
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const HOURS_PER_DAY = 8.0;
@@ -333,10 +333,34 @@ export class StaffRequestsController {
           WHERE id = ${request.profileId}`;
       }
       
-      // PTO/sick: deduct balances above, but do NOT auto-unassign ScheduleShift
-      // rows. Shifts are weekly templates keyed only by dayIndex (no week/date),
-      // so opening by weekday would clear every matching day forever. Managers
-      // adjust the affected week's schedule manually after approval.
+      // Approved unavailable days are the only availability source. Release any
+      // concrete dated shifts in the approved range so the open-shift board and
+      // staffing totals update immediately.
+      if ((request.kind === 'time_off' || request.kind === 'sick_leave') && tx.scheduleShift?.findMany) {
+        const unavailableStart = request.requestedRangeStart || request.requestedForDate;
+        const unavailableEnd = request.requestedRangeEnd || request.requestedForDate || unavailableStart;
+        if (unavailableStart && unavailableEnd) {
+          const assignedShifts = await tx.scheduleShift.findMany({
+            where: { venueId: request.venueId, profileId: request.profileId },
+            select: { id: true, weekStart: true, dayIndex: true },
+          });
+          const affectedIds = assignedShifts
+            .filter((shift) => {
+              if (!shift.weekStart) return false;
+              const date = new Date(`${shift.weekStart}T00:00:00.000Z`);
+              date.setUTCDate(date.getUTCDate() + shift.dayIndex);
+              const iso = date.toISOString().slice(0, 10);
+              return iso >= unavailableStart && iso <= unavailableEnd;
+            })
+            .map((shift) => shift.id);
+          if (affectedIds.length > 0) {
+            await tx.scheduleShift.updateMany({
+              where: { id: { in: affectedIds } },
+              data: { profileId: null, status: 'open' },
+            });
+          }
+        }
+      }
 
       if (request.kind === 'time_correction') {
         const correction = (request.availability as any) || {};

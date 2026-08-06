@@ -104,11 +104,11 @@ export const en = {
         summary: 'Build the week, publish shifts, and handle swap requests.',
         steps: JSON.stringify([
           'Open the Schedule tab and build shifts for the week — copy a previous day or apply a template to speed this up.',
-          "On the Forecast tab, tap Generate AI draft to have shifts proposed automatically from demand (covers, private events) and staff availability — review each proposed shift, remove any you don't want, then create the rest in one batch.",
+          "On the Forecast tab, tap Generate AI draft to have shifts proposed automatically from demand (covers, private events) while respecting approved unavailable-day requests — review each proposed shift, remove any you don't want, then create the rest in one batch.",
           'The Forecast tab also flags predictive compliance risks before you publish: staff approaching or over 40h, long shifts (6h+) that need a break, and "clopening" pairs — closing one day and opening the next with too little rest.',
           'Publish the schedule when it is ready so staff can see their shifts and get notified.',
           'Open Shift swaps to review swap requests staff have submitted between each other.',
-          'Use the Request review queue to approve or deny availability changes and other schedule requests before they take effect.',
+          'Use the Request review queue to approve or deny unavailable-day and other schedule requests before they take effect.',
         ]),
       },
       availability: {
@@ -181,7 +181,7 @@ export const en = {
         summary: "Venue-scoped messaging so shift changes and updates don't get lost in a personal group text.",
         steps: JSON.stringify([
           'Open Chat to message the team or a specific person — every conversation is scoped to your venue.',
-          "Use chat for shift-day coordination; formal requests (swaps, time off, availability changes) still go through Schedule and Availability so they're tracked.",
+          "Use chat for shift-day coordination; formal requests (swaps, time off, and unavailable days) go through Schedule so they're tracked.",
         ]),
       },
       'bar-stock': {
@@ -252,7 +252,7 @@ export const en = {
           'Open Profile to see your account details and sign out.',
           "Managers and admins: open Venue location & geofence to set the venue's address and the radius staff must be inside to clock in.",
           "Open Billing to view or manage the venue's subscription.",
-          'Account deletion permanently removes your account, profile, and availability — assigned shifts are released back to the venue first.',
+          'Account deletion permanently removes your account, profile, and unavailable-day requests — assigned shifts are released back to the venue first.',
         ]),
       },
     },

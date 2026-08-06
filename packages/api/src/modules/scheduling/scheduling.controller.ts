@@ -12,7 +12,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Availability, Prisma, ShiftStatus } from '@prisma/client';
+import { Prisma, ShiftStatus } from '@prisma/client';
 import { Type, plainToInstance } from 'class-transformer';
 import {
   IsArray,
@@ -34,14 +34,8 @@ import { dayLabel, minutesToTime } from '../../common/mappers';
 import { ACTIVE_MEMBERSHIP } from '../../common/membership';
 import {
   addDays,
-  DEFAULT_PAY_PERIOD_ANCHOR,
-  DEFAULT_PAY_PERIOD_LENGTH_DAYS,
   isIsoDate,
-  isValidPeriodLength,
-  isWeekLocked,
   todayInZone,
-  upcomingWeeks,
-  weeksToCover,
   weekStartFor,
 } from '../../common/pay-period';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
@@ -62,44 +56,6 @@ const SHIFT_STATUSES = ['scheduled', 'open', 'covered'];
 const SWAP_STATUSES = ['proposed', 'accepted', 'declined', 'approved', 'denied', 'cancelled'];
 const AI_SCHEDULE_RATE_LIMIT_MAX = 20;
 const AI_SCHEDULE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-
-class AvailabilityBlockDto {
-  @IsInt()
-  dayIndex!: number;
-
-  @IsInt()
-  startMinutes!: number;
-
-  @IsInt()
-  endMinutes!: number;
-
-  @IsBoolean()
-  available!: boolean;
-}
-
-class SetAvailabilityDto {
-  @IsString()
-  weekStart!: string;
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => AvailabilityBlockDto)
-  rows!: AvailabilityBlockDto[];
-}
-
-class PayPeriodSettingsDto {
-  @IsString()
-  @IsOptional()
-  anchor?: string;
-
-  @IsInt()
-  @IsOptional()
-  lengthDays?: number;
-
-  @IsBoolean()
-  @IsOptional()
-  availabilityUnlocked?: boolean;
-}
 
 class BlackoutDto {
   @IsString()
@@ -126,6 +82,10 @@ class ScheduleMemoryNoteDto {
 }
 
 class ShiftDto {
+  @IsString()
+  @IsOptional()
+  weekStart?: string;
+
   @IsInt()
   dayIndex!: number;
 
@@ -170,6 +130,10 @@ class LaborBudgetDto {
 class TemplateDto {
   @IsString()
   name!: string;
+
+  @IsString()
+  @IsOptional()
+  weekStart?: string;
 }
 
 class TemplateShiftDto {
@@ -202,9 +166,17 @@ class TemplateShiftDto {
 class ApplyTemplateDto {
   @IsBoolean()
   replace!: boolean;
+
+  @IsString()
+  @IsOptional()
+  weekStart?: string;
 }
 
 class CopyDayDto {
+  @IsString()
+  @IsOptional()
+  weekStart?: string;
+
   @IsInt()
   @Min(0)
   @Max(6)
@@ -226,10 +198,20 @@ class RestoreShiftDto extends ShiftDto {
 }
 
 class RestoreShiftsDto {
+  @IsString()
+  @IsOptional()
+  weekStart?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RestoreShiftDto)
   shifts!: RestoreShiftDto[];
+}
+
+class WeekDto {
+  @IsString()
+  @IsOptional()
+  weekStart?: string;
 }
 
 class AutoScheduleAssignmentDto {
@@ -362,7 +344,7 @@ type TemplateShiftSlot = {
   notes?: string | null;
 };
 
-type AvailabilityWindow = Pick<Availability, 'dayIndex' | 'startMinutes' | 'endMinutes' | 'available'>;
+type AvailabilityWindow = { dayIndex: number; startMinutes: number; endMinutes: number; available: boolean };
 
 function availabilityCovers(rows: AvailabilityWindow[] | undefined, shift: { dayIndex: number; startMinutes: number; endMinutes: number }) {
   const dayRows = (rows ?? []).filter((row) => row.dayIndex === shift.dayIndex);
@@ -387,113 +369,6 @@ export class SchedulingController {
     private readonly assignments: SchedulingAssignmentService,
     private readonly aiScheduler: AiSchedulerService,
   ) {}
-
-  @RequireSubscription()
-  @Get('availability/me')
-  async getMyAvailability(@VenueScope() scope: Scope) {
-    if (!scope) return { payPeriod: { anchor: DEFAULT_PAY_PERIOD_ANCHOR, lengthDays: DEFAULT_PAY_PERIOD_LENGTH_DAYS, unlocked: false }, weeks: [] };
-    const config = await this.payPeriodConfig(scope.venueId);
-    const today = todayInZone(config.timezone);
-    const weekStarts = upcomingWeeks(today, weeksToCover(config.lengthDays));
-    const rows = await this.prisma.availability.findMany({
-      where: { profileId: scope.profileId, weekStart: { in: weekStarts } },
-      orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
-    });
-    const byWeek = new Map<string, typeof rows>();
-    for (const row of rows) {
-      const list = byWeek.get(row.weekStart) ?? [];
-      list.push(row);
-      byWeek.set(row.weekStart, list);
-    }
-    return {
-      payPeriod: config,
-      weeks: weekStarts.map((weekStart) => ({
-        weekStart,
-        locked: isWeekLocked({ weekStart, today, anchor: config.anchor, lengthDays: config.lengthDays, unlocked: config.unlocked }),
-        days: (byWeek.get(weekStart) ?? []).map((row) => ({
-          dayIndex: row.dayIndex,
-          startMinutes: row.startMinutes,
-          endMinutes: row.endMinutes,
-          available: row.available,
-        })),
-      })),
-    };
-  }
-
-  @RequireSubscription()
-  @Post('availability/me')
-  async setMyAvailability(@VenueScope() scope: Scope, @Body() body: SetAvailabilityDto) {
-    if (!scope) throw new ForbiddenException('Profile does not belong to a venue');
-    if (!isIsoDate(body.weekStart)) throw new BadRequestException('weekStart must be a YYYY-MM-DD date');
-    const weekStart = weekStartFor(body.weekStart);
-    const config = await this.payPeriodConfig(scope.venueId);
-    const today = todayInZone(config.timezone);
-    if (isWeekLocked({ weekStart, today, anchor: config.anchor, lengthDays: config.lengthDays, unlocked: config.unlocked })) {
-      throw new ForbiddenException('Availability for this week is locked. Ask a manager to unlock availability.');
-    }
-    for (const row of body.rows) {
-      ensureValidShiftWindow(row.dayIndex, row.startMinutes, row.endMinutes);
-    }
-    await this.prisma.$transaction([
-      this.prisma.availability.deleteMany({ where: { profileId: scope.profileId, weekStart } }),
-      ...body.rows.map((row) =>
-        this.prisma.availability.create({
-          data: {
-            venueId: scope.venueId,
-            profileId: scope.profileId,
-            weekStart,
-            dayIndex: row.dayIndex,
-            startMinutes: row.startMinutes,
-            endMinutes: row.endMinutes,
-            available: row.available,
-          },
-        }),
-      ),
-    ]);
-    return { ok: true };
-  }
-
-  @RequireSubscription()
-  @Get('availability/settings')
-  async getAvailabilitySettings(@VenueScope() scope: Scope) {
-    this.requireManager(scope);
-    const config = await this.payPeriodConfig(scope!.venueId);
-    return { anchor: config.anchor, lengthDays: config.lengthDays, availabilityUnlocked: config.unlocked };
-  }
-
-  @RequireSubscription()
-  @Patch('availability/settings')
-  async updateAvailabilitySettings(@VenueScope() scope: Scope, @Body() body: PayPeriodSettingsDto) {
-    this.requireManager(scope);
-    const data: Prisma.VenueUpdateInput = {};
-    if (body.anchor !== undefined) {
-      if (!isIsoDate(body.anchor)) throw new BadRequestException('anchor must be a YYYY-MM-DD date');
-      // Normalize to the Sunday that starts the week so periods align to weeks.
-      data.payPeriodAnchor = weekStartFor(body.anchor);
-    }
-    if (body.lengthDays !== undefined) {
-      if (!isValidPeriodLength(body.lengthDays)) {
-        throw new BadRequestException('Pay period must be a whole number of weeks (7, 14, 21, or 28 days).');
-      }
-      data.payPeriodLengthDays = body.lengthDays;
-    }
-    if (body.availabilityUnlocked !== undefined) data.availabilityUnlocked = body.availabilityUnlocked;
-    await this.prisma.venue.update({ where: { id: scope!.venueId }, data });
-    return { ok: true };
-  }
-
-  private async payPeriodConfig(venueId: string) {
-    const venue = await this.prisma.venue.findUnique({
-      where: { id: venueId },
-      select: { payPeriodAnchor: true, payPeriodLengthDays: true, availabilityUnlocked: true, timezone: true },
-    });
-    return {
-      anchor: venue?.payPeriodAnchor ?? DEFAULT_PAY_PERIOD_ANCHOR,
-      lengthDays: venue?.payPeriodLengthDays ?? DEFAULT_PAY_PERIOD_LENGTH_DAYS,
-      unlocked: venue?.availabilityUnlocked ?? false,
-      timezone: venue?.timezone ?? null,
-    };
-  }
 
   @RequireSubscription()
   @Get('blackouts')
@@ -545,12 +420,13 @@ export class SchedulingController {
 
   @RequireSubscription()
   @Get('manager')
-  async getManagerSchedule(@VenueScope() scope: Scope) {
+  async getManagerSchedule(@VenueScope() scope: Scope, @Query('weekStart') requestedWeekStart?: string) {
     this.requireManager(scope);
-    const [venue, shifts, staff, config] = await Promise.all([
+    const selectedWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, requestedWeekStart);
+    const [venue, shifts, staff] = await Promise.all([
       this.prisma.venue.findUniqueOrThrow({ where: { id: scope!.venueId } }),
       this.prisma.scheduleShift.findMany({
-        where: { venueId: scope!.venueId },
+        where: { venueId: scope!.venueId, weekStart: selectedWeekStart },
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
@@ -558,16 +434,13 @@ export class SchedulingController {
         where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
         orderBy: { fullName: 'asc' },
       }),
-      this.payPeriodConfig(scope!.venueId),
     ]);
-    const today = todayInZone(config.timezone);
-    const currentWeekStart = weekStartFor(today);
-    const approvedUnavailable = await this.unavailableRequests(scope!.venueId, currentWeekStart);
-    const availability = this.unavailableByProfile(approvedUnavailable, currentWeekStart);
+    const approvedUnavailable = await this.unavailableRequests(scope!.venueId, selectedWeekStart);
+    const availability = this.unavailableByProfile(approvedUnavailable, selectedWeekStart);
     const availabilityByProfile = availability;
     const selectedAvailabilityWeekByProfile = new Map<string, string>();
     for (const profileId of availability.keys()) {
-      selectedAvailabilityWeekByProfile.set(profileId, currentWeekStart);
+      selectedAvailabilityWeekByProfile.set(profileId, selectedWeekStart);
     }
     const weeklyMinutes = new Map<string, number>();
     for (const shift of shifts) {
@@ -600,24 +473,25 @@ export class SchedulingController {
       }),
       laborBudgetHours: venue.weeklyLaborBudgetHours ?? null,
       totalScheduledHours: Math.round((totalScheduledMinutes / 60) * 10) / 10,
+      weekStart: selectedWeekStart,
       publishState: schedulePublishState(venue),
     };
   }
 
   @RequireSubscription()
   @Get('labor-forecast')
-  async getLaborForecast(@VenueScope() scope: Scope) {
+  async getLaborForecast(@VenueScope() scope: Scope, @Query('weekStart') requestedWeekStart?: string) {
     this.requireManager(scope);
     const venue = await this.prisma.venue.findUnique({
       where: { id: scope!.venueId },
       select: { timezone: true, weeklyLaborBudgetHours: true },
     });
     const tz = venue?.timezone ?? null;
-    const now = new Date();
-    const weekEnd = new Date(now);
-    weekEnd.setDate(now.getDate() + 7);
+    const selectedWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, requestedWeekStart);
+    const now = new Date(zonedDateBounds(tz, selectedWeekStart).start);
+    const weekEnd = new Date(zonedDateBounds(tz, addDays(selectedWeekStart, 7)).start);
     const [shifts, reservations, venueEvents, profiles] = await Promise.all([
-      this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } }),
+      this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId, weekStart: selectedWeekStart } }),
       this.prisma.reservation.findMany({
         where: {
           venueId: scope!.venueId,
@@ -711,8 +585,10 @@ export class SchedulingController {
   async createShift(@VenueScope() scope: Scope, @Body() body: ShiftDto) {
     this.requireManager(scope);
     ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
+    const weekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart);
     const shift = await this.assignments.createShift({
       venueId: scope!.venueId,
+      weekStart,
       profileId: body.profileId,
       dayIndex: body.dayIndex,
       startMinutes: body.startMinutes,
@@ -838,15 +714,13 @@ export class SchedulingController {
   @Get('me')
   async getMySchedule(@VenueScope() scope: Scope) {
     if (!scope) return { mine: [], open: [], roster: [] };
-    const [shifts, venue] = await Promise.all([
-      this.prisma.scheduleShift.findMany({
-        where: { venueId: scope.venueId },
-        include: { profile: true },
-        orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
-      }),
-      this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } }),
-    ]);
+    const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } });
     const weekStart = weekStartFor(todayInZone(venue?.timezone ?? null));
+    const shifts = await this.prisma.scheduleShift.findMany({
+      where: { venueId: scope.venueId, weekStart },
+      include: { profile: true },
+      orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+    });
     const unavailableByProfile = this.unavailableByProfile(
       await this.unavailableRequests(scope.venueId, weekStart),
       weekStart,
@@ -908,9 +782,10 @@ export class SchedulingController {
 
   @RequireSubscription()
   @Post('publish')
-  async publishSchedule(@VenueScope() scope: Scope) {
+  async publishSchedule(@VenueScope() scope: Scope, @Body() body: WeekDto) {
     this.requireManager(scope);
-    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } });
+    const selectedWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart);
+    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId, weekStart: selectedWeekStart } });
     const assigned = shifts.filter((shift) => shift.profileId).length;
     const open = shifts.filter((shift) => shift.status === 'open').length;
     await this.prisma.venue.update({
@@ -932,8 +807,7 @@ export class SchedulingController {
       select: { timezone: true, name: true },
     });
     const tz = venue?.timezone ?? null;
-    const today = todayInZone(tz);
-    const sunday = weekStartFor(today);
+    const sunday = selectedWeekStart;
     const saturday = addDays(sunday, 6);
 
     const formatDateMD = (dateStr: string) => {
@@ -964,7 +838,7 @@ export class SchedulingController {
         `What Happens Next\n` +
         `Staff are notified via push notification the moment a schedule is published\n` +
         `Shifts are visible to each employee as soon as they open the app\n` +
-        `Availability conflicts, if any, are flagged in your dashboard for review\n\n` +
+        `Approved unavailable-day conflicts, if any, are flagged in your dashboard for review\n\n` +
         `Schedule Summary\n` +
         `Detail\tInfo\n` +
         `Schedule Period\t${periodLabel}\n` +
@@ -1068,7 +942,8 @@ export class SchedulingController {
     this.requireManager(scope);
     const name = body.name.trim();
     if (!name) throw new BadRequestException('Enter a template name');
-    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId } });
+    const weekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart);
+    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId, weekStart } });
     if (shifts.length === 0) throw new BadRequestException('Create at least one shift before saving a template.');
     const row = await this.prisma.scheduleTemplate.create({
       data: {
@@ -1097,6 +972,7 @@ export class SchedulingController {
     if (slots.length === 0) throw new BadRequestException('This template has no shifts to apply.');
     return this.assignments.applyTemplate({
       venueId: scope!.venueId,
+      weekStart: await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart),
       replace: body.replace,
       slots,
     });
@@ -1128,6 +1004,7 @@ export class SchedulingController {
     }
     return this.assignments.copyDayShifts({
       venueId: scope!.venueId,
+      weekStart: await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart),
       fromDay: body.fromDay,
       toDays: [...new Set(body.toDays)],
     });
@@ -1135,10 +1012,11 @@ export class SchedulingController {
 
   @RequireSubscription()
   @Post('clear-week')
-  async clearWeek(@VenueScope() scope: Scope) {
+  async clearWeek(@VenueScope() scope: Scope, @Body() body: WeekDto) {
     this.requireManager(scope);
     return this.assignments.clearWeek({
       venueId: scope!.venueId,
+      weekStart: await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart),
     });
   }
 
@@ -1151,6 +1029,7 @@ export class SchedulingController {
     }
     return this.assignments.restoreShifts({
       venueId: scope!.venueId,
+      weekStart: await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart),
       shifts: body.shifts,
     });
   }
@@ -1162,7 +1041,7 @@ export class SchedulingController {
     const availabilityWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, weekStartDate);
     const [shifts, staff, requests] = await Promise.all([
       this.prisma.scheduleShift.findMany({
-        where: { venueId: scope!.venueId },
+        where: { venueId: scope!.venueId, weekStart: availabilityWeekStart },
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
@@ -1282,7 +1161,7 @@ export class SchedulingController {
     const weekEndDayUtc = new Date(zonedDateBounds(timezone, nextWeekStart).start);
 
     const [shifts, staff, unavailableRequests, reservations, venueEvents, memoryNotes] = await Promise.all([
-      this.prisma.scheduleShift.findMany({ where: { venueId } }),
+      this.prisma.scheduleShift.findMany({ where: { venueId, weekStart: availabilityWeekStart } }),
       this.prisma.profile.findMany({
         where: { venueId, OR: ACTIVE_MEMBERSHIP },
         orderBy: { fullName: 'asc' },
@@ -1360,6 +1239,7 @@ export class SchedulingController {
           : undefined;
         await this.assignments.createShift({
           venueId,
+          weekStart: availabilityWeekStart,
           profileId,
           dayIndex: shift.dayIndex,
           startMinutes: shift.startMinutes,
@@ -1487,17 +1367,8 @@ export class SchedulingController {
       if (!isIsoDate(weekStartDate)) throw new BadRequestException('weekStartDate must be a YYYY-MM-DD date');
       return Promise.resolve(weekStartFor(weekStartDate));
     }
-    return this.payPeriodConfig(venueId).then((config) => weekStartFor(todayInZone(config.timezone)));
-  }
-
-  private groupAvailabilityByProfile(rows: Availability[]) {
-    const byProfile = new Map<string, Availability[]>();
-    for (const row of rows) {
-      const profileRows = byProfile.get(row.profileId) ?? [];
-      profileRows.push(row);
-      byProfile.set(row.profileId, profileRows);
-    }
-    return byProfile;
+    return this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } })
+      .then((venue) => weekStartFor(todayInZone(venue?.timezone ?? null)));
   }
 
   private async unavailableRequests(venueId: string, weekStart: string) {

@@ -9,6 +9,7 @@ import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling } from '../../lib/permissions';
 import { useI18n } from '../../lib/i18n';
+import { appApi } from '../../lib/api-client';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 const MONTHLY_PLAN_LABEL = '$99.99 / month';
@@ -29,6 +30,15 @@ export default function BillingScreen() {
   const trialDaysLeft = inTrial ? Math.max(0, Math.ceil((trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
   const upgradeLabel = inTrial ? t('settingsBilling.upgrade') : t('settingsBilling.subscribe');
   const canEditBilling = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
+
+  const manageSubscription = async () => {
+    if (billing?.platform === 'stripe') {
+      const { url } = await appApi.createStripePortal();
+      await Linking.openURL(url);
+      return;
+    }
+    await Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
+  };
 
   if (me === undefined) {
     return (
@@ -63,7 +73,7 @@ export default function BillingScreen() {
               {upgradeLabel}
             </Button>
           ) : null}
-          <Button mode="outlined" textColor={colors.primary} onPress={() => void Linking.openURL(APPLE_SUBSCRIPTIONS_URL)}>
+          <Button mode="outlined" textColor={colors.primary} onPress={() => void manageSubscription()}>
             {t('settingsBilling.manageSubscription')}
           </Button>
           <Button mode="text" textColor={colors.primary} onPress={() => router.push('/(tabs)/profile')}>

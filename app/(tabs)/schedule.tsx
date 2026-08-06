@@ -19,7 +19,7 @@ import { LaborForecastPanel } from '../../components/schedule/LaborForecastPanel
 type StaffRequest = {
   _id: string;
   title: string;
-  kind: 'add_shift' | 'drop_shift' | 'time_off' | 'availability';
+  kind: 'add_shift' | 'drop_shift' | 'time_off' | 'sick_leave' | 'other';
   status: 'pending' | 'approved' | 'denied' | 'cancelled';
   details: string;
 };

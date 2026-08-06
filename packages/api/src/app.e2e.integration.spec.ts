@@ -101,7 +101,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     it('returns 402 for a venue without an active subscription', async () => {
       const token = signTestToken(jwt, { sub: unsubscribedSession!.userId, sid: unsubscribedSession!.sid });
       await request(app.getHttpServer())
-        .get('/api/v1/scheduling/availability/me')
+        .get('/api/v1/scheduling/me')
         .set('Authorization', `Bearer ${token}`)
         .expect(402);
     });
@@ -109,7 +109,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     it('allows the same route for a venue with an active subscription', async () => {
       const token = signTestToken(jwt, { sub: subscribedSession!.userId, sid: subscribedSession!.sid });
       await request(app.getHttpServer())
-        .get('/api/v1/scheduling/availability/me')
+        .get('/api/v1/scheduling/me')
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
     });

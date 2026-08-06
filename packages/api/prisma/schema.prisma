@@ -412,6 +412,8 @@ model ScheduleShift {
   id           String      @id @default(cuid())
   venueId      String
   profileId    String?
+  // Sunday (YYYY-MM-DD) of the concrete calendar week this shift belongs to.
+  weekStart    String?
   dayIndex     Int
   startMinutes Int
   endMinutes   Int
@@ -429,7 +431,8 @@ model ScheduleShift {
 
   @@index([venueId])
   @@index([profileId])
-  @@index([venueId, profileId, dayIndex])
+  @@index([venueId, weekStart])
+  @@index([venueId, profileId, weekStart, dayIndex])
 }
 
 model BlackoutDate {
@@ -470,6 +473,7 @@ model ScheduleMemoryNote {
   @@index([venueId])
   @@index([venueId, weekStart])
   @@index([venueId, createdAt])
+  @@index([createdByProfileId])
 }
 
 model Availability {
@@ -560,6 +564,9 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@index([senderId])
+  @@index([venueId])
+  @@index([shiftId])
+  @@index([swapId])
 }
 
 model ConversationRead {
@@ -574,6 +581,7 @@ model ConversationRead {
 
   @@unique([conversationId, profileId])
   @@index([conversationId])
+  @@index([profileId])
   @@index([venueId])
 }
 
@@ -610,6 +618,7 @@ model VenueDocument {
 
   @@index([venueId, createdAt])
   @@index([venueId, category])
+  @@index([uploadedById])
 }
 
 model NotificationEvent {
@@ -717,6 +726,8 @@ model ShiftSwap {
   @@index([venueId])
   @@index([requesterProfileId])
   @@index([targetProfileId])
+  @@index([requesterShiftId])
+  @@index([targetShiftId])
 }
 
 model Guest {
@@ -1061,6 +1072,7 @@ model CrmLead {
   @@index([venueId])
   @@index([venueId, status])
   @@index([guestId])
+  @@index([assignedToId])
 }
 
 model CrmNote {
@@ -1155,6 +1167,7 @@ model CrmActivityLog {
 
   @@index([leadId, createdAt])
   @@index([venueId, createdAt])
+  @@index([actorId])
 }
 
 model EmailTemplate {
@@ -1585,6 +1598,7 @@ model EventExecutionTask {
   @@unique([workspaceId, templateKey])
   @@index([venueId, workspaceId, status])
   @@index([venueId, dueAt])
+  @@index([workspaceId, venueId])
 }
 
 model EventExecutionTimelineItem {
@@ -1602,6 +1616,7 @@ model EventExecutionTimelineItem {
 
   @@unique([workspaceId, templateKey])
   @@index([venueId, workspaceId, startsAt])
+  @@index([workspaceId, venueId])
 }
 
 model EventExecutionVendor {
@@ -1621,6 +1636,7 @@ model EventExecutionVendor {
 
   @@unique([workspaceId, templateKey])
   @@index([venueId, workspaceId, status])
+  @@index([workspaceId, venueId])
 }
 
 model EventExecutionIncident {
@@ -1639,6 +1655,7 @@ model EventExecutionIncident {
   workspace     EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
 
   @@index([venueId, workspaceId, status])
+  @@index([workspaceId, venueId])
 }
 
 model ReservationSetting {
@@ -1668,6 +1685,7 @@ model TableStateHistory {
 
   @@index([tableId, timestamp])
   @@index([venueId, timestamp])
+  @@index([actorId])
 }
 
 model Invite {
@@ -1716,6 +1734,7 @@ model WorkplaceJoinRequest {
   @@index([userId])
   @@index([status])
   @@index([venueId, status])
+  @@index([decidedById])
 }
 
 model WorkplaceJoinRequestEvent {
@@ -1729,6 +1748,7 @@ model WorkplaceJoinRequestEvent {
   actor     User?                @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([requestId, createdAt])
+  @@index([actorId])
 }
 
 model RateLimitBucket {

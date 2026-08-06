@@ -72,7 +72,7 @@ export type AvailabilityBlock = {
   available: boolean;
 };
 
-export type StaffRequestKind = 'add_shift' | 'drop_shift' | 'time_off' | 'availability';
+export type StaffRequestKind = 'add_shift' | 'drop_shift' | 'time_off' | 'sick_leave' | 'time_correction' | 'other';
 export type StaffRequestStatus = 'pending' | 'approved' | 'denied' | 'cancelled';
 
 export type StaffRequest = {
