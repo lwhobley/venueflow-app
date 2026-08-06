@@ -222,8 +222,8 @@ export class BillingController {
   }
 
   private isAllowedRevenueCatEvent(productId: string | undefined, entitlementIds: string[] | undefined): boolean {
-    const allowedProducts = this.csvEnv('REVENUECAT_ALLOWED_PRODUCT_IDS', 'com.venuewrangler.monthly');
-    const allowedEntitlements = this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro');
+    const allowedProducts = this.csvEnv('REVENUECAT_ALLOWED_PRODUCT_IDS', 'com.venuewrangler.monthly,com.venuewrangler.multivenue.399');
+    const allowedEntitlements = this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro,multi_venue');
     if (productId && !allowedProducts.has(productId)) return false;
     if (entitlementIds && entitlementIds.length > 0 && !entitlementIds.some((id) => allowedEntitlements.has(id))) {
       return false;
