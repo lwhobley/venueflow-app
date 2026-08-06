@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
@@ -28,6 +28,9 @@ const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
 const FLAT_PLAN_ID = 'venueflow_monthly';
 const FLAT_PLAN_PRICE_CENTS = 9999;
+const MULTI_VENUE_PLAN_ID = 'venueflow_multi_venue_5';
+const MULTI_VENUE_PRICE_CENTS = 39900;
+const MULTI_VENUE_MAX_VENUES = 5;
 const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -272,7 +275,28 @@ export class AppController {
 
     const existingProfile = await this.getProfile(user);
 
-    const plan = planForStaffRange(body.staffRange);
+    const userVenues = await this.profiles.listUserVenues(user.sub);
+    if (userVenues.length >= MULTI_VENUE_MAX_VENUES) {
+      throw new ForbiddenException('You have reached the maximum limit of 5 venues for multi-venue management.');
+    }
+    const isAdditionalVenue = userVenues.length >= 1;
+    if (isAdditionalVenue) {
+      const hasMultiPlan = await this.profiles.hasMultiVenueSubscription(user.sub);
+      if (!hasMultiPlan) {
+        throw new HttpException(
+          {
+            statusCode: 402,
+            message: 'Registering an additional venue requires a Multi-Venue Pro subscription ($399/month for up to 5 venues).',
+            code: 'MULTI_VENUE_REQUIRED',
+          },
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
+    }
+
+    const plan = isAdditionalVenue
+      ? { planId: MULTI_VENUE_PLAN_ID, priceCents: MULTI_VENUE_PRICE_CENTS }
+      : planForStaffRange(body.staffRange);
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
     const result = await this.prisma.$transaction(async (tx) => {

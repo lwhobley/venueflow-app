@@ -205,8 +205,8 @@ export const appApi = {
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
   syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
     apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),
-  createStripeCheckout: () =>
-    apiRequest<{ url: string }>('/v1/app/billing/stripe/checkout', { method: 'POST' }),
+  createStripeCheckout: (body?: { plan?: 'single' | 'multi_venue' }) =>
+    apiRequest<{ url: string }>('/v1/app/billing/stripe/checkout', { method: 'POST', body }),
   createStripePortal: () =>
     apiRequest<{ url: string }>('/v1/app/billing/stripe/portal', { method: 'POST' }),
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),

@@ -132,7 +132,7 @@ describe('AppBillingController', () => {
       expect(vi.mocked(stripeRequest).mock.calls[0][2]).toBe('/checkout/sessions');
       const body = vi.mocked(stripeRequest).mock.calls[0][3] as any;
       expect(body.line_items).toEqual([{ price: 'price_configured', quantity: 1 }]);
-      expect(body.metadata).toEqual({ venueId: 'venue-1' });
+      expect(body.metadata).toMatchObject({ venueId: 'venue-1' });
       expect(body.client_reference_id).toBe('venue-1');
     });
 

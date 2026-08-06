@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Button, Card, Chip, Dialog, Portal, Text, TextInput, ActivityIndicator } from 'react-native-paper';
+import { router } from 'expo-router';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { useMutation } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
@@ -79,8 +80,13 @@ export function VenueSwitcher() {
       }
       setRegisterVisible(false);
       setBusinessName('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to register new venue.');
+    } catch (e: any) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('Multi-Venue Pro') || msg.includes('402') || msg.includes('subscription')) {
+        setError('Multi-Venue Pro subscription ($399/mo) required to register additional venues.');
+      } else {
+        setError(msg || 'Failed to register new venue.');
+      }
     } finally {
       setRegistering(false);
     }
@@ -93,7 +99,24 @@ export function VenueSwitcher() {
         subtitle="Switch between your locations or register an additional venue"
       />
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <View style={{ gap: 4 }}>
+          <Text style={styles.errorText}>{error}</Text>
+          {error.includes('Multi-Venue Pro') ? (
+            <Button
+              mode="contained"
+              buttonColor={colors.primary}
+              compact
+              onPress={() => {
+                setRegisterVisible(false);
+                router.push('/billing/paywall');
+              }}
+            >
+              Upgrade to Multi-Venue Pro ($399/mo)
+            </Button>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.venueList}>
         {venues.map((v) => {
