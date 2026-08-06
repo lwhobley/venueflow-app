@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { GuestsController } from './guests.controller';
-import { generateWebhookSecret } from '../../common/webhook-auth';
+import { generateWebhookSecret, hashWebhookSecret } from '../../common/webhook-auth';
 
 vi.mock('../../common/rate-limit', () => ({
   assertWithinSharedRateLimit: vi.fn().mockResolvedValue(undefined),
@@ -364,13 +364,23 @@ describe('GuestsController', () => {
   });
 
   describe('leadsWebhook', () => {
-    it('applies a per-venue, per-IP rate limit before checking auth', async () => {
+    it('verifies the webhook secret before touching the rate limiter', async () => {
       const { controller, prisma } = makeController();
       prisma.venue.findUnique.mockResolvedValue(null);
 
       await expect(
         controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', { leads: [] } as any),
       ).rejects.toThrow(UnauthorizedException);
+
+      // An unauthenticated spray of random venueIds must not churn buckets.
+      expect(assertWithinSharedRateLimit).not.toHaveBeenCalled();
+    });
+
+    it('applies a per-venue, per-IP rate limit once the secret is verified', async () => {
+      const { controller, prisma } = makeController();
+      prisma.venue.findUnique.mockResolvedValue({ leadsWebhookSecret: hashWebhookSecret('secret') });
+
+      await controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', { leads: [] } as any);
 
       expect(assertWithinSharedRateLimit).toHaveBeenCalledWith(
         prisma,

@@ -508,7 +508,10 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
   const authEpoch = useAuthStore((state) => state.authEpoch);
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const venueId = useAuthStore((state) => state.venue?.id ?? null);
-  const enabled = args !== 'skip';
+  const token = useAuthStore((state) => state.token);
+  // Never fire authenticated API queries without a session token — route
+  // protection must not depend on every screen remembering to gate its query.
+  const enabled = args !== 'skip' && Boolean(token);
   const query = useReactQuery({
     queryKey: [...key.split('.'), args, authEpoch, userId, venueId],
     enabled,
@@ -526,7 +529,8 @@ export function useQueryState<T = any>(ref: RailwayFunctionRef, args?: QueryArgs
   const authEpoch = useAuthStore((state) => state.authEpoch);
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const venueId = useAuthStore((state) => state.venue?.id ?? null);
-  const enabled = args !== 'skip';
+  const token = useAuthStore((state) => state.token);
+  const enabled = args !== 'skip' && Boolean(token);
   const query = useReactQuery({
     queryKey: [...key.split('.'), args, authEpoch, userId, venueId],
     enabled,

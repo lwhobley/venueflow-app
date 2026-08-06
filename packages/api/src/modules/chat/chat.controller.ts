@@ -523,6 +523,24 @@ export class ChatController {
       throw new ForbiddenException('Not a participant');
     }
 
+    // Shift/swap references deep-link into venue-owned scheduling records, so
+    // they must belong to this venue — otherwise a member could attach foreign
+    // venue ids to messages.
+    if (body.shiftId) {
+      const shift = await this.prisma.scheduleShift.findFirst({
+        where: { id: body.shiftId, venueId: scope.venueId },
+        select: { id: true },
+      });
+      if (!shift) throw new BadRequestException('Shift not found in this venue');
+    }
+    if (body.swapId) {
+      const swap = await this.prisma.shiftSwap.findFirst({
+        where: { id: body.swapId, venueId: scope.venueId },
+        select: { id: true },
+      });
+      if (!swap) throw new BadRequestException('Shift swap not found in this venue');
+    }
+
     const text = body.text.trim();
 
     let imageUrl: string | null = null;

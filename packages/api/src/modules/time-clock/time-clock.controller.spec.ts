@@ -272,7 +272,7 @@ describe('TimeClockController', () => {
         },
       ]);
 
-      const result = await controller.getMyTimeClock({ sub: 'user-1' } as any);
+      const result = await controller.getMyTimeClock({ sub: 'user-1' } as any, scope);
 
       expect(result!.isClockedIn).toBe(false);
       expect(result!.regularHours).toBe(2.5);

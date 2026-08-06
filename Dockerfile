@@ -1,4 +1,5 @@
-FROM node:22-bookworm-slim AS build
+# Pinned by digest for reproducible builds; refresh via Dependabot/Renovate.
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS build
 
 WORKDIR /app
 COPY package*.json ./
@@ -8,14 +9,14 @@ RUN npm ci --ignore-scripts
 COPY packages/api packages/api
 RUN npm run build -w @venue-wrangler/api
 
-FROM node:22-bookworm-slim AS production-dependencies
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS production-dependencies
 
 WORKDIR /app
 COPY package*.json ./
 COPY packages/api/package*.json packages/api/
 RUN npm ci --omit=dev --ignore-scripts --workspace @venue-wrangler/api --include-workspace-root=false
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS runtime
 
 # Prisma requires OpenSSL at runtime for the native query engine.
 RUN apt-get update \

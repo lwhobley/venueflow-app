@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
@@ -179,11 +179,27 @@ export class PosController {
     @Headers('x-webhook-secret') secret: string | undefined,
     @Body() body: PosIngestDto,
   ) {
-    await assertWithinSharedRateLimit(this.prisma, `pos-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     const provider = body.provider as PosProvider;
+    // Verify the per-connection secret before touching the rate limiter so an
+    // unauthenticated spray of random venueIds can't churn RateLimitBucket rows.
     const connection = await this.prisma.posConnection.findFirst({ where: { venueId, provider } });
     if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
+    }
+    await assertWithinSharedRateLimit(this.prisma, `pos-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
+
+    // class-validator's @IsNumber() accepts NaN/Infinity, which would surface
+    // as a 500 from Prisma via `new Date(NaN)`. Reject non-finite timestamps
+    // up front with a 400 the provider can act on.
+    for (const check of body.checks ?? []) {
+      if (!Number.isFinite(check.openedAt) || (check.closedAt != null && !Number.isFinite(check.closedAt))) {
+        throw new BadRequestException(`Invalid timestamp on check ${check.externalCheckId}`);
+      }
+    }
+    for (const punch of body.laborPunches ?? []) {
+      if (!Number.isFinite(punch.clockInAt) || (punch.clockOutAt != null && !Number.isFinite(punch.clockOutAt))) {
+        throw new BadRequestException(`Invalid timestamp on labor punch ${punch.externalEmployeeId}`);
+      }
     }
 
     // Batch upserts into chunked transactions (not one single transaction for
