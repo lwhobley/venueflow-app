@@ -8,6 +8,13 @@ RUN npm ci --ignore-scripts
 COPY packages/api packages/api
 RUN npm run build -w @venue-wrangler/api
 
+FROM node:22-bookworm-slim AS production-dependencies
+
+WORKDIR /app
+COPY package*.json ./
+COPY packages/api/package*.json packages/api/
+RUN npm ci --omit=dev --ignore-scripts --workspace @venue-wrangler/api --include-workspace-root=false
+
 FROM node:22-bookworm-slim AS runtime
 
 # Prisma requires OpenSSL at runtime for the native query engine.
@@ -21,7 +28,10 @@ WORKDIR /app
 
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/packages/api/package*.json packages/api/
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=production-dependencies /app/node_modules ./node_modules
+# `prisma generate` runs in the build stage; retain only its generated client
+# and native engine alongside the production dependency tree.
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/packages/api/dist packages/api/dist
 COPY --from=build /app/packages/api/prisma packages/api/prisma
 
@@ -29,4 +39,4 @@ COPY --from=build /app/packages/api/prisma packages/api/prisma
 RUN chown -R node:node /app
 USER node
 EXPOSE 8080
-CMD ["sh", "-c", "npx prisma migrate deploy --schema packages/api/prisma/schema.prisma && exec node packages/api/dist/main.js"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema packages/api/prisma/schema.prisma && exec node packages/api/dist/main.js"]

@@ -28,7 +28,7 @@ jobs:
       # The site/ directory is a static marketing landing page (no build step).
       # Keep the deployment label aligned with the canonical production branch.
       - name: Deploy landing site to Cloudflare Pages
-        run: npx wrangler@3 pages deploy site --project-name venue-wrangler --branch main
+        run: npx wrangler@3.114.17 pages deploy site --project-name venue-wrangler --branch main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
