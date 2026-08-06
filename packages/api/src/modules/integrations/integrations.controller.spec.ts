@@ -145,6 +145,35 @@ describe('IntegrationsController', () => {
       expect(result.webhookSecret).toEqual(expect.any(String));
     });
 
+    it('updates the winning connection when a concurrent create returns P2002', async () => {
+      const { controller, prisma } = makeController();
+      prisma.reservationConnection.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'conn-winner', webhookSecret: 'sha256:winner-secret' });
+      prisma.reservationConnection.create.mockRejectedValue({ code: 'P2002' });
+      prisma.reservationConnection.update.mockResolvedValue({
+        id: 'conn-winner',
+        venueId: 'venue-1',
+        provider: 'opentable',
+        externalVenueId: 'updated-venue',
+        status: 'paused',
+        webhookSecret: 'sha256:winner-secret',
+        lastSyncAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const result = await controller.upsertReservationConnection(managerScope, {
+        provider: 'opentable', externalVenueId: 'updated-venue', status: 'paused',
+      } as any);
+
+      expect(prisma.reservationConnection.update).toHaveBeenCalledWith({
+        where: { id: 'conn-winner' },
+        data: expect.not.objectContaining({ webhookSecret: expect.anything() }),
+      });
+      expect(result.webhookSecret).toBeNull();
+    });
+
     it('does not rotate the secret when the existing connection already has one', async () => {
       const { controller, prisma } = makeController();
       prisma.reservationConnection.findFirst.mockResolvedValue({ id: 'conn-1', webhookSecret: 'sha256:already-set' });
