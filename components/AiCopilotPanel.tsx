@@ -51,7 +51,7 @@ function buildActions(insights: InsightSnapshot, dashboard: any): CopilotAction[
     actions.push({
       tone: 'warn',
       title: `${insights.pendingRequests} staff request${insights.pendingRequests === 1 ? '' : 's'} pending`,
-      body: 'Approve or deny pending time-off and availability changes before publishing the next schedule.',
+      body: 'Approve or deny pending unavailable-day requests before publishing the next schedule.',
     });
   }
   if (insights.upcomingReservations > 0) {

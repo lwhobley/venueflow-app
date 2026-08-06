@@ -11,7 +11,7 @@ type StaffOption = { _id: Id<'profiles'>; fullName: string; jobTitle: string; ro
 const reasonLabel: Record<string, string> = {
   assigned: 'Proposed',
   no_role_match: 'No matching role',
-  no_availability: 'Nobody available',
+  no_availability: 'Blocked by unavailable-day requests',
   all_double_booked: 'All candidates busy',
   labor_cap: 'Over labor budget',
   time_off: 'On approved time off',
@@ -27,18 +27,20 @@ function currentWeekSundayISO(): string {
 
 export function AutoScheduleModal({
   venueId,
+  weekStartDate: selectedWeekStart,
   visible,
   onClose,
   onApplied,
   staff,
 }: {
   venueId: Id<'venues'>;
+  weekStartDate: string;
   visible: boolean;
   onClose: () => void;
   onApplied: (msg: string) => void;
   staff: StaffOption[];
 }) {
-  const [weekStartDate, setWeekStartDate] = useState(currentWeekSundayISO);
+  const [weekStartDate, setWeekStartDate] = useState(selectedWeekStart || currentWeekSundayISO);
   const preview = useQuery(api.scheduling.previewAutoSchedule, visible ? { venueId, weekStartDate } : 'skip');
   const applyAutoSchedule = useMutation(api.scheduling.applyAutoSchedule);
 
@@ -49,8 +51,8 @@ export function AutoScheduleModal({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (visible) setWeekStartDate(currentWeekSundayISO());
-  }, [visible]);
+    if (visible) setWeekStartDate(selectedWeekStart || currentWeekSundayISO());
+  }, [selectedWeekStart, visible]);
 
   useEffect(() => {
     if (!preview) return;
@@ -98,7 +100,7 @@ export function AutoScheduleModal({
             ) : (
               <>
                 <Text style={{ color: colors.muted, fontSize: 13 }}>
-                  Matched {preview.filled} of {preview.openCount} open shifts by role, availability, and labor budget. Review and commit.
+                  Matched {preview.filled} of {preview.openCount} open shifts by role, approved unavailable days, and labor budget. Review and commit.
                 </Text>
                 <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
                   <Chip compact style={{ backgroundColor: '#E1FBF3' }}>{preview.filled} matched</Chip>

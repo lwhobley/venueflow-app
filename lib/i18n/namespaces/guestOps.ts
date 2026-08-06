@@ -589,7 +589,7 @@ export const en = {
     },
     secret: {
       title: 'Webhook secret — copy it now',
-      body: 'Send this in the x-venueflow-connection-secret header on each webhook. It is shown once and cannot be retrieved later — save it, then rotate if you lose it.',
+      body: 'Send this in the x-webhook-secret header on each webhook. It is shown once and cannot be retrieved later — save it, then rotate if you lose it.',
       saved: "I've saved it",
     },
     metrics: {
@@ -726,7 +726,7 @@ export const en = {
     signOut: 'Sign out',
     accountDeletion: {
       title: 'Account deletion',
-      description: 'Permanently delete your Venue Wrangler account, profile, availability, push tokens, and sign-in credentials. Assigned shifts are released back to the venue before deletion.',
+      description: 'Permanently delete your Venue Wrangler account, profile, unavailable-day requests, push tokens, and sign-in credentials. Assigned shifts are released back to the venue before deletion.',
       startButton: 'Start account deletion',
       confirmWarning: 'This cannot be undone. You will be signed out after deletion is complete.',
       confirmButton: 'Permanently delete my account',
@@ -1325,7 +1325,7 @@ export const es: GuestOpsDictionary = {
     },
     secret: {
       title: 'Secreto de webhook — cópialo ahora',
-      body: 'Envía esto en el encabezado x-venueflow-connection-secret de cada webhook. Se muestra una sola vez y no se puede recuperar después — guárdalo, y rótalo si lo pierdes.',
+      body: 'Envía esto en el encabezado x-webhook-secret de cada webhook. Se muestra una sola vez y no se puede recuperar después — guárdalo, y rótalo si lo pierdes.',
       saved: 'Ya lo guardé',
     },
     metrics: {
@@ -2059,7 +2059,7 @@ export const fr: GuestOpsDictionary = {
     },
     secret: {
       title: 'Secret du webhook — copiez-le maintenant',
-      body: "Envoyez ceci dans l'en-tête x-venueflow-connection-secret de chaque webhook. Il ne s'affiche qu'une seule fois et ne peut pas être récupéré ensuite — enregistrez-le, puis régénérez-le si vous le perdez.",
+      body: "Envoyez ceci dans l'en-tête x-webhook-secret de chaque webhook. Il ne s'affiche qu'une seule fois et ne peut pas être récupéré ensuite — enregistrez-le, puis régénérez-le si vous le perdez.",
       saved: "Je l'ai enregistré",
     },
     metrics: {

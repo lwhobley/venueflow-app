@@ -55,7 +55,7 @@ export function CosmicInsights() {
       <Card.Content style={{ gap: spacing.sm }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <MaterialCommunityIcons name="creation" size={22} color={colors.primary} />
-          <Text variant="titleMedium" style={{ color: colors.primary, fontWeight: '800' }}>Cosmic Insights</Text>
+          <Text variant="titleMedium" style={{ color: colors.primary, fontWeight: '800' }}>Operations Insights</Text>
         </View>
         <Text style={{ color: colors.muted }}>Hospitality tips, F&B facts, and clean service humor refreshed through the day.</Text>
         {items.map((item, index) => {

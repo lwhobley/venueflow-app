@@ -26,24 +26,21 @@ export class NotificationsService {
       where: { venueId: args.venueId, role: { in: ADMIN_ROLES }, OR: ACTIVE_MEMBERSHIP },
       select: { id: true },
     });
-    // Fire-and-forget: push delivery must not add latency to the triggering request.
-    void this.deliver({ venueId: args.venueId, profileIds: managers.map((m) => m.id), title: args.title, body: args.body, kind: args.kind });
+    await this.deliver({ venueId: args.venueId, profileIds: managers.map((m) => m.id), title: args.title, body: args.body, kind: args.kind });
   }
 
   async notifyProfile(args: { venueId: string; profileId: string; kind: string; title: string; body: string }) {
     await this.prisma.notificationEvent.create({
       data: { venueId: args.venueId, profileId: args.profileId, audience: 'profile', kind: args.kind, title: args.title, body: args.body },
     });
-    // Fire-and-forget: push delivery must not add latency to the triggering request.
-    void this.deliver({ venueId: args.venueId, profileIds: [args.profileId], title: args.title, body: args.body, kind: args.kind });
+    await this.deliver({ venueId: args.venueId, profileIds: [args.profileId], title: args.title, body: args.body, kind: args.kind });
   }
 
   async notifyStaff(args: { venueId: string; kind: string; title: string; body: string }) {
     await this.prisma.notificationEvent.create({
       data: { venueId: args.venueId, audience: 'staff', kind: args.kind, title: args.title, body: args.body },
     });
-    // Fire-and-forget: push delivery must not add latency to the triggering request.
-    void this.deliver({ venueId: args.venueId, title: args.title, body: args.body, kind: args.kind });
+    await this.deliver({ venueId: args.venueId, title: args.title, body: args.body, kind: args.kind });
   }
 
   /**

@@ -102,6 +102,19 @@ export default function PaywallScreen() {
     }
   };
 
+  const buyWithStripe = async () => {
+    setBusy('stripe');
+    setError(null);
+    try {
+      const { url } = await appApi.createStripeCheckout();
+      await Linking.openURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('paywall.purchaseFailed'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
@@ -112,8 +125,13 @@ export default function PaywallScreen() {
 
       {!PURCHASES_SUPPORTED ? (
         <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
-          <Card.Content>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>Venue Wrangler</Text>
+            <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{MONTHLY_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
             <Text style={{ color: colors.muted }}>{t('paywall.managedInApp')}</Text>
+            <Button mode="contained" buttonColor={colors.primary} loading={busy === 'stripe'} disabled={Boolean(busy)} onPress={() => void buyWithStripe()}>
+              {ctaLabel}
+            </Button>
           </Card.Content>
         </Card>
       ) : loading ? (
@@ -153,9 +171,11 @@ export default function PaywallScreen() {
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
 
-      <Button mode="text" textColor={colors.primary} loading={busy === 'restore'} disabled={!!busy || !PURCHASES_SUPPORTED} onPress={() => void restore()}>
-        {t('paywall.restorePurchases')}
-      </Button>
+      {PURCHASES_SUPPORTED ? (
+        <Button mode="text" textColor={colors.primary} loading={busy === 'restore'} disabled={!!busy} onPress={() => void restore()}>
+          {t('paywall.restorePurchases')}
+        </Button>
+      ) : null}
 
       <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center' }}>
         {t('paywall.autoRenewNotice')}

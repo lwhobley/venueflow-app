@@ -164,7 +164,7 @@ function FloorScreen() {
   const waitlistQueue = openWaitlist ?? [];
 
   const mergeableTables = useMemo(
-    () => (activeFloor?.tables ?? []).filter((t: FloorTableRow) => !t.state || t.state.status === 'available' || t.state.status === 'dirty' || t.state.status === 'seated'),
+    () => (activeFloor?.tables ?? []).filter((t: FloorTableRow) => !t.state?.mergeGroupId && (!t.state || t.state.status === 'available' || t.state.status === 'dirty' || t.state.status === 'seated')),
     [activeFloor],
   );
   const mergeGroups = useMemo(() => {

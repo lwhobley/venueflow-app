@@ -1,6 +1,6 @@
 # Tenant Isolation
 
-Venue Wrangler currently enforces tenant isolation in the NestJS API rather than through Supabase Row Level Security policies. The production data path should stay server-mediated unless database-level RLS is added and tested.
+Venue Wrangler enforces tenant isolation in the NestJS API and keeps the production data path server-mediated. Every public table also has Supabase Row Level Security enabled with no client policies, while table, sequence, and function privileges are revoked from `anon` and `authenticated`. This makes the Supabase Data API fail closed; the Cloud Run API connects with its database role and remains the only application data path.
 
 The API-level controls are:
 
@@ -9,7 +9,7 @@ The API-level controls are:
 - Controllers must use `request.venueScope.venueId` or a manager profile lookup as the source of truth, never a client-supplied `venueId`.
 - Public webhook routes must authenticate with a per-connection secret and rate limit by IP and venue.
 
-Before enabling any direct Supabase client access, add SQL policies and tests that prove users can only read and mutate rows for their active venue.
+Before enabling any direct Supabase client access, add narrowly scoped SQL policies and tests that prove users can only read and mutate rows for their active venue. Do not grant broad table access or disable the fail-closed RLS backstop.
 
 ## Database-layer backstop (enforced by default)
 

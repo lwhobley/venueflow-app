@@ -105,7 +105,7 @@ const DEFAULT_ONBOARDING_TASKS = [
   { title: 'Confirm profile details', category: 'profile', details: 'Verify name, phone, emergency contact, and job title.' },
   { title: 'Collect required certifications', category: 'compliance', details: 'Add food handler, alcohol server, safety, or local permits.' },
   { title: 'Review handbook and policies', category: 'training', details: 'Confirm workplace expectations, scheduling rules, and conduct policies.' },
-  { title: 'Train on clock-in and scheduling', category: 'training', details: 'Show the staff member how to clock in, set availability, and request changes.' },
+  { title: 'Train on clock-in and scheduling', category: 'training', details: 'Show the staff member how to clock in and request unavailable days or shift changes.' },
   { title: 'First shift readiness check', category: 'service', details: 'Confirm uniform, station assignment, POS access, and opening checklist.' },
 ] as const;
 
@@ -357,7 +357,7 @@ export class AppStaffController {
           `— The Venue Wrangler Team`
         : `Hi ${row.fullName},\n\n` +
           `Welcome! You have been added to the team at ${venueName} as a ${row.jobTitle}.\n\n` +
-          `To view your schedule, manage your availability, and request shift swaps, please join the venue using the steps below:\n\n` +
+          `To view your schedule, request unavailable days, and request shift swaps, please join the venue using the steps below:\n\n` +
           `1. Create a Venue Wrangler account or sign in using your email: ${row.email}\n` +
           `2. You will be automatically linked to the venue and can access your dashboard right away.\n\n` +
           `We're excited to have you on board!\n\n` +

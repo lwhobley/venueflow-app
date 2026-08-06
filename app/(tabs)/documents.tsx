@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Alert, Linking, ScrollView, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import { ActivityIndicator, Button, Card, Chip, Searchbar, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
@@ -13,6 +12,7 @@ import { errorMessage } from '../../lib/format';
 import { useI18n, type TranslationKey } from '../../lib/i18n';
 import { radius, spacing, useDesignTheme } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
+import { readPickedFileBase64 } from '../../lib/picked-file';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const CATEGORIES = ['sop', 'manual', 'recipe', 'menu', 'training', 'form', 'other'] as const;
@@ -35,6 +35,7 @@ type SelectedFile = {
   name: string;
   mimeType: string;
   size: number | null;
+  file?: Blob | null;
 };
 
 const PICKER_TYPES = [
@@ -121,7 +122,7 @@ function DocumentsScreenInner() {
         return;
       }
       const name = asset.name || 'document';
-      setSelectedFile({ uri: asset.uri, name, mimeType: asset.mimeType || 'application/octet-stream', size: asset.size ?? null });
+      setSelectedFile({ uri: asset.uri, file: asset.file, name, mimeType: asset.mimeType || 'application/octet-stream', size: asset.size ?? null });
       if (!title.trim()) setTitle(name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '));
     } catch (error) {
       setMessage(errorMessage(error, t('documents.errors.pickFailed')));
@@ -140,7 +141,7 @@ function DocumentsScreenInner() {
     setBusy('upload');
     setMessage(null);
     try {
-      const dataBase64 = await FileSystem.readAsStringAsync(selectedFile.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const dataBase64 = await readPickedFileBase64(selectedFile);
       await uploadDocument({
         title: title.trim(),
         fileName: selectedFile.name,

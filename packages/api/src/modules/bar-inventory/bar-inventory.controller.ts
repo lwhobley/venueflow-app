@@ -910,7 +910,7 @@ export class BarInventoryController {
       html,
     });
 
-    void this.notifications.notifyManagers({
+    await this.notifications.notifyManagers({
       venueId,
       kind: 'inventory_digest',
       title: 'Inventory digest sent',

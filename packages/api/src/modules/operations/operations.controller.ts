@@ -25,7 +25,7 @@ import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { isActiveMembership } from '../../common/membership';
-import { todayInZone } from '../../common/pay-period';
+import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaAccessService } from '../chat/media-access.service';
@@ -355,6 +355,7 @@ export class OperationsController {
     const now = new Date();
     const timezone = profile.venue?.timezone;
     const today = zonedIsoDate(timezone, now.getTime());
+    const weekStart = weekStartFor(today);
     const todayBounds = zonedDayBounds(timezone, 0);
     const tomorrowBounds = zonedDayBounds(timezone, 1);
     const todayStart = new Date(todayBounds.start);
@@ -384,7 +385,7 @@ export class OperationsController {
         take: 100,
       }),
       this.prisma.scheduleShift.findMany({
-        where: { venueId, dayIndex: zonedDayOfWeek(timezone, now.getTime()) },
+        where: { venueId, weekStart, dayIndex: zonedDayOfWeek(timezone, now.getTime()) },
         orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }],
         take: 100,
       }),
@@ -557,11 +558,11 @@ export class OperationsController {
     const timezone = profile.venue?.timezone;
     const now = new Date();
     const today = zonedIsoDate(timezone, now.getTime());
+    const weekStart = weekStartFor(today);
     const bounds = zonedDayBounds(timezone, 0);
     const todayStart = new Date(bounds.start);
     const todayEnd = new Date(bounds.end);
     const dayIndex = zonedDayOfWeek(timezone, now.getTime());
-
     const [events, reservations, shifts, checklistItems, checklistCompletions, floorPlan, beos] = await Promise.all([
       this.prisma.venueEvent.findMany({ where: { venueId, startsAt: { gte: todayStart, lt: todayEnd } }, orderBy: { startsAt: 'asc' }, take: 50 }),
       this.prisma.reservation.findMany({
@@ -569,7 +570,7 @@ export class OperationsController {
         include: { tableAssignments: { where: { releasedAt: null }, select: { id: true } } },
         orderBy: { reservationTime: 'asc' }, take: 200,
       }),
-      this.prisma.scheduleShift.findMany({ where: { venueId, dayIndex }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 200 }),
+      this.prisma.scheduleShift.findMany({ where: { venueId, weekStart, dayIndex }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 200 }),
       this.prisma.checklistTemplateItem.findMany({ where: { venueId, kind: 'opening', active: true }, orderBy: { sortOrder: 'asc' }, take: 100 }),
       this.prisma.checklistCompletion.findMany({ where: { venueId, date: today }, select: { templateItemId: true, status: true } }),
       this.prisma.floorPlan.findFirst({ where: { venueId, isActive: true }, include: { tables: { select: { id: true, label: true, section: true } } } }),
@@ -745,7 +746,8 @@ export class OperationsController {
     const workspace = await this.prisma.eventExecutionWorkspace.findFirst({ where: { venueId, sourceType: input.sourceType, sourceId: input.sourceId }, include: { tasks: { orderBy: { createdAt: 'asc' } }, timeline: { orderBy: { startsAt: 'asc' } }, vendors: { orderBy: { createdAt: 'asc' } }, incidents: { orderBy: { createdAt: 'desc' } } } });
     if (!workspace) throw new NotFoundException('Execution workspace not found');
     const tasks = workspace.tasks;
-    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId, dayIndex: zonedDayOfWeek(profile.venue?.timezone, start.getTime()) }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 100 });
+    const eventWeekStart = weekStartFor(zonedIsoDate(profile.venue?.timezone, start.getTime()));
+    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId, weekStart: eventWeekStart, dayIndex: zonedDayOfWeek(profile.venue?.timezone, start.getTime()) }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 100 });
     const openTasks = tasks.filter((task) => task.status !== 'done');
     const openShifts = shifts.filter((shift) => shift.status === 'open');
     const hasFloorAssignment = reservation ? reservation.tableAssignments.length > 0 : true;

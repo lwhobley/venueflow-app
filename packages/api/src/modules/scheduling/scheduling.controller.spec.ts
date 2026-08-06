@@ -11,9 +11,6 @@ import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 const bigVenue = {
   id: 'venue-1',
   name: 'Test Venue',
-  payPeriodAnchor: null,
-  payPeriodLengthDays: null,
-  availabilityUnlocked: false,
   timezone: 'America/New_York',
   weeklyLaborBudgetHours: null,
   schedulePublishedAt: null,
@@ -23,11 +20,6 @@ const bigVenue = {
 
 function makeController() {
   const prisma = {
-    availability: {
-      findMany: vi.fn().mockResolvedValue([]),
-      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-      create: vi.fn().mockResolvedValue({}),
-    },
     venue: {
       findUnique: vi.fn().mockResolvedValue({ ...bigVenue }),
       findUniqueOrThrow: vi.fn().mockResolvedValue({ ...bigVenue }),
@@ -186,13 +178,6 @@ describe('SchedulingController', () => {
   });
 
   describe('no-scope guard (self-service endpoints)', () => {
-    it('rejects setMyAvailability with no scope', async () => {
-      const { controller } = makeController();
-      await expect(controller.setMyAvailability(undefined as any, { weekStart: '2026-08-02', rows: [] })).rejects.toThrow(
-        'Profile does not belong to a venue',
-      );
-    });
-
     it('rejects claimOpenShift with no scope', async () => {
       const { controller } = makeController();
       await expect(controller.claimOpenShift(undefined as any, 'shift-1')).rejects.toThrow('Profile does not belong to a venue');
@@ -241,7 +226,7 @@ describe('SchedulingController', () => {
       await controller.getManagerSchedule(managerScope);
 
       expect(prisma.venue.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'venue-1' } });
-      expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { venueId: 'venue-1' } }));
+      expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1', weekStart: '2026-08-02' }) }));
       expect(prisma.profile.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1' }) }));
     });
 
@@ -426,7 +411,7 @@ describe('SchedulingController', () => {
       ]);
       prisma.profile.findMany.mockResolvedValue([{ id: 'staff-1', fullName: 'Alex', email: 'alex@test.com' }]);
 
-      const result = await controller.publishSchedule(managerScope);
+      const result = await controller.publishSchedule(managerScope, { weekStart: '2026-08-02' });
 
       expect(result).toEqual({ notified: 1 });
       expect(prisma.venue.update).toHaveBeenCalledWith({
@@ -566,11 +551,8 @@ describe('SchedulingController', () => {
   });
 
   describe('commitAiSchedule', () => {
-    it('creates a shift with the proposed profile when availability covers it', async () => {
+    it('creates a shift with the proposed profile when no unavailable-day request blocks it', async () => {
       const { controller, prisma, assignments } = makeController();
-      prisma.availability.findMany.mockResolvedValue([
-        { profileId: 'staff-1', dayIndex: 1, startMinutes: 0, endMinutes: 1440, available: true },
-      ]);
       assignments.createShift.mockResolvedValue({ id: 'shift-1' });
 
       const result = await controller.commitAiSchedule(managerScope, {
@@ -647,10 +629,6 @@ describe('SchedulingController', () => {
         { id: 'shift-1', dayIndex: 1, startMinutes: 600, endMinutes: 900, jobTitle: 'Server', station: 'Floor', status: 'open', profileId: null },
       ]);
       prisma.profile.findMany.mockResolvedValue([{ id: 'staff-1', fullName: 'Alex', jobTitle: 'Server', role: 'staff' }]);
-      prisma.availability.findMany.mockResolvedValue([
-        { profileId: 'staff-1', dayIndex: 1, startMinutes: 0, endMinutes: 1440, available: true },
-      ]);
-
       const result = await controller.previewAutoSchedule(managerScope);
 
       expect(result.proposals[0]).toEqual(expect.objectContaining({ profileId: 'staff-1', reason: 'assigned' }));
@@ -660,10 +638,7 @@ describe('SchedulingController', () => {
 
   describe('applyAutoSchedule', () => {
     it('delegates to applyOpenAssignments with a canAssign gate that defaults to available', async () => {
-      const { controller, prisma, assignments } = makeController();
-      prisma.availability.findMany.mockResolvedValue([
-        { profileId: 'staff-1', dayIndex: 1, startMinutes: 0, endMinutes: 1440, available: true },
-      ]);
+      const { controller, assignments } = makeController();
       assignments.applyOpenAssignments.mockResolvedValue({ assigned: 1, skipped: 0, assignedShifts: [] });
 
       await controller.applyAutoSchedule(managerScope, {
@@ -698,77 +673,6 @@ describe('SchedulingController', () => {
   // ---------------------------------------------------------------------
   // 5. Representative read/CRUD coverage (not exhaustive)
   // ---------------------------------------------------------------------
-  describe('availability settings', () => {
-    it('rejects an invalid anchor date', async () => {
-      const { controller } = makeController();
-      await expect(controller.updateAvailabilitySettings(managerScope, { anchor: 'nope' } as any)).rejects.toThrow(
-        'anchor must be a YYYY-MM-DD date',
-      );
-    });
-
-    it('rejects a pay period length that is not a whole number of weeks', async () => {
-      const { controller } = makeController();
-      await expect(controller.updateAvailabilitySettings(managerScope, { lengthDays: 10 } as any)).rejects.toThrow(
-        'Pay period must be a whole number of weeks (7, 14, 21, or 28 days).',
-      );
-    });
-
-    it('normalizes the anchor to the start of its week and persists the update', async () => {
-      const { controller, prisma } = makeController();
-
-      await controller.updateAvailabilitySettings(managerScope, { anchor: '2026-08-05', lengthDays: 14, availabilityUnlocked: true } as any);
-
-      expect(prisma.venue.update).toHaveBeenCalledWith({
-        where: { id: 'venue-1' },
-        data: { payPeriodAnchor: '2026-08-02', payPeriodLengthDays: 14, availabilityUnlocked: true },
-      });
-    });
-  });
-
-  describe('setMyAvailability', () => {
-    it('rejects a malformed weekStart', async () => {
-      const { controller } = makeController();
-      await expect(controller.setMyAvailability(staffScope, { weekStart: 'not-a-date', rows: [] })).rejects.toThrow(
-        'weekStart must be a YYYY-MM-DD date',
-      );
-    });
-
-    it('rejects edits to a locked (already-started) week', async () => {
-      const { controller } = makeController();
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z'));
-
-      await expect(controller.setMyAvailability(staffScope, { weekStart: '2024-01-07', rows: [] })).rejects.toThrow(
-        'Availability for this week is locked. Ask a manager to unlock availability.',
-      );
-    });
-
-    it('rejects an invalid row window', async () => {
-      const { controller } = makeController();
-      await expect(
-        controller.setMyAvailability(staffScope, {
-          weekStart: '2030-01-06',
-          rows: [{ dayIndex: 1, startMinutes: 900, endMinutes: 600, available: true }],
-        }),
-      ).rejects.toThrow('End time must be after start time');
-    });
-
-    it('replaces the week rows in a single transaction for a future, unlocked week', async () => {
-      const { controller, prisma } = makeController();
-
-      const result = await controller.setMyAvailability(staffScope, {
-        weekStart: '2030-01-06',
-        rows: [{ dayIndex: 1, startMinutes: 600, endMinutes: 900, available: true }],
-      });
-
-      expect(result).toEqual({ ok: true });
-      expect(prisma.availability.deleteMany).toHaveBeenCalledWith({ where: { profileId: 'staff-1', weekStart: '2030-01-06' } });
-      expect(prisma.availability.create).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ venueId: 'venue-1', profileId: 'staff-1', weekStart: '2030-01-06' }),
-      }));
-    });
-  });
-
   describe('blackouts', () => {
     it('rejects a malformed date', async () => {
       const { controller } = makeController();
@@ -864,6 +768,7 @@ describe('SchedulingController', () => {
 
       expect(assignments.applyTemplate).toHaveBeenCalledWith({
         venueId: 'venue-1',
+        weekStart: '2026-08-02',
         replace: true,
         slots: [expect.objectContaining({ dayIndex: 1, jobTitle: 'Server' })],
       });
@@ -883,7 +788,7 @@ describe('SchedulingController', () => {
 
       const result = await controller.copyDayShifts(managerScope, { fromDay: 1, toDays: [2, 3] });
 
-      expect(assignments.copyDayShifts).toHaveBeenCalledWith({ venueId: 'venue-1', fromDay: 1, toDays: [2, 3] });
+      expect(assignments.copyDayShifts).toHaveBeenCalledWith({ venueId: 'venue-1', weekStart: '2026-08-02', fromDay: 1, toDays: [2, 3] });
       expect(result).toEqual({ added: 3 });
     });
 
@@ -905,16 +810,16 @@ describe('SchedulingController', () => {
 
       await controller.copyDayShifts(managerScope, { fromDay: 1, toDays: [2, 2] });
 
-      expect(assignments.copyDayShifts).toHaveBeenCalledWith({ venueId: 'venue-1', fromDay: 1, toDays: [2] });
+      expect(assignments.copyDayShifts).toHaveBeenCalledWith({ venueId: 'venue-1', weekStart: '2026-08-02', fromDay: 1, toDays: [2] });
     });
 
     it('delegates clearWeek scoped to the venue', async () => {
       const { controller, assignments } = makeController();
       assignments.clearWeek.mockResolvedValue({ removed: 5, shifts: [] });
 
-      await controller.clearWeek(managerScope);
+      await controller.clearWeek(managerScope, { weekStart: '2026-08-02' });
 
-      expect(assignments.clearWeek).toHaveBeenCalledWith({ venueId: 'venue-1' });
+      expect(assignments.clearWeek).toHaveBeenCalledWith({ venueId: 'venue-1', weekStart: '2026-08-02' });
     });
 
     it('rejects restoreShifts when any shift window is invalid, without calling the service', async () => {
@@ -970,17 +875,6 @@ describe('SchedulingController', () => {
   });
 
   describe('read-only endpoints (representative coverage)', () => {
-    it('getMyAvailability returns per-week rows scoped to the caller profile', async () => {
-      const { controller, prisma } = makeController();
-
-      const result = await controller.getMyAvailability(staffScope);
-
-      expect(prisma.availability.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: expect.objectContaining({ profileId: 'staff-1' }),
-      }));
-      expect(Array.isArray(result.weeks)).toBe(true);
-    });
-
     it('getMySchedule splits shifts into mine/open/roster', async () => {
       const { controller, prisma } = makeController();
       prisma.scheduleShift.findMany.mockResolvedValue([

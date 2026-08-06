@@ -141,10 +141,7 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
 
 export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const isDesktop = useIsDesktop();
-  const data = useQuery(api.scheduling.getManagerSchedule, { venueId });
-  const forecast = useQuery(api.scheduling.getLaborForecast, { venueId }) as LaborForecast | undefined;
-  const templates = useQuery(api.scheduling.listScheduleTemplates, { venueId });
-  const requestRows = useQuery(api.app.listStaffRequests, { venueId });
+  const [weekOffset, setWeekOffset] = useState(0);
 
   const createShift = useMutation(api.scheduling.createShift);
   const updateShift = useMutation(api.scheduling.updateShift);
@@ -161,7 +158,6 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const restoreShifts = useMutation(api.scheduling.restoreShifts);
   const openDm = useMutation(api.chat.openDm);
 
-  const [weekOffset, setWeekOffset] = useState(0);
   const [subTab, setSubTab] = useState<'planner' | 'analytics' | 'staffing'>('planner');
 
   const weekStart = useMemo(() => {
@@ -171,6 +167,12 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     sunday.setHours(0, 0, 0, 0);
     return sunday;
   }, [weekOffset]);
+
+  const selectedWeekStart = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
+  const data = useQuery(api.scheduling.getManagerSchedule, { venueId, weekStart: selectedWeekStart });
+  const forecast = useQuery(api.scheduling.getLaborForecast, { venueId, weekStart: selectedWeekStart }) as LaborForecast | undefined;
+  const templates = useQuery(api.scheduling.listScheduleTemplates, { venueId });
+  const requestRows = useQuery(api.app.listStaffRequests, { venueId });
 
   const dayDate = (dayIndex: number) => {
     const d = new Date(weekStart);
@@ -301,7 +303,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     const snapshot = undo;
     setUndo(null);
     void safe(async () => {
-      await restoreShifts({ venueId, shifts: snapshot.shifts });
+      await restoreShifts({ venueId, weekStart: selectedWeekStart, shifts: snapshot.shifts });
       markEdited();
     }, 'Restored.');
   };
@@ -348,6 +350,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     await safe(async () => {
       const shiftId = await createShift({
         venueId,
+        weekStart: selectedWeekStart,
         dayIndex: day,
         startMinutes,
         endMinutes,
@@ -457,7 +460,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                 style={topButtonStyle}
                 labelStyle={{ fontSize: 12 }}
                 onPress={() => void safe(async () => {
-                  const r = await publishSchedule({ venueId });
+                  const r = await publishSchedule({ venueId, weekStart: selectedWeekStart });
                   setStatus('Published');
                   flash(`Published and notified ${r.notified} staff.`);
                 })}
@@ -627,7 +630,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             <View style={{ gap: spacing.md }}>
               <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TextInput dense label="Template name" value={templateName} onChangeText={setTemplateName} mode="outlined" style={{ flex: 1, minWidth: 200, backgroundColor: colors.surface }} />
-                <Button mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim() }); setTemplateName(''); }, 'Template saved.')}>
+                <Button mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim(), weekStart: selectedWeekStart }); setTemplateName(''); }, 'Template saved.')}>
                   Save current week
                 </Button>
               </View>
@@ -639,10 +642,10 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{template.name}</Text>
                       <Text style={{ color: colors.muted, fontSize: 12 }}>{template.shiftCount} open shifts</Text>
                     </View>
-                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
+                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false, weekStart: selectedWeekStart }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
                       Add
                     </Button>
-                    <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
+                    <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true, weekStart: selectedWeekStart }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
                       Replace
                     </Button>
                     <IconButton
@@ -777,7 +780,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                     title="Duplicate Monday to week"
                     onPress={async () => {
                       setMenuOpen(false);
-                      const r = await copyDayShifts({ venueId, fromDay: 1, toDays: [0, 2, 3, 4, 5, 6] });
+                      const r = await copyDayShifts({ venueId, weekStart: selectedWeekStart, fromDay: 1, toDays: [0, 2, 3, 4, 5, 6] });
                       markEdited();
                       flash(`Copied ${r.added} shifts.`);
                     }}
@@ -801,7 +804,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                     onPress={async () => {
                       setMenuOpen(false);
                       await safe(async () => {
-                        const r = await clearWeek({ venueId });
+                        const r = await clearWeek({ venueId, weekStart: selectedWeekStart });
                         markEdited();
                         if (r.removed > 0) setUndo({ label: `Cleared ${r.removed} shifts.`, shifts: r.shifts as ShiftSnapshot[] });
                         else flash('Nothing to clear.');
@@ -986,6 +989,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
 
       <AutoScheduleModal
         venueId={venueId}
+        weekStartDate={selectedWeekStart}
         visible={autoOpen}
         onClose={() => setAutoOpen(false)}
         onApplied={flash}

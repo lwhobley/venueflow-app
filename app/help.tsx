@@ -23,7 +23,6 @@ const SECTION_KEYS = [
   'home',
   'clock',
   'schedule',
-  'availability',
   'floor',
   'reservations',
   'guests',

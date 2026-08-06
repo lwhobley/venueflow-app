@@ -12,6 +12,7 @@ import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
 import { unpaidBreakMs } from '../../common/break-duration';
+import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -80,11 +81,12 @@ export class TimeClockController {
       const tz = venue.timezone ?? null;
       const today = zonedDayOfWeek(tz, now);
       const minutesNow = zonedMinutesOfDay(tz, now);
+      const weekStart = weekStartFor(todayInZone(tz));
       const openByProfile = new Set(
         entries.filter((entry) => entry.isOpen).map((entry) => entry.profileId),
       );
       const shifts = await this.prisma.scheduleShift.findMany({
-        where: { venueId: venue.id },
+        where: { venueId: venue.id, weekStart },
         include: { profile: true },
       });
       for (const shift of shifts) {
@@ -210,12 +212,14 @@ export class TimeClockController {
       const nowMs = Date.now();
       const today = zonedDayOfWeek(venue.timezone, nowMs);
       const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
+      const weekStart = weekStartFor(todayInZone(venue.timezone));
       const shift = await this.prisma.scheduleShift.findFirst({
         where: {
           venueId: venue.id,
           profileId: profile.id,
+          weekStart,
           dayIndex: today,
-          status: 'scheduled',
+          status: { in: ['scheduled', 'covered'] },
         },
         orderBy: { startMinutes: 'asc' },
       });

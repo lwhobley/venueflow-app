@@ -1,5 +1,5 @@
 // Translation keys for the shift/labor screen group: app/(tabs)/schedule.tsx,
-// staff.tsx, floor.tsx, availability.tsx, clock.tsx.
+// staff.tsx, floor.tsx, schedule.tsx, clock.tsx.
 //
 // Each locale object must define the SAME keys as `en` — this app does not
 // fall back key-by-key within a namespace, so a missing key here renders as
@@ -9,7 +9,7 @@ export const en = {
     kicker: 'Team',
     title: 'Schedule',
     subtitleManager: 'Build the schedule, assign staff, and review requests.',
-    subtitleStaff: 'See your shifts, pick up open ones, and set your availability.',
+    subtitleStaff: 'See your shifts, pick up open ones, and request days you are unavailable.',
     noVenue: 'No venue assigned to your account yet.',
     tabCalendar: 'Calendar',
     tabForecast: 'Forecast',

@@ -170,7 +170,7 @@ export class StaffController {
       text:
         `Hi ${created.fullName},\n\n` +
         `Welcome! You have been added to the team at ${scope.venueName} as a ${created.jobTitle}.\n\n` +
-        `To view your schedule, manage your availability, and request shift swaps, please join the venue using the steps below:\n\n` +
+        `To view your schedule, request unavailable days, and request shift swaps, please join the venue using the steps below:\n\n` +
         `1. Create a Venue Wrangler account or sign in using your email: ${created.email}\n` +
         `2. You will be automatically linked to the venue and can access your dashboard right away.\n\n` +
         `We're excited to have you on board!\n\n` +
