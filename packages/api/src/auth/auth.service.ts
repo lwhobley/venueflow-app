@@ -86,12 +86,23 @@ export class AuthService {
         ? { venueId: activeInvite.venueId, role: activeInvite.role, jobTitle: activeInvite.jobTitle }
         : null;
 
-      const existingByUser = await tx.profile.findUnique({
-        where: { userId },
-        include: { venue: true },
-      });
+      const existingProfileForVenue = grant?.venueId
+        ? await tx.profile.findFirst({
+            where: { userId, venueId: grant.venueId },
+            include: { venue: true },
+          })
+        : null;
+
+      const existingByUser =
+        existingProfileForVenue ||
+        (await tx.profile.findFirst({
+          where: { userId },
+          include: { venue: true },
+          orderBy: { createdAt: 'asc' },
+        }));
+
       let result;
-      if (existingByUser) {
+      if (existingByUser && (!grant?.venueId || existingByUser.venueId === grant.venueId)) {
         const adoptableProfile = emailVerified
           ? await tx.profile.findFirst({
               where: { userId: null, email: { equals: email, mode: 'insensitive' }, venueId: { not: null } },
@@ -120,6 +131,20 @@ export class AuthService {
             include: { venue: true },
           });
         }
+      } else if (grant?.venueId) {
+        // User belongs to another venue and is joining this venue via invite -> create new profile for this venue
+        result = await tx.profile.create({
+          data: {
+            userId,
+            email,
+            fullName: trimmedFullName || existingByUser?.fullName || email.split('@')[0] || 'Team Member',
+            role: grant.role,
+            jobTitle: grant.jobTitle,
+            venueId: grant.venueId,
+            trialEndsAt,
+          },
+          include: { venue: true },
+        });
       } else {
         const adoptableProfile = emailVerified
           ? (grant

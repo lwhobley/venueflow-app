@@ -2,11 +2,12 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { UserSummary, Venue } from './types';
+import type { UserSummary, Venue, VenueSummary } from './types';
 
 type SessionState = {
   user: UserSummary | null;
   venue: Venue | null;
+  venues: VenueSummary[];
   token: string | null;
 };
 
@@ -17,9 +18,12 @@ export type AuthState = SessionState & {
   setSession: (session: {
     user: UserSummary;
     venue: Venue | null;
+    venues?: VenueSummary[];
     token?: string | null;
   }) => void;
   setVenue: (venue: Venue) => void;
+  setVenues: (venues: VenueSummary[]) => void;
+  switchVenue: (venue: Venue) => void;
   clearSession: () => void;
 };
 
@@ -51,20 +55,29 @@ const createAuthStore = (set: any): AuthState => ({
   hydrated: false,
   user: null,
   venue: null,
+  venues: [],
   token: null,
   setHydrated: (hydrated: boolean) => set({ hydrated }),
-  setSession: (session: { user: UserSummary; venue: Venue | null; token?: string | null }) =>
+  setSession: (session: { user: UserSummary; venue: Venue | null; venues?: VenueSummary[]; token?: string | null }) =>
     set((state: AuthState) => ({
       user: session.user,
       venue: session.venue,
+      venues: session.venues ?? state.venues,
       ...(session.token !== undefined ? { token: session.token } : {}),
-      authEpoch: session.token !== undefined ? state.authEpoch + 1 : state.authEpoch,
+      authEpoch: state.authEpoch + 1,
     })),
   setVenue: (venue: Venue) => set({ venue }),
+  setVenues: (venues: VenueSummary[]) => set({ venues }),
+  switchVenue: (venue: Venue) =>
+    set((state: AuthState) => ({
+      venue,
+      authEpoch: state.authEpoch + 1,
+    })),
   clearSession: () =>
     set((state: AuthState) => ({
       user: null,
       venue: null,
+      venues: [],
       token: null,
       authEpoch: state.authEpoch + 1,
     })),
@@ -77,6 +90,7 @@ export const useAuthStore = create<AuthState>()(
     partialize: (state: AuthState): SessionState => ({
       user: state.user,
       venue: state.venue,
+      venues: state.venues,
       token: state.token,
     }),
     onRehydrateStorage: () => (state: AuthState | undefined) => {

@@ -230,8 +230,8 @@ model User {
   failedSignInCount         Int                         @default(0)
   lockedUntil               DateTime?
   createdAt                 DateTime                    @default(now())
-  // userId is unique on Profile, so this is effectively one-to-one.
-  profile                   Profile?
+  // One profile per venue — a user with multi-venue access has multiple rows.
+  profiles                  Profile[]
   sessions                  Session[]
   accounts                  AuthAccount[]
   password                  PasswordCredential?
@@ -364,7 +364,7 @@ model Venue {
 
 model Profile {
   id                         String               @id @default(cuid())
-  userId                     String?              @unique
+  userId                     String?
   tokenIdentifier            String?
   email                      String
   fullName                   String
@@ -404,6 +404,8 @@ model Profile {
   createdScheduleMemoryNotes ScheduleMemoryNote[] @relation("ScheduleMemoryCreatedBy")
   uploadedDocuments          VenueDocument[]      @relation("DocumentUploader")
 
+  @@unique([userId, venueId])
+  @@index([userId])
   @@index([venueId])
   @@index([email])
   @@index([tokenIdentifier])

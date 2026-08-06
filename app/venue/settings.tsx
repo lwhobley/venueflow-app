@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { colors, spacing, type } from '../../lib/theme';
 import { AppCard, SectionHeader } from '../../components/AppCard';
+import { VenueSwitcher } from '../../components/VenueSwitcher';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { getPreciseLocation } from '../../lib/location';
@@ -106,6 +107,8 @@ export default function VenueSettingsScreen() {
           <Text style={{ color: colors.muted }}>{t('venueSettings.subtitle')}</Text>
         </View>
       </View>
+
+      <VenueSwitcher />
 
       <AppCard>
           <SectionHeader title={t('venueSettings.detailsSection')} />

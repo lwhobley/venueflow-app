@@ -115,6 +115,18 @@ const mutationRoutes: Record<string, Route> = {
     body: ({ name, latitude, longitude, geofenceRadiusM }) => ({ name, latitude, longitude, geofenceRadiusM }),
     invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
   },
+  'app.switchVenue': {
+    path: '/v1/app/switch-venue',
+    method: 'POST',
+    body: ({ venueId }) => ({ venueId }),
+    invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
+  },
+  'app.registerVenue': {
+    path: '/v1/app/register-venue',
+    method: 'POST',
+    body: ({ businessName, ownerName, phone, address, venueType, staffRange }) => ({ businessName, ownerName, phone, address, venueType, staffRange }),
+    invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
+  },
   'app.deleteMyAccount': { path: '/v1/app/me', method: 'DELETE' },
   'app.clockIn': { path: '/v1/time-clock/clock-in', method: 'POST', body: locationBody, invalidate: clockInvalidations() },
   'app.clockOut': { path: '/v1/time-clock/clock-out', method: 'POST', body: locationBody, invalidate: clockInvalidations() },
