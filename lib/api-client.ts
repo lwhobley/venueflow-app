@@ -70,6 +70,7 @@ type RequestOptions = {
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = useAuthStore.getState().token;
+  const venueId = useAuthStore.getState().venue?.id;
   const timeout = options.timeoutMs ?? 30_000;
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const signal = controller?.signal ?? options.signal;
@@ -93,6 +94,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         Accept: 'application/json, text/csv;q=0.9, text/plain;q=0.8',
         ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(venueId ? { 'X-Venue-Id': venueId } : {}),
       },
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       ...(signal ? { signal } : {}),

@@ -22,7 +22,10 @@ import { buildDailyBriefProfitabilityPulse } from './daily-brief-profitability';
 
 function makeController() {
   const prisma = {
-    profile: { findUnique: vi.fn().mockResolvedValue(null) },
+    profile: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockImplementation((args: any) => prisma.profile.findUnique(args)),
+    },
     reservation: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
     managerGoal: {
       findMany: vi.fn().mockResolvedValue([]),

@@ -11,6 +11,8 @@ import { canManageVenue } from './permissions';
 
 export function useVenueAuth() {
   const venue = useAuthStore((state: AuthState) => state.venue);
+  const venues = useAuthStore((state: AuthState) => state.venues);
+  const switchVenue = useAuthStore((state: AuthState) => state.switchVenue);
   const { isReady, user } = useAuthenticatedSession();
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const profileLoading = isReady && me === undefined;
@@ -18,5 +20,5 @@ export function useVenueAuth() {
     me && canManageVenue(me.profile.role, me.profile.allAccess),
   );
 
-  return { venue, isReady, user, me, profileLoading, canManage } as const;
+  return { venue, venues, switchVenue, isReady, user, me, profileLoading, canManage } as const;
 }

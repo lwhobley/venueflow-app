@@ -1040,7 +1040,7 @@ export class OperationsController {
   }
 
   private async getProfile(user: AuthUser) {
-    return this.prisma.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
+    return this.prisma.profile.findFirst({ where: { userId: user.sub }, include: { venue: true }, orderBy: { createdAt: 'asc' } });
   }
 
   private async getExecutionSource(venueId: string, eventId: string) {

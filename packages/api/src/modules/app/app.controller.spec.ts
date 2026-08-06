@@ -64,16 +64,15 @@ describe('AppController redeem-my-invite', () => {
       user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com', emailVerifiedAt: new Date() }) },
       profile: {
         findUnique: vi.fn().mockResolvedValue(existingProfile),
-        // A manager at another venue put this address on their roster.
-        findFirst: vi.fn().mockResolvedValue({ id: 'profile-roster', venueId: 'venue-b', venue: { id: 'venue-b' } }),
+        findFirst: vi.fn().mockImplementation((args: any) => {
+          if (args?.where?.userId) return Promise.resolve(existingProfile);
+          return Promise.resolve({ id: 'profile-roster', venueId: 'venue-b', venue: { id: 'venue-b' } });
+        }),
+        findMany: vi.fn().mockResolvedValue([{ id: 'profile-owner', venueId: 'venue-a', venue: { id: 'venue-a', name: 'Venue A' }, role: 'owner' }]),
         delete: vi.fn(),
-        // Functional mocks so that, without the guard, the adoption path runs
-        // to completion and this test fails on the assertions below rather
-        // than on an undefined mock return.
         update: vi.fn().mockResolvedValue({ ...existingProfile, id: 'profile-roster', venueId: 'venue-b' }),
       },
       invite: { findMany: vi.fn().mockResolvedValue([]) },
-      $transaction: vi.fn(async (fn: any) => fn(prisma)),
     };
     const profiles = new ProfileService(prisma as any);
     const controller = new AppController(prisma as any, {} as any, profiles);
@@ -83,10 +82,10 @@ describe('AppController redeem-my-invite', () => {
     expect(result.redeemed).toBe(false);
     expect(result).toMatchObject({ venue: { id: 'venue-a' } });
     expect(prisma.profile.delete).not.toHaveBeenCalled();
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.profile.update).not.toHaveBeenCalled();
   });
 
-  it('still adopts an unclaimed roster profile when the caller has no venue', async () => {
+  it('adopts an unclaimed roster profile when the caller has no venue', async () => {
     const adopted = {
       id: 'profile-roster',
       email: 'new@example.com',
@@ -101,7 +100,11 @@ describe('AppController redeem-my-invite', () => {
       user: { findUnique: vi.fn().mockResolvedValue({ email: 'new@example.com', emailVerifiedAt: new Date() }) },
       profile: {
         findUnique: vi.fn().mockResolvedValue({ id: 'profile-temp', venueId: null, venue: null }),
-        findFirst: vi.fn().mockResolvedValue({ id: 'profile-roster', venueId: 'venue-b', venue: { id: 'venue-b' } }),
+        findFirst: vi.fn().mockImplementation((args: any) => {
+          if (args?.where?.userId === 'user-new') return Promise.resolve({ id: 'profile-temp', venueId: null, venue: null });
+          return Promise.resolve({ id: 'profile-roster', venueId: 'venue-b', venue: { id: 'venue-b' } });
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
         delete: vi.fn(),
         update: vi.fn().mockResolvedValue(adopted),
       },

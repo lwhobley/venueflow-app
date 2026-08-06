@@ -10,6 +10,13 @@ export type Venue = {
   geofence_radius_m: number;
 };
 
+export type VenueSummary = {
+  id: string;
+  name: string;
+  role: Role;
+  profileId?: string;
+};
+
 export type UserSummary = {
   id: string;
   email: string;

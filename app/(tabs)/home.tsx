@@ -28,6 +28,7 @@ const allowedPriorityRoutes = new Set(['/reports', '/schedule', '/reservations',
 export default function HomeScreen() {
   usePushNotifications();
   const venue = useAuthStore((state) => state.venue);
+  const venues = useAuthStore((state) => state.venues);
   const { isReady } = useAuthenticatedSession();
   const palette = useDesignTheme();
   const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
@@ -83,7 +84,10 @@ export default function HomeScreen() {
       <View style={{ backgroundColor: '#074426', paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.lg, gap: spacing.md }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md }}>
           <View style={{ flex: 1 }}>
-            <CommandText palette={palette} variant="label" style={{ color: '#B6D6BE' }}>{venueName}</CommandText>
+            <Pressable onPress={() => router.push('/venue/settings')} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, flexDirection: 'row', alignItems: 'center', gap: 4 })}>
+              <CommandText palette={palette} variant="label" style={{ color: '#B6D6BE' }}>{venueName}</CommandText>
+              {venues.length > 1 ? <MaterialCommunityIcons name="swap-horizontal" size={16} color="#B6D6BE" /> : null}
+            </Pressable>
             <CommandText palette={palette} variant="hero" style={{ color: '#FFFFFF' }}>Operations command</CommandText>
           </View>
           <Pressable onPress={() => setShowNotifications((value) => !value)} accessibilityRole="button" accessibilityLabel="Open notifications" style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, padding: 8 })}>

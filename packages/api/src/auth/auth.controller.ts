@@ -424,7 +424,7 @@ export class AuthController {
 
     const account = await this.prisma.user.findUnique({
       where: { email },
-      select: { id: true, email: true, profile: { select: { fullName: true } } },
+      select: { id: true, email: true, profiles: { select: { fullName: true }, take: 1 } },
     });
     if (account?.email) {
       const code = this.authService.generateOneTimeCode();
@@ -441,7 +441,7 @@ export class AuthController {
           to: account.email,
           subject: 'Reset Your Venue Wrangler Password',
           text:
-            `Hi ${account.profile?.fullName ?? 'there'},\n\n` +
+            `Hi ${account.profiles?.[0]?.fullName ?? 'there'},\n\n` +
             `We received a request to reset the password for your Venue Wrangler account.\n\n` +
             `To complete your password reset, enter the following code when prompted in the app:\n\n` +
             `   ${code}\n\n` +
@@ -587,10 +587,32 @@ export class AuthController {
       where: { id: session.id },
       data: { tokenHash: createHash('sha256').update(token).digest('hex') },
     });
+    const userProfiles =
+      typeof this.prisma.profile?.findMany === 'function'
+        ? await this.prisma.profile.findMany({
+            where: {
+              userId,
+              venueId: { not: null },
+              OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+            },
+            include: { venue: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [];
+    const venues = userProfiles
+      .filter((p) => p.venue)
+      .map((p) => ({
+        id: p.venue!.id,
+        name: p.venue!.name,
+        role: p.role,
+        profileId: p.id,
+      }));
+
     return {
       token,
       profile: mapProfile(profile, emailVerified),
       venue: profile.venue ? mapVenue(profile.venue) : null,
+      venues,
     };
   }
 

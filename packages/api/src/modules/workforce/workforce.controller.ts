@@ -352,7 +352,7 @@ export class WorkforceController {
           select: {
             id: true,
             email: true,
-            profile: { select: { fullName: true, email: true } },
+            profiles: { select: { fullName: true, email: true }, take: 1 },
           },
         },
       },
@@ -365,8 +365,8 @@ export class WorkforceController {
         venueId: r.venueId,
         venueName: r.venue.name,
         userId: r.userId,
-        userName: r.user.profile?.fullName ?? null,
-        userEmail: r.user.profile?.email ?? r.user.email ?? null,
+        userName: r.user.profiles?.[0]?.fullName ?? null,
+        userEmail: r.user.profiles?.[0]?.email ?? r.user.email ?? null,
         status: r.status,
         createdAt: r.createdAt.getTime(),
       })),
@@ -431,7 +431,7 @@ export class WorkforceController {
           select: {
             id: true,
             email: true,
-            profile: { select: { fullName: true, email: true, role: true, jobTitle: true } },
+            profiles: { select: { fullName: true, email: true, role: true, jobTitle: true }, take: 1 },
           },
         },
         events: { orderBy: { createdAt: 'asc' } },
@@ -455,8 +455,8 @@ export class WorkforceController {
       venueId: request.venueId,
       venueName: request.venue.name,
       userId: request.userId,
-      userName: request.user.profile?.fullName ?? null,
-      userEmail: request.user.profile?.email ?? request.user.email ?? null,
+      userName: request.user.profiles?.[0]?.fullName ?? null,
+      userEmail: request.user.profiles?.[0]?.email ?? request.user.email ?? null,
       status: request.status,
       decidedAt: request.decidedAt?.getTime() ?? null,
       decisionNote: request.decisionNote ?? null,
@@ -488,15 +488,15 @@ export class WorkforceController {
         user: {
           select: {
             email: true,
-            profile: { select: { email: true, fullName: true } },
+            profiles: { select: { email: true, fullName: true }, take: 1 },
           },
         },
       },
     });
     if (!request) return;
-    const to = request.user.profile?.email ?? request.user.email;
+    const to = request.user.profiles?.[0]?.email ?? request.user.email;
     if (!to) return;
-    const name = request.user.profile?.fullName ?? 'there';
+    const name = request.user.profiles?.[0]?.fullName ?? 'there';
     const statusText = decision === 'approved' ? 'Approved' : 'Rejected';
     void this.email.send({
       to,

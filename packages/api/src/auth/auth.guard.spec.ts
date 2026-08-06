@@ -60,6 +60,7 @@ function makeGuard(options?: {
               venue: { name: 'Live Venue', subscriptionStatus: 'active' },
             },
       ),
+      findFirst: vi.fn().mockImplementation((args: any) => prisma.profile.findUnique(args)),
     },
   } as any;
   return { guard: new AuthGuard(jwt, reflector, prisma), prisma, jwt };
@@ -72,7 +73,7 @@ describe('AuthGuard', () => {
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(prisma.session.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'session-1' } }));
-    expect(prisma.profile.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'user-1' } }));
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ userId: 'user-1' }) }));
     expect(context.switchToHttp().getRequest().user).toMatchObject({
       email: 'live@example.com',
       name: 'Live User',
