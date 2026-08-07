@@ -27,7 +27,7 @@ export async function getOfferingPackages(): Promise<PurchasePackage[]> {
   return [];
 }
 
-export async function purchasePackageById(_id: string): Promise<boolean> {
+export async function purchasePackageById(_id: string, _productId?: string): Promise<boolean> {
   throw new Error('In-app purchases are only available in the mobile app.');
 }
 

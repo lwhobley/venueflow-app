@@ -10,6 +10,10 @@ import { Platform } from 'react-native';
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string | undefined>;
 const IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? extra.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
 const ENTITLEMENT = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? extra.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT ?? 'pro';
+const DIRECT_PRODUCT_IDS = [
+  'com.venuewrangler.monthly',
+  'com.venuewrangler.multivenue.399',
+];
 
 const API_KEY = Platform.OS === 'ios' ? IOS_KEY : '';
 
@@ -78,22 +82,51 @@ export async function isPremiumActive(): Promise<boolean> {
 export async function getOfferingPackages(): Promise<PurchasePackage[]> {
   if (!configured) return [];
   const offerings = await Purchases.getOfferings();
-  const current = offerings.current;
-  if (!current) return [];
-  return current.availablePackages.map((p) => ({
+  const packages = (offerings.current?.availablePackages ?? []).map((p) => ({
     id: p.identifier,
     title: p.product.title,
     priceString: p.product.priceString,
     productId: p.product.identifier,
   }));
+
+  // A RevenueCat offering can lag behind App Store Connect configuration.
+  // Query the two supported StoreKit products directly so a valid multi-venue
+  // product stays visible and purchasable even before it is added to the
+  // current offering. StoreKit supplies the localized title and price.
+  try {
+    const products = await Purchases.getProducts(DIRECT_PRODUCT_IDS);
+    for (const product of products) {
+      if (packages.some((pkg) => pkg.productId === product.identifier)) continue;
+      packages.push({
+        id: product.identifier,
+        title: product.title,
+        priceString: product.priceString,
+        productId: product.identifier,
+      });
+    }
+  } catch (e) {
+    console.warn('[purchases] direct product lookup failed:', e instanceof Error ? e.message : String(e));
+  }
+
+  return packages;
 }
 
-export async function purchasePackageById(id: string): Promise<boolean> {
+export async function purchasePackageById(id: string, productId?: string): Promise<boolean> {
   if (!configured) throw new Error('Purchases are not available right now.');
   const offerings = await Purchases.getOfferings();
-  const pkg = offerings.current?.availablePackages.find((p) => p.identifier === id);
-  if (!pkg) throw new Error('That plan is not available right now.');
-  const { customerInfo } = await Purchases.purchasePackage(pkg);
+  const pkg = offerings.current?.availablePackages.find(
+    (candidate) => candidate.identifier === id || candidate.product.identifier === productId,
+  );
+  if (pkg) {
+    const { customerInfo } = await Purchases.purchasePackage(pkg);
+    return Boolean(customerInfo.entitlements.active[ENTITLEMENT]);
+  }
+
+  const targetProductId = productId || id;
+  const products = await Purchases.getProducts([targetProductId]);
+  const product = products.find((candidate) => candidate.identifier === targetProductId);
+  if (!product) throw new Error('That plan is not available right now.');
+  const { customerInfo } = await Purchases.purchaseStoreProduct(product);
   return Boolean(customerInfo.entitlements.active[ENTITLEMENT]);
 }
 
