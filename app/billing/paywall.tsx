@@ -43,6 +43,10 @@ const FALLBACK_TIERS: (PurchasePackage & { planKey: 'single' | 'multi_venue'; de
   },
 ];
 
+function planKeyFor(pkg: Pick<PurchasePackage, 'id' | 'productId'>): 'single' | 'multi_venue' {
+  return pkg.productId.includes('multivenue') || pkg.id.includes('multi') ? 'multi_venue' : 'single';
+}
+
 export default function PaywallScreen() {
   const { t } = useI18n();
   const { me } = useAuthenticatedSession();
@@ -80,9 +84,9 @@ export default function PaywallScreen() {
     setError(null);
     try {
       const selected = (packages.length ? packages : FALLBACK_TIERS).find((pkg) => pkg.id === id);
-      const active = await purchasePackageById(id);
+      const targetProductId = selected?.productId || productId || 'com.venuewrangler.monthly';
+      const active = await purchasePackageById(id, targetProductId);
       if (active) {
-        const targetProductId = selected?.productId || productId || 'com.venuewrangler.monthly';
         const entitlementId = targetProductId.includes('multivenue') ? 'multi_venue' : 'pro';
         await appApi.syncAppleSubscription({ productId: targetProductId, entitlementId });
         router.replace('/(tabs)/home');
@@ -126,10 +130,17 @@ export default function PaywallScreen() {
     }
   };
 
-  const displayTiers = livePackagesLoaded ? packages : FALLBACK_TIERS;
+  const displayTiers = livePackagesLoaded
+    ? [
+        ...packages,
+        ...FALLBACK_TIERS.filter(
+          (fallback) => !packages.some((pkg) => planKeyFor(pkg) === planKeyFor(fallback)),
+        ),
+      ]
+    : FALLBACK_TIERS;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
+    <ScrollView contentInsetAdjustmentBehavior="automatic" style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ gap: 4 }}>
         <Kicker>{t('paywall.kicker')}</Kicker>
         <Text style={{ ...type.display, color: colors.charcoal }}>{t('paywall.title')}</Text>
@@ -175,7 +186,7 @@ export default function PaywallScreen() {
         <Text style={{ color: colors.muted }}>{t('paywall.loadingPricing')}</Text>
       ) : (
         displayTiers.map((pkg) => {
-          const isMulti = pkg.productId.includes('multivenue') || pkg.id.includes('multi');
+          const isMulti = planKeyFor(pkg) === 'multi_venue';
           return (
             <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.soft, borderWidth: isMulti ? 1.5 : StyleSheet.hairlineWidth, borderColor: isMulti ? colors.primary : colors.border }}>
               <Card.Content style={{ gap: spacing.sm }}>
@@ -211,7 +222,7 @@ export default function PaywallScreen() {
         </Text>
       ) : null}
 
-      {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
+      {error ? <Text selectable style={{ color: colors.danger }}>{error}</Text> : null}
 
       {PURCHASES_SUPPORTED ? (
         <Button mode="text" textColor={colors.primary} loading={busy === 'restore'} disabled={!!busy} onPress={() => void restore()}>
