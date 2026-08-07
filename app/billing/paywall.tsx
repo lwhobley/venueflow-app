@@ -17,18 +17,29 @@ import { useI18n } from '../../lib/i18n';
 
 const TERMS_URL = 'https://www.venuewrangler.com/terms';
 const PRIVACY_URL = 'https://www.venuewrangler.com/privacy';
-const MONTHLY_PRICE_LABEL = '$99.99';
+const SINGLE_PRICE_LABEL = '$99.99';
+const MULTI_PRICE_LABEL = '$399.00';
 
 // Shown when RevenueCat returns no live offering yet — e.g. Expo Go / dev
 // (no native key), or before the App Store subscription is approved. Keeps
-// the default plan visible so the screen is never blank. Real packages from
+// default plans visible so the screen is never blank. Real packages from
 // getOfferingPackages() override this whenever they're available.
-const FALLBACK_TIERS: PurchasePackage[] = [
+const FALLBACK_TIERS: (PurchasePackage & { planKey: 'single' | 'multi_venue'; description: string })[] = [
   {
     id: 'venueflow-monthly',
-    title: 'Venue Wrangler',
-    priceString: MONTHLY_PRICE_LABEL,
+    title: 'Single Venue Standard',
+    priceString: SINGLE_PRICE_LABEL,
     productId: 'com.venuewrangler.monthly',
+    planKey: 'single',
+    description: 'Everything you need to manage 1 venue with unlimited staff.',
+  },
+  {
+    id: 'venueflow-multi-venue-5',
+    title: 'Multi-Venue Pro',
+    priceString: MULTI_PRICE_LABEL,
+    productId: 'com.venuewrangler.multivenue.399',
+    planKey: 'multi_venue',
+    description: 'Manage up to 5 venues seamlessly under 1 subscription.',
   },
 ];
 
@@ -64,16 +75,16 @@ export default function PaywallScreen() {
     };
   }, []);
 
-  const buy = async (id: string) => {
+  const buy = async (id: string, productId?: string) => {
     setBusy(id);
     setError(null);
     try {
       const selected = (packages.length ? packages : FALLBACK_TIERS).find((pkg) => pkg.id === id);
       const active = await purchasePackageById(id);
       if (active) {
-        if (selected?.productId) {
-          await appApi.syncAppleSubscription({ productId: selected.productId });
-        }
+        const targetProductId = selected?.productId || productId || 'com.venuewrangler.monthly';
+        const entitlementId = targetProductId.includes('multivenue') ? 'multi_venue' : 'pro';
+        await appApi.syncAppleSubscription({ productId: targetProductId, entitlementId });
         router.replace('/(tabs)/home');
       }
     } catch (e) {
@@ -102,11 +113,11 @@ export default function PaywallScreen() {
     }
   };
 
-  const buyWithStripe = async () => {
-    setBusy('stripe');
+  const buyWithStripe = async (plan: 'single' | 'multi_venue') => {
+    setBusy(`stripe_${plan}`);
     setError(null);
     try {
-      const { url } = await appApi.createStripeCheckout();
+      const { url } = await appApi.createStripeCheckout({ plan });
       await Linking.openURL(url);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('paywall.purchaseFailed'));
@@ -114,6 +125,8 @@ export default function PaywallScreen() {
       setBusy(null);
     }
   };
+
+  const displayTiers = livePackagesLoaded ? packages : FALLBACK_TIERS;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
@@ -124,38 +137,67 @@ export default function PaywallScreen() {
       </View>
 
       {!PURCHASES_SUPPORTED ? (
-        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
-          <Card.Content style={{ gap: spacing.sm }}>
-            <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>Venue Wrangler</Text>
-            <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{MONTHLY_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-            <Text style={{ color: colors.muted }}>{t('paywall.managedInApp')}</Text>
-            <Button mode="contained" buttonColor={colors.primary} loading={busy === 'stripe'} disabled={Boolean(busy)} onPress={() => void buyWithStripe()}>
-              {ctaLabel}
-            </Button>
-          </Card.Content>
-        </Card>
+        <View style={{ gap: spacing.md }}>
+          {FALLBACK_TIERS.map((tier) => {
+            const isMulti = tier.planKey === 'multi_venue';
+            return (
+              <Card
+                key={tier.id}
+                style={{
+                  backgroundColor: colors.surface,
+                  borderRadius: radius.sharp,
+                  borderWidth: isMulti ? 1.5 : StyleSheet.hairlineWidth,
+                  borderColor: isMulti ? colors.primary : colors.border,
+                }}
+              >
+                <Card.Content style={{ gap: spacing.sm }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                    <Text variant="titleMedium" style={{ flex: 1, fontWeight: '800', color: colors.primary }}>{tier.title}</Text>
+                    {isMulti ? <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>UP TO 5 VENUES</Text> : null}
+                  </View>
+                  <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{tier.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
+                  <Text style={{ color: colors.muted }}>{tier.description}</Text>
+                  <Button
+                    mode="contained"
+                    buttonColor={colors.primary}
+                    loading={busy === `stripe_${tier.planKey}`}
+                    disabled={Boolean(busy)}
+                    onPress={() => void buyWithStripe(tier.planKey)}
+                  >
+                    {ctaLabel} — {isMulti ? 'Multi-Venue Pro ($399/mo)' : 'Single Venue'}
+                  </Button>
+                </Card.Content>
+              </Card>
+            );
+          })}
+        </View>
       ) : loading ? (
         <Text style={{ color: colors.muted }}>{t('paywall.loadingPricing')}</Text>
       ) : (
-        (livePackagesLoaded ? packages : FALLBACK_TIERS).map((pkg) => {
+        displayTiers.map((pkg) => {
+          const isMulti = pkg.productId.includes('multivenue') || pkg.id.includes('multi');
           return (
-            <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.soft, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
+            <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.soft, borderWidth: isMulti ? 1.5 : StyleSheet.hairlineWidth, borderColor: isMulti ? colors.primary : colors.border }}>
               <Card.Content style={{ gap: spacing.sm }}>
-                <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
-                <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{MONTHLY_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-                <Text style={{ color: colors.muted, fontWeight: '600' }}>{t('paywall.forTeamSize')}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                  <Text variant="titleMedium" style={{ flex: 1, fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
+                  {isMulti ? <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>UP TO 5 VENUES</Text> : null}
+                </View>
+                <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
+                <Text style={{ color: colors.muted, fontWeight: '600' }}>
+                  {isMulti ? 'Manage up to 5 venues seamlessly under 1 subscription.' : t('paywall.forTeamSize')}
+                </Text>
                 <Text style={{ color: colors.success, fontWeight: '600' }}>
                   {inTrial ? t('paywall.introActive') : t('paywall.monthlySubscription')}
                 </Text>
-                <Text style={{ color: colors.muted }}>{t('paywall.soloFreeUpgrade')}</Text>
                 <Button
                   mode="contained"
                   buttonColor={colors.primary}
                   loading={busy === pkg.id}
-                  disabled={!!busy || !livePackagesLoaded}
-                  onPress={() => void buy(pkg.id)}
+                  disabled={Boolean(busy)}
+                  onPress={() => void buy(pkg.id, pkg.productId)}
                 >
-                  {ctaLabel}
+                  {ctaLabel}{isMulti ? ' — Multi-Venue ($399/mo)' : ''}
                 </Button>
               </Card.Content>
             </Card>
