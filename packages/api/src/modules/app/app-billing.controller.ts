@@ -14,7 +14,15 @@ import { ProfileService } from './profile.service';
 // Idempotency key for the auto-created subscription price, so repeated lookups
 // reuse one price instead of creating duplicates.
 const STRIPE_PRICE_LOOKUP_KEY = 'venue_wrangler_monthly';
+const STRIPE_MULTI_PRICE_LOOKUP_KEY = 'venue_wrangler_multi_venue_399';
 const STRIPE_PLAN_AMOUNT_CENTS = 9999;
+const STRIPE_MULTI_AMOUNT_CENTS = 39900;
+
+class CreateStripeCheckoutDto {
+  @IsString()
+  @IsOptional()
+  plan?: 'single' | 'multi_venue';
+}
 
 class AppleSubscriptionSyncDto {
   @IsString()
@@ -30,8 +38,9 @@ class AppleSubscriptionSyncDto {
 @Controller('v1/app')
 export class AppBillingController {
   private readonly logger = new Logger(AppBillingController.name);
-  // Resolved Stripe price id is stable for the process; cache after first lookup.
+  // Resolved Stripe price ids are stable for the process; cache after first lookup.
   private cachedStripePriceId: string | null = null;
+  private cachedStripeMultiVenuePriceId: string | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -68,7 +77,7 @@ export class AppBillingController {
   // which the iOS app then reads, so paid access is shared across platforms.
   @UseGuards(AuthGuard)
   @Post('billing/stripe/checkout')
-  async createStripeCheckout(@CurrentUser() user: AuthUser) {
+  async createStripeCheckout(@CurrentUser() user: AuthUser, @Body() body?: CreateStripeCheckoutDto) {
     await assertWithinSharedRateLimit(this.prisma, `stripe-checkout:${user.sub}`, 10, 60_000);
     const profile = await this.profiles.requireBillingProfile(user);
     const secret = this.requireStripeSecret();
@@ -79,13 +88,10 @@ export class AppBillingController {
     if (existing?.platform === 'stripe' && (existing.status === 'active' || existing.status === 'trialing')) {
       throw new BadRequestException('This venue already has an active Stripe subscription.');
     }
-    const priceId = await this.resolveStripePriceId(secret);
+    const isMulti = body?.plan === 'multi_venue';
+    const priceId = await this.resolveStripePriceId(secret, isMulti ? 'multi_venue' : 'single');
     const base = this.webBaseUrl();
-    // Idempotency key bucketed per venue per 10 minutes: rapid re-submits
-    // (double-click, screen remount, client retry) reuse one checkout session
-    // instead of creating duplicate subscriptions. The existing active/trialing
-    // check above covers the case where the first checkout already completed.
-    const idempotencyKey = `checkout:${profile.venueId}:${Math.floor(Date.now() / (10 * 60 * 1000))}`;
+    const idempotencyKey = `checkout:${profile.venueId}:${isMulti ? 'multi' : 'single'}:${Math.floor(Date.now() / (10 * 60 * 1000))}`;
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/checkout/sessions', {
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
@@ -94,8 +100,8 @@ export class AppBillingController {
       client_reference_id: profile.venueId,
       ...(existing?.externalCustomerId ? { customer: existing.externalCustomerId } : {}),
       allow_promotion_codes: true,
-      metadata: { venueId: profile.venueId },
-      subscription_data: { metadata: { venueId: profile.venueId } },
+      metadata: { venueId: profile.venueId, planType: isMulti ? 'multi_venue' : 'single' },
+      subscription_data: { metadata: { venueId: profile.venueId, planType: isMulti ? 'multi_venue' : 'single' } },
     }, idempotencyKey);
     if (!session.url) {
       throw new ServiceUnavailableException('Stripe did not return a checkout URL.');
@@ -111,17 +117,18 @@ export class AppBillingController {
   async createStripePortal(@CurrentUser() user: AuthUser) {
     await assertWithinSharedRateLimit(this.prisma, `stripe-portal:${user.sub}`, 10, 60_000);
     const profile = await this.profiles.requireBillingProfile(user);
-    const secret = this.requireStripeSecret();
     const subscription = await this.prisma.subscription.findFirst({
       where: { venueId: profile.venueId! },
-      select: { externalCustomerId: true, platform: true },
+      select: { platform: true, externalCustomerId: true },
     });
     if (subscription?.platform !== 'stripe' || !subscription.externalCustomerId) {
       throw new BadRequestException('No Stripe subscription for this venue yet.');
     }
+    const secret = this.requireStripeSecret();
+    const base = this.webBaseUrl();
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/billing_portal/sessions', {
       customer: subscription.externalCustomerId,
-      return_url: `${this.webBaseUrl()}/app/billing`,
+      return_url: `${base}/app/billing`,
     });
     if (!session.url) {
       throw new ServiceUnavailableException('Stripe did not return a portal URL.');
@@ -131,60 +138,65 @@ export class AppBillingController {
 
   private requireStripeSecret(): string {
     const secret = this.config.get<string>('STRIPE_SECRET_KEY');
-    if (!secret) {
-      throw new ServiceUnavailableException('Stripe is not configured.');
-    }
+    if (!secret) throw new ServiceUnavailableException('Stripe integration is not configured on the server.');
     return secret;
   }
 
   private webBaseUrl(): string {
-    return (this.config.get<string>('APP_WEB_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
+    return (this.config.get<string>('WEB_BASE_URL') || this.config.get<string>('APP_WEB_URL') || 'https://venuewrangler.com').replace(/\/+$/, '');
   }
 
-  // Prefer an explicitly configured price; otherwise reuse-or-create one keyed
-  // by a stable lookup_key so we never accumulate duplicate prices. Provisioning
-  // pricing from a request path is a fallback for environments that haven't set
-  // STRIPE_PRICE_ID yet, not the intended steady state — set it once the price
-  // exists so pricing is deploy-configured rather than created ad hoc.
-  private async resolveStripePriceId(secret: string): Promise<string> {
-    const configured = this.config.get<string>('STRIPE_PRICE_ID');
-    if (configured) return configured;
-    if (this.cachedStripePriceId) return this.cachedStripePriceId;
+  private async resolveStripePriceId(secret: string, planType: 'single' | 'multi_venue' = 'single'): Promise<string> {
+    if (planType === 'single') {
+      const configured = this.config.get<string>('STRIPE_PRICE_ID');
+      if (configured) return configured;
+      if (this.cachedStripePriceId) return this.cachedStripePriceId;
+    } else {
+      const configuredMulti = this.config.get<string>('STRIPE_MULTI_VENUE_PRICE_ID');
+      if (configuredMulti) return configuredMulti;
+      if (this.cachedStripeMultiVenuePriceId) return this.cachedStripeMultiVenuePriceId;
+    }
 
-    this.logger.warn('STRIPE_PRICE_ID is not configured; resolving/creating a price at request time. Set STRIPE_PRICE_ID once a price exists to avoid this.');
+    const lookupKey = planType === 'multi_venue' ? STRIPE_MULTI_PRICE_LOOKUP_KEY : STRIPE_PRICE_LOOKUP_KEY;
+    const amountCents = planType === 'multi_venue' ? STRIPE_MULTI_AMOUNT_CENTS : STRIPE_PLAN_AMOUNT_CENTS;
+    const productName = planType === 'multi_venue' ? 'Venue Wrangler Multi-Venue Pro' : 'Venue Wrangler';
+
+    this.logger.warn(`STRIPE_PRICE_ID for ${planType} is not configured; resolving/creating price at request time.`);
     const found = await stripeRequest<{ data?: { id: string }[] }>(secret, 'GET', '/prices', {
-      lookup_keys: [STRIPE_PRICE_LOOKUP_KEY],
+      lookup_keys: [lookupKey],
       active: true,
       limit: 1,
     });
     const existing = found.data?.[0]?.id;
     if (existing) {
-      this.cachedStripePriceId = existing;
+      if (planType === 'multi_venue') this.cachedStripeMultiVenuePriceId = existing;
+      else this.cachedStripePriceId = existing;
       return existing;
     }
 
-    const product = await stripeRequest<{ id: string }>(secret, 'POST', '/products', { name: 'Venue Wrangler' });
+    const product = await stripeRequest<{ id: string }>(secret, 'POST', '/products', { name: productName });
     try {
       const price = await stripeRequest<{ id: string }>(secret, 'POST', '/prices', {
         product: product.id,
-        unit_amount: STRIPE_PLAN_AMOUNT_CENTS,
+        unit_amount: amountCents,
         currency: 'usd',
         recurring: { interval: 'month' },
-        lookup_key: STRIPE_PRICE_LOOKUP_KEY,
+        lookup_key: lookupKey,
       });
-      this.cachedStripePriceId = price.id;
+      if (planType === 'multi_venue') this.cachedStripeMultiVenuePriceId = price.id;
+      else this.cachedStripePriceId = price.id;
       return price.id;
     } catch (error) {
-      // A concurrent request may have claimed the lookup_key first; re-fetch it.
       this.logger.warn(`Stripe price creation failed, attempting re-fetch: ${error instanceof Error ? error.message : String(error)}`);
       const retry = await stripeRequest<{ data?: { id: string }[] }>(secret, 'GET', '/prices', {
-        lookup_keys: [STRIPE_PRICE_LOOKUP_KEY],
+        lookup_keys: [lookupKey],
         active: true,
         limit: 1,
       });
       const claimed = retry.data?.[0]?.id;
       if (claimed) {
-        this.cachedStripePriceId = claimed;
+        if (planType === 'multi_venue') this.cachedStripeMultiVenuePriceId = claimed;
+        else this.cachedStripePriceId = claimed;
         return claimed;
       }
       throw error;
@@ -204,6 +216,10 @@ export class AppBillingController {
     }
     const status: SubscriptionStatus = 'active';
     const now = new Date();
+    const isMulti = body.productId === 'com.venuewrangler.multivenue.399' || body.entitlementId === 'multi_venue';
+    const priceCents = isMulti ? 39900 : 9999;
+    const planId = isMulti ? 'venueflow_multi_venue_5' : body.productId;
+
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`billing:${profile.venueId!}`}))`;
       const existing = await tx.subscription.findFirst({ where: { venueId: profile.venueId! } });
@@ -220,7 +236,8 @@ export class AppBillingController {
           data: {
             status,
             platform: 'apple',
-            planId: body.productId,
+            planId,
+            priceCents,
             currentPeriodStart: verified.currentPeriodStart ?? existing.currentPeriodStart ?? now,
             currentPeriodEnd: verified.currentPeriodEnd ?? existing.currentPeriodEnd,
             cancelAtPeriodEnd: false,
@@ -236,8 +253,8 @@ export class AppBillingController {
           venueId: profile.venueId!,
           status,
           platform: 'apple',
-          planId: body.productId,
-          priceCents: 0,
+          planId,
+          priceCents,
           currency: 'USD',
           // status is always 'active' here (verified real-money entitlement),
           // never a trial — leave trial dates unset rather than stamping
@@ -258,8 +275,8 @@ export class AppBillingController {
   }
 
   private assertAllowedAppleSync(productId: string, entitlementId?: string) {
-    const allowedProducts = new Set(this.csvEnv('REVENUECAT_ALLOWED_PRODUCT_IDS', 'com.venuewrangler.monthly'));
-    const allowedEntitlements = new Set(this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro'));
+    const allowedProducts = new Set(this.csvEnv('REVENUECAT_ALLOWED_PRODUCT_IDS', 'com.venuewrangler.monthly,com.venuewrangler.multivenue.399'));
+    const allowedEntitlements = new Set(this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro,multi_venue'));
     if (!allowedProducts.has(productId)) {
       throw new BadRequestException('That Apple subscription product is not allowed for this app.');
     }

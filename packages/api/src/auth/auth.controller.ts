@@ -29,6 +29,10 @@ const PASSWORD_ITERATIONS = 600_000;
 const MIN_NEW_PASSWORD_LENGTH = 8;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
+// Keep the unknown-user path computationally indistinguishable from a normal
+// password check. This is a fixed hash for a non-secret, impossible account.
+const DUMMY_PASSWORD_SALT = 'not-a-real-user-salt';
+const DUMMY_PASSWORD_HASH = 'fbe490be8a0cbd07dcd5c3ec11d5525f878fa649e84c17864ad9d3e016700f20';
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 12;
 const MAX_FAILED_SIGN_INS = 8;
@@ -121,14 +125,20 @@ export class AuthController {
     const email = body.email.trim().toLowerCase();
     if (!email || !body.password) throw new BadRequestException('Enter your email and password.');
     await assertWithinSharedRateLimit(this.prisma, `auth:ip:${getClientIp(request)}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
-    await assertWithinSharedRateLimit(this.prisma, `auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+    if (body.flow !== 'signIn') {
+      await assertWithinSharedRateLimit(this.prisma, `auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
+    }
 
     const user = await this.prisma.user.findUnique({ where: { email }, include: { password: true } });
     if (body.flow === 'signIn') {
-      if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
-        throw new UnauthorizedException('Too many failed sign-in attempts. Try again later.');
-      }
-      if (!user?.password || !(await this.authService.verifyPassword(body.password, user.password.salt, user.password.iterations, user.password.passwordHash))) {
+      const credential = user?.password;
+      const passwordMatches = credential
+        ? await this.authService.verifyPassword(body.password, credential.salt, credential.iterations, credential.passwordHash)
+        : await this.authService.verifyPassword(body.password, DUMMY_PASSWORD_SALT, PASSWORD_ITERATIONS, DUMMY_PASSWORD_HASH);
+      if (!credential || !passwordMatches) {
+        // Apply the account-level limiter only after password verification so
+        // a valid credential can always clear an attacker-induced lockout.
+        await assertWithinSharedRateLimit(this.prisma, `auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
         if (user) {
           await this.recordFailedSignIn(user.id, user.failedSignInCount, user.lockedUntil);
         }
@@ -142,7 +152,7 @@ export class AuthController {
       }
       // Transparently upgrade hash strength on login when the stored iteration
       // count is below the current target.
-      if (user.password.iterations < PASSWORD_ITERATIONS) {
+      if (credential.iterations < PASSWORD_ITERATIONS) {
         try {
           const upgraded = await this.authService.hashPassword(body.password);
           await this.prisma.passwordCredential.update({
@@ -161,7 +171,7 @@ export class AuthController {
     // password-reset to recover — allowing signup to overwrite an existing
     // password would let an attacker hijack unverified accounts.
     if (user?.password) {
-      throw new BadRequestException('An account already exists for this email. Sign in instead.');
+      throw new BadRequestException("We couldn't create your account. Check your details or try signing in.");
     }
     // The DTO's MinLength(6) is a floor shared with sign-in (existing users may
     // have shorter legacy passwords); new passwords must meet the current bar.
@@ -414,7 +424,7 @@ export class AuthController {
 
     const account = await this.prisma.user.findUnique({
       where: { email },
-      select: { id: true, email: true, profile: { select: { fullName: true } } },
+      select: { id: true, email: true, profiles: { select: { fullName: true }, take: 1 } },
     });
     if (account?.email) {
       const code = this.authService.generateOneTimeCode();
@@ -431,7 +441,7 @@ export class AuthController {
           to: account.email,
           subject: 'Reset Your Venue Wrangler Password',
           text:
-            `Hi ${account.profile?.fullName ?? 'there'},\n\n` +
+            `Hi ${account.profiles?.[0]?.fullName ?? 'there'},\n\n` +
             `We received a request to reset the password for your Venue Wrangler account.\n\n` +
             `To complete your password reset, enter the following code when prompted in the app:\n\n` +
             `   ${code}\n\n` +
@@ -577,10 +587,32 @@ export class AuthController {
       where: { id: session.id },
       data: { tokenHash: createHash('sha256').update(token).digest('hex') },
     });
+    const userProfiles =
+      typeof this.prisma.profile?.findMany === 'function'
+        ? await this.prisma.profile.findMany({
+            where: {
+              userId,
+              venueId: { not: null },
+              OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+            },
+            include: { venue: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [];
+    const venues = userProfiles
+      .filter((p) => p.venue)
+      .map((p) => ({
+        id: p.venue!.id,
+        name: p.venue!.name,
+        role: p.role,
+        profileId: p.id,
+      }));
+
     return {
       token,
       profile: mapProfile(profile, emailVerified),
       venue: profile.venue ? mapVenue(profile.venue) : null,
+      venues,
     };
   }
 

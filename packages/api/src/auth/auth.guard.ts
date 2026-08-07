@@ -88,8 +88,12 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 
-    const liveProfile = await this.prisma.profile.findUnique({
-      where: { userId: payload.sub },
+    const requestedVenueId = (request.headers?.['x-venue-id'] as string | undefined) || payload.venueId || undefined;
+    const liveProfile = await this.prisma.profile.findFirst({
+      where: {
+        userId: payload.sub,
+        ...(requestedVenueId ? { venueId: requestedVenueId } : {}),
+      },
       select: {
         id: true,
         email: true,
@@ -105,6 +109,7 @@ export class AuthGuard implements CanActivate {
           },
         },
       },
+      orderBy: { createdAt: 'asc' },
     });
     // Privilege claims come only from the live profile. When the profile row is
     // gone, clear role/allAccess/profileId rather than trusting stale JWT fields
@@ -127,8 +132,10 @@ export class AuthGuard implements CanActivate {
     // Bind tenant context for the rest of the request. Inert unless the env
     // flag is on AND the token carries a venueId (auth flows, webhooks, and
     // venueless system tasks legitimately have none and remain unscoped).
-    if (TENANT_ISOLATION_ENFORCED && resolvedUser.venueId) {
-      enterTenant(resolvedUser.venueId);
+    // Multi-venue: prefer X-Venue-Id header over JWT-embedded venueId.
+    const tenantVenueId = requestedVenueId || resolvedUser.venueId;
+    if (TENANT_ISOLATION_ENFORCED && tenantVenueId) {
+      enterTenant(tenantVenueId);
     }
 
     return true;

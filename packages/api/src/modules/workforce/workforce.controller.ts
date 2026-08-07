@@ -113,14 +113,9 @@ export class WorkforceController {
       return this.reportStaleInviteStatus(undefined, phone);
     }
 
-    // The plaintext token is only ever needed for the instant it's embedded
-    // in the outgoing email — it's generated fresh here and never read back
-    // from a previously stored row (Invite.tokenHash is the only thing
-    // persisted), so a rotate happens on every check that has something to
-    // email, not just on first mint. Concurrent checks for the same email
-    // are serialized by the advisory lock below; a later one's rotation
-    // supersedes an earlier one's already-sent link, which is an acceptable
-    // trade-off for never persisting the plaintext.
+    // The plaintext token is only needed when minting a new invite. Existing
+    // links remain valid: rotating their hash here would let anyone who knows
+    // an address invalidate that address's emailed link.
     const freshToken = randomBytes(18).toString('base64url');
     const tokenHash = hashInviteToken(freshToken);
     const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -135,12 +130,7 @@ export class WorkforceController {
       });
 
       if (redeemable) {
-        const rotated = await tx.invite.update({
-          where: { id: redeemable.id },
-          data: { tokenHash, expiresAt: newExpiresAt },
-          include: { venue: { select: { name: true } } },
-        });
-        return { venueName: rotated.venue.name, jobTitle: rotated.jobTitle } as const;
+        return { venueName: redeemable.venue.name, jobTitle: redeemable.jobTitle, emailSent: false } as const;
       }
 
       const unclaimedProfile = await tx.profile.findFirst({
@@ -164,7 +154,7 @@ export class WorkforceController {
         },
         include: { venue: { select: { name: true } } },
       });
-      return { venueName: created.venue.name, jobTitle: created.jobTitle } as const;
+      return { venueName: created.venue.name, jobTitle: created.jobTitle, emailSent: true } as const;
     });
 
     if (!outcome) {
@@ -182,23 +172,25 @@ export class WorkforceController {
     // channel for the enumeration check above) and (b) turn a transient
     // email-provider outage into a 500 that still confirms "found" via the
     // error shape. The invite itself is already durable in the DB, so a
-    // failed send just means the user can retry the check.
-    void this.email
-      .sendOrThrow({
-        to: email,
-        subject: `Create your Venue Wrangler account for ${venueName}`,
-        text:
-          `Your email address has been invited to join ${venueName} on Venue Wrangler as ${outcome.jobTitle}.\n\n` +
-          `Create your account using this secure link:\n${signupUrl}\n\n` +
-          `Create your account with this invited email address and you will automatically join ${venueName}.\n\n` +
-          `This link expires on ${newExpiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
-          `Questions? support@venuewrangler.com\n\n` +
-          `— The Venue Wrangler Team`,
-      })
-      .catch((err: unknown) => {
-        this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    return { status: 'found', emailSent: true };
+    // failed send leaves the newly-created invite available for recovery.
+    if (outcome.emailSent) {
+      void this.email
+        .sendOrThrow({
+          to: email,
+          subject: `Create your Venue Wrangler account for ${venueName}`,
+          text:
+            `Your email address has been invited to join ${venueName} on Venue Wrangler as ${outcome.jobTitle}.\n\n` +
+            `Create your account using this secure link:\n${signupUrl}\n\n` +
+            `Create your account with this invited email address and you will automatically join ${venueName}.\n\n` +
+            `This link expires on ${newExpiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
+            `Questions? support@venuewrangler.com\n\n` +
+            `— The Venue Wrangler Team`,
+        })
+        .catch((err: unknown) => {
+          this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }
+    return { status: 'found', emailSent: outcome.emailSent };
   }
 
   // No redeemable invite and no roster row to fall back to — report the most
@@ -220,10 +212,16 @@ export class WorkforceController {
 
   @Public()
   @Get('venues/search')
-  async searchVenues(@Req() req: Request, @Query('q') q: string) {
+  async searchVenues(@Req() req: Request, @Query('q') q: unknown) {
     await assertWithinSharedRateLimit(this.prisma, `venue-search:ip:${getClientIp(req)}`, INVITE_CHECK_LIMIT_MAX, INVITE_CHECK_LIMIT_WINDOW_MS);
 
+    if (q !== undefined && typeof q !== 'string') {
+      throw new BadRequestException('Search query must be a string.');
+    }
     const term = (q ?? '').trim();
+    if (term.length > 120) {
+      throw new BadRequestException('Search query must be 120 characters or fewer.');
+    }
     if (!term) {
       return { venues: [] };
     }
@@ -360,7 +358,7 @@ export class WorkforceController {
           select: {
             id: true,
             email: true,
-            profile: { select: { fullName: true, email: true } },
+            profiles: { select: { fullName: true, email: true }, take: 1 },
           },
         },
       },
@@ -373,8 +371,8 @@ export class WorkforceController {
         venueId: r.venueId,
         venueName: r.venue.name,
         userId: r.userId,
-        userName: r.user.profile?.fullName ?? null,
-        userEmail: r.user.profile?.email ?? r.user.email ?? null,
+        userName: r.user.profiles?.[0]?.fullName ?? null,
+        userEmail: r.user.profiles?.[0]?.email ?? r.user.email ?? null,
         status: r.status,
         createdAt: r.createdAt.getTime(),
       })),
@@ -439,7 +437,7 @@ export class WorkforceController {
           select: {
             id: true,
             email: true,
-            profile: { select: { fullName: true, email: true, role: true, jobTitle: true } },
+            profiles: { select: { fullName: true, email: true, role: true, jobTitle: true }, take: 1 },
           },
         },
         events: { orderBy: { createdAt: 'asc' } },
@@ -463,8 +461,8 @@ export class WorkforceController {
       venueId: request.venueId,
       venueName: request.venue.name,
       userId: request.userId,
-      userName: request.user.profile?.fullName ?? null,
-      userEmail: request.user.profile?.email ?? request.user.email ?? null,
+      userName: request.user.profiles?.[0]?.fullName ?? null,
+      userEmail: request.user.profiles?.[0]?.email ?? request.user.email ?? null,
       status: request.status,
       decidedAt: request.decidedAt?.getTime() ?? null,
       decisionNote: request.decisionNote ?? null,
@@ -496,15 +494,15 @@ export class WorkforceController {
         user: {
           select: {
             email: true,
-            profile: { select: { email: true, fullName: true } },
+            profiles: { select: { email: true, fullName: true }, take: 1 },
           },
         },
       },
     });
     if (!request) return;
-    const to = request.user.profile?.email ?? request.user.email;
+    const to = request.user.profiles?.[0]?.email ?? request.user.email;
     if (!to) return;
-    const name = request.user.profile?.fullName ?? 'there';
+    const name = request.user.profiles?.[0]?.fullName ?? 'there';
     const statusText = decision === 'approved' ? 'Approved' : 'Rejected';
     void this.email.send({
       to,

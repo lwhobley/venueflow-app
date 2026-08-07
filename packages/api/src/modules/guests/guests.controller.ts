@@ -273,11 +273,13 @@ export class GuestsController {
     @Headers('x-webhook-secret') secret: string | undefined,
     @Body() body: IngestLeadsDto,
   ) {
-    await assertWithinSharedRateLimit(this.prisma, `leads-webhook:${venueId}:${getClientIp(request)}`, LEADS_WEBHOOK_RATE_LIMIT_MAX, LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
+    // Verify the webhook secret before touching the rate limiter so an
+    // unauthenticated spray of random venueIds can't churn RateLimitBucket rows.
     const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { leadsWebhookSecret: true } });
     if (!venue?.leadsWebhookSecret || !secretsMatch(secret, venue.leadsWebhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
     }
+    await assertWithinSharedRateLimit(this.prisma, `leads-webhook:${venueId}:${getClientIp(request)}`, LEADS_WEBHOOK_RATE_LIMIT_MAX, LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     return this.ingestLeadsForVenue(venueId, body.leads);
   }
 

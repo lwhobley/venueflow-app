@@ -68,6 +68,7 @@ function makeController() {
   const prisma: any = {
     profile: {
       findUnique: vi.fn().mockResolvedValue(makeProfile()),
+      findFirst: vi.fn().mockImplementation((args: any) => prisma.profile.findUnique(args)),
       findMany: vi.fn().mockResolvedValue([]),
     },
     barInventoryItem: {

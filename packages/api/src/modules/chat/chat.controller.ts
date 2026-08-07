@@ -16,7 +16,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { Public } from '../../auth/public.decorator';
@@ -70,6 +70,7 @@ class SendMessageDto {
 
 class ReactDto {
   @IsString()
+  @MaxLength(32)
   emoji!: string;
 }
 
@@ -522,6 +523,24 @@ export class ChatController {
       throw new ForbiddenException('Not a participant');
     }
 
+    // Shift/swap references deep-link into venue-owned scheduling records, so
+    // they must belong to this venue — otherwise a member could attach foreign
+    // venue ids to messages.
+    if (body.shiftId) {
+      const shift = await this.prisma.scheduleShift.findFirst({
+        where: { id: body.shiftId, venueId: scope.venueId },
+        select: { id: true },
+      });
+      if (!shift) throw new BadRequestException('Shift not found in this venue');
+    }
+    if (body.swapId) {
+      const swap = await this.prisma.shiftSwap.findFirst({
+        where: { id: body.swapId, venueId: scope.venueId },
+        select: { id: true },
+      });
+      if (!swap) throw new BadRequestException('Shift swap not found in this venue');
+    }
+
     const text = body.text.trim();
 
     let imageUrl: string | null = null;
@@ -584,7 +603,13 @@ export class ChatController {
       const msg = await this.prisma.message.findFirst({ where: { id, venueId: scope.venueId } });
       if (!msg) throw new NotFoundException('Message not found');
 
-      const reactions = { ...(msg.reactions as Record<string, string[]> | null) };
+      const reactions: Record<string, string[]> = Object.assign(
+        Object.create(null),
+        msg.reactions ?? {},
+      );
+      if (!Object.prototype.hasOwnProperty.call(reactions, emoji) && Object.keys(reactions).length >= 20) {
+        throw new BadRequestException('A message can have at most 20 reaction types');
+      }
       let users = reactions[emoji] || [];
       if (users.includes(scope.profileId)) {
         users = users.filter((uid) => uid !== scope.profileId);

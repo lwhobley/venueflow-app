@@ -14,7 +14,6 @@ describe('WorkforceController invite check email', () => {
   // Inner (tx-scoped) mocks: everything the email path does happens inside
   // the advisory-locked transaction.
   const txFindInvite = vi.fn();
-  const txUpdateInvite = vi.fn();
   const txCreateInvite = vi.fn();
   const txFindProfile = vi.fn();
   const executeLock = vi.fn();
@@ -25,7 +24,7 @@ describe('WorkforceController invite check email', () => {
     profile: { findFirst: outerFindProfile },
     $transaction: vi.fn((callback: any) => callback({
       $executeRaw: executeLock,
-      invite: { findFirst: txFindInvite, update: txUpdateInvite, create: txCreateInvite },
+      invite: { findFirst: txFindInvite, create: txCreateInvite },
       profile: { findFirst: txFindProfile },
     })),
   };
@@ -40,7 +39,7 @@ describe('WorkforceController invite check email', () => {
     sendOrThrow.mockResolvedValue(undefined);
   });
 
-  it('rotates and emails the secure account link for an existing redeemable invite', async () => {
+  it('keeps an existing redeemable invite valid without sending another email', async () => {
     txFindInvite.mockResolvedValue({
       id: 'invite-1',
       email: 'staff@example.com',
@@ -49,24 +48,12 @@ describe('WorkforceController invite check email', () => {
       jobTitle: 'Server',
       venue: { name: 'Test Venue' },
     });
-    txUpdateInvite.mockImplementation(async ({ data }: any) => ({
-      jobTitle: 'Server',
-      venue: { name: 'Test Venue' },
-      ...data,
-    }));
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: ' Staff@Example.com ' }))
-      .resolves.toEqual({ status: 'found', emailSent: true });
-    expect(txUpdateInvite).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'invite-1' },
-      data: expect.objectContaining({ tokenHash: expect.any(String) }),
-    }));
+      .resolves.toEqual({ status: 'found', emailSent: false });
     expect(txCreateInvite).not.toHaveBeenCalled();
-    expect(sendOrThrow).toHaveBeenCalledWith(expect.objectContaining({
-      to: 'staff@example.com',
-      text: expect.stringContaining('https://app.example.com/join#invite='),
-    }));
+    expect(sendOrThrow).not.toHaveBeenCalled();
   });
 
   it('mints an invite token for a legacy unclaimed roster profile', async () => {
@@ -101,11 +88,8 @@ describe('WorkforceController invite check email', () => {
     expect(executeLock).toHaveBeenCalledOnce();
   });
 
-  it('rotates the already-created invite for a concurrent second check instead of reusing its unrecoverable plaintext', async () => {
-    // Under hash-only-at-rest storage, a second (serialized-by-lock) request
-    // can no longer read back the first request's plaintext token — it must
-    // mint its own rotation of the same row rather than "reuse" a token it
-    // has no way to recover.
+  it('does not rotate an already-created invite on a later check', async () => {
+    // A repeated lookup must leave the original emailed credential intact.
     txFindInvite.mockResolvedValue({
       id: 'invite-2',
       email: 'legacy@example.com',
@@ -114,17 +98,12 @@ describe('WorkforceController invite check email', () => {
       jobTitle: 'Bartender',
       venue: { name: 'Legacy Venue' },
     });
-    txUpdateInvite.mockImplementation(async ({ data }: any) => ({
-      jobTitle: 'Bartender',
-      venue: { name: 'Legacy Venue' },
-      ...data,
-    }));
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
-      .resolves.toEqual({ status: 'found', emailSent: true });
+      .resolves.toEqual({ status: 'found', emailSent: false });
     expect(txCreateInvite).not.toHaveBeenCalled();
-    expect(txUpdateInvite).toHaveBeenCalledOnce();
+    expect(sendOrThrow).not.toHaveBeenCalled();
   });
 
   it('mints a fresh invite for an unclaimed roster profile even when a used invite exists for the email', async () => {
@@ -208,5 +187,33 @@ describe('WorkforceController invite check email', () => {
 
     await expect((controller as any).inviteCheck(request, { phone: '555-0199' }))
       .resolves.toEqual({ status: 'not_found' });
+  });
+});
+
+describe('WorkforceController venue search', () => {
+  const findMany = vi.fn();
+  const prisma = {
+    venue: { findMany },
+  };
+  const request = { ip: '127.0.0.1' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects array-shaped query parameters instead of throwing a 500', async () => {
+    const controller = new WorkforceController(prisma as any, {} as any, {} as any);
+
+    await expect(controller.searchVenues(request as any, ['venue']))
+      .rejects.toThrow('Search query must be a string.');
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects excessively long search terms', async () => {
+    const controller = new WorkforceController(prisma as any, {} as any, {} as any);
+
+    await expect(controller.searchVenues(request as any, 'a'.repeat(121)))
+      .rejects.toThrow('Search query must be 120 characters or fewer.');
+    expect(findMany).not.toHaveBeenCalled();
   });
 });

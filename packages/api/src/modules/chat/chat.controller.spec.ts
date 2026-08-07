@@ -9,6 +9,10 @@ function makeController() {
     },
     scheduleShift: {
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    shiftSwap: {
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     conversation: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -531,6 +535,39 @@ describe('ChatController', () => {
       text: '',
       imageUrl: '/bad/url',
     })).rejects.toThrow('Invalid image URL format');
+  });
+
+  it('rejects shift and swap references that do not belong to the venue', async () => {
+    const { controller, prisma } = makeController();
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: 'conv-1',
+      venueId: 'venue-1',
+      type: 'group',
+      name: 'Closing Crew',
+      memberIds: ['staff-1'],
+    });
+    // Mock returns null: no such shift/swap inside this venue.
+    await expect(controller.sendMessage(staffScope, 'conv-1', {
+      text: 'Can you cover?',
+      shiftId: 'other-venue-shift',
+    })).rejects.toThrow('Shift not found in this venue');
+    await expect(controller.sendMessage(staffScope, 'conv-1', {
+      text: 'Take my swap?',
+      swapId: 'other-venue-swap',
+    })).rejects.toThrow('Shift swap not found in this venue');
+    expect(prisma.message.create).not.toHaveBeenCalled();
+
+    // Same-venue references pass through to the create.
+    prisma.scheduleShift.findFirst.mockResolvedValue({ id: 'shift-1' });
+    prisma.message.create.mockResolvedValue({ id: 'msg-1' });
+    await expect(controller.sendMessage(staffScope, 'conv-1', {
+      text: 'Can you cover?',
+      shiftId: 'shift-1',
+    })).resolves.toEqual({ _id: 'msg-1', id: 'msg-1' });
+    expect(prisma.scheduleShift.findFirst).toHaveBeenCalledWith({
+      where: { id: 'shift-1', venueId: 'venue-1' },
+      select: { id: true },
+    });
   });
 
   it('rejects empty uploads and returns a signed chat image path for valid uploads', async () => {

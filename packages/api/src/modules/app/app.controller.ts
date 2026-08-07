@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
@@ -28,6 +28,9 @@ const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
 const FLAT_PLAN_ID = 'venueflow_monthly';
 const FLAT_PLAN_PRICE_CENTS = 9999;
+const MULTI_VENUE_PLAN_ID = 'venueflow_multi_venue_5';
+const MULTI_VENUE_PRICE_CENTS = 39900;
+const MULTI_VENUE_MAX_VENUES = 5;
 const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -147,6 +150,11 @@ class RedeemInviteDto {
   codeOrToken!: string;
 }
 
+class SwitchVenueDto {
+  @IsString()
+  venueId!: string;
+}
+
 function planForStaffRange(range: string) {
   void range;
   return { planId: FLAT_PLAN_ID, priceCents: FLAT_PLAN_PRICE_CENTS };
@@ -162,13 +170,34 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @Get('me')
-  async getMe(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
+  async getMe(@CurrentUser() user: AuthUser, @Req() req: Request) {
+    const requestedVenueId = (req.headers['x-venue-id'] as string | undefined) || user.venueId || undefined;
+    const profile = await this.getProfile(user, requestedVenueId);
     if (!profile) return null;
     const emailVerified = await this.isEmailVerified(user.sub);
+    const venues = await this.profiles.listUserVenues(user.sub);
     return {
       profile: mapProfile(profile, emailVerified),
       venue: profile.venue ? mapVenue(profile.venue) : null,
+      venues,
+    };
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('switch-venue')
+  async switchVenue(@CurrentUser() user: AuthUser, @Body() body: SwitchVenueDto) {
+    const venueId = body.venueId;
+    if (!venueId) throw new BadRequestException('Venue ID is required');
+    const profile = await this.profiles.getProfile(user, venueId);
+    if (!profile || profile.venueId !== venueId || !profile.venue) {
+      throw new ForbiddenException('You do not belong to this venue.');
+    }
+    const emailVerified = await this.isEmailVerified(user.sub);
+    const venues = await this.profiles.listUserVenues(user.sub);
+    return {
+      profile: mapProfile(profile, emailVerified),
+      venue: mapVenue(profile.venue),
+      venues,
     };
   }
 
@@ -177,29 +206,34 @@ export class AppController {
   async bootstrapProfile(@CurrentUser() user: AuthUser, @Body() body: BootstrapProfileDto) {
     await this.ensureUser(user);
     const emailVerified = await this.isEmailVerified(user.sub);
-    const existingProfile = await this.prisma.profile.findUnique({
+    const existingProfile = await this.prisma.profile.findFirst({
       where: { userId: user.sub },
-      select: { email: true },
+      select: { id: true, email: true },
+      orderBy: { createdAt: 'asc' },
     });
     const email = user.email ?? existingProfile?.email ?? `${user.sub}@venuewrangler.local`;
     const fullName = body.fullName?.trim() || user.name || email.split('@')[0] || 'Team Member';
-    const profile = await this.prisma.profile.upsert({
-      where: { userId: user.sub },
-      update: {
-        email,
-        fullName,
-        jobTitle: body.jobTitle ?? 'Staff',
-      },
-      create: {
-        userId: user.sub,
-        email,
-        fullName,
-        role: 'staff',
-        jobTitle: body.jobTitle ?? 'Staff',
-        trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
-      },
-      include: { venue: true },
-    });
+    const profile = existingProfile
+      ? await this.prisma.profile.update({
+          where: { id: existingProfile.id },
+          data: {
+            email,
+            fullName,
+            jobTitle: body.jobTitle ?? 'Staff',
+          },
+          include: { venue: true },
+        })
+      : await this.prisma.profile.create({
+          data: {
+            userId: user.sub,
+            email,
+            fullName,
+            role: 'staff',
+            jobTitle: body.jobTitle ?? 'Staff',
+            trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
+          },
+          include: { venue: true },
+        });
 
     const venueName = profile.venue?.name ?? 'your venue';
     void this.email.send({
@@ -219,9 +253,11 @@ export class AppController {
         `— The Venue Wrangler Team`,
     });
 
+    const venues = await this.profiles.listUserVenues(user.sub);
     return {
       profile: mapProfile(profile, emailVerified),
       venue: profile.venue ? mapVenue(profile.venue) : null,
+      venues,
     };
   }
 
@@ -233,34 +269,39 @@ export class AppController {
     if (!businessName) throw new BadRequestException('Enter your business name');
     if (!STAFF_RANGES.includes(body.staffRange as (typeof STAFF_RANGES)[number])) throw new BadRequestException('Choose a staff size range');
 
-    // The intended client flow already routes signup through email
-    // verification before create-venue; enforce it server-side too so a
-    // direct API call can't create a venue (and start a trial) on an
-    // unverified account.
     if (!(await this.isEmailVerified(user.sub))) {
       throw new ForbiddenException('Verify your email before creating a venue.');
     }
 
     const existingProfile = await this.getProfile(user);
-    if (existingProfile?.venue) {
-      const emailVerified = await this.isEmailVerified(user.sub);
-      return {
-        profile: mapProfile(existingProfile, emailVerified),
-        venue: mapVenue(existingProfile.venue),
-      };
+
+    const userVenues = await this.profiles.listUserVenues(user.sub);
+    if (userVenues.length >= MULTI_VENUE_MAX_VENUES) {
+      throw new ForbiddenException('You have reached the maximum limit of 5 venues for multi-venue management.');
+    }
+    const isAdditionalVenue = userVenues.length >= 1;
+    if (isAdditionalVenue) {
+      const hasMultiPlan = await this.profiles.hasMultiVenueSubscription(user.sub);
+      if (!hasMultiPlan) {
+        throw new HttpException(
+          {
+            statusCode: 402,
+            message: 'Registering an additional venue requires a Multi-Venue Pro subscription ($399/month for up to 5 venues).',
+            code: 'MULTI_VENUE_REQUIRED',
+          },
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
     }
 
-    const plan = planForStaffRange(body.staffRange);
+    const plan = isAdditionalVenue
+      ? { planId: MULTI_VENUE_PLAN_ID, priceCents: MULTI_VENUE_PRICE_CENTS }
+      : planForStaffRange(body.staffRange);
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
     const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`register-venue:${user.sub}`}))`;
-      // Re-check inside the transaction so a double-submit doesn't create a
-      // second venue + subscription for an owner who already has one.
-      const current = await tx.profile.findUnique({ where: { userId: user.sub }, include: { venue: true } });
-      if (current?.venue) {
-        return { profile: current, venue: current.venue };
-      }
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`register-venue:${user.sub}:${businessName}`}))`;
+
       const venue = await tx.venue.create({
         data: {
           name: businessName,
@@ -288,18 +329,11 @@ export class AppController {
           cancelAtPeriodEnd: false,
         },
       });
-      const profile = await tx.profile.upsert({
-        where: { userId: user.sub },
-        update: {
-          venueId: venue.id,
-          role: 'admin',
-          jobTitle: 'Owner',
-          fullName: body.ownerName?.trim() || existingProfile?.fullName || user.name || 'Owner',
-        },
-        create: {
+      const profile = await tx.profile.create({
+        data: {
           userId: user.sub,
-          email: user.email ?? `${user.sub}@venuewrangler.local`,
-          fullName: body.ownerName?.trim() || user.name || 'Owner',
+          email: user.email ?? existingProfile?.email ?? `${user.sub}@venuewrangler.local`,
+          fullName: body.ownerName?.trim() || existingProfile?.fullName || user.name || 'Owner',
           role: 'admin',
           jobTitle: 'Owner',
           venueId: venue.id,
@@ -310,7 +344,8 @@ export class AppController {
       return { profile, venue };
     });
 
-    return { profile: mapProfile(result.profile, true), venue: mapVenue(result.venue) };
+    const venues = await this.profiles.listUserVenues(user.sub);
+    return { profile: mapProfile(result.profile, true), venue: mapVenue(result.venue), venues };
   }
 
   @UseGuards(AuthGuard)
@@ -1023,8 +1058,8 @@ export class AppController {
     return this.profiles.ensureUser(user);
   }
 
-  private getProfile(user: AuthUser) {
-    return this.profiles.getProfile(user);
+  private getProfile(user: AuthUser, venueId?: string | null) {
+    return this.profiles.getProfile(user, venueId);
   }
 
   private requireVenueProfile(user: AuthUser) {

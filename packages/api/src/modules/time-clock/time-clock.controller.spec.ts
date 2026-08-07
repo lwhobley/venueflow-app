@@ -45,7 +45,11 @@ function makeController() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       findUniqueOrThrow: vi.fn(),
     },
-    profile: { findUniqueOrThrow: vi.fn().mockResolvedValue(profile) },
+    profile: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue(profile),
+      findFirst: vi.fn().mockResolvedValue(profile),
+      findUnique: vi.fn().mockResolvedValue(profile),
+    },
     scheduleShift: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
   } as any;
   const controller = new TimeClockController(prisma);
@@ -247,16 +251,16 @@ describe('TimeClockController', () => {
   describe('getMyTimeClock', () => {
     it('returns null when the caller has no profile', async () => {
       const { controller, prisma } = makeController();
-      prisma.profile.findUnique = vi.fn().mockResolvedValue(null);
+      prisma.profile.findFirst = vi.fn().mockResolvedValue(null);
 
-      const result = await controller.getMyTimeClock({ sub: 'user-1' } as any);
+      const result = await controller.getMyTimeClock({ sub: 'user-1' } as any, scope);
 
       expect(result).toBeNull();
     });
 
     it('subtracts unpaid break time from regular hours', async () => {
       const { controller, prisma } = makeController();
-      prisma.profile.findUnique = vi.fn().mockResolvedValue({ ...profile, venue: { timezone: 'America/New_York' } });
+      prisma.profile.findFirst = vi.fn().mockResolvedValue({ ...profile, venue: { timezone: 'America/New_York' } });
       const clockInAt = new Date(Date.now() - 4 * 3600000);
       const clockOutAt = new Date(Date.now() - 1 * 3600000);
       prisma.timeEntry.findMany.mockResolvedValue([
@@ -268,7 +272,7 @@ describe('TimeClockController', () => {
         },
       ]);
 
-      const result = await controller.getMyTimeClock({ sub: 'user-1' } as any);
+      const result = await controller.getMyTimeClock({ sub: 'user-1' } as any, scope);
 
       expect(result!.isClockedIn).toBe(false);
       expect(result!.regularHours).toBe(2.5);

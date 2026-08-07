@@ -33,19 +33,25 @@ const FILTERABLE_OPERATIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Unique-keyed operations (findUnique, update, delete, upsert) require a unique
- * `where` selector and are deliberately NOT auto-scoped here — injecting a
- * non-unique venueId predicate is invalid for them. These remain the
- * responsibility of explicit call-site checks (the app already pairs them with a
- * venueId guard). This limitation is documented for reviewers.
+ * Prisma's extended unique filters permit additional non-unique predicates
+ * alongside an id/unique selector, so unique-keyed operations can be tenant
+ * scoped as well. This prevents a future call site from bypassing isolation by
+ * using a client-supplied id directly.
  */
 export function isVenueScoped(model: string | undefined | null): boolean {
   return !!model && VENUE_SCOPED_MODELS.has(model);
 }
 
 export function shouldScopeOperation(operation: string): boolean {
-  return FILTERABLE_OPERATIONS.has(operation) || operation === 'create' || operation === 'createMany';
+  return FILTERABLE_OPERATIONS.has(operation)
+    || operation === 'create'
+    || operation === 'createMany'
+    || UNIQUE_KEYED_OPERATIONS.has(operation);
 }
+
+const UNIQUE_KEYED_OPERATIONS: ReadonlySet<string> = new Set([
+  'findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert',
+]);
 
 /**
  * Return a new args object with the tenant predicate enforced. The original is
@@ -62,6 +68,14 @@ export function scopeArgs<T extends Record<string, any> | undefined>(
 
   if (FILTERABLE_OPERATIONS.has(operation)) {
     next.where = mergeVenueWhere(next.where, venueId);
+    return next as T;
+  }
+
+  if (UNIQUE_KEYED_OPERATIONS.has(operation)) {
+    next.where = mergeUniqueVenueWhere(next.where, venueId);
+    if (operation === 'upsert' && next.create) {
+      next.create = forceVenue(next.create, venueId);
+    }
     return next as T;
   }
 
@@ -88,6 +102,13 @@ function mergeVenueWhere(where: unknown, venueId: string): Record<string, any> {
   // AND so an existing predicate (including a hostile venueId) can only narrow,
   // never widen, the result set.
   return { AND: [{ venueId }, where] };
+}
+
+function mergeUniqueVenueWhere(where: unknown, venueId: string): Record<string, any> {
+  // Do not wrap this in AND: Prisma requires the unique selector to remain at
+  // the top level of a WhereUniqueInput. Extended unique filtering then applies
+  // venueId as an additional narrowing predicate.
+  return { ...(where as Record<string, any> | undefined), venueId };
 }
 
 function forceVenue(data: unknown, venueId: string): Record<string, any> {

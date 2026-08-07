@@ -30,6 +30,11 @@ export type VenueScopedRequest = AuthenticatedRequest & {
  * result to `request.venueScope`. Controllers and guards downstream read from
  * this object instead of re-querying the DB.
  *
+ * Multi-venue: when the `X-Venue-Id` header is present, the interceptor
+ * resolves the profile for that specific venue (if the user has one). When
+ * absent, it falls back to the first active profile — full backwards
+ * compatibility.
+ *
  * Skip with @SkipVenueScope() for routes that intentionally run before a
  * profile/venue exists (e.g. bootstrapProfile, getMe).
  */
@@ -59,10 +64,25 @@ export class VenueScopeInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const profile = await this.prisma.profile.findUnique({
-      where: { userId: user.sub },
-      include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
-    });
+    // Multi-venue: prefer the X-Venue-Id header when present.
+    const requestedVenueId = request.headers['x-venue-id'] as string | undefined;
+
+    let profile;
+    if (requestedVenueId) {
+      // Look up the profile for the specific (userId, venueId) pair.
+      profile = await this.prisma.profile.findFirst({
+        where: { userId: user.sub, venueId: requestedVenueId },
+        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
+      });
+    }
+    if (!profile) {
+      // Fallback: first profile with a venue (backwards-compat for single-venue).
+      profile = await this.prisma.profile.findFirst({
+        where: { userId: user.sub, venueId: { not: null } },
+        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
 
     if (!profile?.venueId || !profile.venue) {
       return next.handle();

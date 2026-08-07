@@ -138,10 +138,12 @@ export class TimeClockController {
 
   @RequireSubscription()
   @Get('me')
-  async getMyTimeClock(@CurrentUser() user: AuthUser) {
-    const profile = await this.prisma.profile.findUnique({
-      where: { userId: user.sub },
+  async getMyTimeClock(@CurrentUser() user: AuthUser, @VenueScope() scope: Scope) {
+    const venueId = scope?.venueId ?? user.venueId;
+    const profile = await this.prisma.profile.findFirst({
+      where: { userId: user.sub, ...(venueId ? { venueId } : {}) },
       include: { venue: { select: { timezone: true } } },
+      orderBy: { createdAt: 'asc' },
     });
     if (!profile) return null;
 

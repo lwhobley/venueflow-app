@@ -217,9 +217,9 @@ enum WorkplaceJoinRequestStatus {
 }
 
 model User {
-  id                        String                 @id @default(cuid())
-  email                     String?                @unique
-  phone                     String?                @unique
+  id                        String                      @id @default(cuid())
+  email                     String?                     @unique
+  phone                     String?                     @unique
   emailVerifiedAt           DateTime?
   emailVerificationCodeHash String?
   emailVerificationSentAt   DateTime?
@@ -227,11 +227,11 @@ model User {
   passwordResetCodeHash     String?
   passwordResetExpiresAt    DateTime?
   passwordResetSentAt       DateTime?
-  failedSignInCount         Int                    @default(0)
+  failedSignInCount         Int                         @default(0)
   lockedUntil               DateTime?
-  createdAt                 DateTime               @default(now())
-  // userId is unique on Profile, so this is effectively one-to-one.
-  profile                   Profile?
+  createdAt                 DateTime                    @default(now())
+  // One profile per venue — a user with multi-venue access has multiple rows.
+  profiles                  Profile[]
   sessions                  Session[]
   accounts                  AuthAccount[]
   password                  PasswordCredential?
@@ -275,7 +275,7 @@ model PasswordCredential {
 }
 
 model Venue {
-  id                            String                  @id @default(cuid())
+  id                            String                    @id @default(cuid())
   name                          String
   latitude                      Float
   longitude                     Float
@@ -283,7 +283,7 @@ model Venue {
   // IANA timezone (e.g. "America/New_York"). Null falls back to UTC; used to
   // bucket daily reports in the venue's business day rather than server time.
   timezone                      String?
-  code                          String?                 @unique
+  code                          String?                   @unique
   phone                         String?
   address                       String?
   venueType                     String?
@@ -295,14 +295,14 @@ model Venue {
   // Availability lock window. Staff set availability for upcoming pay periods;
   // a period locks once it begins, unless availabilityUnlocked is set venue-wide.
   payPeriodAnchor               String?
-  payPeriodLengthDays           Int                     @default(14)
-  availabilityUnlocked          Boolean                 @default(false)
-  earlyClockInWindowMin         Int                     @default(10)
+  payPeriodLengthDays           Int                       @default(14)
+  availabilityUnlocked          Boolean                   @default(false)
+  earlyClockInWindowMin         Int                       @default(10)
   subscriptionStatus            SubscriptionStatus?
   subscriptionPlatform          SubscriptionPlatform?
   leadsWebhookSecret            String?
-  createdAt                     DateTime                @default(now())
-  updatedAt                     DateTime                @updatedAt
+  createdAt                     DateTime                  @default(now())
+  updatedAt                     DateTime                  @updatedAt
   profiles                      Profile[]
   shifts                        ScheduleShift[]
   shiftSwaps                    ShiftSwap[]
@@ -321,6 +321,7 @@ model Venue {
   floorPlans                    FloorPlan[]
   tables                        TableState[]
   subscriptions                 Subscription[]
+  subscriptionEvents            SubscriptionEvent[]
   crmLeads                      CrmLead[]
   posChecks                     PosCheck[]
   scheduleTemplates             ScheduleTemplate[]
@@ -362,69 +363,71 @@ model Venue {
 }
 
 model Profile {
-  id               String            @id @default(cuid())
-  userId           String?           @unique
-  tokenIdentifier  String?
-  email            String
-  fullName         String
-  role             Role
-  jobTitle         String
-  phone            String?
-  altPhone         String?
-  address          String?
-  dateOfBirth      DateTime?
-  certifications   String[]          @default([])
-  venueId          String?
-  membershipStatus MembershipStatus?
-  allAccess        Boolean           @default(false)
-  sickHoursAccrued Float             @default(40.0)
-  ptoHoursAccrued  Float             @default(80.0)
-  trialEndsAt      DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  user             User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
-  venue            Venue?            @relation(fields: [venueId], references: [id], onDelete: SetNull)
-  shifts           ScheduleShift[]
-  availability     Availability[]
-  pushTokens       PushToken[]
-  timeEntries      TimeEntry[]
-  staffRequests    StaffRequest[]
-  sentMessages     Message[]
-  conversationReads ConversationRead[]
-  notificationEvents NotificationEvent[]
-  notificationReads NotificationRead[]
-  requestedShiftSwaps ShiftSwap[]          @relation("ShiftSwapRequesterProfile")
-  targetShiftSwaps    ShiftSwap[]          @relation("ShiftSwapTargetProfile")
-  crmNotes         CrmNote[]
-  crmActivityLogs  CrmActivityLog[]
-  tableStateHistory TableStateHistory[]
-  servedTables     TableState[]           @relation("ServerTables")
-  assignedLeads    CrmLead[]              @relation("AssignedLeads")
+  id                         String               @id @default(cuid())
+  userId                     String?
+  tokenIdentifier            String?
+  email                      String
+  fullName                   String
+  role                       Role
+  jobTitle                   String
+  phone                      String?
+  altPhone                   String?
+  address                    String?
+  dateOfBirth                DateTime?
+  certifications             String[]             @default([])
+  venueId                    String?
+  membershipStatus           MembershipStatus?
+  allAccess                  Boolean              @default(false)
+  sickHoursAccrued           Float                @default(40.0)
+  ptoHoursAccrued            Float                @default(80.0)
+  trialEndsAt                DateTime?
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
+  user                       User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  venue                      Venue?               @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  shifts                     ScheduleShift[]
+  availability               Availability[]
+  pushTokens                 PushToken[]
+  timeEntries                TimeEntry[]
+  staffRequests              StaffRequest[]
+  sentMessages               Message[]
+  conversationReads          ConversationRead[]
+  notificationEvents         NotificationEvent[]
+  notificationReads          NotificationRead[]
+  requestedShiftSwaps        ShiftSwap[]          @relation("ShiftSwapRequesterProfile")
+  targetShiftSwaps           ShiftSwap[]          @relation("ShiftSwapTargetProfile")
+  crmNotes                   CrmNote[]
+  crmActivityLogs            CrmActivityLog[]
+  tableStateHistory          TableStateHistory[]
+  servedTables               TableState[]         @relation("ServerTables")
+  assignedLeads              CrmLead[]            @relation("AssignedLeads")
   createdScheduleMemoryNotes ScheduleMemoryNote[] @relation("ScheduleMemoryCreatedBy")
-  uploadedDocuments VenueDocument[] @relation("DocumentUploader")
+  uploadedDocuments          VenueDocument[]      @relation("DocumentUploader")
 
+  @@unique([userId, venueId])
+  @@index([userId])
   @@index([venueId])
   @@index([email])
   @@index([tokenIdentifier])
 }
 
 model ScheduleShift {
-  id           String      @id @default(cuid())
-  venueId      String
-  profileId    String?
+  id             String      @id @default(cuid())
+  venueId        String
+  profileId      String?
   // Sunday (YYYY-MM-DD) of the concrete calendar week this shift belongs to.
-  weekStart    String?
-  dayIndex     Int
-  startMinutes Int
-  endMinutes   Int
-  jobTitle     String
-  station      String
-  notes        String?
-  status       ShiftStatus
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  venue        Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  profile      Profile?    @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  weekStart      String?
+  dayIndex       Int
+  startMinutes   Int
+  endMinutes     Int
+  jobTitle       String
+  station        String
+  notes          String?
+  status         ShiftStatus
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  venue          Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile        Profile?    @relation(fields: [profileId], references: [id], onDelete: SetNull)
   requesterSwaps ShiftSwap[] @relation("ShiftSwapRequesterShift")
   targetSwaps    ShiftSwap[] @relation("ShiftSwapTargetShift")
   messages       Message[]
@@ -460,15 +463,15 @@ model ScheduleTemplate {
 }
 
 model ScheduleMemoryNote {
-  id                  String   @id @default(cuid())
-  venueId             String
-  weekStart           String
-  title               String
-  detail              String
-  createdByProfileId   String?
-  createdAt           DateTime @default(now())
-  venue               Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  createdByProfile    Profile? @relation("ScheduleMemoryCreatedBy", fields: [createdByProfileId], references: [id], onDelete: SetNull)
+  id                 String   @id @default(cuid())
+  venueId            String
+  weekStart          String
+  title              String
+  detail             String
+  createdByProfileId String?
+  createdAt          DateTime @default(now())
+  venue              Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  createdByProfile   Profile? @relation("ScheduleMemoryCreatedBy", fields: [createdByProfileId], references: [id], onDelete: SetNull)
 
   @@index([venueId])
   @@index([venueId, weekStart])
@@ -490,6 +493,9 @@ model Availability {
   venue        Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
   profile      Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
+  // One availability row per profile per day per week — the app upserts per
+  // day, so this turns retry/race duplicates into a constraint violation.
+  @@unique([profileId, weekStart, dayIndex])
   @@index([profileId])
   @@index([venueId])
   @@index([profileId, weekStart])
@@ -523,7 +529,7 @@ model StaffRequest {
 }
 
 model Conversation {
-  id              String    @id @default(cuid())
+  id              String             @id @default(cuid())
   venueId         String
   type            String
   name            String?
@@ -532,7 +538,7 @@ model Conversation {
   lastMessageText String?
   roleName        String?
   shiftDate       String?
-  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue           Venue              @relation(fields: [venueId], references: [id], onDelete: Cascade)
   messages        Message[]
   reads           ConversationRead[]
 
@@ -540,27 +546,27 @@ model Conversation {
 }
 
 model Message {
-  id             String       @id @default(cuid())
+  id             String         @id @default(cuid())
   conversationId String
   venueId        String
   // Nullable + SetNull so the team's chat history survives a member deleting
   // their account; the UI shows a fallback name for missing senders.
   senderId       String?
   text           String
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime       @default(now())
   // Used as an optimistic-concurrency guard for reaction toggles (read-modify
   // -write on the reactions JSON column) so two simultaneous reactions can't
   // silently drop one of them.
-  updatedAt      DateTime     @default(now()) @updatedAt
+  updatedAt      DateTime       @default(now()) @updatedAt
   shiftId        String?
   swapId         String?
   imageUrl       String?
   reactions      Json?
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         Profile?     @relation(fields: [senderId], references: [id], onDelete: SetNull)
-  venue          Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         Profile?       @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  venue          Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
   shift          ScheduleShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  swap           ShiftSwap?   @relation(fields: [swapId], references: [id], onDelete: SetNull)
+  swap           ShiftSwap?     @relation(fields: [swapId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@index([senderId])
@@ -622,16 +628,19 @@ model VenueDocument {
 }
 
 model NotificationEvent {
-  id        String   @id @default(cuid())
+  id        String             @id @default(cuid())
   venueId   String
   profileId String?
   audience  String
   kind      String
   title     String
   body      String
-  createdAt DateTime @default(now())
-  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  profile   Profile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt DateTime           @default(now())
+  venue     Venue              @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  // SetNull (not Cascade): deleting a profile must not erase venue-wide
+  // notification history already delivered to other staff — mirrors
+  // Message.senderId.
+  profile   Profile?           @relation(fields: [profileId], references: [id], onDelete: SetNull)
   reads     NotificationRead[]
 
   @@index([venueId, createdAt])
@@ -639,14 +648,14 @@ model NotificationEvent {
 }
 
 model NotificationRead {
-  id             String   @id @default(cuid())
+  id             String            @id @default(cuid())
   notificationId String
   profileId      String
   venueId        String
-  readAt         DateTime @default(now())
-  venue          Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  readAt         DateTime          @default(now())
+  venue          Venue             @relation(fields: [venueId], references: [id], onDelete: Cascade)
   notification   NotificationEvent @relation(fields: [notificationId], references: [id], onDelete: Cascade)
-  profile        Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile        Profile           @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([notificationId, profileId])
   @@index([profileId])
@@ -706,7 +715,7 @@ model TimeEntry {
 }
 
 model ShiftSwap {
-  id                 String   @id @default(cuid())
+  id                 String         @id @default(cuid())
   venueId            String
   requesterProfileId String
   requesterShiftId   String
@@ -714,12 +723,12 @@ model ShiftSwap {
   targetShiftId      String?
   status             String
   note               String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  venue              Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  requesterProfile   Profile  @relation("ShiftSwapRequesterProfile", fields: [requesterProfileId], references: [id], onDelete: Cascade)
-  targetProfile      Profile  @relation("ShiftSwapTargetProfile", fields: [targetProfileId], references: [id], onDelete: Cascade)
-  requesterShift     ScheduleShift @relation("ShiftSwapRequesterShift", fields: [requesterShiftId], references: [id], onDelete: Cascade)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  venue              Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  requesterProfile   Profile        @relation("ShiftSwapRequesterProfile", fields: [requesterProfileId], references: [id], onDelete: Cascade)
+  targetProfile      Profile        @relation("ShiftSwapTargetProfile", fields: [targetProfileId], references: [id], onDelete: Cascade)
+  requesterShift     ScheduleShift  @relation("ShiftSwapRequesterShift", fields: [requesterShiftId], references: [id], onDelete: Cascade)
   targetShift        ScheduleShift? @relation("ShiftSwapTargetShift", fields: [targetShiftId], references: [id], onDelete: SetNull)
   messages           Message[]
 
@@ -731,7 +740,7 @@ model ShiftSwap {
 }
 
 model Guest {
-  id              String    @id @default(cuid())
+  id              String        @id @default(cuid())
   venueId         String
   fullName        String
   phone           String?
@@ -748,10 +757,11 @@ model Guest {
   notes           String?
   nameLower       String?
   deletedAt       DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  venue           Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
   reservations    Reservation[]
+  waitlistEntries Waitlist[]
 
   @@index([venueId])
   @@index([phone])
@@ -760,7 +770,7 @@ model Guest {
 }
 
 model Reservation {
-  id                  String            @id @default(cuid())
+  id                  String                 @id @default(cuid())
   venueId             String
   guestId             String?
   guestName           String
@@ -805,14 +815,15 @@ model Reservation {
   // status flips.
   confirmationSentAt  DateTime?
   deletedAt           DateTime?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  venue               Venue             @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  guest               Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  venue               Venue                  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  guest               Guest?                 @relation(fields: [guestId], references: [id], onDelete: SetNull)
   venueEvents         VenueEvent[]
   syncEvents          ReservationSyncEvent[]
   tableAssignments    TableAssignment[]
 
+  @@unique([venueId, source, externalId])
   @@index([venueId, reservationTime])
   @@index([venueId, status])
   @@index([guestId])
@@ -822,26 +833,28 @@ model Reservation {
 }
 
 model Waitlist {
-  id          String         @id @default(cuid())
-  venueId     String
-  guestId     String?
-  guestName   String
-  guestPhone  String?
-  guestEmail  String?
-  partySize   Int
-  source      String
-  status      WaitlistStatus
-  requestedAt DateTime
-  readyAt     DateTime?
+  id               String            @id @default(cuid())
+  venueId          String
+  guestId          String?
+  guestName        String
+  guestPhone       String?
+  guestEmail       String?
+  partySize        Int
+  source           String
+  status           WaitlistStatus
+  requestedAt      DateTime
+  readyAt          DateTime?
   // Set when the auto-notifier emails the guest that a table is ready.
   // Prevents re-notifying on subsequent table releases.
-  notifiedAt  DateTime?
-  notes       String?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  venue       Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  notifiedAt       DateTime?
+  notes            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  venue            Venue             @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  guest            Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
   tableAssignments TableAssignment[]
 
+  @@index([guestId])
   @@index([venueId, requestedAt])
   @@index([venueId, status])
 }
@@ -881,24 +894,26 @@ model FloorPlan {
 }
 
 model FloorTable {
-  id             String       @id @default(cuid())
-  floorPlanId    String
-  label          String
-  shape          TableShape
-  seats          Int
-  seatLabelStyle String?
-  x              Float
-  y              Float
-  width          Float
-  height         Float
-  rotation       Float
-  section        TableSection
-  minSpend       Int
-  isReservable   Boolean
-  floorPlan      FloorPlan    @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
-  tableStates    TableState[]
+  id               String              @id @default(cuid())
+  floorPlanId      String
+  label            String
+  shape            TableShape
+  seats            Int
+  seatLabelStyle   String?
+  x                Float
+  y                Float
+  width            Float
+  height           Float
+  rotation         Float
+  section          TableSection
+  // Whole cents (25000 = $250.00), matching the *Cents convention used
+  // everywhere else; the field name predates that convention.
+  minSpend         Int
+  isReservable     Boolean
+  floorPlan        FloorPlan           @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
+  tableStates      TableState[]
   tableAssignments TableAssignment[]
-  stateHistory   TableStateHistory[]
+  stateHistory     TableStateHistory[]
 
   @@index([floorPlanId])
   @@index([floorPlanId, section])
@@ -921,7 +936,7 @@ model FloorChair {
 model TableState {
   id             String      @id @default(cuid())
   venueId        String
-  tableId        String
+  tableId        String      @unique
   status         TableStatus
   partySize      Int?
   serverId       String?
@@ -934,7 +949,6 @@ model TableState {
   table          FloorTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
   server         Profile?    @relation("ServerTables", fields: [serverId], references: [id], onDelete: SetNull)
 
-  @@index([tableId])
   @@index([status])
   @@index([serverId])
   @@index([venueId])
@@ -942,7 +956,7 @@ model TableState {
 }
 
 model TableAssignment {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
   venueId        String
   reservationId  String?
   waitlistId     String?
@@ -950,13 +964,13 @@ model TableAssignment {
   holdType       HoldType
   startsAt       DateTime
   endsAt         DateTime
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime     @default(now())
   releasedAt     DateTime?
   releasedReason String?
-  venue          Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue          Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
   reservation    Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
-  waitlist       Waitlist?  @relation(fields: [waitlistId], references: [id], onDelete: SetNull)
-  table          FloorTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  waitlist       Waitlist?    @relation(fields: [waitlistId], references: [id], onDelete: SetNull)
+  table          FloorTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
 
   @@index([tableId, startsAt])
   @@index([reservationId])
@@ -976,8 +990,8 @@ model PosConnection {
   updatedAt          DateTime          @updatedAt
   venue              Venue             @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  @@unique([venueId, provider])
   @@index([venueId])
-  @@index([venueId, provider])
 }
 
 model PosCheck {
@@ -1045,7 +1059,7 @@ model PosLaborPunch {
 }
 
 model CrmLead {
-  id                  String        @id @default(cuid())
+  id                  String           @id @default(cuid())
   venueId             String
   guestId             String?
   fullName            String
@@ -1060,10 +1074,10 @@ model CrmLead {
   lastActivityAt      DateTime?
   estimatedValueCents Int?
   deletedAt           DateTime?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  venue               Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  assignedTo          Profile?      @relation("AssignedLeads", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  venue               Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  assignedTo          Profile?         @relation("AssignedLeads", fields: [assignedToId], references: [id], onDelete: SetNull)
   notes               CrmNote[]
   beos                CrmBeo[]
   contracts           CrmContract[]
@@ -1190,7 +1204,7 @@ model EmailTemplate {
 
 model Subscription {
   id                     String                @id @default(cuid())
-  venueId                String
+  venueId                String                @unique
   status                 SubscriptionStatus
   platform               SubscriptionPlatform?
   planId                 String
@@ -1204,7 +1218,7 @@ model Subscription {
   currentPeriodEnd       DateTime?
   cancelAtPeriodEnd      Boolean
   cancelledAt            DateTime?
-  externalSubscriptionId String?
+  externalSubscriptionId String?               @unique
   externalCustomerId     String?
   dataRetentionWarnedAt  DateTime?
   lastStripeEventAt      DateTime?
@@ -1213,9 +1227,7 @@ model Subscription {
   updatedAt              DateTime              @updatedAt
   venue                  Venue                 @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
-  @@index([venueId])
   @@index([status])
-  @@index([externalSubscriptionId])
   @@index([externalCustomerId])
 }
 
@@ -1229,6 +1241,7 @@ model SubscriptionEvent {
   processedAt     DateTime?
   status          String
   errorMessage    String?
+  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@unique([source, externalEventId])
   @@index([venueId, processedAt])
@@ -1246,6 +1259,7 @@ model PaymentMethod {
   createdAt             DateTime @default(now())
   venue                 Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  @@unique([venueId, stripePaymentMethodId])
   @@index([venueId])
 }
 
@@ -1339,8 +1353,8 @@ model ReservationConnection {
   updatedAt       DateTime          @updatedAt
   venue           Venue             @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  @@unique([venueId, provider])
   @@index([venueId])
-  @@index([venueId, provider])
 }
 
 model ReservationSyncEvent {
@@ -1366,7 +1380,7 @@ model ReservationSyncEvent {
 }
 
 model BarInventoryItem {
-  id            String           @id @default(cuid())
+  id            String                 @id @default(cuid())
   venueId       String
   name          String
   category      BarStockCategory
@@ -1379,9 +1393,9 @@ model BarInventoryItem {
   sku           String?
   notes         String?
   lastCountedAt DateTime?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  venue         Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  venue         Venue                  @relation(fields: [venueId], references: [id], onDelete: Cascade)
   movements     BarInventoryMovement[]
 
   @@index([venueId])
@@ -1408,22 +1422,22 @@ model BarInventoryMovement {
 }
 
 model PrepBoardItem {
-  id            String    @id @default(cuid())
-  venueId       String
-  kind          String
-  title         String
-  quantity      Float?
-  unit          String?
-  station       String?
-  notes         String?
-  dueDate       String?
-  status        String
-  createdBy     String
-  completedBy   String?
-  completedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  venue         Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  venueId     String
+  kind        String
+  title       String
+  quantity    Float?
+  unit        String?
+  station     String?
+  notes       String?
+  dueDate     String?
+  status      String
+  createdBy   String
+  completedBy String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  venue       Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, status])
   @@index([venueId, kind])
@@ -1431,19 +1445,19 @@ model PrepBoardItem {
 }
 
 model StaffOnboardingTask {
-  id              String    @id @default(cuid())
-  venueId         String
-  profileId       String
-  title           String
-  details         String?
-  category        String
-  dueDate         String?
-  status          String
-  completedBy     String?
-  completedAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  venue           Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  venueId     String
+  profileId   String
+  title       String
+  details     String?
+  category    String
+  dueDate     String?
+  status      String
+  completedBy String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  venue       Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, title])
   @@index([venueId, profileId])
@@ -1482,7 +1496,7 @@ model ChecklistTemplateItem {
 }
 
 model ChecklistCompletion {
-  id              String                 @id @default(cuid())
+  id              String                @id @default(cuid())
   venueId         String
   templateItemId  String
   date            String
@@ -1491,31 +1505,31 @@ model ChecklistCompletion {
   completedByName String?
   completedAt     DateTime?
   photoKey        String?
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
-  venue           Venue                  @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  templateItem    ChecklistTemplateItem  @relation(fields: [templateItemId], references: [id], onDelete: Cascade)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  venue           Venue                 @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  templateItem    ChecklistTemplateItem @relation(fields: [templateItemId], references: [id], onDelete: Cascade)
 
   @@unique([templateItemId, date])
   @@index([venueId, date])
 }
 
 model AuditLog {
-  id             String   @id @default(cuid())
-  venueId        String
-  actorProfileId String?
-  actorName      String?
-  actorRole      String?
+  id              String   @id @default(cuid())
+  venueId         String
+  actorProfileId  String?
+  actorName       String?
+  actorRole       String?
   targetProfileId String?
-  targetName     String?
-  targetRole     String?
-  entityType     String
-  entityId       String?
-  action         String
-  summary        String
-  metadata       Json?
-  createdAt      DateTime @default(now())
-  venue          Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  targetName      String?
+  targetRole      String?
+  entityType      String
+  entityId        String?
+  action          String
+  summary         String
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  venue           Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, createdAt])
   @@index([venueId, action])
@@ -1541,7 +1555,7 @@ model ManagerGoal {
 }
 
 model VenueEvent {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
   venueId        String
   title          String
   startsAt       DateTime
@@ -1551,27 +1565,27 @@ model VenueEvent {
   reservationId  String?
   reservation    Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
   createdBy      String
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  venue          Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  venue          Venue        @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, startsAt])
   @@index([reservationId])
 }
 
 model EventExecutionWorkspace {
-  id          String   @id @default(cuid())
-  venueId     String
-  sourceType  String
-  sourceId    String
-  title       String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  venue       Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  tasks       EventExecutionTask[]
-  timeline    EventExecutionTimelineItem[]
-  vendors     EventExecutionVendor[]
-  incidents   EventExecutionIncident[]
+  id         String                       @id @default(cuid())
+  venueId    String
+  sourceType String
+  sourceId   String
+  title      String
+  createdAt  DateTime                     @default(now())
+  updatedAt  DateTime                     @updatedAt
+  venue      Venue                        @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  tasks      EventExecutionTask[]
+  timeline   EventExecutionTimelineItem[]
+  vendors    EventExecutionVendor[]
+  incidents  EventExecutionIncident[]
 
   @@unique([venueId, sourceType, sourceId])
   @@unique([id, venueId])
@@ -1579,20 +1593,20 @@ model EventExecutionWorkspace {
 }
 
 model EventExecutionTask {
-  id          String   @id @default(cuid())
+  id          String                  @id @default(cuid())
   venueId     String
   workspaceId String
   templateKey String
   title       String
   department  String
   dueAt       DateTime?
-  critical    Boolean  @default(true)
-  status      String   @default("open")
+  critical    Boolean                 @default(true)
+  status      String                  @default("open")
   ownerId     String?
   completedBy String?
   completedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
   workspace   EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
 
   @@unique([workspaceId, templateKey])
@@ -1602,16 +1616,16 @@ model EventExecutionTask {
 }
 
 model EventExecutionTimelineItem {
-  id          String   @id @default(cuid())
+  id          String                  @id @default(cuid())
   venueId     String
   workspaceId String
   templateKey String
   title       String
   startsAt    DateTime
-  status      String   @default("pending")
+  status      String                  @default("pending")
   completedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
   workspace   EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
 
   @@unique([workspaceId, templateKey])
@@ -1620,18 +1634,18 @@ model EventExecutionTimelineItem {
 }
 
 model EventExecutionVendor {
-  id          String   @id @default(cuid())
+  id          String                  @id @default(cuid())
   venueId     String
   workspaceId String
   templateKey String
   name        String
   dueAt       DateTime?
-  status      String   @default("unconfirmed")
+  status      String                  @default("unconfirmed")
   ownerId     String?
   confirmedAt DateTime?
   arrivedAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
   workspace   EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
 
   @@unique([workspaceId, templateKey])
@@ -1640,19 +1654,19 @@ model EventExecutionVendor {
 }
 
 model EventExecutionIncident {
-  id            String   @id @default(cuid())
-  venueId       String
-  workspaceId   String
-  title         String
-  severity      String   @default("high")
-  status        String   @default("open")
-  blocksReadiness Boolean @default(true)
-  createdBy     String
-  resolvedBy    String?
-  resolvedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  workspace     EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
+  id              String                  @id @default(cuid())
+  venueId         String
+  workspaceId     String
+  title           String
+  severity        String                  @default("high")
+  status          String                  @default("open")
+  blocksReadiness Boolean                 @default(true)
+  createdBy       String
+  resolvedBy      String?
+  resolvedAt      DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  workspace       EventExecutionWorkspace @relation(fields: [workspaceId, venueId], references: [id, venueId], onDelete: Cascade)
 
   @@index([venueId, workspaceId, status])
   @@index([workspaceId, venueId])
@@ -1711,6 +1725,9 @@ model Invite {
   createdAt DateTime @default(now())
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
+  // NOTE: a partial SQL-only index (Invite_phone_idx) exists on top of this
+  // schema. Prisma can't represent partial indexes; if `prisma migrate dev`
+  // ever generates a DROP for it, delete that statement before applying.
   @@index([email])
   @@index([venueId])
 }
@@ -1730,6 +1747,12 @@ model WorkplaceJoinRequest {
   decidedBy    User?                       @relation("WorkplaceJoinRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
   events       WorkplaceJoinRequestEvent[]
 
+  // NOTE: a partial SQL-only unique index
+  // (WorkplaceJoinRequest_one_pending_per_user_venue_idx, WHERE status =
+  // 'pending') exists on top of this schema. Prisma can't represent partial
+  // indexes; if `prisma migrate dev` ever generates a DROP for it, delete
+  // that statement before applying — dropping it re-opens duplicate pending
+  // request races.
   @@index([venueId])
   @@index([userId])
   @@index([status])

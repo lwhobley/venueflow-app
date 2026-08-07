@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
@@ -179,11 +179,27 @@ export class PosController {
     @Headers('x-webhook-secret') secret: string | undefined,
     @Body() body: PosIngestDto,
   ) {
-    await assertWithinSharedRateLimit(this.prisma, `pos-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     const provider = body.provider as PosProvider;
+    // Verify the per-connection secret before touching the rate limiter so an
+    // unauthenticated spray of random venueIds can't churn RateLimitBucket rows.
     const connection = await this.prisma.posConnection.findFirst({ where: { venueId, provider } });
     if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
+    }
+    await assertWithinSharedRateLimit(this.prisma, `pos-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
+
+    // class-validator's @IsNumber() accepts NaN/Infinity, which would surface
+    // as a 500 from Prisma via `new Date(NaN)`. Reject non-finite timestamps
+    // up front with a 400 the provider can act on.
+    for (const check of body.checks ?? []) {
+      if (!Number.isFinite(check.openedAt) || (check.closedAt != null && !Number.isFinite(check.closedAt))) {
+        throw new BadRequestException(`Invalid timestamp on check ${check.externalCheckId}`);
+      }
+    }
+    for (const punch of body.laborPunches ?? []) {
+      if (!Number.isFinite(punch.clockInAt) || (punch.clockOutAt != null && !Number.isFinite(punch.clockOutAt))) {
+        throw new BadRequestException(`Invalid timestamp on labor punch ${punch.externalEmployeeId}`);
+      }
     }
 
     // Batch upserts into chunked transactions (not one single transaction for
@@ -531,14 +547,13 @@ export class PosController {
       where: {
         venueId,
         provider: body.provider as any,
-        ...(externalLocationId ? { externalLocationId } : {}),
       },
     });
 
-    if (existing) {
-      const freshSecret = existing.webhookSecret ? null : generateWebhookSecret();
+    const updateExisting = async (connection: NonNullable<typeof existing>) => {
+      const freshSecret = connection.webhookSecret ? null : generateWebhookSecret();
       const updated = await this.prisma.posConnection.update({
-        where: { id: existing.id },
+        where: { id: connection.id },
         data: {
           status: body.status as any,
           externalLocationId,
@@ -547,22 +562,33 @@ export class PosController {
         },
       });
       return { ...this.mapConnection(updated), webhookSecret: freshSecret?.secret ?? null };
-    }
+    };
+
+    if (existing) return updateExisting(existing);
 
     const freshSecret = generateWebhookSecret();
-    const created = await this.prisma.posConnection.create({
-      data: {
-        venueId,
-        provider: body.provider as any,
-        externalLocationId,
-        status: body.status as any,
-        webhookSecret: freshSecret.hashedSecret,
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
+    try {
+      const created = await this.prisma.posConnection.create({
+        data: {
+          venueId,
+          provider: body.provider as any,
+          externalLocationId,
+          status: body.status as any,
+          webhookSecret: freshSecret.hashedSecret,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
 
-    return { ...this.mapConnection(created), webhookSecret: freshSecret.secret };
+      return { ...this.mapConnection(created), webhookSecret: freshSecret.secret };
+    } catch (error: any) {
+      if (error?.code !== 'P2002') throw error;
+      const winner = await this.prisma.posConnection.findFirst({
+        where: { venueId, provider: body.provider as any },
+      });
+      if (!winner) throw error;
+      return updateExisting(winner);
+    }
   }
 
   private mapConnection(conn: {

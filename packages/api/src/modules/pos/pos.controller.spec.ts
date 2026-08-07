@@ -49,12 +49,22 @@ afterEach(() => {
 
 describe('PosController', () => {
   describe('ingest webhook', () => {
-    it('applies a per-venue, per-IP rate limit before touching auth', async () => {
+    it('verifies the webhook secret before touching the rate limiter', async () => {
       const { controller, prisma } = makeController();
       prisma.posConnection.findFirst.mockResolvedValue(null);
 
       await expect(controller.ingest(makeRequest(), 'venue-1', 'secret', { provider: 'toast' } as any))
         .rejects.toThrow(UnauthorizedException);
+
+      // An unauthenticated spray of random venueIds must not churn buckets.
+      expect(assertWithinSharedRateLimit).not.toHaveBeenCalled();
+    });
+
+    it('applies a per-venue, per-IP rate limit once the secret is verified', async () => {
+      const { controller, prisma } = makeController();
+      prisma.posConnection.findFirst.mockResolvedValue({ id: 'conn-1', webhookSecret: hashWebhookSecret('secret') });
+
+      await controller.ingest(makeRequest(), 'venue-1', 'secret', { provider: 'toast' } as any);
 
       expect(assertWithinSharedRateLimit).toHaveBeenCalledWith(
         prisma,
@@ -171,6 +181,30 @@ describe('PosController', () => {
   });
 
   describe('upsertPosConnection', () => {
+    it('looks up an existing provider connection regardless of location changes', async () => {
+      const { controller, prisma } = makeController();
+      prisma.posConnection.findFirst.mockResolvedValue({
+        id: 'conn-1', venueId: 'venue-1', provider: 'toast', externalLocationId: 'old-location',
+        status: 'connected', webhookSecret: hashWebhookSecret('already-set'), lastSyncAt: null, createdAt: new Date(), updatedAt: new Date(),
+      });
+      prisma.posConnection.update.mockResolvedValue({
+        id: 'conn-1', venueId: 'venue-1', provider: 'toast', externalLocationId: 'new-location',
+        status: 'connected', lastSyncAt: null, createdAt: new Date(), updatedAt: new Date(),
+      });
+
+      await controller.upsertPosConnection(managerScope, {
+        provider: 'toast', status: 'connected', externalLocationId: 'new-location',
+      });
+
+      expect(prisma.posConnection.findFirst).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1', provider: 'toast' },
+      });
+      expect(prisma.posConnection.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'conn-1' },
+        data: expect.objectContaining({ externalLocationId: 'new-location' }),
+      }));
+    });
+
     it('creates a new connection with a freshly generated webhook secret', async () => {
       const { controller, prisma } = makeController();
       prisma.posConnection.findFirst.mockResolvedValue(null);
@@ -185,6 +219,25 @@ describe('PosController', () => {
         data: expect.objectContaining({ venueId: 'venue-1', webhookSecret: expect.stringMatching(/^sha256:/) }),
       }));
       expect(result.webhookSecret).toEqual(expect.any(String));
+    });
+
+    it('updates the winning connection when a concurrent create returns P2002', async () => {
+      const { controller, prisma } = makeController();
+      const winner = {
+        id: 'conn-winner', venueId: 'venue-1', provider: 'toast', externalLocationId: null,
+        status: 'connected', webhookSecret: hashWebhookSecret('winner-secret'), lastSyncAt: null, createdAt: new Date(), updatedAt: new Date(),
+      };
+      prisma.posConnection.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(winner);
+      prisma.posConnection.create.mockRejectedValue({ code: 'P2002' });
+      prisma.posConnection.update.mockResolvedValue({ ...winner, status: 'paused' });
+
+      const result = await controller.upsertPosConnection(managerScope, { provider: 'toast', status: 'paused' });
+
+      expect(prisma.posConnection.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'conn-winner' },
+        data: expect.not.objectContaining({ webhookSecret: expect.anything() }),
+      }));
+      expect(result.webhookSecret).toBeNull();
     });
 
     it('rotates the secret only when the existing connection has none', async () => {
