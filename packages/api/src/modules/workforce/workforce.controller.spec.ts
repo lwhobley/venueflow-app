@@ -189,3 +189,31 @@ describe('WorkforceController invite check email', () => {
       .resolves.toEqual({ status: 'not_found' });
   });
 });
+
+describe('WorkforceController venue search', () => {
+  const findMany = vi.fn();
+  const prisma = {
+    venue: { findMany },
+  };
+  const request = { ip: '127.0.0.1' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects array-shaped query parameters instead of throwing a 500', async () => {
+    const controller = new WorkforceController(prisma as any, {} as any, {} as any);
+
+    await expect(controller.searchVenues(request as any, ['venue']))
+      .rejects.toThrow('Search query must be a string.');
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects excessively long search terms', async () => {
+    const controller = new WorkforceController(prisma as any, {} as any, {} as any);
+
+    await expect(controller.searchVenues(request as any, 'a'.repeat(121)))
+      .rejects.toThrow('Search query must be 120 characters or fewer.');
+    expect(findMany).not.toHaveBeenCalled();
+  });
+});

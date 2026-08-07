@@ -212,10 +212,16 @@ export class WorkforceController {
 
   @Public()
   @Get('venues/search')
-  async searchVenues(@Req() req: Request, @Query('q') q: string) {
+  async searchVenues(@Req() req: Request, @Query('q') q: unknown) {
     await assertWithinSharedRateLimit(this.prisma, `venue-search:ip:${getClientIp(req)}`, INVITE_CHECK_LIMIT_MAX, INVITE_CHECK_LIMIT_WINDOW_MS);
 
+    if (q !== undefined && typeof q !== 'string') {
+      throw new BadRequestException('Search query must be a string.');
+    }
     const term = (q ?? '').trim();
+    if (term.length > 120) {
+      throw new BadRequestException('Search query must be 120 characters or fewer.');
+    }
     if (!term) {
       return { venues: [] };
     }
