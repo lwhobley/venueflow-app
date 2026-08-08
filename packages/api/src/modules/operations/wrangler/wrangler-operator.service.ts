@@ -328,7 +328,7 @@ export class WranglerOperatorService {
       const startMinutes = args.startMinutes != null ? this.minuteValue(args.startMinutes, 'startMinutes') : existing.startMinutes;
       const endMinutes = args.endMinutes != null ? this.minuteValue(args.endMinutes, 'endMinutes') : existing.endMinutes;
       if (endMinutes <= startMinutes) throw new BadRequestException('Shift end must be after shift start');
-      if (existing.profileId) await this.assertNoShiftOverlap(venueId, existing.profileId, existing.weekStart, existing.dayIndex, startMinutes, endMinutes, existing.id);
+      if (existing.profileId) await this.assertNoShiftOverlap(venueId, existing.profileId, existing.weekStart ?? weekStartFor(zonedIsoDate(timezone, Date.now())), existing.dayIndex, startMinutes, endMinutes, existing.id);
       const row = await this.prisma.scheduleShift.update({ where: { id }, data: { startMinutes, endMinutes, ...(args.jobTitle != null ? { jobTitle: this.requiredText(args.jobTitle, 'jobTitle') } : {}), ...(args.station != null ? { station: this.requiredText(args.station, 'station') } : {}) } });
       await this.markScheduleEdited(venueId);
       return { id: row.id, startMinutes: row.startMinutes, endMinutes: row.endMinutes, profileId: row.profileId, status: row.status };
@@ -341,7 +341,7 @@ export class WranglerOperatorService {
       if (!shift) throw new NotFoundException('Shift no longer exists');
       const profile = await this.prisma.profile.findFirst({ where: { id: profileId, venueId } });
       if (!profile) throw new NotFoundException('Staff member no longer exists');
-      await this.assertNoShiftOverlap(venueId, profile.id, shift.weekStart, shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
+      await this.assertNoShiftOverlap(venueId, profile.id, shift.weekStart ?? weekStartFor(zonedIsoDate(timezone, Date.now())), shift.dayIndex, shift.startMinutes, shift.endMinutes, shift.id);
       const row = await this.prisma.scheduleShift.update({ where: { id }, data: { profileId: profile.id, status: 'scheduled' } });
       await this.markScheduleEdited(venueId);
       return { id: row.id, profileId: profile.id, staffName: profile.fullName, status: row.status };
