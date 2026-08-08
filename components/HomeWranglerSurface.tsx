@@ -107,7 +107,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
               {nextAction.label}
             </CommandText>
           </View>
-          <MaterialCommunityIcons name="arrow-right" size={20} color={urgent ? '#FFFFFF' : palette.text} />
+          <MaterialCommunityIcons name="arrow-right" size={20} color={urgent ? '#FFFFFF' : palette.muted} />
         </Pressable>
       ) : null}
 
