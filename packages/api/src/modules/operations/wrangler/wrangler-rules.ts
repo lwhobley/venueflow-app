@@ -1,4 +1,4 @@
-import type { DailyBriefPriorityAction } from '../daily-brief-priority-actions';
+import type { DailyBriefPriorityAction, WranglerAction } from '../daily-brief-priority-actions';
 
 export type WranglerReservation = {
   id: string;
@@ -20,6 +20,10 @@ function minutesUntil(now: number, target: number) {
   return Math.round((target - now) / 60000);
 }
 
+function navAction(id: string, label: string, route: WranglerAction['route']): WranglerAction {
+  return { id, type: 'NAVIGATE', label, route, requiresConfirmation: false };
+}
+
 export function buildWranglerRuleActions(input: WranglerRuleInput): DailyBriefPriorityAction[] {
   const actions: DailyBriefPriorityAction[] = [];
 
@@ -29,6 +33,7 @@ export function buildWranglerRuleActions(input: WranglerRuleInput): DailyBriefPr
     const isLarge = reservation.partySize >= 8;
 
     if (mins >= 0 && mins <= 30 && (isVip || isLarge)) {
+      const route = '/reservations' as const;
       actions.push({
         id: `arrival:${reservation.id}`,
         kind: 'event',
@@ -38,21 +43,14 @@ export function buildWranglerRuleActions(input: WranglerRuleInput): DailyBriefPr
         body: `${reservation.partySize} guests expected. Review seating, service notes, and floor readiness before arrival.`,
         reason: isVip ? 'VIP arrival inside the next 30 minutes.' : 'Large-party arrival inside the next 30 minutes.',
         cta: 'Open reservations',
-        route: '/reservations',
-        actions: [
-          {
-            id: `open-reservation:${reservation.id}`,
-            type: 'NAVIGATE',
-            label: 'Review arrival',
-            route: '/reservations',
-            payload: { reservationId: reservation.id },
-          },
-        ],
+        route,
+        actions: [navAction(`open-reservation:${reservation.id}`, 'Review arrival', route)],
       });
     }
   }
 
   if (input.openShiftCount >= 3) {
+    const route = '/staff' as const;
     actions.push({
       id: 'coverage:critical',
       kind: 'coverage',
@@ -62,14 +60,13 @@ export function buildWranglerRuleActions(input: WranglerRuleInput): DailyBriefPr
       body: 'Coverage is materially short for today. Resolve staffing before the busiest service window.',
       reason: 'Three or more open shifts remain unfilled.',
       cta: 'Open staff',
-      route: '/staff',
-      actions: [
-        { id: 'coverage:open-staff', type: 'NAVIGATE', label: 'Resolve coverage', route: '/staff' },
-      ],
+      route,
+      actions: [navAction('coverage:open-staff', 'Resolve coverage', route)],
     });
   }
 
   if (input.lowStockCount > 0 && input.eightySixCount > 0) {
+    const route = '/bar-stock' as const;
     actions.push({
       id: 'inventory:service-risk',
       kind: 'stock',
@@ -79,10 +76,8 @@ export function buildWranglerRuleActions(input: WranglerRuleInput): DailyBriefPr
       body: `${input.lowStockCount} low-stock item${input.lowStockCount === 1 ? '' : 's'} and ${input.eightySixCount} item${input.eightySixCount === 1 ? '' : 's'} on the 86 list need attention.`,
       reason: 'Low stock and active 86 items are occurring at the same time.',
       cta: 'Open inventory',
-      route: '/bar-stock',
-      actions: [
-        { id: 'inventory:open', type: 'NAVIGATE', label: 'Review inventory', route: '/bar-stock' },
-      ],
+      route,
+      actions: [navAction('inventory:open', 'Review inventory', route)],
     });
   }
 
