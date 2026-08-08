@@ -2,7 +2,16 @@
 -- defense-in-depth boundary as the rest of the API-first schema.
 ALTER TABLE public."AiUsageEvent" ENABLE ROW LEVEL SECURITY;
 
--- No direct Data API policies are intentionally created. Application access
--- goes through the trusted API/database role, which is responsible for venue
--- scoping. Explicitly keep browser-facing roles without table privileges.
-REVOKE ALL ON TABLE public."AiUsageEvent" FROM anon, authenticated;
+-- Supabase provides anon/authenticated roles; plain Postgres CI does not.
+-- Revoke browser-facing access only when those roles exist so this migration
+-- remains portable across both environments.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    EXECUTE 'REVOKE ALL ON TABLE public."AiUsageEvent" FROM anon';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    EXECUTE 'REVOKE ALL ON TABLE public."AiUsageEvent" FROM authenticated';
+  END IF;
+END
+$$;
