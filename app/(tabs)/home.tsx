@@ -7,6 +7,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { CommandButton, CommandText } from '../../components/FutureUI';
+import { HomeWranglerSurface } from '../../components/HomeWranglerSurface';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
@@ -23,7 +24,6 @@ type NotificationItem = {
 };
 
 const todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-const allowedPriorityRoutes = new Set(['/reports', '/schedule', '/reservations', '/guests', '/sales', '/operations', '/event-command-center']);
 
 export default function HomeScreen() {
   usePushNotifications();
@@ -46,9 +46,7 @@ export default function HomeScreen() {
   const notificationsList = (notifications ?? []) as NotificationItem[];
   const unreadCount = notificationsList.filter((item) => !item.read).length;
   const readiness = commandCenter?.readiness;
-  const blockers = commandCenter?.blockers ?? [];
   const pulse = dailyBrief?.profitabilityPulse;
-  const firstPriority = blockers[0] ?? pulse?.recoveryActions?.[0] ?? null;
   const events = commandCenter?.events?.slice(0, 4) ?? managerDashboard?.events?.slice(0, 4) ?? [];
   const loading = dashboard === undefined;
 
@@ -75,10 +73,6 @@ export default function HomeScreen() {
     setGoalTitle('');
   };
 
-  const priorityTitle = firstPriority?.title ?? (pulse?.headline || 'Service is on track');
-  const priorityDetail = firstPriority?.detail ?? firstPriority?.body ?? pulse?.detail ?? 'No urgent operational issues are blocking the shift.';
-  const priorityRoute = allowedPriorityRoutes.has(firstPriority?.route) ? firstPriority.route : '/reports';
-
   return (
     <ScrollView style={{ flex: 1, backgroundColor: palette.background }} contentContainerStyle={{ paddingBottom: spacing.xxl }} showsVerticalScrollIndicator={false}>
       <View style={{ backgroundColor: '#074426', paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.lg, gap: spacing.md }}>
@@ -104,22 +98,12 @@ export default function HomeScreen() {
           </View>
           <View style={{ width: StyleSheet.hairlineWidth, height: 20, backgroundColor: '#70A381' }} />
           <CommandText palette={palette} variant="body" style={{ color: '#D9EBDD' }}>
-            {readiness?.status === 'blocked' ? 'Needs attention' : readiness?.status === 'at-risk' ? 'Watch service' : 'All clear except one'}
+            {readiness?.status === 'blocked' ? 'Needs attention' : readiness?.status === 'at-risk' ? 'Watch service' : 'Service command ready'}
           </CommandText>
         </View>
       </View>
 
-      <View style={{ marginHorizontal: spacing.lg, marginTop: -1, backgroundColor: '#FFF4DE', borderLeftWidth: 3, borderLeftColor: palette.warning, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
-        <MaterialCommunityIcons name={firstPriority ? 'alert-outline' : 'check-circle-outline'} size={22} color={firstPriority ? palette.warning : palette.success} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <CommandText palette={palette} variant="body" style={{ fontWeight: '700' }}>{priorityTitle}</CommandText>
-          {pulse?.salesPerLaborHourCents != null ? <CommandText palette={palette} variant="caption">{formatMoney(pulse.salesPerLaborHourCents)}/hr</CommandText> : null}
-        </View>
-        {firstPriority ? <Pressable onPress={() => router.push(priorityRoute)} accessibilityRole="button" style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, flexDirection: 'row', alignItems: 'center', gap: 2 })}>
-          <CommandText palette={palette} variant="body" style={{ color: palette.warning, fontWeight: '700' }}>Inspect</CommandText>
-          <MaterialCommunityIcons name="chevron-right" size={20} color={palette.warning} />
-        </Pressable> : null}
-      </View>
+      <HomeWranglerSurface enabled={isReady && canManage && Boolean(venue?.id)} />
 
       <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.xl }}>
         {showNotifications ? (
