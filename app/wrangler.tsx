@@ -41,9 +41,9 @@ export default function WranglerScreen() {
   if (wrangler.isLoading || !snapshot) {
     return (
       <View style={{ flex: 1, backgroundColor: palette.background, padding: spacing.lg, gap: spacing.md }}>
-        <Skeleton height={34} borderRadius={8} />
-        <Skeleton height={92} borderRadius={8} />
-        <Skeleton height={180} borderRadius={8} />
+        <Skeleton height={34} style={{ borderRadius: 8 }} />
+        <Skeleton height={92} style={{ borderRadius: 8 }} />
+        <Skeleton height={180} style={{ borderRadius: 8 }} />
       </View>
     );
   }
