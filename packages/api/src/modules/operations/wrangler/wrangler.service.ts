@@ -6,6 +6,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { buildDailyBriefPriorityActions, type DailyBriefPriorityAction } from '../daily-brief-priority-actions';
 import { buildWranglerFloorActions } from './wrangler-floor-rules';
 import { buildWranglerRuleActions } from './wrangler-rules';
+import { deriveWranglerServicePhase, phaseLabel } from './wrangler-service-phase';
 import { WRANGLER_SEVERITY_RANK } from './wrangler.constants';
 
 @Injectable()
@@ -170,10 +171,22 @@ export class WranglerService {
     const priorities = this.mergePriorities([...floorPriorities, ...rulePriorities, ...eventPriorities]);
     const covers = reservations.reduce((sum, reservation) => sum + reservation.partySize, 0);
     const vipArrivals = reservations.filter((reservation) => reservation.tags.some((tag) => tag.toLowerCase().includes('vip'))).length;
+    const seatedTables = tableStates.filter((table) => table.status === 'seated').length;
+    const servicePhase = deriveWranglerServicePhase({
+      now: nowMs,
+      reservations: reservations.map((reservation) => ({
+        reservationTime: reservation.reservationTime.getTime(),
+        durationMinutes: reservation.durationMinutes,
+        status: reservation.status,
+      })),
+      seatedTables,
+    });
 
     return {
       generatedAt: nowMs,
       date: today,
+      servicePhase,
+      servicePhaseLabel: phaseLabel(servicePhase),
       summary: {
         covers,
         reservations: reservations.length,
@@ -183,7 +196,7 @@ export class WranglerService {
         lowStockItems: lowStockItems.length,
         eightySixItems: eightySixCount,
         pendingStaffRequests: pendingRequests.length,
-        seatedTables: tableStates.filter((table) => table.status === 'seated').length,
+        seatedTables,
       },
       status: priorities.some((item) => item.severity === 'critical')
         ? 'critical'
