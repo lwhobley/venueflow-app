@@ -9,6 +9,5 @@ import { FloorService } from './floor.service';
   imports: [PrismaModule, BillingModule, ReservationsModule],
   controllers: [FloorController],
   providers: [FloorService],
-  exports: [FloorService],
 })
 export class FloorModule {}
