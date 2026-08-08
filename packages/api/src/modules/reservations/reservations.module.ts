@@ -11,6 +11,6 @@ import { OperationsModule } from '../operations/operations.module';
   imports: [PrismaModule, BillingModule, EmailModule, OperationsModule],
   controllers: [ReservationsController],
   providers: [ReservationNotifierService, ReservationMutationService],
-  exports: [ReservationNotifierService],
+  exports: [ReservationNotifierService, ReservationMutationService],
 })
 export class ReservationsModule {}
