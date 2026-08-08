@@ -12,6 +12,7 @@ import { AlertsPanel } from '../../components/AlertsPanel';
 import { CosmicInsights } from '../../components/CosmicInsights';
 import { OperationsAutopilotPanel } from '../../components/OperationsAutopilotPanel';
 import { ProfitabilityPulsePanel } from '../../components/ProfitabilityPulsePanel';
+import { HomeWranglerSurface } from '../../components/HomeWranglerSurface';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
@@ -183,6 +184,8 @@ export default function HomeScreen() {
           ))}
         </View>
       </View>
+
+      <HomeWranglerSurface enabled={isReady && canManage && Boolean(venue?.id)} />
 
       {alertsOpen ? (
         <AlertsPanel
