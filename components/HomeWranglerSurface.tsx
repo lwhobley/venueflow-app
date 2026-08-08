@@ -58,7 +58,8 @@ export function HomeWranglerSurface({ enabled }: Props) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 }}>
           <MaterialCommunityIcons name="target" size={22} color="#7A5A35" />
           <View style={{ flex: 1 }}>
-            <CommandText palette={palette} variant="label" style={{ color: '#7A5A35' }}>THE WRANGLER · {statusLabel(snapshot.status)}</CommandText>
+            <CommandText palette={palette} variant="label" style={{ color: '#7A5A35' }}>THE WRANGLER · {snapshot.servicePhaseLabel.toUpperCase()}</CommandText>
+            <CommandText palette={palette} variant="caption" style={{ marginTop: 2, color: accent }}>{statusLabel(snapshot.status)}</CommandText>
             <CommandText palette={palette} variant="title" style={{ marginTop: 2 }}>
               {priority?.title ?? 'Service is under control'}
             </CommandText>
