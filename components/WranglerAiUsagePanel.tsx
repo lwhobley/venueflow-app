@@ -34,6 +34,32 @@ export function WranglerAiUsagePanel() {
         <CommandText palette={palette} variant="caption">Loading venue AI usage…</CommandText>
       ) : (
         <>
+          {usage.data.budget.status !== 'unlimited' ? (
+            <View style={{ gap: spacing.sm, backgroundColor: usage.data.budget.status === 'over_budget' ? '#FFF0ED' : usage.data.budget.status === 'warning' ? '#FFF8E8' : '#F5F7F2', padding: spacing.md }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md }}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <CommandText palette={palette} variant="label">
+                    {usage.data.budget.status === 'over_budget' ? 'AI BUDGET EXCEEDED' : usage.data.budget.status === 'warning' ? 'AI BUDGET WARNING' : 'AI BUDGET'}
+                  </CommandText>
+                  <CommandText palette={palette} variant="caption">
+                    {money(usage.data.estimatedCostUsd)} of {money(usage.data.budget.budgetUsd)} used this month
+                  </CommandText>
+                </View>
+                <CommandText palette={palette} variant="title">{usage.data.budget.percentUsed.toFixed(1)}%</CommandText>
+              </View>
+              <View style={{ height: 8, backgroundColor: palette.divider, overflow: 'hidden' }}>
+                <View style={{ height: 8, width: `${Math.min(100, usage.data.budget.percentUsed)}%`, backgroundColor: usage.data.budget.status === 'over_budget' ? palette.warning : '#7A5A35' }} />
+              </View>
+              <CommandText palette={palette} variant="caption">
+                {usage.data.budget.status === 'over_budget'
+                  ? 'This venue is above its monthly AI budget target. Review high-cost features before usage grows further.'
+                  : usage.data.budget.status === 'warning'
+                    ? `This venue has crossed the ${usage.data.budget.warningPercent}% warning threshold.`
+                    : `${money(usage.data.budget.remainingUsd ?? 0)} remains in the current venue AI budget.`}
+              </CommandText>
+            </View>
+          ) : null}
+
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
             {[
               ['Estimated spend', money(usage.data.estimatedCostUsd)],
