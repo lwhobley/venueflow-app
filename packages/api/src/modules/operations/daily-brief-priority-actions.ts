@@ -2,20 +2,20 @@ export type WranglerAction = {
   id: string;
   type: 'NAVIGATE' | 'ACKNOWLEDGE';
   label: string;
-  route: '/reservations' | '/staff' | '/schedule' | '/bar-stock' | '/reports';
+  route: '/reservations' | '/staff' | '/schedule' | '/bar-stock' | '/reports' | '/floor';
   requiresConfirmation: boolean;
 };
 
 export type DailyBriefPriorityAction = {
   id: string;
-  kind: 'event' | 'coverage' | 'requests' | 'stock' | 'steady';
+  kind: 'event' | 'coverage' | 'requests' | 'stock' | 'floor' | 'steady';
   tone: 'good' | 'warn' | 'neutral';
   severity: 'info' | 'watch' | 'warning' | 'critical';
   title: string;
   body: string;
   reason: string;
   cta: string;
-  route: '/reservations' | '/staff' | '/schedule' | '/bar-stock' | '/reports';
+  route: WranglerAction['route'];
   actions: WranglerAction[];
 };
 
