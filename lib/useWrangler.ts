@@ -12,7 +12,9 @@ export function useWrangler(enabled = true) { return useApiQuery<WranglerSnapsho
 export function useAskWrangler() { return useApiMutation<{ question: string }, { answer: string; sources: string[] }>((body) => apiRequest('/v1/operations/wrangler/ask', { method: 'POST', body }), []); }
 export function useExecuteWranglerAction() {
   return useApiMutation<
-    { type: 'REASSIGN_RESERVATION'; reservationId: string; tableId: string } | { type: 'NOTIFY_STAFF' },
-    { ok: true; type: string; reservationId?: string; tableId?: string; notified?: string; openShifts?: number }
-  >((body) => apiRequest('/v1/operations/wrangler/actions', { method: 'POST', body }), [['operations', 'wrangler'], ['floor', 'getActiveFloorPlan'], ['floor', 'getFloorStats'], ['reservations', 'getReservationsPage']]);
+    | { type: 'REASSIGN_RESERVATION'; reservationId: string; tableId: string }
+    | { type: 'NOTIFY_STAFF' }
+    | { type: 'CREATE_FOLLOW_UP'; priorityId: string },
+    { ok: true; type: string; reservationId?: string; tableId?: string; notified?: string; openShifts?: number; followUpId?: string; title?: string; existing?: boolean }
+  >((body) => apiRequest('/v1/operations/wrangler/actions', { method: 'POST', body }), [['operations', 'wrangler'], ['operations', 'managerDashboard'], ['floor', 'getActiveFloorPlan'], ['floor', 'getFloorStats'], ['reservations', 'getReservationsPage']]);
 }
