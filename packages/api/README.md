@@ -13,18 +13,26 @@ npm run api:dev
 
 The API defaults to `http://localhost:4000`.
 
-## Railway Database
+## Production database and deployment
 
-This API expects Railway Postgres in `DATABASE_URL`. Railway deploys run
-`npm run release -w @venue-wrangler/api`, which applies Prisma migrations before
-starting the service.
+Production uses Supabase PostgreSQL and deploys the API to Google Cloud Run.
+Set `DATABASE_URL` to the Supavisor/session-pooler connection string and run
+`npm run release -w @venue-wrangler/api` before starting a new revision so
+Prisma migrations are applied first.
 
-To apply migrations manually against the linked Railway environment:
+To inspect the linked Supabase project or run database advisors:
 
 ```bash
-railway login
-railway run npm run prisma:migrate:deploy -w @venue-wrangler/api
+supabase projects list
+supabase db advisors --linked
 ```
+
+Do not put a production database password in this repository. Configure the
+Cloud Run revision with its own `DATABASE_URL` secret.
+
+This repository uses Prisma migrations in `packages/api/prisma/migrations`.
+Do not use `supabase db push` for the application schema: it manages the
+separate `supabase/migrations` history and is not the deployment path here.
 
 ## Migration notes
 
