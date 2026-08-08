@@ -8,8 +8,21 @@ export type WranglerPriority = { id: string; kind: 'event' | 'coverage' | 'reque
 export type WranglerSummary = { covers: number; reservations: number; vipArrivals: number; scheduledStaff: number; openShifts: number; lowStockItems: number; eightySixItems: number; pendingStaffRequests: number; seatedTables: number };
 export type WranglerSnapshot = { venue: { _id: string; name: string }; generatedAt: number; date: string; status: WranglerStatus; servicePhase: WranglerServicePhase; servicePhaseLabel: string; summary: WranglerSummary; priorities: WranglerPriority[]; recap: { headline: string; metrics: Array<{ label: string; value: number }>; unresolved: Array<{ id: string; title: string; severity: WranglerSeverity; reason: string }>; tomorrow: string[] }; patterns: Array<{ id: string; title: string; detail: string; confidence: 'live' | 'emerging' }> };
 
+export type WranglerOperatorRisk = 'read' | 'low_risk_write' | 'operational_write' | 'sensitive_write';
+export type WranglerOperatorPlan = { tool: string; args: Record<string, unknown>; summary: string; risk: WranglerOperatorRisk };
+export type WranglerOperatorResponse =
+  | { status: 'executed'; tool: string; risk: WranglerOperatorRisk; summary: string; result: unknown }
+  | { status: 'confirmation_required'; tool: string; risk: WranglerOperatorRisk; summary: string; preview: string[]; plan: WranglerOperatorPlan };
+
 export function useWrangler(enabled = true) { return useApiQuery<WranglerSnapshot>(['operations', 'wrangler'], '/v1/operations/wrangler', enabled); }
 export function useAskWrangler() { return useApiMutation<{ question: string }, { answer: string; sources: string[] }>((body) => apiRequest('/v1/operations/wrangler/ask', { method: 'POST', body }), []); }
+export function useWranglerOperatorPlan() { return useApiMutation<{ command: string }, WranglerOperatorResponse>((body) => apiRequest('/v1/operations/wrangler/operator/plan', { method: 'POST', body }), []); }
+export function useWranglerOperatorExecute() {
+  return useApiMutation<{ plan: WranglerOperatorPlan }, { ok: true; tool: string; risk: WranglerOperatorRisk; result: unknown }>(
+    (body) => apiRequest('/v1/operations/wrangler/operator/execute', { method: 'POST', body }),
+    [['operations', 'wrangler'], ['operations', 'managerDashboard'], ['reservations', 'getReservationsPage'], ['scheduling', 'manager'], ['time-clock', 'board'], ['app', 'staff']],
+  );
+}
 export function useExecuteWranglerAction() {
   return useApiMutation<
     | { type: 'REASSIGN_RESERVATION'; reservationId: string; tableId: string }
