@@ -7,13 +7,13 @@ export type WranglerAction = {
   id: string;
   type: 'NAVIGATE' | 'ACKNOWLEDGE';
   label: string;
-  route: '/reservations' | '/staff' | '/schedule' | '/bar-stock' | '/reports';
+  route: '/reservations' | '/staff' | '/schedule' | '/bar-stock' | '/reports' | '/floor';
   requiresConfirmation: boolean;
 };
 
 export type WranglerPriority = {
   id: string;
-  kind: 'event' | 'coverage' | 'requests' | 'stock' | 'steady';
+  kind: 'event' | 'coverage' | 'requests' | 'stock' | 'floor' | 'steady';
   tone: 'good' | 'warn' | 'neutral';
   severity: WranglerSeverity;
   title: string;
