@@ -54,7 +54,7 @@ export default function WranglerScreen() {
       <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.lg, backgroundColor: '#F5EFE4', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider }}>
         <CommandText palette={palette} variant="label" style={{ color: '#7A5A35' }}>{snapshot.venue.name}</CommandText>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 4 }}>
-          <MaterialCommunityIcons name="lasso" size={28} color="#7A5A35" />
+          <MaterialCommunityIcons name="target" size={28} color="#7A5A35" />
           <CommandText palette={palette} variant="hero">The Wrangler</CommandText>
         </View>
         <CommandText palette={palette} variant="body" style={{ marginTop: spacing.sm, color: palette.muted }}>
