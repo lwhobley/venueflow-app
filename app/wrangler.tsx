@@ -3,6 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { CommandButton, CommandText } from '../components/FutureUI';
 import { Skeleton } from '../components/Skeleton';
+import { WranglerShiftStory } from '../components/WranglerShiftStory';
 import { spacing, useDesignTheme } from '../lib/theme';
 import {
   useExecuteWranglerAction,
@@ -134,6 +135,8 @@ export default function WranglerScreen() {
             </View>
           ))}
         </View>
+
+        <WranglerShiftStory snapshot={snapshot} />
 
         <View style={{ gap: spacing.sm }}>
           <CommandText palette={palette} variant="title">Needs wrangling</CommandText>
