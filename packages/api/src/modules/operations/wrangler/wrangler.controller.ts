@@ -32,23 +32,30 @@ export class WranglerController {
   async getAiUsage(@VenueScope() scope: Scope) {
     if (!scope) return null;
     if (!isAdminRole(scope.role)) throw new ForbiddenException('Manager access required to view AI usage');
-    const rows = await this.prisma.$queryRawUnsafe<Array<{ feature: string; model: string; requests: bigint; promptTokens: bigint; completionTokens: bigint; totalTokens: bigint; estimatedCostMicros: bigint }>>(
-      `SELECT "feature", "model", COUNT(*)::bigint AS requests, COALESCE(SUM("promptTokens"),0)::bigint AS "promptTokens", COALESCE(SUM("completionTokens"),0)::bigint AS "completionTokens", COALESCE(SUM("totalTokens"),0)::bigint AS "totalTokens", COALESCE(SUM("estimatedCostMicros"),0)::bigint AS "estimatedCostMicros" FROM "AiUsageEvent" WHERE "venueId" = $1 AND "createdAt" >= date_trunc('month', NOW()) GROUP BY "feature", "model" ORDER BY "estimatedCostMicros" DESC`, scope.venueId,
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ feature: string; model: string; requests: bigint; promptTokens: bigint; completionTokens: bigint; cachedTokens: bigint; totalTokens: bigint; estimatedCostMicros: bigint }>>(
+      `SELECT "feature", "model", COUNT(*)::bigint AS requests, COALESCE(SUM("promptTokens"),0)::bigint AS "promptTokens", COALESCE(SUM("completionTokens"),0)::bigint AS "completionTokens", COALESCE(SUM("cachedTokens"),0)::bigint AS "cachedTokens", COALESCE(SUM("totalTokens"),0)::bigint AS "totalTokens", COALESCE(SUM("estimatedCostMicros"),0)::bigint AS "estimatedCostMicros" FROM "AiUsageEvent" WHERE "venueId" = $1 AND "createdAt" >= date_trunc('month', NOW()) GROUP BY "feature", "model" ORDER BY "estimatedCostMicros" DESC`, scope.venueId,
     );
-    const items = rows.map((row) => ({ feature: row.feature, model: row.model, requests: Number(row.requests), promptTokens: Number(row.promptTokens), completionTokens: Number(row.completionTokens), totalTokens: Number(row.totalTokens), estimatedCostUsd: Number(row.estimatedCostMicros) / 1_000_000 }));
-    const estimatedCostUsd = items.reduce((sum, row) => sum + row.estimatedCostUsd, 0);
+    const breakdown = rows.map((row) => ({ feature: row.feature, model: row.model, requests: Number(row.requests), promptTokens: Number(row.promptTokens), completionTokens: Number(row.completionTokens), totalTokens: Number(row.totalTokens), estimatedCostUsd: Number(row.estimatedCostMicros) / 1_000_000 }));
+    const requests = breakdown.reduce((sum, row) => sum + row.requests, 0);
+    const promptTokens = rows.reduce((sum, row) => sum + Number(row.promptTokens), 0);
+    const completionTokens = rows.reduce((sum, row) => sum + Number(row.completionTokens), 0);
+    const cachedTokens = rows.reduce((sum, row) => sum + Number(row.cachedTokens), 0);
+    const totalTokens = breakdown.reduce((sum, row) => sum + row.totalTokens, 0);
+    const estimatedCostUsd = breakdown.reduce((sum, row) => sum + row.estimatedCostUsd, 0);
     const budgetUsd = Math.max(0, Number(process.env.AI_MONTHLY_VENUE_BUDGET_USD ?? 25));
     const warningPercent = Math.min(100, Math.max(1, Number(process.env.AI_MONTHLY_VENUE_WARNING_PERCENT ?? 80)));
     const percentUsed = budgetUsd > 0 ? Math.round((estimatedCostUsd / budgetUsd) * 1000) / 10 : 0;
-    const budgetStatus = budgetUsd <= 0 ? 'unlimited' : estimatedCostUsd >= budgetUsd ? 'over_budget' : percentUsed >= warningPercent ? 'warning' : 'healthy';
+    const status = budgetUsd <= 0 ? 'unlimited' : estimatedCostUsd >= budgetUsd ? 'over_budget' : percentUsed >= warningPercent ? 'warning' : 'healthy';
     return {
-      period: 'month_to_date',
-      venueId: scope.venueId,
-      requests: items.reduce((sum, row) => sum + row.requests, 0),
-      totalTokens: items.reduce((sum, row) => sum + row.totalTokens, 0),
+      month: new Date().toISOString().slice(0, 7),
+      requests,
+      promptTokens,
+      completionTokens,
+      cachedTokens,
+      totalTokens,
       estimatedCostUsd,
-      budget: { budgetUsd, warningPercent, percentUsed, remainingUsd: budgetUsd > 0 ? Math.max(0, budgetUsd - estimatedCostUsd) : null, status: budgetStatus },
-      items,
+      budget: { budgetUsd, warningPercent, percentUsed, remainingUsd: budgetUsd > 0 ? Math.max(0, budgetUsd - estimatedCostUsd) : null, status },
+      breakdown,
     };
   }
 
