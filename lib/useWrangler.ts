@@ -41,6 +41,7 @@ export type WranglerSnapshot = {
     lowStockItems: number;
     eightySixItems: number;
     pendingStaffRequests: number;
+    seatedTables: number;
   };
   priorities: WranglerPriority[];
 };
