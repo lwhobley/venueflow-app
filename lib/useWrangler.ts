@@ -22,6 +22,13 @@ export type WranglerAiUsage = {
   cachedTokens: number;
   totalTokens: number;
   estimatedCostUsd: number;
+  budget: {
+    budgetUsd: number;
+    warningPercent: number;
+    percentUsed: number;
+    remainingUsd: number | null;
+    status: 'healthy' | 'warning' | 'over_budget' | 'unlimited';
+  };
   breakdown: Array<{
     feature: string;
     model: string;
