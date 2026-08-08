@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { canManageVenue } from '../../../auth/roles';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ReservationMutationService } from '../../reservations/reservation-mutation.service';
 import { SchedulingAssignmentService } from '../../scheduling/scheduling-assignment.service';
@@ -7,6 +8,7 @@ import { WranglerOperatorService } from './wrangler-operator.service';
 @Injectable()
 export class SafeWranglerOperatorService {
   private readonly parser: WranglerOperatorService;
+  private readonly logger = new Logger(SafeWranglerOperatorService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -29,6 +31,9 @@ export class SafeWranglerOperatorService {
   }
 
   async execute(input: any): Promise<any> {
+    if (!canManageVenue(input?.actor?.role, input?.actor?.allAccess)) {
+      throw new ForbiddenException('Manager access required for Wrangler operator actions');
+    }
     const tool = String(input.plan?.tool ?? '');
     if (!['CREATE_RESERVATION', 'UPDATE_RESERVATION', 'UPDATE_SHIFT', 'ASSIGN_SHIFT', 'CORRECT_PUNCH'].includes(tool)) {
       return this.parser.execute(input);
@@ -88,9 +93,14 @@ export class SafeWranglerOperatorService {
       result = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: old.id } });
     }
 
-    await this.prisma.auditLog.create({ data: { venueId: input.venueId, actorProfileId: input.actor.profileId, actorName: input.actor.fullName,
-      actorRole: input.actor.role, entityType: 'wrangler_operator', entityId: String(result?.id ?? tool), action: `wrangler_operator_${tool.toLowerCase()}`,
-      summary: String(input.plan?.summary ?? tool), metadata: { tool, safeDomainService: true } as any } });
+    try {
+      await this.prisma.auditLog.create({ data: { venueId: input.venueId, actorProfileId: input.actor.profileId, actorName: input.actor.fullName,
+        actorRole: input.actor.role, entityType: 'wrangler_operator', entityId: String(result?.id ?? tool), action: `wrangler_operator_${tool.toLowerCase()}`,
+        summary: String(input.plan?.summary ?? tool), metadata: { tool, safeDomainService: true } as any } });
+    } catch (error) {
+      // Do not make a completed operation look failed and invite a retry.
+      this.logger.error(`Wrangler operator audit failed for ${tool}`, error);
+    }
     return { ok: true, tool, risk: tool === 'CORRECT_PUNCH' ? 'sensitive_write' : 'operational_write', result };
   }
 

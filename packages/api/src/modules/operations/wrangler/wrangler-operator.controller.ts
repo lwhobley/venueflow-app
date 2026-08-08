@@ -1,5 +1,6 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Post } from '@nestjs/common';
 import { IsObject, IsString, MaxLength, MinLength } from 'class-validator';
+import { canManageVenue } from '../../../auth/roles';
 import { RequireSubscription } from '../../../billing/require-subscription.decorator';
 import { VenueScope } from '../../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../../venue/venue-scope.interceptor';
@@ -45,6 +46,9 @@ export class WranglerOperatorController {
   @Post('execute')
   async execute(@VenueScope() scope: Scope, @Body() body: WranglerOperatorExecuteDto) {
     if (!scope) return null;
+    if (!canManageVenue(scope.role, scope.allAccess)) {
+      throw new ForbiddenException('Manager access required for Wrangler operator actions');
+    }
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } });
     if (!venue) return null;
     const plan = body.plan as any;

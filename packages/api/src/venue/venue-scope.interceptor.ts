@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { Observable } from 'rxjs';
 import type { AuthenticatedRequest } from '../auth/auth.guard';
 import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
-import { runWithAiUsageContext } from '../common/ai-usage-context';
+import { bindAiUsageContext } from '../common/ai-usage-context';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -30,7 +30,10 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
     const request = context.switchToHttp().getRequest<VenueScopedRequest>();
     if (request.venueScope) {
-      return runWithAiUsageContext({ venueId: request.venueScope.venueId, profileId: request.venueScope.profileId, prisma: this.prisma }, () => next.handle());
+      return bindAiUsageContext(
+        { venueId: request.venueScope.venueId, profileId: request.venueScope.profileId, prisma: this.prisma },
+        () => next.handle(),
+      );
     }
 
     const user = request.user;
@@ -50,6 +53,9 @@ export class VenueScopeInterceptor implements NestInterceptor {
     const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, { venueId: profile.venueId, venueStatus: profile.venue.subscriptionStatus, trialEndsAt: profile.trialEndsAt });
     request.venueScope = { profileId: profile.id, fullName: profile.fullName, venueId: profile.venueId, venueName: profile.venue.name, role: profile.role, allAccess: profile.allAccess, subscriptionStatus, trialEndsAt: profile.trialEndsAt ?? null };
 
-    return runWithAiUsageContext({ venueId: profile.venueId, profileId: profile.id, prisma: this.prisma }, () => next.handle());
+    return bindAiUsageContext(
+      { venueId: profile.venueId, profileId: profile.id, prisma: this.prisma },
+      () => next.handle(),
+    );
   }
 }

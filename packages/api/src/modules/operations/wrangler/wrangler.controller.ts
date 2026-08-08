@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Post } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { isAdminRole } from '../../../auth/roles';
+import { canManageVenue, isAdminRole } from '../../../auth/roles';
 import { RequireSubscription } from '../../../billing/require-subscription.decorator';
 import { zonedIsoDate } from '../../../common/venue-time';
 import { NotificationsService } from '../../../notifications/notifications.service';
@@ -21,6 +21,7 @@ export class WranglerController {
   @RequireSubscription('active') @Get()
   async getWrangler(@VenueScope() scope: Scope) {
     if (!scope) return null;
+    if (!canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Manager access required to view Wrangler');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { id: true, name: true, timezone: true } });
     if (!venue) return null;
     const snapshot = await this.wrangler.getSnapshot(venue.id, venue.timezone);
@@ -60,7 +61,7 @@ export class WranglerController {
   }
 
   @RequireSubscription('active') @Post('ask')
-  async askWrangler(@VenueScope() scope: Scope, @Body() body: AskWranglerDto) { if (!scope) return null; const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } }); if (!venue) return null; return this.wrangler.ask(scope.venueId, venue.timezone, body.question); }
+  async askWrangler(@VenueScope() scope: Scope, @Body() body: AskWranglerDto) { if (!scope) return null; if (!canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Manager access required to ask Wrangler'); const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } }); if (!venue) return null; return this.wrangler.ask(scope.venueId, venue.timezone, body.question); }
 
   @RequireSubscription('active') @Post('actions')
   async executeAction(@VenueScope() scope: Scope, @Body() body: ExecuteWranglerActionDto) {

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import { canManageRole } from '../../../auth/roles';
 import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../../common/ai-json-parse';
 import { weekStartFor } from '../../../common/pay-period';
 import { zonedDateBounds, zonedIsoDate } from '../../../common/venue-time';
@@ -362,7 +363,9 @@ export class WranglerOperatorService {
       if (profileId === actor.profileId) throw new BadRequestException('Wrangler will not deactivate your own active profile');
       const target = await this.prisma.profile.findFirst({ where: { id: profileId, venueId } });
       if (!target) throw new NotFoundException('Staff member no longer exists');
-      if (['owner', 'admin'].includes(String(target.role)) && !(actor.role === 'owner' || actor.allAccess)) throw new ForbiddenException('Only an owner can deactivate an owner/admin profile');
+      if (!canManageRole(actor.role, target.role, actor.allAccess)) {
+        throw new ForbiddenException('You cannot deactivate a staff member with equal or higher access');
+      }
       await this.prisma.$transaction(async (tx) => {
         await tx.profile.update({ where: { id: target.id }, data: { membershipStatus: 'revoked' } as any });
         if (target.userId) await tx.session.deleteMany({ where: { userId: target.userId } });
