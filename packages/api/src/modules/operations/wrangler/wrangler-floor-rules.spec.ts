@@ -16,6 +16,7 @@ describe('buildWranglerFloorActions', () => {
           tableId: 't18',
           tableLabel: 'Table 18',
           startsAt: NOW + 18 * 60_000,
+          endsAt: NOW + 108 * 60_000,
           reservationId: 'r1',
           guestName: 'Jordan Carter',
           partySize: 4,
@@ -29,6 +30,43 @@ describe('buildWranglerFloorActions', () => {
       kind: 'floor',
       severity: 'critical',
       route: '/floor',
+    });
+  });
+
+  it('offers an executable move when a safe alternate exists', () => {
+    const results = buildWranglerFloorActions({
+      now: NOW,
+      tables: [
+        { tableId: 't18', label: 'Table 18', status: 'seated', seatedAt: NOW - 95 * 60_000 },
+      ],
+      upcomingAssignments: [
+        {
+          assignmentId: 'a1',
+          tableId: 't18',
+          tableLabel: 'Table 18',
+          startsAt: NOW + 18 * 60_000,
+          endsAt: NOW + 108 * 60_000,
+          reservationId: 'r1',
+          guestName: 'Jordan Carter',
+          partySize: 4,
+          tags: ['VIP'],
+          alternateTableId: 't12',
+          alternateTableLabel: 'Table 12',
+        },
+      ],
+    });
+
+    expect(results[0]?.actions[0]).toEqual({
+      id: 'floor-conflict:a1:reassign',
+      type: 'REASSIGN_RESERVATION',
+      label: 'Move to Table 12',
+      route: '/floor',
+      requiresConfirmation: true,
+      payload: {
+        reservationId: 'r1',
+        tableId: 't12',
+        tableLabel: 'Table 12',
+      },
     });
   });
 
@@ -63,6 +101,7 @@ describe('buildWranglerFloorActions', () => {
           tableId: 't12',
           tableLabel: 'Table 12',
           startsAt: NOW + 10 * 60_000,
+          endsAt: NOW + 100 * 60_000,
           reservationId: 'r2',
           guestName: 'Alex Morgan',
           partySize: 2,
