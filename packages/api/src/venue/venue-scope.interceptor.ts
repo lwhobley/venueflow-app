@@ -1,16 +1,11 @@
-import {
-  CallHandler,
-  ExecutionContext,
-  Injectable,
-  NestInterceptor,
-} from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Observable } from 'rxjs';
 import type { AuthenticatedRequest } from '../auth/auth.guard';
 import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
+import { runWithAiUsageContext } from '../common/ai-usage-context';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
-import { Role } from '@prisma/client';
 
 export type VenueScopedRequest = AuthenticatedRequest & {
   venueScope?: {
@@ -25,96 +20,36 @@ export type VenueScopedRequest = AuthenticatedRequest & {
   };
 };
 
-/**
- * Resolves the caller's profile and venue once per request and attaches the
- * result to `request.venueScope`. Controllers and guards downstream read from
- * this object instead of re-querying the DB.
- *
- * Multi-venue: when the `X-Venue-Id` header is present, the interceptor
- * resolves the profile for that specific venue (if the user has one). When
- * absent, it falls back to the first active profile — full backwards
- * compatibility.
- *
- * Skip with @SkipVenueScope() for routes that intentionally run before a
- * profile/venue exists (e.g. bootstrapProfile, getMe).
- */
 @Injectable()
 export class VenueScopeInterceptor implements NestInterceptor {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly reflector: Reflector,
-  ) {}
+  constructor(private readonly prisma: PrismaService, private readonly reflector: Reflector) {}
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
-    const skip = this.reflector.getAllAndOverride<boolean>(SKIP_VENUE_SCOPE_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (skip) {
-      return next.handle();
-    }
+    const skip = this.reflector.getAllAndOverride<boolean>(SKIP_VENUE_SCOPE_KEY, [context.getHandler(), context.getClass()]);
+    if (skip) return next.handle();
 
     const request = context.switchToHttp().getRequest<VenueScopedRequest>();
     if (request.venueScope) {
-      return next.handle();
+      return runWithAiUsageContext({ venueId: request.venueScope.venueId, profileId: request.venueScope.profileId, prisma: this.prisma }, () => next.handle());
     }
 
     const user = request.user;
-    if (!user?.sub) {
-      return next.handle();
-    }
-
-    // Multi-venue: prefer the X-Venue-Id header when present.
+    if (!user?.sub) return next.handle();
     const requestedVenueId = request.headers['x-venue-id'] as string | undefined;
 
     let profile;
     if (requestedVenueId) {
-      // Look up the profile for the specific (userId, venueId) pair.
-      profile = await this.prisma.profile.findFirst({
-        where: { userId: user.sub, venueId: requestedVenueId },
-        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
-      });
+      profile = await this.prisma.profile.findFirst({ where: { userId: user.sub, venueId: requestedVenueId }, include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } } });
     }
     if (!profile) {
-      // Fallback: first profile with a venue (backwards-compat for single-venue).
-      profile = await this.prisma.profile.findFirst({
-        where: { userId: user.sub, venueId: { not: null } },
-        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
-        orderBy: { createdAt: 'asc' },
-      });
+      profile = await this.prisma.profile.findFirst({ where: { userId: user.sub, venueId: { not: null } }, include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } }, orderBy: { createdAt: 'asc' } });
     }
+    if (!profile?.venueId || !profile.venue) return next.handle();
+    if (profile.membershipStatus === 'pending' || profile.membershipStatus === 'rejected' || profile.membershipStatus === 'revoked') return next.handle();
 
-    if (!profile?.venueId || !profile.venue) {
-      return next.handle();
-    }
+    const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, { venueId: profile.venueId, venueStatus: profile.venue.subscriptionStatus, trialEndsAt: profile.trialEndsAt });
+    request.venueScope = { profileId: profile.id, fullName: profile.fullName, venueId: profile.venueId, venueName: profile.venue.name, role: profile.role, allAccess: profile.allAccess, subscriptionStatus, trialEndsAt: profile.trialEndsAt ?? null };
 
-    // A profile with an explicit pending/rejected/revoked status must not get
-    // venue scope even if venueId is set (e.g. revoked after being approved).
-    if (
-      profile.membershipStatus === 'pending' ||
-      profile.membershipStatus === 'rejected' ||
-      profile.membershipStatus === 'revoked'
-    ) {
-      return next.handle();
-    }
-
-    const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
-      venueId: profile.venueId,
-      venueStatus: profile.venue.subscriptionStatus,
-      trialEndsAt: profile.trialEndsAt,
-    });
-
-    request.venueScope = {
-      profileId: profile.id,
-      fullName: profile.fullName,
-      venueId: profile.venueId,
-      venueName: profile.venue.name,
-      role: profile.role,
-      allAccess: profile.allAccess,
-      subscriptionStatus,
-      trialEndsAt: profile.trialEndsAt ?? null,
-    };
-
-    return next.handle();
+    return runWithAiUsageContext({ venueId: profile.venueId, profileId: profile.id, prisma: this.prisma }, () => next.handle());
   }
 }
