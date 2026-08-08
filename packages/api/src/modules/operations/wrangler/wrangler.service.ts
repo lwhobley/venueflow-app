@@ -5,9 +5,9 @@ import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../../common/ve
 import { PrismaService } from '../../../prisma/prisma.service';
 import { buildDailyBriefPriorityActions, type DailyBriefPriorityAction } from '../daily-brief-priority-actions';
 import { buildWranglerFloorActions } from './wrangler-floor-rules';
+import { sortWranglerPrioritiesForPhase } from './wrangler-phase-priority';
 import { buildWranglerRuleActions } from './wrangler-rules';
-import { deriveWranglerServicePhase, phaseLabel } from './wrangler-service-phase';
-import { WRANGLER_SEVERITY_RANK } from './wrangler.constants';
+import { deriveWranglerServicePhase, phaseLabel, type WranglerServicePhase } from './wrangler-service-phase';
 
 @Injectable()
 export class WranglerService {
@@ -25,22 +25,9 @@ export class WranglerService {
     const fourHoursFromNow = new Date(nowMs + 4 * 60 * 60_000);
     const thirtyMinutesFromNowMs = nowMs + 30 * 60_000;
 
-    const [
-      reservations,
-      shifts,
-      pendingRequests,
-      barItems,
-      prepItems,
-      events,
-      tableStates,
-      futureAssignments,
-    ] = await Promise.all([
+    const [reservations, shifts, pendingRequests, barItems, prepItems, events, tableStates, futureAssignments] = await Promise.all([
       this.prisma.reservation.findMany({
-        where: {
-          venueId,
-          reservationTime: { gte: todayStart, lt: todayEnd },
-          status: { notIn: ['cancelled', 'no_show'] },
-        },
+        where: { venueId, reservationTime: { gte: todayStart, lt: todayEnd }, status: { notIn: ['cancelled', 'no_show'] } },
         orderBy: { reservationTime: 'asc' },
         take: 200,
       }),
@@ -49,53 +36,24 @@ export class WranglerService {
         orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }],
         take: 200,
       }),
-      this.prisma.staffRequest.findMany({
-        where: { venueId, status: 'pending' },
-        select: { id: true },
-        take: 100,
-      }),
-      this.prisma.barInventoryItem.findMany({
-        where: { venueId },
-        orderBy: { name: 'asc' },
-        take: 300,
-      }),
+      this.prisma.staffRequest.findMany({ where: { venueId, status: 'pending' }, select: { id: true }, take: 100 }),
+      this.prisma.barInventoryItem.findMany({ where: { venueId }, orderBy: { name: 'asc' }, take: 300 }),
       this.prisma.prepBoardItem.findMany({
-        where: {
-          venueId,
-          status: 'open',
-          OR: [{ dueDate: null }, { dueDate: { lte: today } }],
-        },
+        where: { venueId, status: 'open', OR: [{ dueDate: null }, { dueDate: { lte: today } }] },
         orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
         take: 100,
       }),
-      this.prisma.venueEvent.findMany({
-        where: { venueId, startsAt: { gte: todayStart, lt: todayEnd } },
-        orderBy: { startsAt: 'asc' },
-        take: 20,
-      }),
+      this.prisma.venueEvent.findMany({ where: { venueId, startsAt: { gte: todayStart, lt: todayEnd } }, orderBy: { startsAt: 'asc' }, take: 20 }),
       this.prisma.tableState.findMany({
         where: { venueId },
         include: { table: { select: { id: true, label: true, seats: true, section: true, isReservable: true } } },
         take: 300,
       }),
       this.prisma.tableAssignment.findMany({
-        where: {
-          venueId,
-          releasedAt: null,
-          endsAt: { gt: now },
-          startsAt: { lt: fourHoursFromNow },
-        },
+        where: { venueId, releasedAt: null, endsAt: { gt: now }, startsAt: { lt: fourHoursFromNow } },
         include: {
           table: { select: { id: true, label: true, section: true } },
-          reservation: {
-            select: {
-              id: true,
-              guestName: true,
-              partySize: true,
-              tags: true,
-              status: true,
-            },
-          },
+          reservation: { select: { id: true, guestName: true, partySize: true, tags: true, status: true } },
         },
         orderBy: { startsAt: 'asc' },
         take: 300,
@@ -105,6 +63,16 @@ export class WranglerService {
     const openShiftCount = shifts.filter((shift) => shift.status === 'open').length;
     const lowStockItems = barItems.filter((item) => item.onHand <= item.parLevel);
     const eightySixCount = prepItems.filter((item) => item.kind === 'eighty_six').length;
+    const seatedTables = tableStates.filter((table) => table.status === 'seated').length;
+    const servicePhase = deriveWranglerServicePhase({
+      now: nowMs,
+      reservations: reservations.map((reservation) => ({
+        reservationTime: reservation.reservationTime.getTime(),
+        durationMinutes: reservation.durationMinutes,
+        status: reservation.status,
+      })),
+      seatedTables,
+    });
 
     const eventPriorities = buildDailyBriefPriorityActions({
       openShiftCount,
@@ -168,19 +136,9 @@ export class WranglerService {
       }),
     });
 
-    const priorities = this.mergePriorities([...floorPriorities, ...rulePriorities, ...eventPriorities]);
+    const priorities = this.mergePriorities([...floorPriorities, ...rulePriorities, ...eventPriorities], servicePhase);
     const covers = reservations.reduce((sum, reservation) => sum + reservation.partySize, 0);
     const vipArrivals = reservations.filter((reservation) => reservation.tags.some((tag) => tag.toLowerCase().includes('vip'))).length;
-    const seatedTables = tableStates.filter((table) => table.status === 'seated').length;
-    const servicePhase = deriveWranglerServicePhase({
-      now: nowMs,
-      reservations: reservations.map((reservation) => ({
-        reservationTime: reservation.reservationTime.getTime(),
-        durationMinutes: reservation.durationMinutes,
-        status: reservation.status,
-      })),
-      seatedTables,
-    });
 
     return {
       generatedAt: nowMs,
@@ -209,28 +167,15 @@ export class WranglerService {
     };
   }
 
-  async executeAction(venueId: string, input: {
-    type: 'REASSIGN_RESERVATION';
-    reservationId?: string;
-    tableId?: string;
-  }) {
+  async executeAction(venueId: string, input: { type: 'REASSIGN_RESERVATION'; reservationId?: string; tableId?: string }) {
     if (input.type !== 'REASSIGN_RESERVATION') throw new BadRequestException('Unsupported Wrangler action');
-    if (!input.reservationId || !input.tableId) {
-      throw new BadRequestException('reservationId and tableId are required');
-    }
+    if (!input.reservationId || !input.tableId) throw new BadRequestException('reservationId and tableId are required');
 
-    const reservation = await this.prisma.reservation.findFirst({
-      where: { id: input.reservationId, venueId, deletedAt: null },
-    });
+    const reservation = await this.prisma.reservation.findFirst({ where: { id: input.reservationId, venueId, deletedAt: null } });
     if (!reservation) throw new NotFoundException('Reservation not found');
 
     const table = await this.prisma.floorTable.findFirst({
-      where: {
-        id: input.tableId,
-        floorPlan: { venueId, isActive: true },
-        isReservable: true,
-        seats: { gte: reservation.partySize },
-      },
+      where: { id: input.tableId, floorPlan: { venueId, isActive: true }, isReservable: true, seats: { gte: reservation.partySize } },
       select: { id: true, label: true },
     });
     if (!table) throw new BadRequestException('Recommended table is no longer eligible');
@@ -239,13 +184,8 @@ export class WranglerService {
     const endsAt = new Date(startsAt.getTime() + reservation.durationMinutes * 60_000);
 
     await withSerializableRetry(this.prisma, async (tx) => {
-      const currentState = await tx.tableState.findFirst({
-        where: { venueId, tableId: table.id },
-        select: { status: true },
-      });
-      if (!currentState || currentState.status !== 'available') {
-        throw new ConflictException(`${table.label} is no longer available`);
-      }
+      const currentState = await tx.tableState.findFirst({ where: { venueId, tableId: table.id }, select: { status: true } });
+      if (!currentState || currentState.status !== 'available') throw new ConflictException(`${table.label} is no longer available`);
 
       const conflict = await tx.tableAssignment.findFirst({
         where: {
@@ -265,23 +205,11 @@ export class WranglerService {
         data: { releasedAt: new Date(), releasedReason: 'wrangler_reassigned' },
       });
       await tx.tableAssignment.create({
-        data: {
-          venueId,
-          reservationId: reservation.id,
-          tableId: table.id,
-          holdType: 'reserved',
-          startsAt,
-          endsAt,
-        },
+        data: { venueId, reservationId: reservation.id, tableId: table.id, holdType: 'reserved', startsAt, endsAt },
       });
       await tx.tableState.updateMany({
         where: { venueId, tableId: table.id },
-        data: {
-          status: 'reserved',
-          partySize: reservation.partySize,
-          seatedAt: null,
-          lastActivityAt: new Date(),
-        },
+        data: { status: 'reserved', partySize: reservation.partySize, seatedAt: null, lastActivityAt: new Date() },
       });
     });
 
@@ -302,12 +230,7 @@ export class WranglerService {
       status: string;
       table: { label: string; seats: number; section: string; isReservable: boolean };
     }>;
-    futureAssignments: Array<{
-      tableId: string;
-      startsAt: Date;
-      endsAt: Date;
-      releasedAt: Date | null;
-    }>;
+    futureAssignments: Array<{ tableId: string; startsAt: Date; endsAt: Date; releasedAt: Date | null }>;
   }) {
     const partySize = args.assignment.reservation?.partySize ?? 0;
     const candidates = args.tableStates
@@ -337,10 +260,9 @@ export class WranglerService {
     return best ? { tableId: best.tableId, label: best.table.label } : null;
   }
 
-  private mergePriorities(items: DailyBriefPriorityAction[]) {
+  private mergePriorities(items: DailyBriefPriorityAction[], phase: WranglerServicePhase) {
     const seen = new Set<string>();
-    return items
-      .sort((a, b) => WRANGLER_SEVERITY_RANK[a.severity] - WRANGLER_SEVERITY_RANK[b.severity])
+    return sortWranglerPrioritiesForPhase(items, phase)
       .filter((item) => {
         const key = item.kind === 'event' ? `event:${item.id}` : item.kind;
         if (seen.has(key)) return false;
