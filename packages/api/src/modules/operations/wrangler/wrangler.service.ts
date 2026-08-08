@@ -127,7 +127,7 @@ export class WranglerService {
     return items
       .sort((a, b) => WRANGLER_SEVERITY_RANK[a.severity] - WRANGLER_SEVERITY_RANK[b.severity])
       .filter((item) => {
-        const key = `${item.kind}:${item.route}:${item.title}`;
+        const key = item.kind === 'event' ? `event:${item.id}` : item.kind;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
