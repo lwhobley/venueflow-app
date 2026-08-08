@@ -3,6 +3,7 @@ import { weekStartFor } from '../../../common/pay-period';
 import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../../common/venue-time';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { buildDailyBriefPriorityActions, type DailyBriefPriorityAction } from '../daily-brief-priority-actions';
+import { buildWranglerFloorActions } from './wrangler-floor-rules';
 import { buildWranglerRuleActions } from './wrangler-rules';
 import { WRANGLER_SEVERITY_RANK } from './wrangler.constants';
 
@@ -19,8 +20,18 @@ export class WranglerService {
     const todayEnd = new Date(bounds.end);
     const weekStart = weekStartFor(today);
     const dayIndex = zonedDayOfWeek(timezone, nowMs);
+    const thirtyMinutesFromNow = new Date(nowMs + 30 * 60_000);
 
-    const [reservations, shifts, pendingRequests, barItems, prepItems, events] = await Promise.all([
+    const [
+      reservations,
+      shifts,
+      pendingRequests,
+      barItems,
+      prepItems,
+      events,
+      tableStates,
+      upcomingAssignments,
+    ] = await Promise.all([
       this.prisma.reservation.findMany({
         where: {
           venueId,
@@ -59,6 +70,32 @@ export class WranglerService {
         orderBy: { startsAt: 'asc' },
         take: 20,
       }),
+      this.prisma.tableState.findMany({
+        where: { venueId },
+        include: { table: { select: { id: true, label: true } } },
+        take: 300,
+      }),
+      this.prisma.tableAssignment.findMany({
+        where: {
+          venueId,
+          releasedAt: null,
+          startsAt: { gte: now, lte: thirtyMinutesFromNow },
+        },
+        include: {
+          table: { select: { id: true, label: true } },
+          reservation: {
+            select: {
+              id: true,
+              guestName: true,
+              partySize: true,
+              tags: true,
+              status: true,
+            },
+          },
+        },
+        orderBy: { startsAt: 'asc' },
+        take: 100,
+      }),
     ]);
 
     const openShiftCount = shifts.filter((shift) => shift.status === 'open').length;
@@ -94,7 +131,29 @@ export class WranglerService {
       eightySixCount,
     });
 
-    const priorities = this.mergePriorities([...rulePriorities, ...eventPriorities]);
+    const floorPriorities = buildWranglerFloorActions({
+      now: nowMs,
+      tables: tableStates.map((tableState) => ({
+        tableId: tableState.tableId,
+        label: tableState.table.label,
+        status: tableState.status,
+        seatedAt: tableState.seatedAt?.getTime() ?? null,
+      })),
+      upcomingAssignments: upcomingAssignments
+        .filter((assignment) => assignment.reservation && !['cancelled', 'no_show', 'completed'].includes(assignment.reservation.status))
+        .map((assignment) => ({
+          assignmentId: assignment.id,
+          tableId: assignment.tableId,
+          tableLabel: assignment.table.label,
+          startsAt: assignment.startsAt.getTime(),
+          reservationId: assignment.reservation?.id ?? null,
+          guestName: assignment.reservation?.guestName ?? null,
+          partySize: assignment.reservation?.partySize ?? null,
+          tags: assignment.reservation?.tags ?? [],
+        })),
+    });
+
+    const priorities = this.mergePriorities([...floorPriorities, ...rulePriorities, ...eventPriorities]);
     const covers = reservations.reduce((sum, reservation) => sum + reservation.partySize, 0);
     const vipArrivals = reservations.filter((reservation) => reservation.tags.some((tag) => tag.toLowerCase().includes('vip'))).length;
 
@@ -110,6 +169,7 @@ export class WranglerService {
         lowStockItems: lowStockItems.length,
         eightySixItems: eightySixCount,
         pendingStaffRequests: pendingRequests.length,
+        seatedTables: tableStates.filter((table) => table.status === 'seated').length,
       },
       status: priorities.some((item) => item.severity === 'critical')
         ? 'critical'
