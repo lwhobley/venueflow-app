@@ -33,16 +33,13 @@ export function HomeWranglerSurface({ enabled }: Props) {
   }
 
   const priority = snapshot.priorities[0];
+  const nextAction = priority?.actions[0];
   const urgent = priority?.severity === 'critical' || priority?.severity === 'warning';
   const accent = urgent ? palette.warning : priority?.severity === 'watch' ? '#8A6B2D' : palette.success;
 
   return (
-    <Pressable
-      onPress={() => router.push('/wrangler')}
-      accessibilityRole="button"
-      accessibilityLabel="Open The Wrangler"
-      style={({ pressed }) => ({
-        opacity: pressed ? 0.72 : 1,
+    <View
+      style={{
         marginHorizontal: spacing.lg,
         marginTop: -1,
         backgroundColor: '#F8F3EA',
@@ -52,21 +49,28 @@ export function HomeWranglerSurface({ enabled }: Props) {
         borderLeftColor: accent,
         padding: spacing.md,
         gap: spacing.sm,
-      })}
+      }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 }}>
-          <MaterialCommunityIcons name="target" size={22} color="#7A5A35" />
-          <View style={{ flex: 1 }}>
-            <CommandText palette={palette} variant="label" style={{ color: '#7A5A35' }}>THE WRANGLER · {snapshot.servicePhaseLabel.toUpperCase()}</CommandText>
-            <CommandText palette={palette} variant="caption" style={{ marginTop: 2, color: accent }}>{statusLabel(snapshot.status)}</CommandText>
-            <CommandText palette={palette} variant="title" style={{ marginTop: 2 }}>
-              {priority?.title ?? 'Service is under control'}
-            </CommandText>
+      <Pressable
+        onPress={() => router.push('/wrangler')}
+        accessibilityRole="button"
+        accessibilityLabel="Open The Wrangler"
+        style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 }}>
+            <MaterialCommunityIcons name="target" size={22} color="#7A5A35" />
+            <View style={{ flex: 1 }}>
+              <CommandText palette={palette} variant="label" style={{ color: '#7A5A35' }}>THE WRANGLER · {snapshot.servicePhaseLabel.toUpperCase()}</CommandText>
+              <CommandText palette={palette} variant="caption" style={{ marginTop: 2, color: accent }}>{statusLabel(snapshot.status)}</CommandText>
+              <CommandText palette={palette} variant="title" style={{ marginTop: 2 }}>
+                {priority?.title ?? 'Service is under control'}
+              </CommandText>
+            </View>
           </View>
+          <MaterialCommunityIcons name="chevron-right" size={22} color={palette.muted} />
         </View>
-        <MaterialCommunityIcons name="chevron-right" size={22} color={palette.muted} />
-      </View>
+      </Pressable>
 
       <CommandText palette={palette} variant="body">
         {priority?.body ?? 'No active service conflicts need attention right now.'}
@@ -78,11 +82,40 @@ export function HomeWranglerSurface({ enabled }: Props) {
         </View>
       ) : null}
 
+      {nextAction ? (
+        <Pressable
+          onPress={() => router.push('/wrangler')}
+          accessibilityRole="button"
+          accessibilityLabel={`Wrangle it: ${nextAction.label}`}
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.75 : 1,
+            marginTop: spacing.xs,
+            paddingVertical: spacing.sm,
+            paddingHorizontal: spacing.md,
+            backgroundColor: urgent ? '#7A5A35' : palette.surface,
+            borderWidth: 1,
+            borderColor: urgent ? '#7A5A35' : palette.border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: spacing.sm,
+          })}
+        >
+          <View style={{ flex: 1, gap: 2 }}>
+            <CommandText palette={palette} variant="label" style={urgent ? { color: '#FFFFFF' } : undefined}>NEXT BEST MOVE</CommandText>
+            <CommandText palette={palette} variant="body" style={urgent ? { color: '#FFFFFF', fontWeight: '700' } : { fontWeight: '700' }}>
+              {nextAction.label}
+            </CommandText>
+          </View>
+          <MaterialCommunityIcons name="arrow-right" size={20} color={urgent ? '#FFFFFF' : palette.text} />
+        </Pressable>
+      ) : null}
+
       <View style={{ flexDirection: 'row', gap: spacing.lg, paddingTop: 2 }}>
         <CommandText palette={palette} variant="caption">{snapshot.summary.covers} covers</CommandText>
         <CommandText palette={palette} variant="caption">{snapshot.summary.vipArrivals} VIPs</CommandText>
         <CommandText palette={palette} variant="caption">{snapshot.summary.seatedTables} seated</CommandText>
       </View>
-    </Pressable>
+    </View>
   );
 }
