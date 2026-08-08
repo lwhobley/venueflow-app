@@ -18,6 +18,7 @@ function iconFor(priority: WranglerPriority) {
   if (priority.kind === 'stock') return 'bottle-wine-outline' as const;
   if (priority.kind === 'event') return 'calendar-clock-outline' as const;
   if (priority.kind === 'requests') return 'clipboard-clock-outline' as const;
+  if (priority.kind === 'floor') return 'floor-plan' as const;
   return 'check-circle-outline' as const;
 }
 
@@ -25,6 +26,17 @@ export default function WranglerScreen() {
   const palette = useDesignTheme();
   const wrangler = useWrangler(true);
   const snapshot = wrangler.data;
+
+  if (wrangler.isError) {
+    return (
+      <View style={{ flex: 1, backgroundColor: palette.background, padding: spacing.lg, justifyContent: 'center', gap: spacing.md }}>
+        <MaterialCommunityIcons name="alert-circle-outline" size={32} color={palette.warning} />
+        <CommandText palette={palette} variant="title">The Wrangler could not load</CommandText>
+        <CommandText palette={palette} variant="body">The live service snapshot is unavailable right now. Existing operational screens are still available.</CommandText>
+        <CommandButton palette={palette} onPress={() => router.back()}>Go back</CommandButton>
+      </View>
+    );
+  }
 
   if (wrangler.isLoading || !snapshot) {
     return (
@@ -68,7 +80,7 @@ export default function WranglerScreen() {
             ['Covers', String(summary.covers)],
             ['Reservations', String(summary.reservations)],
             ['VIPs', String(summary.vipArrivals)],
-            ['Staff', String(summary.scheduledStaff)],
+            ['Seated', String(summary.seatedTables ?? 0)],
           ].map(([label, value], index) => (
             <View key={label} style={{ flex: 1, paddingHorizontal: spacing.sm, borderLeftWidth: index ? StyleSheet.hairlineWidth : 0, borderColor: palette.divider, gap: 2 }}>
               <CommandText palette={palette} variant="title">{value}</CommandText>
