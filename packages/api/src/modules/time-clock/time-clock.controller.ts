@@ -11,7 +11,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertWithinGeofence } from '../../common/geofence';
-import { unpaidBreakMs } from '../../common/break-duration';
+import { parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
@@ -174,7 +174,7 @@ export class TimeClockController {
       const outAt = entry.clockOutAt?.getTime();
       if (!outAt || now - outAt > weekMs) return sum;
       let durationMs = outAt - entry.clockInAt.getTime();
-      const breaks = (entry.breaks as any[]) || [];
+      const breaks = parseTimeBreaks(entry.breaks);
       for (const b of breaks) {
         if (b.type === 'unpaid' && b.startAt && b.endAt) {
           durationMs -= unpaidBreakMs(b.startAt, b.endAt);
@@ -300,8 +300,8 @@ export class TimeClockController {
     });
     if (!entry) throw new BadRequestException('No active clock-in found');
 
-    const breaks = (entry.breaks as any[]) || [];
-    const activeBreak = breaks.find((b: any) => b.endAt === null);
+    const breaks = parseTimeBreaks(entry.breaks);
+    const activeBreak = breaks.find((breakRow) => breakRow.endAt === null);
     if (activeBreak) throw new BadRequestException('Already on a break');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
@@ -327,8 +327,8 @@ export class TimeClockController {
     });
     if (!entry) throw new BadRequestException('No active clock-in found');
 
-    const breaks = (entry.breaks as any[]) || [];
-    const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
+    const breaks = parseTimeBreaks(entry.breaks);
+    const activeBreakIndex = breaks.findIndex((breakRow) => breakRow.endAt === null);
     if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });

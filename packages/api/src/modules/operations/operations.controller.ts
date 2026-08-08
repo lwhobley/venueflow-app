@@ -23,6 +23,7 @@ import { isAdminRole } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
+import { parseTimeBreaks } from '../../common/break-duration';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { isActiveMembership } from '../../common/membership';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
@@ -479,7 +480,7 @@ export class OperationsController {
         if (endMs <= startMs || entry.clockInAt.getTime() >= todayEnd.getTime()) return sum;
         const entryStart = Math.max(entry.clockInAt.getTime(), startMs);
         let durationMs = Math.max(0, endMs - entryStart);
-        for (const rawBreak of (entry.breaks as any[]) ?? []) {
+        for (const rawBreak of parseTimeBreaks(entry.breaks)) {
           if (rawBreak?.type !== 'unpaid' || rawBreak.startAt == null || rawBreak.endAt == null) continue;
           const breakStart = Math.max(Number(rawBreak.startAt), entryStart, startMs);
           const breakEnd = Math.min(Number(rawBreak.endAt), endMs);

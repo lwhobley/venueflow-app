@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { TableShape, TableSection } from '@prisma/client';
+import { TableShape, TableSection, TableStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { ReservationNotifierService } from '../reservations/reservation-notifier.service';
@@ -205,7 +205,8 @@ export class FloorService {
     chairs?: Array<{ x: number; y: number; rotation: number; label?: string }>;
   }) {
     const tables = input.tables ?? [];
-    await this.prisma.$transaction(async (tx) => {
+    await withSerializableRetry(this.prisma, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`floor-plan:${venueId}`}))`;
       let plan = await tx.floorPlan.findFirst({ where: { venueId, isActive: true } });
       if (plan) {
         plan = await tx.floorPlan.update({ where: { id: plan.id }, data: { name: input.name?.trim() || 'Floor Plan', width: input.width ?? plan.width, height: input.height ?? plan.height, backgroundImageUrl: input.backgroundImageUrl ?? null } });
@@ -373,10 +374,11 @@ export class FloorService {
   async updateTableStatus(venueId: string, id: string, status: string) {
     const state = await this.prisma.tableState.findFirst({ where: { tableId: id, venueId } });
     if (!state) throw new NotFoundException('Table not found');
-    await this.prisma.tableState.update({
-      where: { id: state.id },
-      data: { status: status as any, lastActivityAt: new Date() },
+    const result = await this.prisma.tableState.updateMany({
+      where: { id: state.id, venueId, lastActivityAt: state.lastActivityAt },
+      data: { status: status as TableStatus, lastActivityAt: new Date() },
     });
+    if (result.count === 0) throw new ConflictException('Table status changed. Refresh and try again.');
     return { ok: true };
   }
 

@@ -3,6 +3,28 @@ import { describe, expect, it, vi } from 'vitest';
 import { FloorService } from './floor.service';
 
 describe('FloorService regressions', () => {
+  it('serializes floor-plan saves per venue', async () => {
+    const transaction = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      floorPlan: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'plan-1', width: 800, height: 600 }),
+        update: vi.fn().mockResolvedValue({ id: 'plan-1' }),
+      },
+      floorTable: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
+      tableAssignment: { count: vi.fn().mockResolvedValue(0) },
+      floorChair: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }), createMany: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn((callback: (tx: typeof transaction) => unknown) => callback(transaction)),
+    };
+    const service = new FloorService(prisma as any, {} as any);
+
+    await service.saveFloorPlan('venue-1', { tables: [] });
+
+    expect(transaction.$executeRaw).toHaveBeenCalledOnce();
+    expect(transaction.floorPlan.findFirst).toHaveBeenCalledWith({ where: { venueId: 'venue-1', isActive: true } });
+  });
+
   it('returns the saved seat-label style in the active floor payload', async () => {
     const now = new Date();
     const prisma = {
@@ -38,5 +60,23 @@ describe('FloorService regressions', () => {
 
     await expect(service.mergeTablesForParty('venue-1', ['t1', 't2'], 6)).rejects.toThrow(ConflictException);
     expect(prisma.tableState.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a table-status write that loses an optimistic concurrency race', async () => {
+    const lastActivityAt = new Date();
+    const prisma = {
+      tableState: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'state-1', lastActivityAt }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const service = new FloorService(prisma as any, {} as any);
+
+    await expect(service.updateTableStatus('venue-1', 'table-1', 'dirty')).rejects.toThrow(
+      'Table status changed. Refresh and try again.',
+    );
+    expect(prisma.tableState.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'state-1', venueId: 'venue-1', lastActivityAt },
+    }));
   });
 });

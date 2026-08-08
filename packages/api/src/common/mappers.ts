@@ -16,7 +16,7 @@ type TimeEntryRow = {
   clockOutAccuracyM: number | null;
   clockOutMocked: boolean | null;
   isOpen: boolean;
-  breaks: any;
+  breaks: unknown;
 };
 
 export function dayLabel(index: number): string {

@@ -56,6 +56,46 @@ describe('ReservationMutationService', () => {
     });
   });
 
+  it('persists legacy table numbers as conflict-checked relational assignments', async () => {
+    const reservation = {
+      id: 'reservation-1',
+      venueId: 'venue-1',
+      reservationTime: new Date('2026-06-28T19:00:00.000Z'),
+      durationMinutes: 90,
+      status: 'confirmed',
+    };
+    const prisma = withTransaction({
+      reservationHold: { findFirst: vi.fn().mockResolvedValue(null) },
+      reservation: { create: vi.fn().mockResolvedValue(reservation) },
+      floorPlan: {
+        findFirst: vi.fn().mockResolvedValue({ tables: [{ id: 'table-12', label: '12' }] }),
+      },
+      tableAssignment: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn().mockResolvedValue({}),
+      },
+    });
+    const service = new ReservationMutationService(prisma as any);
+
+    await service.saveReservation({
+      venueId: 'venue-1',
+      guestName: 'Alex Guest',
+      partySize: 4,
+      reservationTime: '2026-06-28T19:00:00.000Z',
+      tableNumbers: ['12'],
+    });
+
+    expect(prisma.tableAssignment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        venueId: 'venue-1',
+        reservationId: 'reservation-1',
+        tableId: 'table-12',
+        holdType: 'reserved',
+      }),
+    });
+  });
+
   it('creates an execution workspace immediately for a private event', async () => {
     const reservation = {
       id: 'reservation-private', venueId: 'venue-1', status: 'confirmed', isPrivateEvent: true,

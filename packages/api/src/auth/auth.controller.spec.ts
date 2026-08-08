@@ -58,6 +58,36 @@ describe('AuthController email invite signup', () => {
     });
   });
 
+  it('serializes failed sign-ins and locks the account at the threshold', async () => {
+    const lockedUntil = new Date('2026-08-08T18:15:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-08T18:00:00.000Z'));
+    const transaction = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ failedSignInCount: 7, lockedUntil: null }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn((callback: (tx: typeof transaction) => unknown) => callback(transaction)),
+    };
+    const controller = new AuthController(prisma as any, {} as any, {} as any, {} as any);
+
+    await (controller as any).recordFailedSignIn('user-1');
+
+    expect(transaction.$executeRaw).toHaveBeenCalledOnce();
+    expect(transaction.user.findUnique).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      select: { failedSignInCount: true, lockedUntil: true },
+    });
+    expect(transaction.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { failedSignInCount: 0, lockedUntil },
+    });
+    vi.useRealTimers();
+  });
+
   it('requires terms acceptance for every new account', async () => {
     const controller = new AuthController(
       { user: { findUnique: vi.fn().mockResolvedValue(null) } } as any,

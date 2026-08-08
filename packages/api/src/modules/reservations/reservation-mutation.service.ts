@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Optional } from '@nestjs/common';
 import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { withSerializableRetry } from '../../common/tx-retry';
 import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class ReservationMutationService {
     source?: string;
     tags?: string[];
     specialRequests?: string;
+    tableIds?: string[];
     tableNumbers?: string[];
     phone?: string;
     email?: string;
@@ -78,7 +80,7 @@ export class ReservationMutationService {
       durationMinutes: args.durationMinutes ?? 90,
     };
 
-    return this.prisma.$transaction(async (transaction) => {
+    return withSerializableRetry(this.prisma, async (transaction) => {
       // Serialize reservation writes with hold creation for this venue. Without
       // the shared lock a hold could be inserted after the conflict query but
       // before this transaction committed.
@@ -94,11 +96,13 @@ export class ReservationMutationService {
           where: { id: existing.id },
           data,
         });
+        await this.syncTableAssignments(transaction, updated, args.tableIds ?? args.tableNumbers);
         await this.ensureExecutionWorkspace(updated, transaction);
         return { reservation: updated, previousStatus: existing.status };
       }
 
       const created = await transaction.reservation.create({ data });
+      await this.syncTableAssignments(transaction, created, args.tableIds ?? args.tableNumbers);
       await this.ensureExecutionWorkspace(created, transaction);
       return { reservation: created, previousStatus: null };
     });
@@ -188,6 +192,78 @@ export class ReservationMutationService {
     });
     if (hold) {
       throw new BadRequestException(`This time conflicts with a hold: ${hold.reason}`);
+    }
+  }
+
+  private async syncTableAssignments(
+    transaction: Prisma.TransactionClient,
+    reservation: {
+      id: string;
+      venueId: string;
+      reservationTime: Date;
+      durationMinutes: number;
+      status: string;
+    },
+    requestedTableRefs: string[] | undefined,
+  ) {
+    if (requestedTableRefs === undefined) return;
+
+    const refs = [...new Set(requestedTableRefs.map((value) => value.trim()).filter(Boolean))];
+    let tableIds: string[] = [];
+    if (refs.length > 0 && !['cancelled', 'no_show', 'completed'].includes(reservation.status)) {
+      const plan = await transaction.floorPlan.findFirst({
+        where: { venueId: reservation.venueId, isActive: true },
+        include: {
+          tables: {
+            where: { OR: [{ id: { in: refs } }, { label: { in: refs } }] },
+            select: { id: true, label: true },
+          },
+        },
+      });
+      if (!plan) throw new BadRequestException('Create an active floor plan before assigning tables');
+
+      tableIds = refs.map((ref) => {
+        const matches = plan.tables.filter((table) => table.id === ref || table.label === ref);
+        if (matches.length !== 1) {
+          throw new BadRequestException(`Table ${ref} was not found uniquely on the active floor plan`);
+        }
+        return matches[0].id;
+      });
+      tableIds = [...new Set(tableIds)];
+    }
+
+    const startsAt = reservation.reservationTime;
+    const endsAt = new Date(startsAt.getTime() + reservation.durationMinutes * 60_000);
+    if (tableIds.length > 0) {
+      const conflict = await transaction.tableAssignment.findFirst({
+        where: {
+          venueId: reservation.venueId,
+          tableId: { in: tableIds },
+          releasedAt: null,
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+          NOT: { reservationId: reservation.id },
+        },
+        select: { tableId: true },
+      });
+      if (conflict) throw new ConflictException(`Table ${conflict.tableId} is already booked for this time window`);
+    }
+
+    await transaction.tableAssignment.updateMany({
+      where: { venueId: reservation.venueId, reservationId: reservation.id, releasedAt: null },
+      data: { releasedAt: new Date(), releasedReason: 'reservation_updated' },
+    });
+    for (const tableId of tableIds) {
+      await transaction.tableAssignment.create({
+        data: {
+          venueId: reservation.venueId,
+          reservationId: reservation.id,
+          tableId,
+          holdType: 'reserved',
+          startsAt,
+          endsAt,
+        },
+      });
     }
   }
 
