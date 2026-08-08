@@ -12,10 +12,13 @@ export type WranglerUpcomingAssignment = {
   tableId: string;
   tableLabel: string;
   startsAt: number;
+  endsAt: number;
   reservationId: string | null;
   guestName: string | null;
   partySize: number | null;
   tags: string[];
+  alternateTableId?: string | null;
+  alternateTableLabel?: string | null;
 };
 
 function navAction(id: string, label: string, route: WranglerAction['route']): WranglerAction {
@@ -45,19 +48,37 @@ export function buildWranglerFloorActions(input: {
 
     const isVip = assignment.tags.some((tag) => tag.toLowerCase().includes('vip'));
     const route = '/floor' as const;
+    const recommendedActions: WranglerAction[] = [];
+
+    if (assignment.reservationId && assignment.alternateTableId && assignment.alternateTableLabel) {
+      recommendedActions.push({
+        id: `floor-conflict:${assignment.assignmentId}:reassign`,
+        type: 'REASSIGN_RESERVATION',
+        label: `Move to ${assignment.alternateTableLabel}`,
+        route,
+        requiresConfirmation: true,
+        payload: {
+          reservationId: assignment.reservationId,
+          tableId: assignment.alternateTableId,
+          tableLabel: assignment.alternateTableLabel,
+        },
+      });
+    }
+    recommendedActions.push(navAction(`floor-conflict:${assignment.assignmentId}:open`, 'Resolve on floor', route));
+
     actions.push({
       id: `floor-conflict:${assignment.assignmentId}`,
       kind: 'floor',
       tone: 'warn',
       severity: isVip ? 'critical' : 'warning',
       title: `${assignment.tableLabel} is still seated`,
-      body: `${assignment.guestName ?? 'An incoming party'} arrives in ${arrivalMinutes} min${assignment.partySize ? ` for ${assignment.partySize}` : ''}, but the assigned table has not cleared.`,
+      body: `${assignment.guestName ?? 'An incoming party'} arrives in ${arrivalMinutes} min${assignment.partySize ? ` for ${assignment.partySize}` : ''}, but the assigned table has not cleared.${assignment.alternateTableLabel ? ` ${assignment.alternateTableLabel} is available as an alternate.` : ''}`,
       reason: isVip
         ? 'A VIP reservation is approaching while its assigned table remains seated.'
         : 'An incoming reservation is approaching while its assigned table remains seated.',
-      cta: 'Open floor',
+      cta: assignment.alternateTableLabel ? `Move to ${assignment.alternateTableLabel}` : 'Open floor',
       route,
-      actions: [navAction(`floor-conflict:${assignment.assignmentId}:open`, 'Resolve seating', route)],
+      actions: recommendedActions,
     });
   }
 
