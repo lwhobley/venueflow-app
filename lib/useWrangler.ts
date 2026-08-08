@@ -14,7 +14,27 @@ export type WranglerOperatorResponse =
   | { status: 'executed'; tool: string; risk: WranglerOperatorRisk; summary: string; result: unknown }
   | { status: 'confirmation_required'; tool: string; risk: WranglerOperatorRisk; summary: string; preview: string[]; plan: WranglerOperatorPlan };
 
+export type WranglerAiUsage = {
+  month: string;
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  breakdown: Array<{
+    feature: string;
+    model: string;
+    requests: number;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    estimatedCostUsd: number;
+  }>;
+};
+
 export function useWrangler(enabled = true) { return useApiQuery<WranglerSnapshot>(['operations', 'wrangler'], '/v1/operations/wrangler', enabled); }
+export function useWranglerAiUsage(enabled = true) { return useApiQuery<WranglerAiUsage>(['operations', 'wrangler', 'ai-usage'], '/v1/operations/wrangler/ai-usage', enabled); }
 export function useAskWrangler() { return useApiMutation<{ question: string }, { answer: string; sources: string[] }>((body) => apiRequest('/v1/operations/wrangler/ask', { method: 'POST', body }), []); }
 export function useWranglerOperatorPlan() { return useApiMutation<{ command: string }, WranglerOperatorResponse>((body) => apiRequest('/v1/operations/wrangler/operator/plan', { method: 'POST', body }), []); }
 export function useWranglerOperatorExecute() {
