@@ -38,6 +38,9 @@ import { WorkforceModule } from './modules/workforce/workforce.module';
 import { SchedulingAssignmentService } from './modules/scheduling/scheduling-assignment.service';
 import { AiSchedulerService } from './modules/scheduling/ai-scheduler.service';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { WranglerOperatorController } from './modules/operations/wrangler/wrangler-operator.controller';
+import { WranglerOperatorService } from './modules/operations/wrangler/wrangler-operator.service';
+import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-wrangler-operator.service';
 
 @Module({
   imports: [
@@ -78,6 +81,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
     TimeClockController,
     StaffRequestsController,
     StaffController,
+    WranglerOperatorController,
   ],
   providers: [
     // Throttle FIRST so unauthenticated attackers can't hammer the auth check
@@ -95,6 +99,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
     StaffImportParserService,
     SchedulingAssignmentService,
     AiSchedulerService,
+    { provide: WranglerOperatorService, useClass: SafeWranglerOperatorService },
   ],
 })
 export class AppModule {}
