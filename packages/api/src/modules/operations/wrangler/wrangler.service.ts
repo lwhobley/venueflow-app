@@ -1,8 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { weekStartFor } from '../../../common/pay-period';
+import { withSerializableRetry } from '../../../common/tx-retry';
 import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../../common/venue-time';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { FloorService } from '../../floor/floor.service';
 import { buildDailyBriefPriorityActions, type DailyBriefPriorityAction } from '../daily-brief-priority-actions';
 import { buildWranglerFloorActions } from './wrangler-floor-rules';
 import { buildWranglerRuleActions } from './wrangler-rules';
@@ -10,10 +10,7 @@ import { WRANGLER_SEVERITY_RANK } from './wrangler.constants';
 
 @Injectable()
 export class WranglerService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly floor: FloorService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getSnapshot(venueId: string, timezone?: string | null) {
     const now = new Date();
@@ -153,11 +150,7 @@ export class WranglerService {
         seatedAt: tableState.seatedAt?.getTime() ?? null,
       })),
       upcomingAssignments: upcomingAssignments.map((assignment) => {
-        const alternate = this.findAlternateTable({
-          assignment,
-          tableStates,
-          futureAssignments,
-        });
+        const alternate = this.findAlternateTable({ assignment, tableStates, futureAssignments });
         return {
           assignmentId: assignment.id,
           tableId: assignment.tableId,
@@ -208,15 +201,78 @@ export class WranglerService {
     reservationId?: string;
     tableId?: string;
   }) {
-    if (input.type !== 'REASSIGN_RESERVATION') {
-      throw new BadRequestException('Unsupported Wrangler action');
-    }
+    if (input.type !== 'REASSIGN_RESERVATION') throw new BadRequestException('Unsupported Wrangler action');
     if (!input.reservationId || !input.tableId) {
       throw new BadRequestException('reservationId and tableId are required');
     }
 
-    await this.floor.assignReservationToTables(venueId, input.reservationId, [input.tableId], { holdType: 'reserved' });
-    return { ok: true, type: input.type, reservationId: input.reservationId, tableId: input.tableId };
+    const reservation = await this.prisma.reservation.findFirst({
+      where: { id: input.reservationId, venueId, deletedAt: null },
+    });
+    if (!reservation) throw new NotFoundException('Reservation not found');
+
+    const table = await this.prisma.floorTable.findFirst({
+      where: {
+        id: input.tableId,
+        floorPlan: { venueId, isActive: true },
+        isReservable: true,
+        seats: { gte: reservation.partySize },
+      },
+      select: { id: true, label: true },
+    });
+    if (!table) throw new BadRequestException('Recommended table is no longer eligible');
+
+    const startsAt = reservation.reservationTime;
+    const endsAt = new Date(startsAt.getTime() + reservation.durationMinutes * 60_000);
+
+    await withSerializableRetry(this.prisma, async (tx) => {
+      const currentState = await tx.tableState.findFirst({
+        where: { venueId, tableId: table.id },
+        select: { status: true },
+      });
+      if (!currentState || currentState.status !== 'available') {
+        throw new ConflictException(`${table.label} is no longer available`);
+      }
+
+      const conflict = await tx.tableAssignment.findFirst({
+        where: {
+          venueId,
+          tableId: table.id,
+          releasedAt: null,
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+          NOT: { reservationId: reservation.id },
+        },
+        select: { id: true },
+      });
+      if (conflict) throw new ConflictException(`${table.label} is already booked for this time window`);
+
+      await tx.tableAssignment.updateMany({
+        where: { venueId, reservationId: reservation.id, releasedAt: null },
+        data: { releasedAt: new Date(), releasedReason: 'wrangler_reassigned' },
+      });
+      await tx.tableAssignment.create({
+        data: {
+          venueId,
+          reservationId: reservation.id,
+          tableId: table.id,
+          holdType: 'reserved',
+          startsAt,
+          endsAt,
+        },
+      });
+      await tx.tableState.updateMany({
+        where: { venueId, tableId: table.id },
+        data: {
+          status: 'reserved',
+          partySize: reservation.partySize,
+          seatedAt: null,
+          lastActivityAt: new Date(),
+        },
+      });
+    });
+
+    return { ok: true, type: input.type, reservationId: reservation.id, tableId: table.id, tableLabel: table.label };
   }
 
   private findAlternateTable(args: {
