@@ -2,6 +2,7 @@ import { apiRequest, useApiMutation, useApiQuery } from './api-client';
 
 export type WranglerSeverity = 'info' | 'watch' | 'warning' | 'critical';
 export type WranglerStatus = 'clear' | 'watch' | 'attention' | 'critical';
+export type WranglerServicePhase = 'pre_service' | 'active' | 'closing' | 'closed';
 
 export type WranglerAction = {
   id: string;
@@ -33,6 +34,8 @@ export type WranglerSnapshot = {
   generatedAt: number;
   date: string;
   status: WranglerStatus;
+  servicePhase: WranglerServicePhase;
+  servicePhaseLabel: string;
   summary: {
     covers: number;
     reservations: number;
