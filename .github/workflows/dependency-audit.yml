@@ -1,0 +1,51 @@
+name: Dependency Security Audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'packages/api/package.json'
+      - '.github/workflows/dependency-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'packages/api/package.json'
+      - '.github/workflows/dependency-audit.yml'
+  schedule:
+    - cron: '30 12 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-dependencies:
+    name: Production dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Fail on high/critical production vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
+
+  full-inventory:
+    name: Full dependency inventory
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Report all high/critical vulnerabilities including dev tooling
+        run: npm audit --audit-level=high
