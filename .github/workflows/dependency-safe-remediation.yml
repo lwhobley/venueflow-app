@@ -22,7 +22,12 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply only non-breaking npm audit fixes to lockfile
-        run: npm audit fix --package-lock-only
+        shell: bash
+        run: |
+          # npm exits non-zero while any advisory remains, including advisories
+          # with no patched release. Preserve any safe lockfile fixes it can
+          # apply, then let the dedicated audit job report what remains.
+          npm audit fix --package-lock-only || true
       - name: Commit safe lockfile remediation
         shell: bash
         run: |
