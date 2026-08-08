@@ -36,7 +36,20 @@ export class WranglerController {
       `SELECT "feature", "model", COUNT(*)::bigint AS requests, COALESCE(SUM("promptTokens"),0)::bigint AS "promptTokens", COALESCE(SUM("completionTokens"),0)::bigint AS "completionTokens", COALESCE(SUM("totalTokens"),0)::bigint AS "totalTokens", COALESCE(SUM("estimatedCostMicros"),0)::bigint AS "estimatedCostMicros" FROM "AiUsageEvent" WHERE "venueId" = $1 AND "createdAt" >= date_trunc('month', NOW()) GROUP BY "feature", "model" ORDER BY "estimatedCostMicros" DESC`, scope.venueId,
     );
     const items = rows.map((row) => ({ feature: row.feature, model: row.model, requests: Number(row.requests), promptTokens: Number(row.promptTokens), completionTokens: Number(row.completionTokens), totalTokens: Number(row.totalTokens), estimatedCostUsd: Number(row.estimatedCostMicros) / 1_000_000 }));
-    return { period: 'month_to_date', venueId: scope.venueId, requests: items.reduce((sum, row) => sum + row.requests, 0), totalTokens: items.reduce((sum, row) => sum + row.totalTokens, 0), estimatedCostUsd: items.reduce((sum, row) => sum + row.estimatedCostUsd, 0), items };
+    const estimatedCostUsd = items.reduce((sum, row) => sum + row.estimatedCostUsd, 0);
+    const budgetUsd = Math.max(0, Number(process.env.AI_MONTHLY_VENUE_BUDGET_USD ?? 25));
+    const warningPercent = Math.min(100, Math.max(1, Number(process.env.AI_MONTHLY_VENUE_WARNING_PERCENT ?? 80)));
+    const percentUsed = budgetUsd > 0 ? Math.round((estimatedCostUsd / budgetUsd) * 1000) / 10 : 0;
+    const budgetStatus = budgetUsd <= 0 ? 'unlimited' : estimatedCostUsd >= budgetUsd ? 'over_budget' : percentUsed >= warningPercent ? 'warning' : 'healthy';
+    return {
+      period: 'month_to_date',
+      venueId: scope.venueId,
+      requests: items.reduce((sum, row) => sum + row.requests, 0),
+      totalTokens: items.reduce((sum, row) => sum + row.totalTokens, 0),
+      estimatedCostUsd,
+      budget: { budgetUsd, warningPercent, percentUsed, remainingUsd: budgetUsd > 0 ? Math.max(0, budgetUsd - estimatedCostUsd) : null, status: budgetStatus },
+      items,
+    };
   }
 
   @RequireSubscription('active') @Post('ask')
