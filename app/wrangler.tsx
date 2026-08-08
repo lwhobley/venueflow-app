@@ -1,10 +1,16 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { CommandButton, CommandText } from '../components/FutureUI';
 import { Skeleton } from '../components/Skeleton';
 import { spacing, useDesignTheme } from '../lib/theme';
-import { useWrangler, type WranglerPriority, type WranglerSeverity } from '../lib/useWrangler';
+import {
+  useExecuteWranglerAction,
+  useWrangler,
+  type WranglerAction,
+  type WranglerPriority,
+  type WranglerSeverity,
+} from '../lib/useWrangler';
 
 function severityLabel(severity: WranglerSeverity) {
   if (severity === 'critical') return 'CRITICAL';
@@ -25,7 +31,47 @@ function iconFor(priority: WranglerPriority) {
 export default function WranglerScreen() {
   const palette = useDesignTheme();
   const wrangler = useWrangler(true);
+  const executeAction = useExecuteWranglerAction();
   const snapshot = wrangler.data;
+
+  const handleAction = (action: WranglerAction) => {
+    if (action.type === 'NAVIGATE' || action.type === 'ACKNOWLEDGE') {
+      router.push(action.route);
+      return;
+    }
+
+    if (action.type === 'REASSIGN_RESERVATION') {
+      const reservationId = typeof action.payload?.reservationId === 'string' ? action.payload.reservationId : null;
+      const tableId = typeof action.payload?.tableId === 'string' ? action.payload.tableId : null;
+      const tableLabel = typeof action.payload?.tableLabel === 'string' ? action.payload.tableLabel : 'the alternate table';
+      if (!reservationId || !tableId) {
+        Alert.alert('Action unavailable', 'The Wrangler recommendation is missing the table assignment details.');
+        return;
+      }
+
+      const run = async () => {
+        try {
+          await executeAction.mutateAsync({ type: 'REASSIGN_RESERVATION', reservationId, tableId });
+          Alert.alert('Reservation moved', `The reservation is now assigned to ${tableLabel}.`);
+        } catch (error) {
+          Alert.alert('Could not move reservation', error instanceof Error ? error.message : 'The table assignment could not be changed.');
+        }
+      };
+
+      if (action.requiresConfirmation) {
+        Alert.alert(
+          'Move reservation?',
+          `Reassign this reservation to ${tableLabel}? Venue Wrangler will recheck table conflicts before saving.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Move reservation', onPress: () => void run() },
+          ],
+        );
+      } else {
+        void run();
+      }
+    }
+  };
 
   if (wrangler.isError) {
     return (
@@ -123,9 +169,9 @@ export default function WranglerScreen() {
                     <CommandButton
                       palette={palette}
                       selected={priority.severity === 'critical' || priority.severity === 'warning'}
-                      onPress={() => router.push(action.route)}
+                      onPress={() => handleAction(action)}
                     >
-                      {action.label}
+                      {executeAction.isPending && action.type === 'REASSIGN_RESERVATION' ? 'Moving…' : action.label}
                     </CommandButton>
                   ) : null}
                   <CommandButton palette={palette} onPress={() => router.push(priority.route)}>
