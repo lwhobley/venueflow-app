@@ -53,18 +53,7 @@ jobs:
             --key "database-backups/$(basename "$archive")" >/dev/null
           rm -f "$archive"
 
-      # Retention: dumps older than 30 days are pruned after each successful
-      # upload so backups don't accumulate in S3 indefinitely.
-      - name: Prune backups older than 30 days
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          cutoff="$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)"
-          expired="$(aws s3api list-objects-v2 --bucket "$BACKUP_BUCKET" --prefix database-backups/ \
-            --query "Contents[?LastModified<=\`${cutoff}\`].Key" --output text)"
-          if [ -n "$expired" ] && [ "$expired" != "None" ]; then
-            for key in $expired; do
-              aws s3 rm "s3://${BACKUP_BUCKET}/${key}" --only-show-errors
-              echo "Pruned expired backup: ${key}"
-            done
-          fi
+      # Retention is intentionally handled by an S3 lifecycle rule on the
+      # database-backups/ prefix. The backup IAM identity only needs object
+      # write/read verification permissions and does not require ListBucket or
+      # delete access, keeping the blast radius of this credential smaller.
