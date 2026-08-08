@@ -6,6 +6,7 @@ import { NotificationsService } from '../../../notifications/notifications.servi
 import { VenueScope } from '../../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../../venue/venue-scope.interceptor';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { WranglerHistoryService } from './wrangler-history.service';
 import { WranglerService } from './wrangler.service';
 
 type Scope = VenueScopedRequest['venueScope'];
@@ -31,6 +32,7 @@ export class WranglerController {
     private readonly prisma: PrismaService,
     private readonly wrangler: WranglerService,
     private readonly notifications: NotificationsService,
+    private readonly history: WranglerHistoryService,
   ) {}
 
   @RequireSubscription('active')
@@ -40,7 +42,8 @@ export class WranglerController {
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { id: true, name: true, timezone: true } });
     if (!venue) return null;
     const snapshot = await this.wrangler.getSnapshot(venue.id, venue.timezone);
-    return { venue: { _id: venue.id, name: venue.name }, ...snapshot };
+    const historicalPatterns = await this.history.getPatterns({ venueId: venue.id, timezone: venue.timezone, nowMs: snapshot.generatedAt, todayCovers: snapshot.summary.covers, todayReservations: snapshot.summary.reservations });
+    return { venue: { _id: venue.id, name: venue.name }, ...snapshot, patterns: [...snapshot.patterns, ...historicalPatterns].slice(0, 6) };
   }
 
   @RequireSubscription('active')
@@ -64,12 +67,7 @@ export class WranglerController {
       const snapshot = await this.wrangler.getSnapshot(scope.venueId, venue.timezone);
       if (snapshot.summary.openShifts <= 0) throw new BadRequestException('No open shifts currently need coverage');
       const count = snapshot.summary.openShifts;
-      await this.notifications.notifyStaff({
-        venueId: scope.venueId,
-        kind: 'wrangler_coverage',
-        title: 'Open shifts need coverage',
-        body: `${count} open shift${count === 1 ? '' : 's'} still need coverage. Check Venue Wrangler for available shifts.`,
-      });
+      await this.notifications.notifyStaff({ venueId: scope.venueId, kind: 'wrangler_coverage', title: 'Open shifts need coverage', body: `${count} open shift${count === 1 ? '' : 's'} still need coverage. Check Venue Wrangler for available shifts.` });
       return { ok: true, type: body.type, notified: 'staff', openShifts: count };
     }
 
