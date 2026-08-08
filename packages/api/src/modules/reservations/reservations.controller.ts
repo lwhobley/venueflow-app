@@ -84,6 +84,12 @@ class SaveReservationDto {
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
+  tableIds?: string[];
+
+  /** Legacy clients sent floor-table labels under this name. */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
   tableNumbers?: string[];
 
   @IsString()
@@ -473,6 +479,7 @@ export class ReservationsController {
       source: body.source,
       tags: body.tags,
       specialRequests: body.specialRequests,
+      tableIds: body.tableIds,
       tableNumbers: body.tableNumbers,
       phone: body.phone,
       email: body.email,

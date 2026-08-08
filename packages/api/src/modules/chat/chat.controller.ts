@@ -481,7 +481,7 @@ export class ChatController {
 
     const recent = await this.prisma.message.findMany({
       where: { conversationId: id },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
     });
     const messages = recent.slice().reverse();
@@ -559,26 +559,32 @@ export class ChatController {
 
     if (!text && !imageUrl) throw new BadRequestException('Message text or image is required');
 
-    const now = new Date();
-    const msg = await this.prisma.message.create({
-      data: {
-        conversationId: conv.id,
-        venueId: conv.venueId,
-        senderId: scope.profileId,
-        text,
-        shiftId: body.shiftId || null,
-        swapId: body.swapId || null,
-        imageUrl,
-        createdAt: now,
-      },
-    });
-
-    await this.prisma.conversation.update({
-      where: { id: conv.id },
-      data: {
-        lastMessageAt: now,
-        lastMessageText: (text || '📷 Image').slice(0, 80),
-      },
+    const msg = await this.prisma.$transaction(async (transaction) => {
+      // Lock the conversation so concurrent sends cannot commit an older
+      // preview after a newer message. The message and preview then succeed or
+      // roll back together.
+      await transaction.$executeRaw`SELECT 1 FROM "Conversation" WHERE "id" = ${conv.id} FOR UPDATE`;
+      const now = new Date();
+      const created = await transaction.message.create({
+        data: {
+          conversationId: conv.id,
+          venueId: conv.venueId,
+          senderId: scope.profileId,
+          text,
+          shiftId: body.shiftId || null,
+          swapId: body.swapId || null,
+          imageUrl,
+          createdAt: now,
+        },
+      });
+      await transaction.conversation.update({
+        where: { id: conv.id },
+        data: {
+          lastMessageAt: now,
+          lastMessageText: (text || '📷 Image').slice(0, 80),
+        },
+      });
+      return created;
     });
 
     return { _id: msg.id, id: msg.id };

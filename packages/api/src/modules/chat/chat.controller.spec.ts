@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatController } from './chat.controller';
 
 function makeController() {
-  const prisma = {
+  const prisma: any = {
     profile: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -37,8 +37,11 @@ function makeController() {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ id: 'img-created' }),
     },
-    $transaction: vi.fn().mockResolvedValue([]),
-  } as any;
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
+  };
+  prisma.$transaction = vi.fn((operation: any) => (
+    typeof operation === 'function' ? operation(prisma) : Promise.all(operation)
+  ));
 
   const mediaAccess = {
     createPath: vi.fn().mockImplementation(async (_kind: string, _id: string, _venueId: string, path: string) => `signed:${path}`),
@@ -380,6 +383,9 @@ describe('ChatController', () => {
       }),
     ]);
     expect(prisma.conversationRead.upsert).toHaveBeenCalled();
+    expect(prisma.message.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    }));
     expect(mediaAccess.createPath).toHaveBeenCalledWith('chat-image', 'img-1', 'venue-1', '/v1/chat/images/img-1');
   });
 
@@ -519,6 +525,8 @@ describe('ChatController', () => {
         lastMessageText: expect.stringContaining('Image'),
       }),
     }));
+    expect(prisma.$executeRaw).toHaveBeenCalledOnce();
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
   it('rejects invalid image references when sending messages', async () => {

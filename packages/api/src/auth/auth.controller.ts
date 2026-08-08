@@ -140,7 +140,7 @@ export class AuthController {
         // a valid credential can always clear an attacker-induced lockout.
         await assertWithinSharedRateLimit(this.prisma, `auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
         if (user) {
-          await this.recordFailedSignIn(user.id, user.failedSignInCount, user.lockedUntil);
+          await this.recordFailedSignIn(user.id);
         }
         throw new UnauthorizedException('Invalid email or password.');
       }
@@ -616,16 +616,25 @@ export class AuthController {
     };
   }
 
-  private async recordFailedSignIn(userId: string, failedSignInCount: number, lockedUntil: Date | null) {
-    const isLocked = lockedUntil && lockedUntil.getTime() > Date.now();
-    if (isLocked) return;
-    const nextCount = (lockedUntil && lockedUntil.getTime() <= Date.now() ? 0 : failedSignInCount) + 1;
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        failedSignInCount: nextCount >= MAX_FAILED_SIGN_INS ? 0 : nextCount,
-        lockedUntil: nextCount >= MAX_FAILED_SIGN_INS ? new Date(Date.now() + AUTH_RATE_LIMIT_WINDOW_MS) : null,
-      },
+  private async recordFailedSignIn(userId: string) {
+    await this.prisma.$transaction(async (transaction) => {
+      // Serialize failures for one account. A plain read/increment/write lets
+      // concurrent password attempts overwrite one another and bypass lockout.
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`auth-failed-sign-in:${userId}`}))`;
+      const current = await transaction.user.findUnique({
+        where: { id: userId },
+        select: { failedSignInCount: true, lockedUntil: true },
+      });
+      if (!current || (current.lockedUntil && current.lockedUntil.getTime() > Date.now())) return;
+
+      const nextCount = (current.lockedUntil ? 0 : current.failedSignInCount) + 1;
+      await transaction.user.update({
+        where: { id: userId },
+        data: {
+          failedSignInCount: nextCount >= MAX_FAILED_SIGN_INS ? 0 : nextCount,
+          lockedUntil: nextCount >= MAX_FAILED_SIGN_INS ? new Date(Date.now() + AUTH_RATE_LIMIT_WINDOW_MS) : null,
+        },
+      });
     });
   }
 

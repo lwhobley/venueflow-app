@@ -11,18 +11,18 @@
   },
   "scripts": {
     "build": "prisma generate && nest build",
-    "start": "node dist/main.js",
-    "start:dev": "nest start --watch",
-    "start:prod": "node dist/main.js",
-    "release": "prisma migrate deploy",
+    "start": "node scripts/assert-database-target.mjs && node dist/main.js",
+    "start:dev": "node scripts/assert-database-target.mjs && nest start --watch",
+    "start:prod": "node scripts/assert-database-target.mjs && node dist/main.js",
+    "release": "node scripts/assert-database-target.mjs && prisma migrate deploy",
     "test": "vitest run",
     "test:integration": "vitest run --config ../../vitest.integration.config.ts",
     "lint": "prisma generate && tsc --noEmit",
     "prisma:generate": "prisma generate",
-    "prisma:migrate:dev": "prisma migrate dev",
-    "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:push": "prisma db push",
-    "prisma:studio": "prisma studio"
+    "prisma:migrate:dev": "node scripts/assert-database-target.mjs && prisma migrate dev",
+    "prisma:migrate:deploy": "node scripts/assert-database-target.mjs && prisma migrate deploy",
+    "prisma:migrate:status": "node scripts/assert-database-target.mjs && prisma migrate status",
+    "prisma:studio": "node scripts/assert-database-target.mjs && prisma studio"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -39,9 +39,9 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "helmet": "^8.1.0",
+    "prisma": "^6.19.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2",
-    "prisma": "^6.19.0"
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.10",
