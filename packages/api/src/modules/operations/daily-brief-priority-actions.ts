@@ -1,9 +1,10 @@
 export type WranglerAction = {
   id: string;
-  type: 'NAVIGATE' | 'ACKNOWLEDGE';
+  type: 'NAVIGATE' | 'ACKNOWLEDGE' | 'REASSIGN_RESERVATION';
   label: string;
   route: '/reservations' | '/staff' | '/schedule' | '/bar-stock' | '/reports' | '/floor';
   requiresConfirmation: boolean;
+  payload?: Record<string, string | number | boolean | null>;
 };
 
 export type DailyBriefPriorityAction = {
