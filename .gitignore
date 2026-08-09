@@ -31,6 +31,9 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+# ...but the EAS Update code-signing certificate (public key) is meant to be
+# committed — only the private key stays out (see keys/ below).
+!certs/certificate.pem
 
 # local env files
 .env
@@ -46,6 +49,12 @@ yarn-error.*
 
 # Generated auth keys (contain a private key — never commit)
 scripts/.auth-keys.json
+
+# EAS Update code-signing keys (private key must never be committed).
+# The certificate in certs/ IS meant to be committed. Back up
+# keys/private-key.pem somewhere safe (KMS/password manager) — publishes
+# require it: `eas update --private-key-path keys/private-key.pem`.
+keys/
 
 # Local tooling artifacts (Claude Code, Codex, agent runners)
 .claude/
