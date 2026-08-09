@@ -6,9 +6,7 @@ import { createHash } from 'crypto';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { enterTenant } from '../prisma/tenant-context';
-
-// Enforced by default (fail-closed); set to 'false' to roll back instantly.
-const TENANT_ISOLATION_ENFORCED = process.env['TENANT_ISOLATION_ENFORCED'] !== 'false';
+import { tenantIsolationEnforced } from '../prisma/tenant-isolation-config';
 
 export type AuthUser = {
   sub: string;
@@ -166,7 +164,7 @@ export class AuthGuard implements CanActivate {
     // Never bind the raw header/JWT claim. A tenant context is derived only
     // from the live membership row loaded above.
     const tenantVenueId = resolvedUser.venueId;
-    if (TENANT_ISOLATION_ENFORCED && tenantVenueId) {
+    if (tenantIsolationEnforced() && tenantVenueId) {
       enterTenant(tenantVenueId);
     }
 
