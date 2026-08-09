@@ -27,6 +27,11 @@ function makeController() {
       create: vi.fn().mockResolvedValue({}),
     },
     session: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    team: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({ id: 'team-1' }),
+      update: vi.fn(),
+    },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
   };
   // The controller passes the same client through as `tx`; reuse the mock so
@@ -125,7 +130,10 @@ describe('AppStaffController', () => {
 
       const result = await controller.listVenueStaff(user);
 
-      expect(prisma.profile.findMany).toHaveBeenCalledWith({ where: { venueId: 'venue-1' }, orderBy: { fullName: 'asc' } });
+      expect(prisma.profile.findMany).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1', OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+        orderBy: { fullName: 'asc' },
+      });
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({ email: 'staff@example.com' });
     });
@@ -171,7 +179,7 @@ describe('AppStaffController', () => {
       await controller.listOnboardingTasks(user, 'staff-1');
 
       expect(prisma.profile.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { venueId: 'venue-1', id: 'staff-1' },
+        where: { venueId: 'venue-1', id: 'staff-1', OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
         take: 1,
       }));
     });
@@ -346,7 +354,7 @@ describe('AppStaffController', () => {
       expect(prisma.profile.update).toHaveBeenCalled();
     });
 
-    it('invalidates sessions when a role change occurs on update', async () => {
+    it('preserves multi-venue sessions when a live role changes', async () => {
       const { controller, prisma, profiles } = makeController();
       profiles.requireManagerProfile.mockResolvedValue(ownerViewer);
       prisma.profile.findFirst.mockResolvedValue(profileRow({ id: 'staff-2', role: 'staff', userId: 'staff-2-user' }));
@@ -356,7 +364,7 @@ describe('AppStaffController', () => {
         venueId: 'venue-1', staffId: 'staff-2', email: 'staff@example.com', fullName: 'Staff Person', role: 'manager', jobTitle: 'Manager',
       } as any);
 
-      expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'staff-2-user' } });
+      expect(prisma.session.deleteMany).not.toHaveBeenCalled();
     });
 
     it('does not invalidate sessions when the role is unchanged', async () => {
@@ -529,20 +537,32 @@ describe('AppStaffController', () => {
       await expect(controller.deactivateVenueStaff(user, 'other-manager')).rejects.toThrow('You cannot modify this staff member');
     });
 
-    it('clears venueId and invalidates sessions on successful deactivation', async () => {
+    it('revokes membership and invalidates sessions when no active venue remains', async () => {
       const { controller, prisma, profiles } = makeController();
       profiles.requireManagerProfile.mockResolvedValue(managerViewer);
       prisma.profile.findFirst.mockResolvedValue(profileRow({ id: 'staff-2', userId: 'staff-2-user' }));
-      prisma.profile.update.mockResolvedValue(profileRow({ id: 'staff-2', venueId: null }));
+      prisma.profile.count.mockResolvedValue(0);
+      prisma.profile.update.mockResolvedValue(profileRow({ id: 'staff-2', membershipStatus: 'revoked' }));
 
-      const result = await controller.deactivateVenueStaff(user, 'staff-2');
+      await controller.deactivateVenueStaff(user, 'staff-2');
 
-      expect(prisma.profile.update).toHaveBeenCalledWith({ where: { id: 'staff-2' }, data: { venueId: null } });
+      expect(prisma.profile.update).toHaveBeenCalledWith({ where: { id: 'staff-2' }, data: { membershipStatus: 'revoked' } });
       expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'staff-2-user' } });
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ action: 'staff_deactivated' }),
       }));
-      expect(result.venueId).toBe(null);
+    });
+
+    it('preserves sessions when the user still has another active venue membership', async () => {
+      const { controller, prisma, profiles } = makeController();
+      profiles.requireManagerProfile.mockResolvedValue(managerViewer);
+      prisma.profile.findFirst.mockResolvedValue(profileRow({ id: 'staff-2', userId: 'staff-2-user' }));
+      prisma.profile.count.mockResolvedValue(1);
+      prisma.profile.update.mockResolvedValue(profileRow({ id: 'staff-2', membershipStatus: 'revoked' }));
+
+      await controller.deactivateVenueStaff(user, 'staff-2');
+
+      expect(prisma.session.deleteMany).not.toHaveBeenCalled();
     });
   });
 

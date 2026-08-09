@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
@@ -30,7 +30,7 @@ export type AuthenticatedRequest = Request & {
 
 // Session lookup queries the database directly to ensure instant revocation
 // across all replicas when a session is invalidated (e.g. logout).
-// Neon connection pooling handles this efficiently.
+// The Supabase Postgres pooler handles this efficiently.
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -88,11 +88,16 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 
-    const requestedVenueId = (request.headers?.['x-venue-id'] as string | undefined) || payload.venueId || undefined;
-    const liveProfile = await this.prisma.profile.findFirst({
+    const rawVenueHeader = request.headers?.['x-venue-id'];
+    const headerVenueId = typeof rawVenueHeader === 'string' && rawVenueHeader.trim()
+      ? rawVenueHeader.trim()
+      : undefined;
+    const requestedVenueId = headerVenueId || payload.venueId || undefined;
+    let liveProfile = await this.prisma.profile.findFirst({
       where: {
         userId: payload.sub,
         ...(requestedVenueId ? { venueId: requestedVenueId } : {}),
+        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
       },
       select: {
         id: true,
@@ -111,6 +116,32 @@ export class AuthGuard implements CanActivate {
       },
       orderBy: { createdAt: 'asc' },
     });
+    if (!liveProfile && headerVenueId) {
+      throw new ForbiddenException('You do not have an active membership at the requested venue.');
+    }
+    // A stale JWT may reference a venue the user has since left. With no
+    // explicit venue request, fall back only to another verified active
+    // membership so normal account recovery and venue switching remain usable.
+    if (!liveProfile && !headerVenueId && requestedVenueId) {
+      liveProfile = await this.prisma.profile.findFirst({
+        where: {
+          userId: payload.sub,
+          venueId: { not: null },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          allAccess: true,
+          trialEndsAt: true,
+          venueId: true,
+          venue: { select: { name: true, subscriptionStatus: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
     // Privilege claims come only from the live profile. When the profile row is
     // gone, clear role/allAccess/profileId rather than trusting stale JWT fields
     // (venueId already cleared to null in that case).
@@ -130,10 +161,11 @@ export class AuthGuard implements CanActivate {
     request.user = resolvedUser;
 
     // Bind tenant context for the rest of the request. Inert unless the env
-    // flag is on AND the token carries a venueId (auth flows, webhooks, and
+    // flag is on AND a verified active profile carries a venueId (auth flows, webhooks, and
     // venueless system tasks legitimately have none and remain unscoped).
-    // Multi-venue: prefer X-Venue-Id header over JWT-embedded venueId.
-    const tenantVenueId = requestedVenueId || resolvedUser.venueId;
+    // Never bind the raw header/JWT claim. A tenant context is derived only
+    // from the live membership row loaded above.
+    const tenantVenueId = resolvedUser.venueId;
     if (TENANT_ISOLATION_ENFORCED && tenantVenueId) {
       enterTenant(tenantVenueId);
     }

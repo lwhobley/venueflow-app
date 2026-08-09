@@ -56,7 +56,7 @@ export class SafeWranglerOperatorService {
       const id = this.text(args.reservationId, 'reservationId is required');
       const old = await this.prisma.reservation.findFirst({ where: { id, venueId: input.venueId, deletedAt: null } });
       if (!old) throw new NotFoundException('Reservation no longer exists');
-      const status = args.status == null ? old.status : this.text(args.status, 'Invalid reservation status') as any;
+      const status = args.status == null ? old.status : this.reservationStatus(args.status);
       const saved = await this.reservations.saveReservation({
         venueId: input.venueId, reservationId: old.id, guestName: old.guestName,
         partySize: args.partySize == null ? old.partySize : this.positiveInt(args.partySize, 'partySize'),
@@ -108,4 +108,11 @@ export class SafeWranglerOperatorService {
   private positiveInt(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 1) throw new BadRequestException(`${field} must be a positive whole number`); return n; }
   private minute(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > 1440) throw new BadRequestException(`${field} must be between 0 and 1440`); return n; }
   private date(value: unknown, message: string) { const d = new Date(String(value ?? '')); if (Number.isNaN(d.getTime())) throw new BadRequestException(message); return d; }
+  private reservationStatus(value: unknown) {
+    const status = this.text(value, 'Invalid reservation status');
+    if (!['requested', 'confirmed', 'checked_in', 'seated', 'completed', 'no_show', 'cancelled'].includes(status)) {
+      throw new BadRequestException('Invalid reservation status');
+    }
+    return status;
+  }
 }

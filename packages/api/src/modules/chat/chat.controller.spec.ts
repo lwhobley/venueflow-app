@@ -202,7 +202,7 @@ describe('ChatController', () => {
       },
     ]);
     expect(prisma.profile.findMany).toHaveBeenCalledWith({
-      where: { venueId: 'venue-1', id: { not: 'staff-1' } },
+      where: { venueId: 'venue-1', id: { not: 'staff-1' }, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
       orderBy: { fullName: 'asc' },
     });
   });

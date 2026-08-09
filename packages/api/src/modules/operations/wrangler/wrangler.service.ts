@@ -69,6 +69,7 @@ export class WranglerService {
     const startsAt = reservation.reservationTime;
     const endsAt = new Date(startsAt.getTime() + reservation.durationMinutes * 60_000);
     await withSerializableRetry(this.prisma, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-holds:${venueId}`}))`;
       const currentState = await tx.tableState.findFirst({ where: { venueId, tableId: table.id }, select: { status: true } });
       if (!currentState || currentState.status !== 'available') throw new ConflictException(`${table.label} is no longer available`);
       const conflict = await tx.tableAssignment.findFirst({ where: { venueId, tableId: table.id, releasedAt: null, startsAt: { lt: endsAt }, endsAt: { gt: startsAt }, NOT: { reservationId: reservation.id } }, select: { id: true } });

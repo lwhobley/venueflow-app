@@ -72,7 +72,7 @@ export class StaffController {
   async listVenueStaff(@VenueScope() scope: Scope) {
     if (!scope || !isAdminRole(scope.role)) return [];
     const staff = await this.prisma.profile.findMany({
-      where: { venueId: scope.venueId },
+      where: { venueId: scope.venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
     });
     return staff
       .sort((a, b) => a.fullName.localeCompare(b.fullName))
@@ -86,7 +86,9 @@ export class StaffController {
       throw new ForbiddenException('Not authorized');
     }
 
-    const existing = await this.prisma.profile.findMany({ where: { venueId: scope.venueId } });
+    const existing = await this.prisma.profile.findMany({
+      where: { venueId: scope.venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+    });
     const member =
       existing.find((item) => item.email.toLowerCase() === body.email.toLowerCase()) ?? null;
 

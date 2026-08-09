@@ -9,7 +9,9 @@ import { canManageRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { syncTeamMemberCount } from '../../common/team-sync';
 import { PrismaService } from '../../prisma/prisma.service';
+import { runWithoutTenant } from '../../prisma/tenant-context';
 import { mapProfile } from './app-mappers';
 import { ProfileService } from './profile.service';
 import { StaffImportParserService } from './staff-import-parser.service';
@@ -128,7 +130,10 @@ export class AppStaffController {
   async listVenueStaff(@CurrentUser() user: AuthUser) {
     const profile = await this.profiles.requireManagerProfile(user);
     return this.prisma.profile
-      .findMany({ where: { venueId: profile.venueId! }, orderBy: { fullName: 'asc' } })
+      .findMany({
+        where: { venueId: profile.venueId!, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+        orderBy: { fullName: 'asc' },
+      })
       .then((rows) => rows.map((row) => mapProfile(row)));
   }
 
@@ -138,7 +143,11 @@ export class AppStaffController {
     const viewer = await this.profiles.requireManagerProfile(user);
     const venueId = viewer.venueId!;
     const profiles = await this.prisma.profile.findMany({
-      where: { venueId, ...(profileId ? { id: profileId } : {}) },
+      where: {
+        venueId,
+        ...(profileId ? { id: profileId } : {}),
+        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+      },
       select: { id: true, fullName: true, email: true, role: true, jobTitle: true },
       orderBy: { fullName: 'asc' },
       take: profileId ? 1 : 200,
@@ -307,14 +316,10 @@ export class AppStaffController {
       if (existing) {
         const isDemoting = isOwnerOrAdminRole(existing.role) && !isOwnerOrAdminRole(body.role);
         await this.assertCanManageLegacyStaffTarget(viewer, existing, isDemoting, tx);
-        const roleChanged = existing.role !== body.role || existing.venueId !== body.venueId;
         created = await tx.profile.update({
           where: { id: existing.id },
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         });
-        if (roleChanged && existing.userId) {
-          await tx.session.deleteMany({ where: { userId: existing.userId } });
-        }
       } else {
         created = await tx.profile.create({
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
@@ -373,11 +378,18 @@ export class AppStaffController {
     const viewer = await this.profiles.requireManagerProfile(user);
     const staff = await this.prisma.profile.findFirst({ where: { id: staffId, venueId: viewer.venueId! } });
     if (!staff) throw new NotFoundException('Staff member not found');
-    const updated = await this.prisma.$transaction(async (tx) => {
+    const updated = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
       await this.assertCanManageLegacyStaffTarget(viewer, staff, true, tx);
-      const u = await tx.profile.update({ where: { id: staff.id }, data: { venueId: null } });
+      const u = await tx.profile.update({ where: { id: staff.id }, data: { membershipStatus: 'revoked' } });
       if (staff.userId) {
-        await tx.session.deleteMany({ where: { userId: staff.userId } });
+        const activeElsewhere = await tx.profile.count({
+          where: {
+            userId: staff.userId,
+            venueId: { not: viewer.venueId! },
+            OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+          },
+        });
+        if (activeElsewhere === 0) await tx.session.deleteMany({ where: { userId: staff.userId } });
       }
       await this.writeAuditLog(
         {
@@ -392,8 +404,9 @@ export class AppStaffController {
         },
         tx,
       );
+      await syncTeamMemberCount(tx, viewer.venueId);
       return u;
-    });
+    }));
     return mapProfile(updated);
   }
 

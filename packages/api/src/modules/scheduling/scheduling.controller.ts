@@ -1466,7 +1466,7 @@ export class SchedulingController {
 
   private async mapSwaps(venueId: string, swaps: Array<{ id: string; status: string; note: string | null; requesterProfileId: string; targetProfileId: string; requesterShiftId: string; targetShiftId: string | null; createdAt: Date }>, meId: string | null) {
     const [staff, shifts] = await Promise.all([
-      this.prisma.profile.findMany({ where: { venueId } }),
+      this.prisma.profile.findMany({ where: { venueId, OR: ACTIVE_MEMBERSHIP } }),
       this.prisma.scheduleShift.findMany({ where: { venueId } }),
     ]);
     const nameById = new Map(staff.map((member) => [member.id, member.fullName]));

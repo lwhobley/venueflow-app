@@ -1009,7 +1009,11 @@ export class BarInventoryController {
   }
 
   private async getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({ where: { userId: user.sub }, include: { venue: true }, orderBy: { createdAt: 'asc' } });
+    return this.prisma.profile.findFirst({
+      where: { userId: user.sub, ...(user.venueId ? { venueId: user.venueId } : {}) },
+      include: { venue: true },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
   private async requireManagerProfile(user: AuthUser) {
