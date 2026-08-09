@@ -86,11 +86,26 @@ export default function VenueSettingsScreen() {
     }
   };
 
+  // Venue switching is not a manager-only operation: render the header and
+  // switcher for everyone and gate only the editing cards below. Otherwise a
+  // user who is staff in the active venue has no path back to a venue they
+  // manage.
   if (!canManage) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg }}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <IconButton icon="arrow-left" onPress={() => router.back()} />
+          <View>
+            <Text style={{ ...type.title, color: colors.charcoal }}>{t('venueSettings.title')}</Text>
+            <Text style={{ color: colors.muted }}>{t('venueSettings.subtitle')}</Text>
+          </View>
+        </View>
+        <VenueSwitcher />
         <Text style={{ color: colors.muted }}>{t('venueSettings.onlyManagersCanEdit')}</Text>
-      </View>
+      </ScrollView>
     );
   }
 

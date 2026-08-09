@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Button, Card, Chip, Dialog, Portal, Text, TextInput, ActivityIndicator } from 'react-native-paper';
+import { Button, Card, Chip, Dialog, Portal, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
+import { ApiError } from '../lib/api-client';
 import { useMutation } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import { colors, spacing, type } from '../lib/theme';
@@ -13,7 +14,6 @@ export function VenueSwitcher() {
   const activeVenue = useAuthStore((state: AuthState) => state.venue);
   const venues = useAuthStore((state: AuthState) => state.venues);
   const switchVenueAction = useAuthStore((state: AuthState) => state.switchVenue);
-  const setSession = useAuthStore((state: AuthState) => state.setSession);
   const user = useAuthStore((state: AuthState) => state.user);
 
   const switchVenueMutation = useMutation(api.app.switchVenue);
@@ -81,10 +81,10 @@ export function VenueSwitcher() {
       setRegisterVisible(false);
       setBusinessName('');
     } catch (e: any) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('Multi-Venue Pro') || msg.includes('402') || msg.includes('subscription')) {
+      if (e instanceof ApiError && e.status === 402) {
         setError('Multi-Venue Pro subscription ($399/mo) required to register additional venues.');
       } else {
+        const msg = e instanceof Error ? e.message : String(e);
         setError(msg || 'Failed to register new venue.');
       }
     } finally {
