@@ -684,15 +684,21 @@ export class ChatController {
 
     const s3Key = await this.s3ImageService.upload(data, mime, scope.venueId);
 
-    const image = await this.prisma.chatImage.create({
-      data: {
-        venueId: scope.venueId,
-        mimeType: mime,
-        s3Key,
-        uploadedBy: scope.profileId,
-      },
-      select: { id: true },
-    });
+    let image: { id: string };
+    try {
+      image = await this.prisma.chatImage.create({
+        data: {
+          venueId: scope.venueId,
+          mimeType: mime,
+          s3Key,
+          uploadedBy: scope.profileId,
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      await this.s3ImageService.delete(s3Key).catch(() => undefined);
+      throw error;
+    }
 
     // Relative path so the stored value stays portable across environments;
     // the client resolves it against its configured API base when rendering.

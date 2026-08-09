@@ -50,6 +50,7 @@ function makeController() {
 
   const s3ImageService = {
     upload: vi.fn().mockResolvedValue('uploads/chat-image.webp'),
+    delete: vi.fn().mockResolvedValue(undefined),
     getPresignedUrl: vi.fn().mockResolvedValue('https://signed.example/image.webp'),
   } as any;
 
@@ -594,6 +595,20 @@ describe('ChatController', () => {
       mimeType: 'image/png',
     })).resolves.toEqual({ imageUrl: 'signed:/v1/chat/images/img-1' });
     expect(mediaAccess.createPath).toHaveBeenCalledWith('chat-image', 'img-1', 'venue-1', '/v1/chat/images/img-1');
+  });
+
+  it('removes an uploaded chat image when its database row cannot be created', async () => {
+    const { controller, prisma, s3ImageService } = makeController();
+    const databaseError = new Error('database unavailable');
+    prisma.chatImage.create.mockRejectedValue(databaseError);
+    s3ImageService.upload.mockResolvedValue('uploads/orphan.png');
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    await expect(controller.uploadImage(staffScope, {
+      dataBase64: pngBytes.toString('base64'),
+      mimeType: 'image/png',
+    })).rejects.toBe(databaseError);
+    expect(s3ImageService.delete).toHaveBeenCalledWith('uploads/orphan.png');
   });
 
   it('validates chat image access tokens before redirecting to the presigned url', async () => {

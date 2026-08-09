@@ -361,6 +361,61 @@ describe('AppBillingController', () => {
       await expect(controller.syncAppleSubscription(user, allowedBody as any)).rejects.toThrow(BadRequestException);
     });
 
+    it('rejects an active entitlement that belongs to a different product', async () => {
+      const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: 'rc_key' });
+      profiles.requireBillingProfile.mockResolvedValue(billingViewer);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          subscriber: {
+            entitlements: {
+              pro: {
+                product_identifier: 'com.venuewrangler.monthly',
+                expires_date: '2027-01-01T00:00:00Z',
+              },
+            },
+            subscriptions: {},
+          },
+        }),
+      }));
+
+      await expect(controller.syncAppleSubscription(user, {
+        productId: 'com.venuewrangler.multivenue.399',
+        entitlementId: 'pro',
+      } as any)).rejects.toThrow('RevenueCat entitlement does not match the requested Apple subscription product.');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('derives the multi-venue plan only from the RevenueCat-verified product', async () => {
+      const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: 'rc_key' });
+      profiles.requireBillingProfile.mockResolvedValue(billingViewer);
+      profiles.getProfile.mockResolvedValue({ venueId: 'venue-1' });
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          subscriber: {
+            entitlements: {
+              multi_venue: {
+                product_identifier: 'com.venuewrangler.multivenue.399',
+                expires_date: '2027-01-01T00:00:00Z',
+              },
+            },
+            subscriptions: {},
+          },
+        }),
+      }));
+
+      await controller.syncAppleSubscription(user, {
+        productId: 'com.venuewrangler.multivenue.399',
+        entitlementId: 'multi_venue',
+      } as any);
+
+      expect(prisma.subscription.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ planId: 'venueflow_multi_venue_5', priceCents: 39900 }),
+      }));
+    });
+
     it('creates a new subscription row for an active entitlement, scoped to the caller venue', async () => {
       const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: 'rc_key' });
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);

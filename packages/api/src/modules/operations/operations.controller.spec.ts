@@ -67,6 +67,7 @@ function makeController() {
       findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   } as any;
   const mediaAccess = {
@@ -75,6 +76,7 @@ function makeController() {
   } as any;
   const s3ImageService = {
     upload: vi.fn().mockResolvedValue('s3-key-1'),
+    delete: vi.fn().mockResolvedValue(undefined),
     getPresignedUrl: vi.fn().mockResolvedValue('https://signed.example/img.jpg'),
   } as any;
   const executionAutopilot = { ensureWorkspace: vi.fn().mockResolvedValue({ id: 'workspace-1' }) } as any;
@@ -923,8 +925,8 @@ describe('OperationsController', () => {
       const result = await controller.completeChecklistItem(managerUser, 'comp-1', {});
 
       expect(s3ImageService.upload).not.toHaveBeenCalled();
-      expect(prisma.checklistCompletion.update).toHaveBeenCalledWith({
-        where: { id: 'comp-1' },
+      expect(prisma.checklistCompletion.updateMany).toHaveBeenCalledWith({
+        where: { id: 'comp-1', venueId: 'venue-1', status: 'pending' },
         data: expect.objectContaining({ status: 'done', completedBy: 'profile-1', completedByName: 'Morgan Manager' }),
       });
       expect(result.hasPhoto).toBe(false);
@@ -948,11 +950,42 @@ describe('OperationsController', () => {
       });
 
       expect(s3ImageService.upload).toHaveBeenCalledWith(expect.any(Buffer), 'image/jpeg', 'venue-1');
-      expect(prisma.checklistCompletion.update).toHaveBeenCalledWith({
-        where: { id: 'comp-1' },
+      expect(prisma.checklistCompletion.updateMany).toHaveBeenCalledWith({
+        where: { id: 'comp-1', venueId: 'venue-1', status: 'pending' },
         data: expect.objectContaining({ photoKey: 's3-key-1' }),
       });
       expect(result.hasPhoto).toBe(true);
+    });
+
+    it('removes the uploaded photo when another request completes the task first', async () => {
+      const { controller, prisma, s3ImageService } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      prisma.checklistCompletion.findFirst.mockResolvedValue({
+        id: 'comp-1', status: 'pending', templateItem: { requiresPhoto: true },
+      });
+      prisma.checklistCompletion.updateMany.mockResolvedValue({ count: 0 });
+      const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02, 0x03]);
+
+      await expect(controller.completeChecklistItem(managerUser, 'comp-1', {
+        photoBase64: jpegBytes.toString('base64'), photoMimeType: 'image/jpeg',
+      })).rejects.toThrow('This task is already marked done for today');
+      expect(s3ImageService.delete).toHaveBeenCalledWith('s3-key-1');
+    });
+
+    it('removes the uploaded photo when the completion update fails', async () => {
+      const { controller, prisma, s3ImageService } = makeController();
+      const databaseError = new Error('database unavailable');
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      prisma.checklistCompletion.findFirst.mockResolvedValue({
+        id: 'comp-1', status: 'pending', templateItem: { requiresPhoto: true },
+      });
+      prisma.checklistCompletion.updateMany.mockRejectedValue(databaseError);
+      const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02, 0x03]);
+
+      await expect(controller.completeChecklistItem(managerUser, 'comp-1', {
+        photoBase64: jpegBytes.toString('base64'), photoMimeType: 'image/jpeg',
+      })).rejects.toBe(databaseError);
+      expect(s3ImageService.delete).toHaveBeenCalledWith('s3-key-1');
     });
   });
 

@@ -223,7 +223,7 @@ describe('SchedulingController', () => {
     it('scopes the manager schedule queries to the caller venue', async () => {
       const { controller, prisma } = makeController();
 
-      await controller.getManagerSchedule(managerScope);
+      await controller.getManagerSchedule(managerScope, '2026-08-02');
 
       expect(prisma.venue.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'venue-1' } });
       expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1', weekStart: '2026-08-02' }) }));
@@ -764,7 +764,7 @@ describe('SchedulingController', () => {
       });
       assignments.applyTemplate.mockResolvedValue({ added: 1 });
 
-      const result = await controller.applyScheduleTemplate(managerScope, 'tmpl-1', { replace: true });
+      const result = await controller.applyScheduleTemplate(managerScope, 'tmpl-1', { replace: true, weekStart: '2026-08-02' });
 
       expect(assignments.applyTemplate).toHaveBeenCalledWith({
         venueId: 'venue-1',
@@ -786,7 +786,7 @@ describe('SchedulingController', () => {
       const { controller, assignments } = makeController();
       assignments.copyDayShifts.mockResolvedValue({ added: 3 });
 
-      const result = await controller.copyDayShifts(managerScope, { fromDay: 1, toDays: [2, 3] });
+      const result = await controller.copyDayShifts(managerScope, { weekStart: '2026-08-02', fromDay: 1, toDays: [2, 3] });
 
       expect(assignments.copyDayShifts).toHaveBeenCalledWith({ venueId: 'venue-1', weekStart: '2026-08-02', fromDay: 1, toDays: [2, 3] });
       expect(result).toEqual({ added: 3 });
@@ -808,7 +808,7 @@ describe('SchedulingController', () => {
       const { controller, assignments } = makeController();
       assignments.copyDayShifts.mockResolvedValue({ added: 1 });
 
-      await controller.copyDayShifts(managerScope, { fromDay: 1, toDays: [2, 2] });
+      await controller.copyDayShifts(managerScope, { weekStart: '2026-08-02', fromDay: 1, toDays: [2, 2] });
 
       expect(assignments.copyDayShifts).toHaveBeenCalledWith({ venueId: 'venue-1', weekStart: '2026-08-02', fromDay: 1, toDays: [2] });
     });

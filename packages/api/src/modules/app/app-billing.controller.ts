@@ -216,9 +216,9 @@ export class AppBillingController {
     }
     const status: SubscriptionStatus = 'active';
     const now = new Date();
-    const isMulti = body.productId === 'com.venuewrangler.multivenue.399' || body.entitlementId === 'multi_venue';
+    const isMulti = verified.productId === 'com.venuewrangler.multivenue.399';
     const priceCents = isMulti ? 39900 : 9999;
-    const planId = isMulti ? 'venueflow_multi_venue_5' : body.productId;
+    const planId = isMulti ? 'venueflow_multi_venue_5' : verified.productId;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`billing:${profile.venueId!}`}))`;
@@ -307,9 +307,13 @@ export class AppBillingController {
     const subscriber = json?.subscriber ?? {};
     const entitlements = subscriber.entitlements ?? {};
     const subscriptions = subscriber.subscriptions ?? {};
-    const allowedEntitlements = new Set(this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro'));
+    const allowedEntitlements = new Set(this.csvEnv('REVENUECAT_ALLOWED_ENTITLEMENTS', 'pro,multi_venue'));
+    const requestedEntitlement = entitlementId ? entitlements[entitlementId] : undefined;
+    if (requestedEntitlement && requestedEntitlement.product_identifier !== productId) {
+      throw new BadRequestException('RevenueCat entitlement does not match the requested Apple subscription product.');
+    }
     const matchingEntitlement = entitlementId
-      ? entitlements[entitlementId]
+      ? requestedEntitlement
       : Object.entries(entitlements).find(([key, entitlement]: [string, any]) =>
           allowedEntitlements.has(key) && entitlement?.product_identifier === productId,
         )?.[1];
@@ -321,7 +325,7 @@ export class AppBillingController {
       throw new BadRequestException('No active RevenueCat entitlement found for this Apple subscription.');
     }
 
-    return { currentPeriodStart: purchasedAt, currentPeriodEnd: expiresAt };
+    return { productId, currentPeriodStart: purchasedAt, currentPeriodEnd: expiresAt };
   }
 
   private csvEnv(key: string, fallback: string): string[] {

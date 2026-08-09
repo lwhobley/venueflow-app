@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { AppController } from './app.controller';
 import { ProfileService } from './profile.service';
+import { getTenantVenueId, runWithTenant } from '../../prisma/tenant-context';
 
 vi.mock('../../common/rate-limit', () => ({
   assertWithinSharedRateLimit: vi.fn().mockResolvedValue(undefined),
@@ -126,6 +127,28 @@ describe('AppController redeem-my-invite', () => {
 });
 
 describe('AppController multi-venue invariants', () => {
+  it('clears the current tenant only while verifying membership in the target venue', async () => {
+    const targetProfile = {
+      id: 'profile-b', userId: 'user-1', venueId: 'venue-b', role: 'owner', allAccess: false,
+      membershipStatus: 'active', fullName: 'Owner Olivia', email: 'owner@example.com', jobTitle: 'Owner',
+      venue: { id: 'venue-b', name: 'Venue B', latitude: 1, longitude: 2, geofenceRadiusM: 150 },
+    };
+    const profiles = {
+      requireVenueProfile: vi.fn(async () => {
+        expect(getTenantVenueId()).toBeUndefined();
+        return targetProfile;
+      }),
+      isEmailVerified: vi.fn().mockResolvedValue(true),
+      listUserVenues: vi.fn().mockResolvedValue([{ id: 'venue-b', name: 'Venue B', role: 'owner', profileId: 'profile-b' }]),
+    };
+    const controller = new AppController({} as any, {} as any, profiles as any);
+
+    const result = await runWithTenant('venue-a', () => controller.switchVenue({ sub: 'user-1' } as any, { venueId: 'venue-b' }));
+
+    expect(profiles.requireVenueProfile).toHaveBeenCalledWith(expect.objectContaining({ sub: 'user-1' }), 'venue-b');
+    expect(result).toMatchObject({ profile: { venueId: 'venue-b' }, venue: { id: 'venue-b' } });
+  });
+
   it('serializes venue registration by user and checks the cap under that lock', async () => {
     const prisma: any = {
       $executeRaw: vi.fn().mockResolvedValue(undefined),
