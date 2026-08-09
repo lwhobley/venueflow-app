@@ -1,6 +1,10 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { tenantIsolationExtension } from './tenant-isolation.extension';
+import { tenantIsolationEnforced } from './tenant-isolation-config';
+
+export const DEFAULT_DATABASE_POOL_SIZE = 5;
+export const DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS = 10;
 
 /**
  * Returns true when the tenant-isolation Prisma extension should be applied.
@@ -11,19 +15,30 @@ import { tenantIsolationExtension } from './tenant-isolation.extension';
  * TENANT_ISOLATION_ENFORCED=false only to roll back instantly if the
  * extension itself is suspected of causing a production issue.
  */
-function tenantIsolationEnforced(): boolean {
-  return process.env['TENANT_ISOLATION_ENFORCED'] !== 'false';
+export function databasePoolSize(raw = process.env['DATABASE_POOL_SIZE']): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_DATABASE_POOL_SIZE;
+}
+
+/** Add conservative Prisma pool controls without overriding an operator value. */
+export function resolveDatabaseUrl(url = process.env['DATABASE_URL']): string | undefined {
+  if (!url) return undefined;
+  const params: Array<[string, string]> = [];
+  if (!/(?:[?&])connection_limit=/i.test(url)) {
+    params.push(['connection_limit', String(databasePoolSize())]);
+  }
+  if (!/(?:[?&])pool_timeout=/i.test(url)) {
+    params.push(['pool_timeout', String(DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS)]);
+  }
+  if (params.length === 0) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}${params.map(([key, value]) => `${key}=${value}`).join('&')}`;
 }
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
-    const poolSize = parseInt(process.env['DATABASE_POOL_SIZE'] ?? '20', 10) || 20;
-    const url = process.env['DATABASE_URL'];
-    const needsPoolParam = url && !url.includes('connection_limit');
-    const resolvedUrl = needsPoolParam
-      ? `${url}${url.includes('?') ? '&' : '?'}connection_limit=${poolSize}`
-      : url;
+    const resolvedUrl = resolveDatabaseUrl();
     super({
       ...(resolvedUrl ? { datasourceUrl: resolvedUrl } : {}),
       log: process.env['NODE_ENV'] === 'production' ? ['error', 'warn'] : ['error', 'warn', 'query'],
