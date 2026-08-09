@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { getTenantVenueId, runWithoutTenant } from '../prisma/tenant-context';
 import { AuthGuard } from './auth.guard';
 
-function makeContext(token: string) {
+function makeContext(token: string, venueId?: string) {
   const request = {
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${token}`, ...(venueId ? { 'x-venue-id': venueId } : {}) },
   };
   return {
     switchToHttp: () => ({ getRequest: () => request }),
@@ -96,6 +97,17 @@ describe('AuthGuard', () => {
       role: undefined,
       allAccess: false,
       venueId: null,
+    });
+  });
+
+  it('rejects an explicit venue without an active membership and never binds it', async () => {
+    const { guard } = makeGuard({ profile: null });
+
+    await runWithoutTenant(async () => {
+      await expect(guard.canActivate(makeContext('token-1', 'venue-foreign'))).rejects.toThrow(
+        'You do not have an active membership at the requested venue.',
+      );
+      expect(getTenantVenueId()).toBeUndefined();
     });
   });
 

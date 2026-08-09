@@ -3,6 +3,7 @@ import { canManageVenue } from '../../auth/roles';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isActiveMembership } from '../../common/membership';
 import { PrismaService } from '../../prisma/prisma.service';
+import { runWithoutTenant } from '../../prisma/tenant-context';
 
 /**
  * Shared profile/venue resolution for the /v1/app routes. Extracted verbatim
@@ -19,9 +20,10 @@ export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
   getProfile(user: AuthUser, venueId?: string | null) {
-    if (venueId) {
+    const resolvedVenueId = venueId ?? user.venueId;
+    if (resolvedVenueId) {
       return this.prisma.profile.findFirst({
-        where: { userId: user.sub, venueId },
+        where: { userId: user.sub, venueId: resolvedVenueId },
         include: { venue: true },
       });
     }
@@ -35,7 +37,7 @@ export class ProfileService {
 
   /** Return all venues (with role) that a user belongs to. */
   async listUserVenues(userId: string) {
-    const profiles = await this.prisma.profile.findMany({
+    const profiles = await runWithoutTenant(() => this.prisma.profile.findMany({
       where: {
         userId,
         venueId: { not: null },
@@ -43,7 +45,7 @@ export class ProfileService {
       },
       include: { venue: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'asc' },
-    });
+    }));
     return profiles
       .filter((p) => p.venue)
       .map((p) => ({
@@ -56,25 +58,31 @@ export class ProfileService {
 
   /** Checks whether the user has an active or trialing Multi-Venue subscription on any of their venues. */
   async hasMultiVenueSubscription(userId: string): Promise<boolean> {
-    const profiles = await this.prisma.profile.findMany({
-      where: { userId, venueId: { not: null } },
-      select: { venueId: true },
-    });
-    const venueIds = Array.from(new Set(profiles.map((p) => p.venueId!).filter(Boolean)));
-    if (!venueIds.length) return false;
+    return runWithoutTenant(async () => {
+      const profiles = await this.prisma.profile.findMany({
+        where: {
+          userId,
+          venueId: { not: null },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        select: { venueId: true },
+      });
+      const venueIds = Array.from(new Set(profiles.map((p) => p.venueId!).filter(Boolean)));
+      if (!venueIds.length) return false;
 
-    const sub = await this.prisma.subscription.findFirst({
-      where: {
-        venueId: { in: venueIds },
-        status: { in: ['active', 'trialing'] },
-        OR: [
-          { planId: 'venueflow_multi_venue_5' },
-          { priceCents: { gte: 39900 } },
-          { planId: { contains: 'multi' } },
-        ],
-      },
+      const sub = await this.prisma.subscription.findFirst({
+        where: {
+          venueId: { in: venueIds },
+          status: { in: ['active', 'trialing'] },
+          OR: [
+            { planId: 'venueflow_multi_venue_5' },
+            { priceCents: { gte: 39900 } },
+            { planId: { contains: 'multi' } },
+          ],
+        },
+      });
+      return Boolean(sub);
     });
-    return Boolean(sub);
   }
 
   async ensureUser(user: AuthUser) {

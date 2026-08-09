@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { currentAiUsageContext } from './ai-usage-context';
 
@@ -30,7 +30,23 @@ async function meter(input: AiJsonCallInput, usage: AiUsage) {
   }
 }
 
+async function assertMonthlyVenueBudget() {
+  const context = currentAiUsageContext();
+  if (!context) return;
+  const budgetUsd = Number(process.env.AI_MONTHLY_VENUE_BUDGET_USD ?? 25);
+  if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) return;
+  const rows = await context.prisma.$queryRawUnsafe<Array<{ estimatedCostMicros: bigint | number | string }>>(
+    `SELECT COALESCE(SUM("estimatedCostMicros"),0)::bigint AS "estimatedCostMicros" FROM "AiUsageEvent" WHERE "venueId" = $1 AND "createdAt" >= date_trunc('month', NOW())`,
+    context.venueId,
+  );
+  const usedMicros = Number(rows[0]?.estimatedCostMicros ?? 0);
+  if (Number.isFinite(usedMicros) && usedMicros >= Math.round(budgetUsd * 1_000_000)) {
+    throw new HttpException('This venue has reached its monthly AI usage budget.', HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
+
 export async function callAiJsonWithUsage(input: AiJsonCallInput): Promise<AiJsonCallResult> {
+  await assertMonthlyVenueBudget();
   const parts: Array<Record<string, unknown>> = [{ text: input.prompt }];
   if (input.userText) parts.push({ text: input.userText });
   if (input.imageBase64) parts.push({ inline_data: { mime_type: input.imageMimeType ?? 'image/jpeg', data: input.imageBase64 } });

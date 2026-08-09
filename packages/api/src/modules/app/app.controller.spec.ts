@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { AppController } from './app.controller';
@@ -122,5 +122,61 @@ describe('AppController redeem-my-invite', () => {
     expect(prisma.profile.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'profile-roster' }, data: { userId: 'user-new' } }),
     );
+  });
+});
+
+describe('AppController multi-venue invariants', () => {
+  it('serializes venue registration by user and checks the cap under that lock', async () => {
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      profile: {
+        findMany: vi.fn().mockResolvedValue(Array.from({ length: 5 }, (_, index) => ({ venueId: `venue-${index}` }))),
+      },
+      venue: { create: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const profiles = {
+      ensureUser: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      isEmailVerified: vi.fn().mockResolvedValue(true),
+    };
+    const controller = new AppController(prisma, {} as any, profiles as any);
+
+    await expect(controller.registerVenue(
+      { sub: 'user-1', email: 'owner@example.com' } as any,
+      { businessName: 'Sixth Venue', staffRange: '1-15' } as any,
+    )).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.$executeRaw.mock.calls[0]?.[1]).toBe('register-venue:user-1');
+    expect(prisma.profile.findMany.mock.invocationCallOrder[0]).toBeGreaterThan(prisma.$executeRaw.mock.invocationCallOrder[0]);
+    expect(prisma.venue.create).not.toHaveBeenCalled();
+  });
+
+  it('checks last-admin safety for every venue before deleting a multi-venue account', async () => {
+    const profiles = [
+      { id: 'profile-a', email: 'owner@example.com', fullName: 'Owner', role: 'owner', venueId: 'venue-a', membershipStatus: 'active' },
+      { id: 'profile-b', email: 'owner@example.com', fullName: 'Owner', role: 'owner', venueId: 'venue-b', membershipStatus: 'active' },
+    ];
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
+      profile: {
+        findMany: vi.fn().mockResolvedValue(profiles),
+        count: vi.fn()
+          .mockResolvedValueOnce(2).mockResolvedValueOnce(2)
+          .mockResolvedValueOnce(1).mockResolvedValueOnce(2),
+        deleteMany: vi.fn(),
+      },
+      pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn() }, scheduleShift: { updateMany: vi.fn() },
+      session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const controller = new AppController(prisma, {} as any, {} as any);
+
+    await expect(controller.deleteMyAccount({ sub: 'user-1' } as any)).rejects.toThrow(
+      'Transfer venue ownership or add another admin',
+    );
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.user.deleteMany).not.toHaveBeenCalled();
   });
 });

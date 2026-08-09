@@ -5,9 +5,12 @@ import { RequireSubscription } from '../../../billing/require-subscription.decor
 import { VenueScope } from '../../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../../venue/venue-scope.interceptor';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { assertWithinSharedRateLimit } from '../../../common/rate-limit';
 import { WranglerOperatorService } from './wrangler-operator.service';
 
 type Scope = VenueScopedRequest['venueScope'];
+const OPERATOR_RATE_LIMIT_MAX = 20;
+const OPERATOR_RATE_LIMIT_WINDOW_MS = 60_000;
 
 class WranglerOperatorPlanDto {
   @IsString()
@@ -31,7 +34,16 @@ export class WranglerOperatorController {
   @RequireSubscription('active')
   @Post('plan')
   async plan(@VenueScope() scope: Scope, @Body() body: WranglerOperatorPlanDto) {
-    if (!scope) return null;
+    if (!scope) throw new ForbiddenException('No active venue profile found');
+    if (!canManageVenue(scope.role, scope.allAccess)) {
+      throw new ForbiddenException('Manager access required for Wrangler operator actions');
+    }
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `wrangler-operator:${scope.venueId}:${scope.profileId}`,
+      OPERATOR_RATE_LIMIT_MAX,
+      OPERATOR_RATE_LIMIT_WINDOW_MS,
+    );
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } });
     if (!venue) return null;
     return this.operator.plan({
@@ -45,7 +57,7 @@ export class WranglerOperatorController {
   @RequireSubscription('active')
   @Post('execute')
   async execute(@VenueScope() scope: Scope, @Body() body: WranglerOperatorExecuteDto) {
-    if (!scope) return null;
+    if (!scope) throw new ForbiddenException('No active venue profile found');
     if (!canManageVenue(scope.role, scope.allAccess)) {
       throw new ForbiddenException('Manager access required for Wrangler operator actions');
     }

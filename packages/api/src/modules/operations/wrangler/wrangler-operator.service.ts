@@ -3,8 +3,10 @@ import { Role } from '@prisma/client';
 import { canManageRole } from '../../../auth/roles';
 import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../../common/ai-json-parse';
 import { weekStartFor } from '../../../common/pay-period';
+import { syncTeamMemberCount } from '../../../common/team-sync';
 import { zonedDateBounds, zonedIsoDate } from '../../../common/venue-time';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { runWithoutTenant } from '../../../prisma/tenant-context';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const ALLOWED_TOOLS = [
@@ -66,10 +68,10 @@ export class WranglerOperatorService {
   async plan(input: { venueId: string; timezone?: string | null; command: string; actor: Actor }) {
     const command = input.command.trim();
     if (command.length < 2) throw new BadRequestException('Enter an operations command');
+    if (!this.canManage(input.actor)) throw new ForbiddenException('Manager access required for Wrangler operator actions');
 
     const parsed = await this.parseCommand(command, input.timezone);
     const risk = this.riskFor(parsed.tool);
-    if (risk !== 'read' && !this.canManage(input.actor)) throw new ForbiddenException('Manager access required for Wrangler operator actions');
 
     if (risk === 'read') {
       const result = await this.executeRead(input.venueId, input.timezone, parsed.tool, parsed.args);
@@ -120,6 +122,7 @@ export class WranglerOperatorService {
       model: resolveAiModel(process.env.GEMINI_WRANGLER_OPERATOR_MODEL, DEFAULT_MODEL),
       prompt: PROMPT,
       userText: `Venue timezone: ${timezone ?? 'unknown'}\nCurrent venue date: ${today}\nCurrent server time: ${new Date().toISOString()}\nManager command: ${command}`,
+      feature: 'wrangler_operator',
     });
     if (!parsed || typeof parsed !== 'object') throw new BadRequestException('Wrangler could not understand that command');
     const raw = parsed as Record<string, unknown>;
@@ -166,7 +169,7 @@ export class WranglerOperatorService {
       const staffName = this.cleanText(args.staffName);
       const jobTitle = this.cleanText(args.jobTitle);
       const rows = await this.prisma.profile.findMany({
-        where: { venueId, ...(staffName ? { fullName: { contains: staffName, mode: 'insensitive' } } : {}), ...(jobTitle ? { jobTitle: { contains: jobTitle, mode: 'insensitive' } } : {}) } as any,
+        where: { venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }], ...(staffName ? { fullName: { contains: staffName, mode: 'insensitive' } } : {}), ...(jobTitle ? { jobTitle: { contains: jobTitle, mode: 'insensitive' } } : {}) } as any,
         orderBy: { fullName: 'asc' }, take: 100,
       });
       return rows.map((row) => ({ id: row.id, fullName: row.fullName, email: row.email, role: row.role, jobTitle: row.jobTitle, membershipStatus: row.membershipStatus }));
@@ -366,11 +369,21 @@ export class WranglerOperatorService {
       if (!canManageRole(actor.role, target.role, actor.allAccess)) {
         throw new ForbiddenException('You cannot deactivate a staff member with equal or higher access');
       }
-      await this.prisma.$transaction(async (tx) => {
+      await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
         await tx.profile.update({ where: { id: target.id }, data: { membershipStatus: 'revoked' } as any });
-        if (target.userId) await tx.session.deleteMany({ where: { userId: target.userId } });
+        if (target.userId) {
+          const activeElsewhere = await tx.profile.count({
+            where: {
+              userId: target.userId,
+              venueId: { not: venueId },
+              OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+            },
+          });
+          if (activeElsewhere === 0) await tx.session.deleteMany({ where: { userId: target.userId } });
+        }
         await tx.scheduleShift.updateMany({ where: { venueId, profileId: target.id, weekStart: { gte: weekStartFor(zonedIsoDate(timezone, Date.now())) } }, data: { profileId: null, status: 'open' } });
-      });
+        await syncTeamMemberCount(tx, venueId);
+      }));
       await this.markScheduleEdited(venueId);
       return { id: target.id, fullName: target.fullName, membershipStatus: 'revoked' };
     }
@@ -434,7 +447,7 @@ export class WranglerOperatorService {
   }
 
   private findProfiles(venueId: string, name: string) {
-    return this.prisma.profile.findMany({ where: { venueId, fullName: { contains: name, mode: 'insensitive' } } as any, orderBy: { fullName: 'asc' }, take: 10 });
+    return this.prisma.profile.findMany({ where: { venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }], fullName: { contains: name, mode: 'insensitive' } } as any, orderBy: { fullName: 'asc' }, take: 10 });
   }
 
   private async assertNoShiftOverlap(venueId: string, profileId: string, weekStart: string, dayIndex: number, startMinutes: number, endMinutes: number, excludeShiftId?: string) {

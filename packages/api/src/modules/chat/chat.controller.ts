@@ -36,6 +36,10 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 type Scope = VenueScopedRequest['venueScope'];
 
 const GENERAL_GROUP_NAME = 'All Staff';
+const ACTIVE_MEMBERSHIP: Array<{ membershipStatus: null | 'active' }> = [
+  { membershipStatus: null },
+  { membershipStatus: 'active' },
+];
 
 class OpenDmDto {
   @IsString()
@@ -126,7 +130,7 @@ export class ChatController {
     const weekStart = venue ? weekStartFor(todayInZone(venue.timezone)) : undefined;
     const [profiles, allShifts, existingConvs] = await Promise.all([
       this.prisma.profile.findMany({
-        where: { venueId },
+        where: { venueId, OR: ACTIVE_MEMBERSHIP },
         select: { id: true, jobTitle: true, role: true, allAccess: true },
       }),
       this.prisma.scheduleShift.findMany({
@@ -249,7 +253,7 @@ export class ChatController {
     });
 
     const staff = await this.prisma.profile.findMany({
-      where: { venueId: scope.venueId },
+      where: { venueId: scope.venueId, OR: ACTIVE_MEMBERSHIP },
       select: { id: true, fullName: true },
     });
     const nameById = new Map(staff.map((s) => [s.id, s.fullName]));
@@ -311,7 +315,7 @@ export class ChatController {
   async listDirectory(@VenueScope() scope: Scope) {
     if (!scope) return [];
     const staff = await this.prisma.profile.findMany({
-      where: { venueId: scope.venueId, id: { not: scope.profileId } },
+      where: { venueId: scope.venueId, id: { not: scope.profileId }, OR: ACTIVE_MEMBERSHIP },
       orderBy: { fullName: 'asc' },
     });
     return staff.map((s) => ({
@@ -437,7 +441,7 @@ export class ChatController {
     }
 
     const staff = await this.prisma.profile.findMany({
-      where: { venueId: scope.venueId },
+      where: { venueId: scope.venueId, OR: ACTIVE_MEMBERSHIP },
       select: { id: true, fullName: true },
     });
     const nameById = new Map(staff.map((s) => [s.id, s.fullName]));

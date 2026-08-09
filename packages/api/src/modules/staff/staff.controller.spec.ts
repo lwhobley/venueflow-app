@@ -59,7 +59,9 @@ describe('StaffController', () => {
 
       const result = await controller.listVenueStaff(managerScope);
 
-      expect(prisma.profile.findMany).toHaveBeenCalledWith({ where: { venueId: 'venue-1' } });
+      expect(prisma.profile.findMany).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1', OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+      });
       expect(result.map((r: any) => r.fullName)).toEqual(['Alex', 'Zed']);
     });
   });

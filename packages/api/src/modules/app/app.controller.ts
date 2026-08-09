@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
@@ -20,6 +20,7 @@ import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { runWithoutTenant } from '../../prisma/tenant-context';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
 import { ProfileService } from './profile.service';
 import { syncTeamMemberCount } from '../../common/team-sync';
@@ -188,10 +189,8 @@ export class AppController {
   async switchVenue(@CurrentUser() user: AuthUser, @Body() body: SwitchVenueDto) {
     const venueId = body.venueId;
     if (!venueId) throw new BadRequestException('Venue ID is required');
-    const profile = await this.profiles.getProfile(user, venueId);
-    if (!profile || profile.venueId !== venueId || !profile.venue) {
-      throw new ForbiddenException('You do not belong to this venue.');
-    }
+    const profile = await this.profiles.requireVenueProfile(user, venueId);
+    if (!profile.venue) throw new ForbiddenException('You do not belong to this venue.');
     const emailVerified = await this.isEmailVerified(user.sub);
     const venues = await this.profiles.listUserVenues(user.sub);
     return {
@@ -273,34 +272,71 @@ export class AppController {
       throw new ForbiddenException('Verify your email before creating a venue.');
     }
 
-    const existingProfile = await this.getProfile(user);
-
-    const userVenues = await this.profiles.listUserVenues(user.sub);
-    if (userVenues.length >= MULTI_VENUE_MAX_VENUES) {
-      throw new ForbiddenException('You have reached the maximum limit of 5 venues for multi-venue management.');
-    }
-    const isAdditionalVenue = userVenues.length >= 1;
-    if (isAdditionalVenue) {
-      const hasMultiPlan = await this.profiles.hasMultiVenueSubscription(user.sub);
-      if (!hasMultiPlan) {
-        throw new HttpException(
-          {
-            statusCode: 402,
-            message: 'Registering an additional venue requires a Multi-Venue Pro subscription ($399/month for up to 5 venues).',
-            code: 'MULTI_VENUE_REQUIRED',
-          },
-          HttpStatus.PAYMENT_REQUIRED,
-        );
-      }
-    }
-
-    const plan = isAdditionalVenue
-      ? { planId: MULTI_VENUE_PLAN_ID, priceCents: MULTI_VENUE_PRICE_CENTS }
-      : planForStaffRange(body.staffRange);
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`register-venue:${user.sub}:${businessName}`}))`;
+    const result = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
+      // Serialize every registration attempt for this account, regardless of
+      // business name, then re-check all cross-venue invariants under the lock.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`register-venue:${user.sub}`}))`;
+
+      const memberships = await tx.profile.findMany({
+        where: {
+          userId: user.sub,
+          venueId: { not: null },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        select: { venueId: true },
+      });
+      const venueIds = Array.from(new Set(memberships.map((profile) => profile.venueId).filter((id): id is string => Boolean(id))));
+      if (venueIds.length >= MULTI_VENUE_MAX_VENUES) {
+        throw new ForbiddenException('You have reached the maximum limit of 5 venues for multi-venue management.');
+      }
+
+      const duplicateMembership = await tx.profile.findFirst({
+        where: {
+          userId: user.sub,
+          venue: { name: { equals: businessName, mode: 'insensitive' } },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        select: { id: true },
+      });
+      if (duplicateMembership) {
+        throw new ConflictException('You already manage a venue with this name.');
+      }
+
+      const isAdditionalVenue = venueIds.length > 0;
+      if (isAdditionalVenue) {
+        const hasMultiPlan = await tx.subscription.findFirst({
+          where: {
+            venueId: { in: venueIds },
+            status: { in: ['active', 'trialing'] },
+            OR: [
+              { planId: MULTI_VENUE_PLAN_ID },
+              { priceCents: { gte: MULTI_VENUE_PRICE_CENTS } },
+              { planId: { contains: 'multi' } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!hasMultiPlan) {
+          throw new HttpException(
+            {
+              statusCode: 402,
+              message: 'Registering an additional venue requires a Multi-Venue Pro subscription ($399/month for up to 5 venues).',
+              code: 'MULTI_VENUE_REQUIRED',
+            },
+            HttpStatus.PAYMENT_REQUIRED,
+          );
+        }
+      }
+
+      const plan = isAdditionalVenue
+        ? { planId: MULTI_VENUE_PLAN_ID, priceCents: MULTI_VENUE_PRICE_CENTS }
+        : planForStaffRange(body.staffRange);
+      const existingProfile = await tx.profile.findFirst({
+        where: { userId: user.sub },
+        orderBy: { createdAt: 'asc' },
+      });
 
       const venue = await tx.venue.create({
         data: {
@@ -342,7 +378,7 @@ export class AppController {
       });
       await syncTeamMemberCount(tx, venue.id);
       return { profile, venue };
-    });
+    }));
 
     const venues = await this.profiles.listUserVenues(user.sub);
     return { profile: mapProfile(result.profile, true), venue: mapVenue(result.venue), venues };
@@ -1003,54 +1039,72 @@ export class AppController {
   @UseGuards(AuthGuard)
   @Delete('me')
   async deleteMyAccount(@CurrentUser() user: AuthUser) {
-    const profile = await this.getProfile(user);
-    if (!profile) return { ok: true };
-    const deletedAccountEmail = profile.email;
-    const deletedAccountName = profile.fullName;
-    await this.prisma.$transaction(async (tx) => {
-      if (profile.venueId && isOwnerOrAdminRole(profile.role)) {
-        // Advisory-lock the venue so two concurrent last-admin deletions can't
-        // both read the same pre-delete count and both pass the guard.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${profile.venueId}`}))`;
+    const deletedAccount = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
+      const [account, profiles] = await Promise.all([
+        tx.user.findUnique({ where: { id: user.sub }, select: { email: true } }),
+        tx.profile.findMany({
+          where: { userId: user.sub },
+          select: { id: true, email: true, fullName: true, role: true, venueId: true, membershipStatus: true },
+          orderBy: { createdAt: 'asc' },
+        }),
+      ]);
+      if (!account && profiles.length === 0) return null;
+
+      const venueIds = Array.from(new Set(
+        profiles.map((profile) => profile.venueId).filter((id): id is string => Boolean(id)),
+      )).sort();
+      for (const venueId of venueIds) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${venueId}`}))`;
+      }
+      for (const venueId of venueIds) {
+        const profile = profiles.find((candidate) => candidate.venueId === venueId);
+        const isActive = profile?.membershipStatus == null || profile.membershipStatus === 'active';
+        if (!profile || !isActive || !isOwnerOrAdminRole(profile.role)) continue;
         const [ownerAdminCount, memberCount] = await Promise.all([
-          tx.profile.count({ where: { venueId: profile.venueId, role: { in: ['owner', 'admin'] } } }),
-          tx.profile.count({ where: { venueId: profile.venueId } }),
+          tx.profile.count({
+            where: { venueId, role: { in: ['owner', 'admin'] }, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+          }),
+          tx.profile.count({ where: { venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] } }),
         ]);
-        // A sole remaining member may delete (orphaning an empty venue is fine,
-        // and App Store guideline 5.1.1(v) requires in-app account deletion).
-        // Block only when other staff remain but this is the last owner/admin.
         if (ownerAdminCount <= 1 && memberCount > 1) {
           throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
         }
       }
-      await tx.pushToken.deleteMany({ where: { profileId: profile.id } });
-      await tx.availability.deleteMany({ where: { profileId: profile.id } });
-      // Time entries are employer wage records (FLSA retention) — keep them.
-      // Snapshot the name; deleting the profile then SetNulls the linkage.
-      await tx.timeEntry.updateMany({
-        where: { profileId: profile.id },
-        data: { profileFullName: profile.fullName, isOpen: false },
-      });
-      await tx.scheduleShift.updateMany({ where: { profileId: profile.id }, data: { profileId: null, status: 'open' } });
+
+      const profileIds = profiles.map((profile) => profile.id);
+      if (profileIds.length) {
+        await tx.pushToken.deleteMany({ where: { profileId: { in: profileIds } } });
+        await tx.availability.deleteMany({ where: { profileId: { in: profileIds } } });
+        for (const profile of profiles) {
+          await tx.timeEntry.updateMany({
+            where: { profileId: profile.id },
+            data: { profileFullName: profile.fullName, isOpen: false },
+          });
+        }
+        await tx.scheduleShift.updateMany({ where: { profileId: { in: profileIds } }, data: { profileId: null, status: 'open' } });
+      }
       await tx.session.deleteMany({ where: { userId: user.sub } });
       await tx.authAccount.deleteMany({ where: { userId: user.sub } });
-      await tx.profile.delete({ where: { id: profile.id } });
+      if (profileIds.length) await tx.profile.deleteMany({ where: { id: { in: profileIds } } });
       await tx.user.deleteMany({ where: { id: user.sub } });
-      if (profile.venueId) {
-        await syncTeamMemberCount(tx, profile.venueId);
-      }
-    });
-    void this.email.send({
-      to: deletedAccountEmail,
-      subject: 'Your Venue Wrangler Account Has Been Deleted',
-      text:
-        `Hi ${deletedAccountName},\n\n` +
-        `Your Venue Wrangler account has been successfully deleted.\n\n` +
-        `Please note that any retained timeclock records remain available to the venue as employer wage and compliance records in accordance with federal and local regulations.\n\n` +
-        `Thank you for using Venue Wrangler.\n\n` +
-        `Questions? support@venuewrangler.com\n\n` +
-        `— The Venue Wrangler Team`,
-    });
+      for (const venueId of venueIds) await syncTeamMemberCount(tx, venueId);
+
+      const primary = profiles[0];
+      return { email: account?.email ?? primary?.email ?? user.email, name: primary?.fullName ?? user.name ?? 'there' };
+    }));
+    if (deletedAccount?.email) {
+      void this.email.send({
+        to: deletedAccount.email,
+        subject: 'Your Venue Wrangler Account Has Been Deleted',
+        text:
+          `Hi ${deletedAccount.name},\n\n` +
+          `Your Venue Wrangler account has been successfully deleted.\n\n` +
+          `Please note that any retained timeclock records remain available to the venue as employer wage and compliance records in accordance with federal and local regulations.\n\n` +
+          `Thank you for using Venue Wrangler.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
+      });
+    }
     return { ok: true };
   }
 

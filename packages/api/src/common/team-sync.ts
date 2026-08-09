@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 export async function syncTeamMemberCount(tx: Prisma.TransactionClient, venueId: string | null | undefined) {
   if (!venueId) return;
   const count = await tx.profile.count({
-    where: { venueId },
+    where: { venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
   });
   const existingTeam = await tx.team.findFirst({
     where: { venueId },

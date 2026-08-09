@@ -1,4 +1,4 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import { CallHandler, ExecutionContext, ForbiddenException, Injectable, NestInterceptor } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Observable } from 'rxjs';
 import type { AuthenticatedRequest } from '../auth/auth.guard';
@@ -38,17 +38,37 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
     const user = request.user;
     if (!user?.sub) return next.handle();
-    const requestedVenueId = request.headers['x-venue-id'] as string | undefined;
+    const rawVenueHeader = request.headers['x-venue-id'];
+    const requestedVenueId = typeof rawVenueHeader === 'string' && rawVenueHeader.trim()
+      ? rawVenueHeader.trim()
+      : undefined;
 
     let profile;
     if (requestedVenueId) {
-      profile = await this.prisma.profile.findFirst({ where: { userId: user.sub, venueId: requestedVenueId }, include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } } });
+      profile = await this.prisma.profile.findFirst({
+        where: {
+          userId: user.sub,
+          venueId: requestedVenueId,
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
+      });
+      if (!profile) {
+        throw new ForbiddenException('You do not have an active membership at the requested venue.');
+      }
     }
-    if (!profile) {
-      profile = await this.prisma.profile.findFirst({ where: { userId: user.sub, venueId: { not: null } }, include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } }, orderBy: { createdAt: 'asc' } });
+    if (!requestedVenueId) {
+      profile = await this.prisma.profile.findFirst({
+        where: {
+          userId: user.sub,
+          venueId: { not: null },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
+        orderBy: { createdAt: 'asc' },
+      });
     }
     if (!profile?.venueId || !profile.venue) return next.handle();
-    if (profile.membershipStatus === 'pending' || profile.membershipStatus === 'rejected' || profile.membershipStatus === 'revoked') return next.handle();
 
     const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, { venueId: profile.venueId, venueStatus: profile.venue.subscriptionStatus, trialEndsAt: profile.trialEndsAt });
     request.venueScope = { profileId: profile.id, fullName: profile.fullName, venueId: profile.venueId, venueName: profile.venue.name, role: profile.role, allAccess: profile.allAccess, subscriptionStatus, trialEndsAt: profile.trialEndsAt ?? null };

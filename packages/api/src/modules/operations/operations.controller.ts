@@ -1041,7 +1041,11 @@ export class OperationsController {
   }
 
   private async getProfile(user: AuthUser) {
-    return this.prisma.profile.findFirst({ where: { userId: user.sub }, include: { venue: true }, orderBy: { createdAt: 'asc' } });
+    return this.prisma.profile.findFirst({
+      where: { userId: user.sub, ...(user.venueId ? { venueId: user.venueId } : {}) },
+      include: { venue: true },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
   private async getExecutionSource(venueId: string, eventId: string) {
