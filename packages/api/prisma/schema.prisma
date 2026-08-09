@@ -357,6 +357,7 @@ model Venue {
   reservationSetting            ReservationSetting?
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
+  aiUsageEvents                 AiUsageEvent[]
   joinRequests                  WorkplaceJoinRequest[]
   eventExecutionWorkspaces      EventExecutionWorkspace[]
   documents                     VenueDocument[]
@@ -403,6 +404,7 @@ model Profile {
   assignedLeads              CrmLead[]            @relation("AssignedLeads")
   createdScheduleMemoryNotes ScheduleMemoryNote[] @relation("ScheduleMemoryCreatedBy")
   uploadedDocuments          VenueDocument[]      @relation("DocumentUploader")
+  aiUsageEvents              AiUsageEvent[]
 
   @@unique([userId, venueId])
   @@index([userId])

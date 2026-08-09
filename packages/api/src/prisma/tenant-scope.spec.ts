@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isVenueScoped, scopeArgs, shouldScopeOperation, VENUE_SCOPED_MODELS } from './tenant-scope';
@@ -36,15 +36,20 @@ describe('isVenueScoped', () => {
 });
 
 describe('VENUE_SCOPED_MODELS drift guard', () => {
-  it('exactly matches every model in schema.prisma that carries a direct venueId column', () => {
+  it('exactly matches every model across prisma/*.prisma that carries a direct venueId column', () => {
     // Prevents the exact bug this test was written after: a new venue-scoped
     // model (AuditLog, PrepBoardItem, StaffOnboardingTask) shipped without
     // being added here, silently leaving the DB-layer isolation backstop
     // inert for it even while the extension was active in production. Fails
     // loudly the next time this happens instead of relying on someone
-    // remembering to update the hardcoded set.
-    const schemaPath = join(__dirname, '..', '..', 'prisma', 'schema.prisma');
-    const schema = readFileSync(schemaPath, 'utf8');
+    // remembering to update the hardcoded set. Reads every .prisma file in the
+    // schema folder — AiUsageEvent lives in ai-usage.prisma and was missed by
+    // the single-file version of this guard.
+    const prismaDir = join(__dirname, '..', '..', 'prisma');
+    const schema = readdirSync(prismaDir)
+      .filter((file) => file.endsWith('.prisma'))
+      .map((file) => readFileSync(join(prismaDir, file), 'utf8'))
+      .join('\n');
     const modelBlockPattern = /^model (\w+) \{([\s\S]*?)^\}/gm;
     const actualVenueScopedModels = new Set<string>();
     let match: RegExpExecArray | null;
