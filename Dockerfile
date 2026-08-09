@@ -1,4 +1,5 @@
-FROM node:22-bookworm-slim AS build
+# Pinned by digest for reproducible builds; refresh via Dependabot/Renovate.
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS build
 
 WORKDIR /app
 COPY package*.json ./
@@ -8,7 +9,14 @@ RUN npm ci --ignore-scripts
 COPY packages/api packages/api
 RUN npm run build -w @venue-wrangler/api
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS production-dependencies
+
+WORKDIR /app
+COPY package*.json ./
+COPY packages/api/package*.json packages/api/
+RUN npm ci --omit=dev --ignore-scripts --workspace @venue-wrangler/api --include-workspace-root=false
+
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS runtime
 
 # Prisma requires OpenSSL at runtime for the native query engine.
 RUN apt-get update \
@@ -21,12 +29,16 @@ WORKDIR /app
 
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/packages/api/package*.json packages/api/
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=production-dependencies /app/node_modules ./node_modules
+# `prisma generate` runs in the build stage; retain only its generated client
+# and native engine alongside the production dependency tree.
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/packages/api/dist packages/api/dist
 COPY --from=build /app/packages/api/prisma packages/api/prisma
+COPY --from=build /app/packages/api/scripts/assert-database-target.mjs packages/api/scripts/assert-database-target.mjs
 
 # Prisma migrations run at startup as the non-root node user.
 RUN chown -R node:node /app
 USER node
 EXPOSE 8080
-CMD ["sh", "-c", "npx prisma migrate deploy --schema packages/api/prisma/schema.prisma && exec node packages/api/dist/main.js"]
+CMD ["sh", "-c", "node packages/api/scripts/assert-database-target.mjs && DATABASE_URL=\"${DATABASE_DIRECT_URL:-$DATABASE_URL}\" ./node_modules/.bin/prisma migrate deploy --schema packages/api/prisma && exec node packages/api/dist/main.js"]

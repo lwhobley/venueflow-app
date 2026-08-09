@@ -989,22 +989,31 @@ export class OperationsController {
       const mime = assertAllowedImageBytes(data, body.photoMimeType);
       photoKey = await this.s3ImageService.upload(data, mime, venueId);
     }
-    const updated = await this.prisma.checklistCompletion.update({
-      where: { id: completion.id },
-      data: {
-        status: 'done',
-        completedBy: profile.id,
-        completedByName: profile.fullName,
-        completedAt: new Date(),
-        ...(photoKey ? { photoKey } : {}),
-      },
-    });
+    const completedAt = new Date();
+    try {
+      const result = await this.prisma.checklistCompletion.updateMany({
+        where: { id: completion.id, venueId, status: completion.status },
+        data: {
+          status: 'done',
+          completedBy: profile.id,
+          completedByName: profile.fullName,
+          completedAt,
+          ...(photoKey ? { photoKey } : {}),
+        },
+      });
+      if (result.count !== 1) {
+        throw new BadRequestException('This task is already marked done for today');
+      }
+    } catch (error) {
+      if (photoKey) await this.s3ImageService.delete(photoKey).catch(() => undefined);
+      throw error;
+    }
     return {
-      _id: updated.id,
-      status: updated.status,
-      completedByName: updated.completedByName,
-      completedAt: toMs(updated.completedAt),
-      hasPhoto: Boolean(updated.photoKey),
+      _id: completion.id,
+      status: 'done',
+      completedByName: profile.fullName,
+      completedAt: completedAt.getTime(),
+      hasPhoto: Boolean(photoKey),
     };
   }
 

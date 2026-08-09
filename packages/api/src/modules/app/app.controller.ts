@@ -189,7 +189,7 @@ export class AppController {
   async switchVenue(@CurrentUser() user: AuthUser, @Body() body: SwitchVenueDto) {
     const venueId = body.venueId;
     if (!venueId) throw new BadRequestException('Venue ID is required');
-    const profile = await this.profiles.requireVenueProfile(user, venueId);
+    const profile = await runWithoutTenant(() => this.profiles.requireVenueProfile(user, venueId));
     if (!profile.venue) throw new ForbiddenException('You do not belong to this venue.');
     const emailVerified = await this.isEmailVerified(user.sub);
     const venues = await this.profiles.listUserVenues(user.sub);
