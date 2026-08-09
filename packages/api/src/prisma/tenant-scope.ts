@@ -5,12 +5,13 @@
  */
 
 /**
- * Every model that carries a direct `venueId` column (derived from schema.prisma).
- * Global models (User, Session, AuthAccount, PasswordCredential) and the tenant
- * root (Venue) are intentionally absent — they are never auto-scoped.
+ * Every model that carries a direct `venueId` column (derived from ALL files in
+ * the prisma/ schema folder — including ai-usage.prisma — by the drift-guard
+ * spec). Global models (User, Session, AuthAccount, PasswordCredential) and the
+ * tenant root (Venue) are intentionally absent - they are never auto-scoped.
  */
 export const VENUE_SCOPED_MODELS: ReadonlySet<string> = new Set([
-  'AuditLog', 'Availability', 'BarInventoryItem', 'BarInventoryMovement', 'BlackoutDate',
+  'AiUsageEvent', 'AuditLog', 'Availability', 'BarInventoryItem', 'BarInventoryMovement', 'BlackoutDate',
   'ChatImage', 'ChecklistCompletion', 'ChecklistTemplateItem', 'Conversation', 'ConversationRead',
   'CrmActivityLog', 'CrmBeo', 'CrmContract', 'CrmLead', 'CrmNote', 'EmailTemplate', 'FloorChair',
   'FloorPlan', 'Guest', 'Invite', 'Invoice', 'LogbookEntry', 'ManagerGoal', 'Message', 'NotificationEvent',
