@@ -99,7 +99,7 @@ export default function EventCommandCenterScreen() {
           <CommandText palette={palette} variant="label">Event command center</CommandText>
           <CommandText palette={palette} variant="hero">{event.title}</CommandText>
         </View>
-        <StatusPill palette={palette} tone={readiness.status === 'blocked' ? 'warn' : 'good'}>{`${readiness.score}% ready`}</StatusPill>
+        <StatusPill palette={palette} tone={readiness?.status === 'blocked' ? 'warn' : 'good'}>{`${readiness?.score ?? 0}% ready`}</StatusPill>
       </View>
 
       {actionError ? (
@@ -108,13 +108,13 @@ export default function EventCommandCenterScreen() {
         </CommandSurface>
       ) : null}
 
-      <CommandSurface palette={palette} strong style={{ gap: spacing.sm, borderColor: readiness.status === 'blocked' ? palette.warning : palette.primary }}>
+      <CommandSurface palette={palette} strong style={{ gap: spacing.sm, borderColor: readiness?.status === 'blocked' ? palette.warning : palette.primary }}>
         <CommandText palette={palette} variant="caption">
           {new Date(event.startsAt).toLocaleString()} · {event.expectedGuests ?? '—'} guests{event.space ? ` · ${event.space}` : ''}
         </CommandText>
         {event.setupStyle ? <StatusPill palette={palette}>{event.setupStyle}</StatusPill> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-          {Object.entries(readiness.categories).map(([key, value]) => (
+          {Object.entries(readiness?.categories ?? {}).map(([key, value]) => (
             <View key={key} style={{ flexGrow: 1, flexBasis: 120, backgroundColor: palette.surfaceSoft, borderRadius: 10, padding: spacing.sm }}>
               <CommandText palette={palette} variant="metric">{`${value}%`}</CommandText>
               <CommandText palette={palette} variant="caption">{key}</CommandText>
