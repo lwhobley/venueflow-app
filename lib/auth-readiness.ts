@@ -12,17 +12,27 @@ export function useAuthenticatedSession() {
 
   const { data: me, isLoading } = useApiQuery<any | null>(['app', 'me'], '/v1/app/me', isReady);
 
-  const lastRole = useRef<string | null>(null);
-  const lastAllAccess = useRef<boolean | null>(null);
+  // Hydrate the venue list from the server (getMe returns venues). This runs
+  // in the always-mounted authed tree, so it covers every sign-in path and
+  // drops venues the user was revoked from.
+  const setVenues = useAuthStore((state: AuthState) => state.setVenues);
+  useEffect(() => {
+    if (me?.venues) setVenues(me.venues);
+  }, [me?.venues, setVenues]);
+
+  // Cache the last resolved role keyed by venue so a venue switch never shows
+  // the previous venue's permissions during the refetch window.
+  const venueId = venue?.id ?? null;
+  const lastKnown = useRef<{ venueId: string | null; role: string | null; allAccess: boolean | null } | null>(null);
   useEffect(() => {
     if (me?.profile) {
-      lastRole.current = me.profile.role ?? null;
-      lastAllAccess.current = me.profile.allAccess === true;
+      lastKnown.current = { venueId, role: me.profile.role ?? null, allAccess: me.profile.allAccess === true };
     }
-  }, [me?.profile?.role, me?.profile?.allAccess]);
+  }, [me?.profile?.role, me?.profile?.allAccess, venueId]);
 
-  const role = me?.profile.role ?? lastRole.current;
-  const allAccess = me?.profile.allAccess ?? lastAllAccess.current ?? false;
+  const cached = lastKnown.current?.venueId === venueId ? lastKnown.current : null;
+  const role = me?.profile.role ?? cached?.role ?? null;
+  const allAccess = me?.profile.allAccess ?? cached?.allAccess ?? false;
   const canManage = canManageVenue(role, allAccess);
   const canViewBilling = canManageBilling(role, allAccess);
 
