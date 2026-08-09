@@ -87,6 +87,30 @@ jobs:
       - name: Build
         run: npm run build -w @venue-wrangler/api
 
+      - name: Lint post-lockdown migrations for RLS coverage
+        run: |
+          set -Eeuo pipefail
+          # The Supabase Data API lockdown (20260805120000) enabled RLS on every
+          # table that existed at the time; RLS ENABLE is per-table and is NOT
+          # covered by ALTER DEFAULT PRIVILEGES, so any migration after it that
+          # creates a table must enable RLS in the same migration.
+          LOCKDOWN=20260805120000
+          # Historical exemption: 20260808134500_ai_usage_metering created
+          # AiUsageEvent without RLS; 20260808150000_harden_ai_usage_event_rls
+          # enabled it shortly after. Migrations are immutable, so exempt the
+          # pair's first half explicitly.
+          EXEMPT=20260808134500
+          for dir in packages/api/prisma/migrations/*/; do
+            name="$(basename "$dir")"
+            [[ "$name" > "$LOCKDOWN" ]] || continue
+            [[ "$name" == "$EXEMPT"* ]] && continue
+            if grep -qi 'CREATE TABLE' "$dir/migration.sql" && ! grep -qi 'ROW LEVEL SECURITY' "$dir/migration.sql"; then
+              echo "::error::Migration $name creates a table without ENABLE ROW LEVEL SECURITY"
+              exit 1
+            fi
+          done
+          echo "All post-lockdown migrations with CREATE TABLE enable RLS."
+
       - name: Apply migrations
         run: npm run prisma:migrate:deploy -w @venue-wrangler/api
 

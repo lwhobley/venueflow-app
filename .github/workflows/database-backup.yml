@@ -24,7 +24,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends unzip curl
-          curl --fail --silent --show-error --location https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip --output /tmp/awscliv2.zip
+          # Pinned AWS CLI version (not the floating "latest" zip) so the backup
+          # toolchain is reproducible; bump deliberately.
+          curl --fail --silent --show-error --location https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.36.19.zip --output /tmp/awscliv2.zip
           unzip -q /tmp/awscliv2.zip -d /tmp
           sudo /tmp/aws/install --update
 
@@ -44,7 +46,8 @@ jobs:
 
           docker run --rm --network host --user "$(id -u):$(id -g)" \
             --env DATABASE_URL="$DATABASE_URL" --volume /tmp:/backup \
-            postgres:17-alpine pg_dump "$DATABASE_URL" --format=custom --no-owner --no-acl \
+            postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+            pg_dump "$DATABASE_URL" --format=custom --no-owner --no-acl \
             --file="/backup/$(basename "$dump")"
           gzip --best "$dump"
           aws s3 cp "$archive" "s3://${BACKUP_BUCKET}/database-backups/$(basename "$archive")" \
