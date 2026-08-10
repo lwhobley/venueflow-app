@@ -15,6 +15,17 @@ const DEFAULT_CORS_ORIGINS = [
   'https://venuewrangler.com',
 ];
 
+function isAllowedOrigin(origin: string, isProduction: boolean): boolean {
+  if (!/^https?:\/\//i.test(origin)) return false;
+  if (!isProduction) return true;
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return host === 'venuewrangler.com' || host.endsWith('.venuewrangler.com');
+  } catch {
+    return false;
+  }
+}
+
 async function bootstrap() {
   // Error tracking — no-op unless SENTRY_DSN is set.
   initSentry();
@@ -33,16 +44,22 @@ async function bootstrap() {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
   }
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
-  // Only accept fully-qualified http(s) origins. Reject wildcards — the server
-  // sends credentials (cookies), and a wildcard origin with credentials is both
-  // spec-violating and dangerous if the middleware ever reflects the requester.
-  const isValidOrigin = (o: string) => /^https?:\/\//i.test(o);
+  // Only accept fully-qualified http(s) origins. In production, further
+  // restrict to venuewrangler.com hosts so a mis-set CORS_ORIGINS cannot
+  // open credentialed browser access to an attacker origin.
+  const isProduction = process.env.NODE_ENV === 'production';
   const origins = config
     .get<string>('CORS_ORIGINS', '')
     .split(',')
     .map((origin) => origin.trim())
-    .filter((origin) => origin && isValidOrigin(origin));
-  const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
+    .filter((origin) => origin && isAllowedOrigin(origin, isProduction));
+  const allowedOrigins = Array.from(
+    new Set([
+      ...DEFAULT_CORS_ORIGINS,
+      ...(isProduction ? [] : origins),
+      ...(isProduction ? origins.filter((o) => isAllowedOrigin(o, true)) : origins),
+    ]),
+  );
 
   app.use(helmet());
   const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
@@ -62,9 +79,9 @@ async function bootstrap() {
     })(req, res, next);
   });
   app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
-  // Fail closed: only origins explicitly listed in CORS_ORIGINS are allowed.
-  // Native mobile clients don't send an Origin header, so this does not affect
-  // them; it only restricts browsers. Set CORS_ORIGINS for web/dev.
+  // Fail closed: only origins explicitly listed (and production-filtered) are
+  // allowed. Native mobile clients don't send an Origin header, so this does
+  // not affect them; it only restricts browsers.
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
