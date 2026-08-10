@@ -11,6 +11,13 @@ export type WranglerSummary = {
   eightySixItems: number;
   pendingStaffRequests: number;
   seatedTables: number;
+  activeWaitlist?: number;
+  totalSalesCents?: number;
+  openChecksCount?: number;
+  activeLeadsCount?: number;
+  connectedIntegrationsCount?: number;
+  disconnectedIntegrationsCount?: number;
+  teamMessagesCount?: number;
 };
 
 export function buildWranglerRecap(args: { phase: WranglerServicePhase; summary: WranglerSummary; priorities: DailyBriefPriorityAction[] }) {
@@ -28,6 +35,8 @@ export function buildWranglerRecap(args: { phase: WranglerServicePhase; summary:
       { label: 'VIPs', value: args.summary.vipArrivals },
       { label: 'Open shifts', value: args.summary.openShifts },
       { label: 'Low stock', value: args.summary.lowStockItems },
+      { label: 'Waitlist', value: args.summary.activeWaitlist ?? 0 },
+      { label: 'Active Leads', value: args.summary.activeLeadsCount ?? 0 },
     ],
     unresolved: unresolved.slice(0, 4).map((item) => ({ id: item.id, title: item.title, severity: item.severity, reason: item.reason })),
     tomorrow: unresolved.slice(0, 3).map((item) => item.reason),
@@ -39,21 +48,40 @@ export function buildWranglerPatterns(args: { summary: WranglerSummary; prioriti
   if (args.summary.openShifts > 0) patterns.push({ id: 'coverage', title: 'Coverage pressure', detail: `${args.summary.openShifts} open shift${args.summary.openShifts === 1 ? '' : 's'} are increasing service risk.`, confidence: 'live' });
   if (args.summary.lowStockItems > 0 || args.summary.eightySixItems > 0) patterns.push({ id: 'stock', title: 'Inventory pressure', detail: `${args.summary.lowStockItems} low-stock and ${args.summary.eightySixItems} 86'd item${args.summary.eightySixItems === 1 ? '' : 's'} need follow-through.`, confidence: 'live' });
   if (args.priorities.some((item) => item.kind === 'floor')) patterns.push({ id: 'floor', title: 'Floor pressure', detail: 'Current seating and reservation timing are creating a floor conflict.', confidence: 'live' });
+  if ((args.summary.disconnectedIntegrationsCount ?? 0) > 0) patterns.push({ id: 'integrations', title: 'Integration pressure', detail: `${args.summary.disconnectedIntegrationsCount} integration connection${args.summary.disconnectedIntegrationsCount === 1 ? '' : 's'} need attention.`, confidence: 'live' });
+  if ((args.summary.activeWaitlist ?? 0) > 3) patterns.push({ id: 'waitlist', title: 'Waitlist demand', detail: `${args.summary.activeWaitlist} parties are currently waiting on the floor.`, confidence: 'live' });
   return patterns.slice(0, 4);
 }
 
 export function answerWranglerQuestion(question: string, args: { phaseLabel: string; summary: WranglerSummary; priorities: DailyBriefPriorityAction[] }) {
   const q = question.trim().toLowerCase();
   const top = args.priorities[0];
-  if (!q) return { answer: 'Ask about service pressure, staffing, the floor, stock, VIPs, or what to fix next.', sources: [] as string[] };
+  if (!q) return { answer: 'Ask about service pressure, staffing, sales, floor, CRM leads, stock, integrations, or what to fix next.', sources: [] as string[] };
   if (q.includes('before') || q.includes('fix') || q.includes('attention') || q.includes('next')) {
     return top
       ? { answer: `${top.title}. ${top.reason} Recommended move: ${top.cta}.`, sources: [top.id] }
       : { answer: `Nothing needs immediate intervention during ${args.phaseLabel.toLowerCase()}.`, sources: [] };
   }
-  if (q.includes('staff') || q.includes('understaff')) return { answer: `${args.summary.scheduledStaff} staff are scheduled and ${args.summary.openShifts} shifts remain open.`, sources: ['coverage'] };
-  if (q.includes('stock') || q.includes('bar') || q.includes('86')) return { answer: `${args.summary.lowStockItems} items are at or below par and ${args.summary.eightySixItems} items are currently 86'd.`, sources: ['stock'] };
+  if (q.includes('sale') || q.includes('revenue') || q.includes('sales') || q.includes('check')) {
+    const totalDollars = ((args.summary.totalSalesCents ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    return { answer: `Today's sales stand at ${totalDollars} across ${args.summary.openChecksCount ?? 0} open checks and closed orders.`, sources: ['sales'] };
+  }
+  if (q.includes('crm') || q.includes('lead') || q.includes('pipeline') || q.includes('event lead')) {
+    return { answer: `There are ${args.summary.activeLeadsCount ?? 0} active CRM leads in the event pipeline.`, sources: ['crm'] };
+  }
+  if (q.includes('integration') || q.includes('pos') || q.includes('toast') || q.includes('stripe') || q.includes('opentable')) {
+    const dis = args.summary.disconnectedIntegrationsCount ?? 0;
+    return { answer: dis > 0 ? `${dis} integration connection(s) require attention.` : `All ${args.summary.connectedIntegrationsCount ?? 0} integration connections are healthy and active.`, sources: ['integrations'] };
+  }
+  if (q.includes('waitlist') || q.includes('walk') || q.includes('waiting')) {
+    return { answer: `There are currently ${args.summary.activeWaitlist ?? 0} parties on the walk-in waitlist.`, sources: ['waitlist'] };
+  }
+  if (q.includes('chat') || q.includes('message') || q.includes('announcement')) {
+    return { answer: `${args.summary.teamMessagesCount ?? 0} team messages have been shared in staff chat channels.`, sources: ['chat'] };
+  }
+  if (q.includes('staff') || q.includes('understaff') || q.includes('roster')) return { answer: `${args.summary.scheduledStaff} staff are scheduled and ${args.summary.openShifts} shifts remain open.`, sources: ['coverage'] };
+  if (q.includes('stock') || q.includes('bar') || q.includes('86') || q.includes('inventory')) return { answer: `${args.summary.lowStockItems} items are at or below par and ${args.summary.eightySixItems} items are currently 86'd.`, sources: ['stock'] };
   if (q.includes('vip') || q.includes('guest')) return { answer: `${args.summary.vipArrivals} VIP arrival${args.summary.vipArrivals === 1 ? '' : 's'} are in today's reservation picture.`, sources: ['guest'] };
-  if (q.includes('floor') || q.includes('table') || q.includes('turn')) return { answer: `${args.summary.seatedTables} tables are seated now.${top?.kind === 'floor' ? ` ${top.title}: ${top.reason}` : ' No floor issue is currently the top operational priority.'}`, sources: top?.kind === 'floor' ? [top.id] : [] };
+  if (q.includes('floor') || q.includes('table') || q.includes('turn')) return { answer: `${args.summary.seatedTables} tables are seated now with ${args.summary.activeWaitlist ?? 0} parties on the waitlist.${top?.kind === 'floor' ? ` ${top.title}: ${top.reason}` : ' No floor issue is currently the top operational priority.'}`, sources: top?.kind === 'floor' ? [top.id] : [] };
   return { answer: top ? `During ${args.phaseLabel.toLowerCase()}, the top issue is ${top.title.toLowerCase()}. ${top.reason}` : `Service is currently under control during ${args.phaseLabel.toLowerCase()}.`, sources: top ? [top.id] : [] };
 }

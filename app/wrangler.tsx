@@ -1,6 +1,6 @@
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { CommandButton, CommandText } from '../components/FutureUI';
 import { Skeleton } from '../components/Skeleton';
 import { WranglerAiUsagePanel } from '../components/WranglerAiUsagePanel';
@@ -20,6 +20,9 @@ function severityLabel(severity: WranglerSeverity) { if (severity === 'critical'
 function iconFor(priority: WranglerPriority) { if (priority.kind === 'coverage') return 'account-alert-outline' as const; if (priority.kind === 'stock') return 'bottle-wine-outline' as const; if (priority.kind === 'event') return 'calendar-clock-outline' as const; if (priority.kind === 'requests') return 'clipboard-clock-outline' as const; if (priority.kind === 'floor') return 'floor-plan' as const; return 'check-circle-outline' as const; }
 
 export default function WranglerScreen() {
+  const params = useLocalSearchParams<{ q?: string; command?: string }>();
+  const initialQuery = typeof params.q === 'string' ? params.q : undefined;
+  const initialCommand = typeof params.command === 'string' ? params.command : undefined;
   const palette = useDesignTheme(); const wrangler = useWrangler(true); const executeAction = useExecuteWranglerAction(); const snapshot = wrangler.data;
   const createFollowUp = (priority: WranglerPriority) => {
     const run = async () => {
@@ -56,7 +59,7 @@ export default function WranglerScreen() {
       <WranglerShiftStory snapshot={snapshot} />
       <View style={{ gap: spacing.sm }}><CommandText palette={palette} variant="title">Needs wrangling</CommandText><CommandText palette={palette} variant="caption">Prioritized by operational impact, not by which module happened to notice first.</CommandText></View>
       <View style={{ gap: spacing.md }}>{snapshot.priorities.map((priority) => { const urgent = priority.severity === 'critical' || priority.severity === 'warning'; const accent = urgent ? palette.warning : priority.severity === 'watch' ? '#8A6B2D' : palette.success; const action = priority.actions[0]; const pendingLabel = action?.type === 'REASSIGN_RESERVATION' ? 'Moving…' : action?.type === 'NOTIFY_STAFF' ? 'Notifying…' : action?.label; return <View key={priority.id} style={{ backgroundColor: palette.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: palette.border, borderLeftWidth: 4, borderLeftColor: accent, padding: spacing.md, gap: spacing.sm }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}><MaterialCommunityIcons name={iconFor(priority)} size={22} color={accent} /><View style={{ flex: 1 }}><CommandText palette={palette} variant="label" style={{ color: accent }}>{severityLabel(priority.severity)}</CommandText><CommandText palette={palette} variant="title">{priority.title}</CommandText></View></View><CommandText palette={palette} variant="body">{priority.body}</CommandText><View style={{ backgroundColor: palette.background, padding: spacing.sm, borderRadius: 6, gap: 2 }}><CommandText palette={palette} variant="label">Why it matters</CommandText><CommandText palette={palette} variant="caption">{priority.reason}</CommandText></View><View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' }}>{action ? <CommandButton palette={palette} selected={urgent} onPress={() => handleAction(action)}>{executeAction.isPending ? pendingLabel : action.label}</CommandButton> : null}{priority.kind !== 'steady' ? <CommandButton palette={palette} onPress={() => createFollowUp(priority)}>Create follow-up</CommandButton> : null}<CommandButton palette={palette} onPress={() => pushWranglerRoute(priority.route)}>View details</CommandButton></View></View>; })}</View>
-      <WranglerIntelligencePanel snapshot={snapshot} />
+      <WranglerIntelligencePanel snapshot={snapshot} initialQuery={initialQuery} initialCommand={initialCommand} />
       <WranglerAiUsagePanel />
       <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: palette.divider, paddingTop: spacing.md, gap: 4 }}><CommandText palette={palette} variant="label">Service risks</CommandText><CommandText palette={palette} variant="caption">{summary.openShifts} open shifts · {summary.lowStockItems} low-stock items · {summary.eightySixItems} 86'd · {summary.pendingStaffRequests} pending staff requests</CommandText></View>
     </View>

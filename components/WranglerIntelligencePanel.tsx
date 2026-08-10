@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, TextInput, View } from 'react-native';
 import { CommandText } from './FutureUI';
 import { spacing, useDesignTheme } from '../lib/theme';
@@ -36,17 +36,36 @@ function formatOperatorResult(result: unknown): string {
   return result == null ? 'Done.' : String(result);
 }
 
-export function WranglerIntelligencePanel({ snapshot }: { snapshot: WranglerSnapshot }) {
+export function WranglerIntelligencePanel({
+  snapshot,
+  initialQuery,
+  initialCommand,
+}: {
+  snapshot: WranglerSnapshot;
+  initialQuery?: string;
+  initialCommand?: string;
+}) {
   const palette = useDesignTheme();
   const ask = useAskWrangler();
   const operatorPlan = useWranglerOperatorPlan();
   const operatorExecute = useWranglerOperatorExecute();
-  const [question, setQuestion] = useState('');
+  const [question, setQuestion] = useState(initialQuery ?? '');
   const [answer, setAnswer] = useState<string | null>(null);
-  const [command, setCommand] = useState('');
+  const [command, setCommand] = useState(initialCommand ?? '');
   const [operatorAnswer, setOperatorAnswer] = useState<string | null>(null);
   const [pendingPlan, setPendingPlan] = useState<WranglerOperatorPlan | null>(null);
   const [pendingPreview, setPendingPreview] = useState<string[]>([]);
+  const [handledInitial, setHandledInitial] = useState(false);
+
+  useEffect(() => {
+    if (handledInitial) return;
+    setHandledInitial(true);
+    if (initialCommand && initialCommand.trim().length >= 2) {
+      void runOperator(initialCommand.trim());
+    } else if (initialQuery && initialQuery.trim().length >= 2) {
+      void submit(initialQuery.trim());
+    }
+  }, [handledInitial, initialCommand, initialQuery]);
 
   const submit = async (preset?: string) => {
     const value = (preset ?? question).trim();
