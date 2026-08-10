@@ -332,6 +332,23 @@ describe('ChatController', () => {
     await expect(controller.openDm(staffScope, { targetProfileId: 'staff-2' })).resolves.toEqual({
       conversationId: 'existing-dm',
     });
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'staff-2',
+        venueId: 'venue-1',
+        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+      },
+    });
+  });
+
+  it('rejects opening a direct message with an inactive or non-existent profile', async () => {
+    const { controller, prisma } = makeController();
+    prisma.profile.findFirst.mockResolvedValue(null);
+
+    await expect(controller.openDm(staffScope, { targetProfileId: 'inactive-staff' })).rejects.toThrow(
+      'User is not an active member of this venue',
+    );
+    expect(prisma.conversation.create).not.toHaveBeenCalled();
   });
 
   it('creates a dm when no thread exists yet', async () => {

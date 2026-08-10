@@ -38,7 +38,10 @@ export async function assertWithinSharedRateLimit(
 
 let lastCleanupAt = 0;
 
-async function maybeCleanupExpiredBuckets(prisma: PrismaService, now: Date) {
+export async function maybeCleanupExpiredBuckets(prisma: PrismaService, now: Date) {
+  if (!prisma.rateLimitBucket?.deleteMany) {
+    return;
+  }
   if (now.getTime() - lastCleanupAt < 5 * 60 * 1000) {
     return;
   }
