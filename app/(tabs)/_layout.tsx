@@ -38,8 +38,8 @@ export default function TabsLayout() {
       tabBar={(props) => <CarouselTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: palette.primary,
-        tabBarInactiveTintColor: palette.muted,
+        tabBarActiveTintColor: String(palette.primary),
+        tabBarInactiveTintColor: String(palette.muted),
       }}
     >
       <Tabs.Screen name="home" options={{ title: t('nav.home'), tabBarIcon: icon('view-dashboard') }} />
