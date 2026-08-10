@@ -23,7 +23,7 @@ import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
-import { tryAcquireSharedLease } from '../../common/shared-lease';
+import { tryAcquireSharedLease, releaseSharedLease } from '../../common/shared-lease';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -111,123 +111,121 @@ export class ChatController {
   ) {}
 
   private async ensureContextualConversationsThrottled(venueId: string) {
+    const leaseKey = `chat-context:${venueId}`;
     const acquired = await tryAcquireSharedLease(
       this.prisma,
-      `chat-context:${venueId}`,
+      leaseKey,
       ChatController.CONTEXTUAL_SYNC_THROTTLE_MS,
     );
     if (!acquired) {
       return;
     }
-    await this.ensureContextualConversations(venueId);
+    try {
+      await this.ensureContextualConversations(venueId);
+    } catch (error) {
+      // Release the lease so the next request on any replica retries immediately
+      // instead of waiting for the full TTL to expire.
+      await releaseSharedLease(this.prisma, leaseKey).catch(() => undefined);
+      throw error;
+    }
   }
 
   async ensureContextualConversations(venueId: string) {
-    await this.prisma.$transaction(async (tx) => {
-      const venue = tx.venue?.findUnique
-        ? await tx.venue.findUnique({ where: { id: venueId }, select: { timezone: true } })
-        : null;
-      const weekStart = venue ? weekStartFor(todayInZone(venue.timezone)) : undefined;
-      const [profiles, allShifts, existingConvs] = await Promise.all([
-        tx.profile.findMany({
-          where: { venueId, OR: ACTIVE_MEMBERSHIP },
-          select: { id: true, jobTitle: true, role: true, allAccess: true },
-        }),
-        tx.scheduleShift.findMany({
-          where: { venueId, ...(weekStart ? { weekStart } : {}) },
-          select: { profileId: true, dayIndex: true },
-        }),
-        tx.conversation.findMany({
-          where: { venueId, type: { in: ['role', 'shift'] } },
-        }),
-      ]);
+    // --- Read phase (no transaction lock) ---
+    // The shared lease already serializes concurrent syncs for this venue,
+    // so the snapshot is stable without a transactional read lock.
+    const venue = this.prisma.venue?.findUnique
+      ? await this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } })
+      : null;
+    const weekStart = venue ? weekStartFor(todayInZone(venue.timezone)) : undefined;
+    const [profiles, allShifts, existingConvs] = await Promise.all([
+      this.prisma.profile.findMany({
+        where: { venueId, OR: ACTIVE_MEMBERSHIP },
+        select: { id: true, jobTitle: true, role: true, allAccess: true },
+      }),
+      this.prisma.scheduleShift.findMany({
+        where: { venueId, ...(weekStart ? { weekStart } : {}) },
+        select: { profileId: true, dayIndex: true },
+      }),
+      this.prisma.conversation.findMany({
+        where: { venueId, type: { in: ['role', 'shift'] } },
+      }),
+    ]);
 
-      const managerIds = profiles.filter((p) => canManageVenue(p.role, p.allAccess)).map((p) => p.id);
+    // --- Compute diff in memory ---
+    const managerIds = profiles.filter((p) => canManageVenue(p.role, p.allAccess)).map((p) => p.id);
 
-      // Group existing by roleName/shiftDate
-      const existingRolesMap = new Map(existingConvs.filter((c) => c.type === 'role' && c.roleName).map((c) => [c.roleName!, c]));
-      const existingShiftsMap = new Map(existingConvs.filter((c) => c.type === 'shift' && c.shiftDate).map((c) => [c.shiftDate!, c]));
+    const existingRolesMap = new Map(existingConvs.filter((c) => c.type === 'role' && c.roleName).map((c) => [c.roleName!, c]));
+    const existingShiftsMap = new Map(existingConvs.filter((c) => c.type === 'shift' && c.shiftDate).map((c) => [c.shiftDate!, c]));
 
-      // 1. Ensure Role Channels
-      const roles = Array.from(new Set(profiles.map((p) => p.jobTitle || p.role).filter(Boolean)));
-      for (const role of roles) {
-        const roleMemberIds = Array.from(new Set([
-          ...managerIds,
-          ...profiles.filter((p) => p.jobTitle === role || p.role === role).map((p) => p.id)
-        ])).sort();
-        
-        const existing = existingRolesMap.get(role);
-        const name = `#Role - ${role}`;
+    type WriteOp = { action: 'create'; data: any } | { action: 'update'; where: any; data: any };
+    const writes: WriteOp[] = [];
+
+    // 1. Role channels
+    const roles = Array.from(new Set(profiles.map((p) => p.jobTitle || p.role).filter(Boolean)));
+    for (const role of roles) {
+      const roleMemberIds = Array.from(new Set([
+        ...managerIds,
+        ...profiles.filter((p) => p.jobTitle === role || p.role === role).map((p) => p.id)
+      ])).sort();
+
+      const existing = existingRolesMap.get(role);
+      const name = `#Role - ${role}`;
+      if (!existing) {
+        writes.push({ action: 'create', data: { venueId, type: 'role', roleName: role, name, memberIds: roleMemberIds, isSystem: true } });
+      } else {
+        const sortedExistingMembers = [...existing.memberIds].sort();
+        if (!sameMembers(roleMemberIds, sortedExistingMembers) || existing.name !== name || !existing.isSystem) {
+          writes.push({ action: 'update', where: { id: existing.id }, data: { memberIds: roleMemberIds, name, isSystem: true } });
+        }
+      }
+    }
+
+    // 2. Shift crew channels for the current week
+    const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const shiftsByDay = Array.from({ length: 7 }, () => [] as string[]);
+    for (const s of allShifts) {
+      if (s.profileId) {
+        shiftsByDay[s.dayIndex].push(s.profileId);
+      }
+    }
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      if (!weekStart) continue;
+      const dateStr = addDays(weekStart, dayIndex);
+      const dayLabel = dayLabels[dayIndex];
+
+      const crewMemberIds = Array.from(new Set([
+        ...managerIds,
+        ...shiftsByDay[dayIndex],
+      ])).sort();
+
+      if (crewMemberIds.length > 0) {
+        const existing = existingShiftsMap.get(dateStr);
+        const name = `#Crew - ${dayLabel} (${formatMonthDay(dateStr)})`;
         if (!existing) {
-          await tx.conversation.create({
-            data: {
-              venueId,
-              type: 'role',
-              roleName: role,
-              name,
-              memberIds: roleMemberIds,
-              isSystem: true,
-            }
-          });
+          writes.push({ action: 'create', data: { venueId, type: 'shift', shiftDate: dateStr, name, memberIds: crewMemberIds, isSystem: true } });
         } else {
           const sortedExistingMembers = [...existing.memberIds].sort();
-          if (!sameMembers(roleMemberIds, sortedExistingMembers) || existing.name !== name || !existing.isSystem) {
-            await tx.conversation.update({
-              where: { id: existing.id },
-              data: { memberIds: roleMemberIds, name, isSystem: true },
-            });
+          if (!sameMembers(crewMemberIds, sortedExistingMembers) || existing.name !== name || !existing.isSystem) {
+            writes.push({ action: 'update', where: { id: existing.id }, data: { memberIds: crewMemberIds, name, isSystem: true } });
           }
         }
       }
+    }
 
-      // 2. Ensure Shift Crew Channels for the current week
-      const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-      // Group shifts by dayIndex in memory
-      const shiftsByDay = Array.from({ length: 7 }, () => [] as string[]);
-      for (const s of allShifts) {
-        if (s.profileId) {
-          shiftsByDay[s.dayIndex].push(s.profileId);
-        }
-      }
-
-      for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-        if (!weekStart) continue;
-        const dateStr = addDays(weekStart, dayIndex);
-        const dayLabel = dayLabels[dayIndex];
-
-        const scheduledProfileIds = shiftsByDay[dayIndex];
-        const crewMemberIds = Array.from(new Set([
-          ...managerIds,
-          ...scheduledProfileIds,
-        ])).sort();
-
-        if (crewMemberIds.length > 0) {
-          const existing = existingShiftsMap.get(dateStr);
-          const name = `#Crew - ${dayLabel} (${formatMonthDay(dateStr)})`;
-          if (!existing) {
-            await tx.conversation.create({
-              data: {
-                venueId,
-                type: 'shift',
-                shiftDate: dateStr,
-                name,
-                memberIds: crewMemberIds,
-                isSystem: true,
-              }
-            });
+    // --- Write phase (transaction lock — writes only) ---
+    if (writes.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const op of writes) {
+          if (op.action === 'create') {
+            await tx.conversation.create({ data: op.data });
           } else {
-            const sortedExistingMembers = [...existing.memberIds].sort();
-            if (!sameMembers(crewMemberIds, sortedExistingMembers) || existing.name !== name || !existing.isSystem) {
-              await tx.conversation.update({
-                where: { id: existing.id },
-                data: { memberIds: crewMemberIds, name, isSystem: true },
-              });
-            }
+            await tx.conversation.update({ where: op.where, data: op.data });
           }
         }
-      }
-    });
+      });
+    }
   }
 
   @RequireSubscription('active')

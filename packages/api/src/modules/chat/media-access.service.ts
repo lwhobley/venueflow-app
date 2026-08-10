@@ -1,45 +1,66 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { createHmac, timingSafeEqual } from 'crypto';
 
-type MediaKind = 'chat-image' | 'checklist-photo';
+export type MediaKind = 'chat-image' | 'checklist-photo';
 
-type MediaAccessClaims = {
-  purpose: 'media-access';
-  kind: MediaKind;
-  mediaId: string;
-  venueId: string;
-};
+/** Duration of one time bucket in seconds (3 minutes). */
+const BUCKET_SECONDS = 180;
 
+/**
+ * Opaque, time-bucketed HMAC tokens for media access.
+ *
+ * React Native <Image> cannot send a bearer header, so image routes accept a
+ * short-lived query-string token instead. Unlike the prior JWT approach, the
+ * token is an opaque hex HMAC — no structured claims leak into logs,
+ * screenshots, or shared links.
+ *
+ * Each token is valid for the current 3-minute time bucket plus the previous
+ * one (to handle requests near a bucket boundary), giving an effective window
+ * of 3–6 minutes.
+ */
 @Injectable()
 export class MediaAccessService {
-  constructor(private readonly jwt: JwtService) {}
+  private readonly secret: string;
 
-  async createPath(kind: MediaKind, mediaId: string, venueId: string, path: string): Promise<string> {
-    const token = await this.jwt.signAsync<MediaAccessClaims>(
-      { purpose: 'media-access', kind, mediaId, venueId },
-      // Short-lived: this token is the only gate on an otherwise-public image
-      // route (React Native <Image> can't send a bearer header). Three minutes
-      // covers image retrieval while tightly limiting exposure
-      // if the URL leaks (logs, screenshots, shared links).
-      { expiresIn: '3m' },
-    );
-    return `${path}?token=${encodeURIComponent(token)}`;
+  constructor(config: ConfigService) {
+    const secret = config.get<string>('JWT_SECRET');
+    if (!secret) throw new Error('JWT_SECRET is required for media access tokens');
+    this.secret = secret;
   }
 
-  async assertToken(token: string | undefined, kind: MediaKind, mediaId: string, venueId: string): Promise<void> {
+  createPath(kind: MediaKind, mediaId: string, venueId: string, path: string): string {
+    const bucket = currentBucket();
+    const token = this.computeHmac(kind, mediaId, venueId, bucket);
+    return `${path}?token=${token}&t=${bucket}`;
+  }
+
+  assertToken(token: string | undefined, kind: MediaKind, mediaId: string, venueId: string): void {
     if (!token) throw new UnauthorizedException('Media access token is required');
-    try {
-      const claims = await this.jwt.verifyAsync<MediaAccessClaims>(token);
-      if (
-        claims.purpose !== 'media-access' ||
-        claims.kind !== kind ||
-        claims.mediaId !== mediaId ||
-        claims.venueId !== venueId
-      ) {
-        throw new Error('Media token does not match this resource');
-      }
-    } catch {
-      throw new UnauthorizedException('Media access token is invalid or expired');
+
+    const now = currentBucket();
+
+    // Accept current bucket or the immediately previous one (boundary grace).
+    for (const bucket of [now, now - 1]) {
+      const expected = this.computeHmac(kind, mediaId, venueId, bucket);
+      if (safeCompare(token, expected)) return;
     }
+
+    throw new UnauthorizedException('Media access token is invalid or expired');
   }
+
+  private computeHmac(kind: string, mediaId: string, venueId: string, bucket: number): string {
+    return createHmac('sha256', this.secret)
+      .update(`media-access|${kind}|${mediaId}|${venueId}|${bucket}`)
+      .digest('hex');
+  }
+}
+
+function currentBucket(nowMs = Date.now()): number {
+  return Math.floor(nowMs / 1000 / BUCKET_SECONDS);
+}
+
+function safeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
 }
