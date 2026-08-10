@@ -125,6 +125,7 @@ jobs:
             TimeEntry_profileId_open_key
             WorkplaceJoinRequest_one_pending_per_user_venue_idx
             Invite_phone_idx
+            Profile_unclaimed_venue_email_key
           )
           for index in "${required_indexes[@]}"; do
             found="$(psql -h localhost -U postgres -d venuetest -Atc \
