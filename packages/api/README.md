@@ -50,3 +50,10 @@ separate `supabase/migrations` history and is not the deployment path here.
   group per venue while allowing any number of custom groups. It lives in
   migration `20260809220000_mark_system_conversations` and is intentionally
   omitted from `schema.prisma`.
+
+- `Profile` has a partial unique index (`Profile_unclaimed_venue_email_key`) on
+  `(venueId, lower(email)) WHERE userId IS NULL` so roster imports cannot create
+  duplicate unclaimed seats for the same email at a venue. Lives in migration
+  `20260810153000_profile_accrual_defaults_and_unclaimed_unique`.
+- New profiles default `sickHoursAccrued` / `ptoHoursAccrued` to `0` (same migration).
+- Optional `MEDIA_TOKEN_SECRET` signs media access tokens; falls back to `JWT_SECRET`.
