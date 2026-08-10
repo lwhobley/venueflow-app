@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Role, TableStatus, CrmLeadStatus } from '@prisma/client';
 import { canManageRole } from '../../../auth/roles';
 import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../../common/ai-json-parse';
@@ -42,6 +42,7 @@ const ALLOWED_TOOLS = [
 type OperatorTool = (typeof ALLOWED_TOOLS)[number];
 type OperatorRisk = 'read' | 'low_risk_write' | 'operational_write' | 'sensitive_write';
 type OperatorPlan = { tool: OperatorTool; args: Record<string, unknown>; summary: string; risk: OperatorRisk; preview?: string[] };
+type OperatorExecutionResponse = { ok: true; tool: OperatorTool; risk: OperatorRisk; result: unknown };
 
 type Actor = {
   profileId: string;
@@ -97,6 +98,8 @@ Rules:
 
 @Injectable()
 export class WranglerOperatorService {
+  private readonly logger = new Logger(WranglerOperatorService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async plan(input: { venueId: string; timezone?: string | null; command: string; actor: Actor }) {
@@ -116,19 +119,7 @@ export class WranglerOperatorService {
 
     if (risk === 'operational_write') {
       const result = await this.executeWrite(input.venueId, input.timezone, input.actor, normalized);
-      await this.prisma.auditLog.create({
-        data: {
-          venueId: input.venueId,
-          actorProfileId: input.actor.profileId,
-          actorName: input.actor.fullName,
-          actorRole: input.actor.role,
-          entityType: 'wrangler_operator',
-          entityId: String((result as any)?.id ?? (normalized.args.reservationId ?? normalized.args.shiftId ?? normalized.args.profileId ?? normalized.args.entryId ?? normalized.tool)),
-          action: `wrangler_operator_${normalized.tool.toLowerCase()}`,
-          summary: normalized.summary,
-          metadata: { tool: normalized.tool, risk, args: this.auditArgs(normalized.args) } as any,
-        },
-      });
+      await this.writeAudit(input.venueId, input.actor, normalized, result);
       return { status: 'executed' as const, tool: normalized.tool, risk, summary: normalized.summary, result };
     }
 
@@ -142,27 +133,18 @@ export class WranglerOperatorService {
     };
   }
 
-  async execute(input: { venueId: string; timezone?: string | null; actor: Actor; plan: OperatorPlan }) {
+  async execute(input: { venueId: string; timezone?: string | null; actor: Actor; plan: OperatorPlan }): Promise<OperatorExecutionResponse> {
     if (!this.canManage(input.actor)) throw new ForbiddenException('Manager access required for Wrangler operator actions');
     if (!ALLOWED_TOOLS.includes(input.plan.tool)) throw new BadRequestException('Unsupported Wrangler operator tool');
     const risk = this.riskFor(input.plan.tool);
-    if (risk === 'read') return this.executeRead(input.venueId, input.timezone, input.plan.tool, input.plan.args);
+    if (risk === 'read') {
+      const result = await this.executeRead(input.venueId, input.timezone, input.plan.tool, input.plan.args);
+      return { ok: true, tool: input.plan.tool, risk, result };
+    }
 
     const normalized = await this.resolveWritePlan(input.venueId, input.timezone, { ...input.plan, risk });
     const result = await this.executeWrite(input.venueId, input.timezone, input.actor, normalized);
-    await this.prisma.auditLog.create({
-      data: {
-        venueId: input.venueId,
-        actorProfileId: input.actor.profileId,
-        actorName: input.actor.fullName,
-        actorRole: input.actor.role,
-        entityType: 'wrangler_operator',
-        entityId: String((result as any)?.id ?? (normalized.args.reservationId ?? normalized.args.shiftId ?? normalized.args.profileId ?? normalized.args.entryId ?? normalized.tool)),
-        action: `wrangler_operator_${normalized.tool.toLowerCase()}`,
-        summary: normalized.summary,
-        metadata: { tool: normalized.tool, risk, args: this.auditArgs(normalized.args) } as any,
-      },
-    });
+    await this.writeAudit(input.venueId, input.actor, normalized, result);
     return { ok: true, tool: normalized.tool, risk, result };
   }
 
@@ -191,13 +173,14 @@ export class WranglerOperatorService {
     const lower = text.toLowerCase();
 
     if (lower.includes('clear table') || lower.startsWith('bus ')) {
-      const match = lower.match(/(?:clear|bus|reset|clean)\s+(?:table\s+)?([a-z0-9_-]+)/i);
-      return { tool: 'CLEAR_TABLE', args: { tableLabel: match ? match[1] : '1' }, summary: `Clear table ${match ? match[1] : ''}.` };
+      const target = text.replace(/^(?:clear|bus|reset|clean)\s+(?:table\b\s*)?/i, '').trim();
+      const tableLabel = /^[a-z0-9_-]+$/i.test(target) ? target : undefined;
+      return { tool: 'CLEAR_TABLE', args: tableLabel ? { tableLabel } : {}, summary: tableLabel ? `Clear table ${tableLabel}.` : 'Clear the requested table.' };
     }
     if (lower.includes('waitlist')) {
       if (lower.includes('add') || lower.includes('put')) {
         const match = lower.match(/(?:add|put)\s+([a-z\s]+?)\s+(?:party of\s+)?(\d+)?/i);
-        return { tool: 'ADD_WAITLIST', args: { guestName: match?.[1]?.trim() || 'Guest', partySize: Number(match?.[2] || 2) }, summary: 'Add party to waitlist.' };
+        return { tool: 'ADD_WAITLIST', args: { guestName: match?.[1]?.trim(), partySize: match?.[2] ? Number(match[2]) : undefined }, summary: 'Add party to waitlist.' };
       }
       return { tool: 'LIST_WAITLIST', args: {}, summary: 'Show active waitlist.' };
     }
@@ -210,7 +193,7 @@ export class WranglerOperatorService {
     if (lower.includes('crm') || lower.includes('lead')) {
       if (lower.includes('add') || lower.includes('create')) {
         const name = text.replace(/.*?(?:add|create)\s+(?:lead\s+)?/i, '').trim();
-        return { tool: 'CREATE_CRM_LEAD', args: { fullName: name || 'New Lead' }, summary: `Create CRM lead ${name}.` };
+        return { tool: 'CREATE_CRM_LEAD', args: name ? { fullName: name } : {}, summary: `Create CRM lead ${name}.` };
       }
       return { tool: 'FIND_CRM_LEAD', args: {}, summary: 'Search CRM leads.' };
     }
@@ -401,7 +384,7 @@ export class WranglerOperatorService {
 
     if (plan.tool === 'CLEAR_TABLE' || plan.tool === 'UPDATE_TABLE_STATUS') {
       const tableLabel = this.requiredText(args.tableLabel, 'Tell Wrangler which table to update');
-      const targetStatus = (this.cleanText(args.status) ?? (plan.tool === 'CLEAR_TABLE' ? 'available' : 'seated')) as TableStatus;
+      const targetStatus = this.tableStatus(args.status, plan.tool === 'CLEAR_TABLE' ? 'available' : 'seated');
       const table = await this.resolveTable(venueId, tableLabel);
       args.tableId = table.id;
       args.tableLabel = table.label;
@@ -435,6 +418,7 @@ export class WranglerOperatorService {
       else if (name) target = (await this.prisma.crmLead.findMany({ where: { venueId, fullName: { contains: name, mode: 'insensitive' } }, take: 1 }))[0];
       if (!target) throw new NotFoundException('CRM lead not found');
       args.leadId = target.id;
+      if (args.status != null) args.status = this.crmLeadStatus(args.status);
       preview.push(`Update lead ${target.fullName} (${target.status} → ${args.status ?? target.status})`);
     }
 
@@ -454,7 +438,7 @@ export class WranglerOperatorService {
     if (plan.tool === 'UPDATE_BAR_STOCK') {
       const itemName = this.requiredText(args.itemName, 'Item name is required');
       const onHand = Number(args.onHand);
-      if (Number.isNaN(onHand) || onHand < 0) throw new BadRequestException('onHand must be a non-negative number');
+      if (!Number.isFinite(onHand) || onHand < 0) throw new BadRequestException('onHand must be a finite non-negative number');
       args.itemName = itemName; args.onHand = onHand;
       preview.push(`Set bar inventory count for "${itemName}" to ${onHand}`);
     }
@@ -642,7 +626,8 @@ export class WranglerOperatorService {
       const msg = await this.prisma.message.create({
         data: {
           conversationId: conv.id,
-          authorProfileId: actor.profileId,
+          venueId,
+          senderId: actor.profileId,
           text: `[Announcement] ${text}`,
         },
       });
@@ -706,7 +691,7 @@ export class WranglerOperatorService {
           endMinutes,
           profileId: profileId ?? null,
           jobTitle: String(args.jobTitle ?? 'Server'),
-          station: this.cleanText(args.station) ?? null,
+          station: this.cleanText(args.station) ?? 'Floor',
           status: profileId ? 'scheduled' : 'open',
         },
       });
@@ -842,7 +827,7 @@ export class WranglerOperatorService {
 
   private async resolveTable(venueId: string, label: string) {
     const activePlan = await this.prisma.floorPlan.findFirst({ where: { venueId, isActive: true } });
-    const tables = await this.prisma.table.findMany({
+    const tables = await this.prisma.floorTable.findMany({
       where: {
         floorPlanId: activePlan?.id ?? undefined,
         label: { contains: label, mode: 'insensitive' },
@@ -850,7 +835,7 @@ export class WranglerOperatorService {
       take: 10,
     });
     if (tables.length === 0) {
-      const allTables = await this.prisma.table.findMany({
+      const allTables = await this.prisma.floorTable.findMany({
         where: { floorPlan: { venueId }, label: { contains: label, mode: 'insensitive' } },
         take: 10,
       });
@@ -928,11 +913,34 @@ export class WranglerOperatorService {
     if (venue?.schedulePublishedAt) await this.prisma.venue.update({ where: { id: venueId }, data: { scheduleUpdatedAfterPublishAt: new Date() } });
   }
 
+  private async writeAudit(venueId: string, actor: Actor, plan: OperatorPlan, result: unknown) {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          venueId,
+          actorProfileId: actor.profileId,
+          actorName: actor.fullName,
+          actorRole: actor.role,
+          entityType: 'wrangler_operator',
+          entityId: String((result as { id?: unknown } | null)?.id ?? (plan.args.reservationId ?? plan.args.shiftId ?? plan.args.profileId ?? plan.args.entryId ?? plan.tool)),
+          action: `wrangler_operator_${plan.tool.toLowerCase()}`,
+          summary: plan.summary,
+          metadata: { tool: plan.tool, risk: plan.risk, args: this.auditArgs(plan.args) } as any,
+        },
+      });
+    } catch (error) {
+      // The operation has already completed; surfacing an audit failure would invite a duplicate retry.
+      this.logger.error(`Wrangler operator audit failed for ${plan.tool}`, error);
+    }
+  }
+
   private canManage(actor: Actor) { return actor.allAccess || ['owner', 'admin', 'manager'].includes(actor.role); }
   private cleanText(value: unknown) { const text = typeof value === 'string' ? value.trim() : ''; return text || undefined; }
   private requiredText(value: unknown, message: string) { const text = this.cleanText(value); if (!text) throw new BadRequestException(message); return text; }
   private positiveInt(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 1) throw new BadRequestException(`${field} must be a positive whole number`); return n; }
   private minuteValue(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > 1440) throw new BadRequestException(`${field} must be between 0 and 1440`); return n; }
+  private tableStatus(value: unknown, fallback: TableStatus) { const status = this.cleanText(value) ?? fallback; if (!['available', 'seated', 'dirty', 'reserved', 'held', 'out_of_service'].includes(status)) throw new BadRequestException('Invalid table status'); return status as TableStatus; }
+  private crmLeadStatus(value: unknown) { const status = this.requiredText(value, 'Invalid CRM lead status'); if (!['new', 'contacted', 'qualified', 'proposal_sent', 'negotiating', 'won', 'lost', 'unqualified', 'on_hold'].includes(status)) throw new BadRequestException('Invalid CRM lead status'); return status as CrmLeadStatus; }
   private requiredDate(value: unknown, message: string) { const date = this.optionalDate(value, message); if (!date) throw new BadRequestException(message); return date; }
   private optionalDate(value: unknown, field: string) { if (value == null || value === '') return undefined; const date = new Date(String(value)); if (Number.isNaN(date.getTime())) throw new BadRequestException(`Invalid ${field}`); return date; }
   private dateBounds(timezone: string | null | undefined, date: string) { if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Date must be YYYY-MM-DD'); const bounds = zonedDateBounds(timezone, date); return { start: new Date(bounds.start), end: new Date(bounds.end) }; }

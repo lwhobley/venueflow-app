@@ -41,7 +41,7 @@ describe('SafeWranglerOperatorService', () => {
   it('executes CLEAR_TABLE command to clear a table status', async () => {
     const prisma = {
       floorPlan: { findFirst: vi.fn().mockResolvedValue({ id: 'plan-1' }) },
-      table: { findMany: vi.fn().mockResolvedValue([{ id: 'table-3', label: '3' }]) },
+      floorTable: { findMany: vi.fn().mockResolvedValue([{ id: 'table-3', label: '3' }]) },
       tableState: {
         findFirst: vi.fn().mockResolvedValue({ id: 'ts-3', status: 'seated' }),
         update: vi.fn().mockResolvedValue({ id: 'ts-3', status: 'available' }),
@@ -164,5 +164,29 @@ describe('SafeWranglerOperatorService', () => {
 
     expect(result.ok).toBe(true);
     expect(result.result).toEqual({ id: 'prep-1', itemName: 'Tuna Tartare', isEightySix: true });
+  });
+
+  it('does not invent a table target when fallback parsing lacks one', async () => {
+    const service = new WranglerOperatorService({} as never);
+
+    const parsed = (service as any).fallbackParse('clear table');
+
+    expect(parsed).toEqual({ tool: 'CLEAR_TABLE', args: {}, summary: 'Clear the requested table.' });
+  });
+
+  it('rejects invalid table statuses before Prisma receives them', async () => {
+    const prisma = {
+      floorPlan: { findFirst: vi.fn().mockResolvedValue({ id: 'plan-1' }) },
+      floorTable: { findMany: vi.fn().mockResolvedValue([{ id: 'table-3', label: '3' }]) },
+      tableState: { findFirst: vi.fn() },
+    };
+    const service = new WranglerOperatorService(prisma as never);
+
+    await expect(service.execute({
+      venueId: 'venue-1',
+      actor: { profileId: 'manager-1', fullName: 'Manager', role: 'manager', allAccess: true },
+      plan: { tool: 'UPDATE_TABLE_STATUS', args: { tableLabel: '3', status: 'destroyed' }, summary: 'Update table 3.', risk: 'operational_write' },
+    })).rejects.toThrow('Invalid table status');
+    expect(prisma.floorTable.findMany).not.toHaveBeenCalled();
   });
 });
