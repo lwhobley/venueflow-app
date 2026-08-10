@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { setupTestDb } from '../test/setup-test-db';
@@ -37,7 +38,14 @@ describe('billing webhook idempotency (integration)', () => {
 
   beforeEach(async () => {
     const venue = await prisma.venue.create({
-      data: { name: 'Idempotency Test Venue', code: 'VW-IDEMPOTENT', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' },
+      data: {
+        name: 'Idempotency Test Venue',
+        code: `VW-${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`,
+        latitude: 0,
+        longitude: 0,
+        geofenceRadiusM: 100,
+        timezone: 'UTC',
+      },
     });
     venueId = venue.id;
   });
