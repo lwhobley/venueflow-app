@@ -43,6 +43,9 @@ async function bootstrap() {
   if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
   }
+  if (process.env.NODE_ENV === 'production' && !config.get<string>('TRUST_PROXY_HOPS')) {
+    console.warn('[Bootstrap] WARNING: TRUST_PROXY_HOPS is not explicitly configured in environment; defaulting to 1 for Cloud Run load balancer');
+  }
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   // Only accept fully-qualified http(s) origins. In production, further
   // restrict to venuewrangler.com hosts so a mis-set CORS_ORIGINS cannot

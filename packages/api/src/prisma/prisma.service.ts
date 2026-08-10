@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { tenantIsolationExtension } from './tenant-isolation.extension';
 import { tenantIsolationEnforced } from './tenant-isolation-config';
 
-export const DEFAULT_DATABASE_POOL_SIZE = 5;
+export const DEFAULT_DATABASE_POOL_SIZE = process.env['NODE_ENV'] === 'production' ? 3 : 5;
 export const DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS = 10;
 
 /**

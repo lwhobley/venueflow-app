@@ -84,7 +84,9 @@ export default function RootLayout() {
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason;
-      const message = typeof reason === 'string' ? reason : reason?.message ?? '';
+      const message = typeof reason === 'string'
+        ? reason
+        : (reason && typeof reason === 'object' && 'message' in reason ? String((reason as { message: unknown }).message) : String(reason ?? ''));
       if (shouldIgnoreWebError(message)) {
         event.preventDefault();
       }

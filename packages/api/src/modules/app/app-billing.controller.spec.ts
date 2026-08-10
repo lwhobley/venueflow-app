@@ -361,6 +361,32 @@ describe('AppBillingController', () => {
       await expect(controller.syncAppleSubscription(user, allowedBody as any)).rejects.toThrow(BadRequestException);
     });
 
+    it('retries RevenueCat verification when encountering a transient 500 server error', async () => {
+      const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: 'rc_key' });
+      profiles.requireBillingProfile.mockResolvedValue(billingViewer);
+      profiles.getProfile.mockResolvedValue({ venueId: 'venue-1' });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ message: 'server error' }) })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            subscriber: {
+              entitlements: { pro: { product_identifier: 'com.venuewrangler.monthly', expires_date: '2030-01-01T00:00:00Z' } },
+              subscriptions: {},
+            },
+          }),
+        });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await controller.syncAppleSubscription(user, allowedBody as any);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(prisma.venue.update).toHaveBeenCalledWith({
+        where: { id: 'venue-1' },
+        data: { subscriptionStatus: 'active', subscriptionPlatform: 'apple' },
+      });
+    });
+
     it('rejects an active entitlement that belongs to a different product', async () => {
       const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: 'rc_key' });
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);
