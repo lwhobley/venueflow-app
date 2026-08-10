@@ -91,9 +91,10 @@ export class BillingController {
   @Public()
   @Post('revenuecat/webhook')
   async revenueCatWebhook(@Req() request: Request, @Headers('authorization') authorization: string | undefined, @Body() body: RevenueCatWebhookBody) {
-    await assertWithinSharedRateLimit(this.prisma, `revenuecat:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
     // Fail closed: the webhook is @Public(), so without a configured secret
     // anyone could forge subscription state for any venue. Always require it.
+    // Authenticate before rate limiting so unauthenticated sprays cannot churn
+    // RateLimitBucket rows (same ordering as POS ingest).
     const expectedSecret = this.config.get<string>('REVENUECAT_WEBHOOK_SECRET');
     if (!expectedSecret) {
       throw new UnauthorizedException('RevenueCat webhook secret is not configured');
@@ -102,6 +103,7 @@ export class BillingController {
     if (!secretsMatch(token, expectedSecret)) {
       throw new UnauthorizedException('Invalid RevenueCat webhook secret');
     }
+    await assertWithinSharedRateLimit(this.prisma, `revenuecat:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
 
     const event = body.event;
     const venueId = event?.app_user_id;
@@ -154,7 +156,8 @@ export class BillingController {
     @Headers('stripe-signature') signature: string | undefined,
     @Body() body: StripeEvent,
   ) {
-    await assertWithinSharedRateLimit(this.prisma, `stripe:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
+    // Authenticate before rate limiting so unauthenticated sprays cannot churn
+    // RateLimitBucket rows (same ordering as POS ingest).
     const secret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
     if (!secret) {
       throw new UnauthorizedException('Stripe webhook secret is not configured');
@@ -163,6 +166,7 @@ export class BillingController {
     if (!verifyStripeSignature(rawBody, signature, secret)) {
       throw new UnauthorizedException('Invalid Stripe signature');
     }
+    await assertWithinSharedRateLimit(this.prisma, `stripe:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
 
     const event = body;
     const object = event.data?.object ?? {};
@@ -478,4 +482,3 @@ export class BillingController {
     }
   }
 }
-
