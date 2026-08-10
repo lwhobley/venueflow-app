@@ -11,7 +11,7 @@ import { canManageVenue } from '../../lib/permissions';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 
 const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap) =>
-  ({ color, size }: { color: ColorValue; size: number }) => <MaterialCommunityIcons name={name} size={size} color={color} />;
+  ({ color, size }: { color: ColorValue; size: number }) => <MaterialCommunityIcons name={name} size={size} color={String(color)} />;
 
 export default function TabsLayout() {
   const localUser = useAuthStore((state: AuthState) => state.user);
