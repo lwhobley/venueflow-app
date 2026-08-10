@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
 import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
@@ -589,6 +589,24 @@ export class PosController {
       if (!winner) throw error;
       return updateExisting(winner);
     }
+  }
+
+  @RequireSubscription('active')
+  @Post('connections/:id/rotate-secret')
+  async rotatePosConnectionSecret(@VenueScope() scope: Scope, @Param('id') id: string) {
+    this.requireManager(scope);
+    const connection = await this.prisma.posConnection.findFirst({
+      where: { id, venueId: scope.venueId },
+      select: { id: true },
+    });
+    if (!connection) throw new NotFoundException('POS connection not found');
+
+    const freshSecret = generateWebhookSecret();
+    await this.prisma.posConnection.update({
+      where: { id: connection.id },
+      data: { webhookSecret: freshSecret.hashedSecret, updatedAt: new Date() },
+    });
+    return { webhookSecret: freshSecret.secret };
   }
 
   private mapConnection(conn: {

@@ -3,6 +3,9 @@ import { ChatController } from './chat.controller';
 
 function makeController() {
   const prisma: any = {
+    venue: {
+      findUnique: vi.fn().mockResolvedValue({ timezone: 'UTC' }),
+    },
     profile: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -38,6 +41,7 @@ function makeController() {
       create: vi.fn().mockResolvedValue({ id: 'img-created' }),
     },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
+    $queryRaw: vi.fn().mockResolvedValue([{ key: 'lease:chat-context:venue-1' }]),
   };
   prisma.$transaction = vi.fn((operation: any) => (
     typeof operation === 'function' ? operation(prisma) : Promise.all(operation)
@@ -104,6 +108,7 @@ describe('ChatController', () => {
         roleName: 'Server',
         name: '#Role - Server',
         memberIds: ['manager-1', 'server-1', 'server-2'],
+        isSystem: true,
       }),
     }));
     expect(prisma.conversation.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -113,6 +118,7 @@ describe('ChatController', () => {
         shiftDate: '2026-07-15',
         name: '#Crew - Wednesday (Jul 15)',
         memberIds: ['bar-1', 'manager-1', 'server-1'],
+        isSystem: true,
       }),
     }));
     expect(prisma.conversation.create).toHaveBeenCalledTimes(10);
@@ -137,13 +143,54 @@ describe('ChatController', () => {
 
     expect(prisma.conversation.update).toHaveBeenCalledWith({
       where: { id: 'role-server' },
-      data: { memberIds: ['staff-1', 'staff-2'], name: '#Role - Server' },
+      data: { memberIds: ['staff-1', 'staff-2'], name: '#Role - Server', isSystem: true },
     });
     expect(prisma.conversation.update).toHaveBeenCalledWith({
       where: { id: 'shift-day' },
-      data: { memberIds: ['staff-1'], name: '#Crew - Wednesday (Jul 15)' },
+      data: { memberIds: ['staff-1'], name: '#Crew - Wednesday (Jul 15)', isSystem: true },
     });
     expect(prisma.conversation.create).not.toHaveBeenCalled();
+  });
+
+  it('uses the venue calendar week when UTC is already on the next day', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T01:00:00Z'));
+    const { controller, prisma } = makeController();
+    prisma.venue.findUnique.mockResolvedValue({ timezone: 'America/Chicago' });
+    prisma.profile.findMany.mockResolvedValue([
+      { id: 'manager-1', jobTitle: 'Manager', role: 'manager', allAccess: false },
+      { id: 'staff-1', jobTitle: 'Server', role: 'staff', allAccess: false },
+    ]);
+    prisma.scheduleShift.findMany.mockResolvedValue([{ profileId: 'staff-1', dayIndex: 6 }]);
+
+    await controller.ensureContextualConversations('venue-1');
+
+    expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { venueId: 'venue-1', weekStart: '2026-07-05' },
+    }));
+    expect(prisma.conversation.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        type: 'shift',
+        shiftDate: '2026-07-11',
+        name: '#Crew - Saturday (Jul 11)',
+      }),
+    }));
+  });
+
+  it('allows only one replica to run a contextual sync during the shared lease', async () => {
+    const first = makeController();
+    const second = makeController();
+    second.prisma.$queryRaw.mockResolvedValue([]);
+    const firstSync = vi.spyOn(first.controller, 'ensureContextualConversations').mockResolvedValue(undefined);
+    const secondSync = vi.spyOn(second.controller, 'ensureContextualConversations').mockResolvedValue(undefined);
+
+    await Promise.all([
+      first.controller.listConversations(staffScope),
+      second.controller.listConversations(staffScope),
+    ]);
+
+    expect(firstSync).toHaveBeenCalledOnce();
+    expect(secondSync).not.toHaveBeenCalled();
   });
 
   it('lists filtered conversations with dm titles and unread state', async () => {
@@ -210,7 +257,12 @@ describe('ChatController', () => {
 
   it('reuses the general chat when it already exists', async () => {
     const { controller, prisma } = makeController();
-    prisma.conversation.findFirst.mockResolvedValue({ id: 'general-chat' });
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: 'general-chat',
+      name: 'All Staff',
+      memberIds: ['staff-1'],
+      isSystem: true,
+    });
 
     await expect(controller.ensureChatSetup(staffScope)).resolves.toEqual({ conversationId: 'general-chat' });
     expect(prisma.conversation.create).not.toHaveBeenCalled();
@@ -227,8 +279,43 @@ describe('ChatController', () => {
         venueId: 'venue-1',
         type: 'group',
         name: 'All Staff',
-        memberIds: [],
+        memberIds: ['staff-1'],
+        isSystem: true,
       },
+    });
+  });
+
+  it('backfills active staff into an existing system chat', async () => {
+    const { controller, prisma } = makeController();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'general-chat',
+        name: 'Renamed',
+        memberIds: [],
+        isSystem: false,
+      });
+    prisma.profile.findMany.mockResolvedValue([{ id: 'staff-1' }, { id: 'staff-2' }]);
+
+    await expect(controller.ensureChatSetup(staffScope)).resolves.toEqual({ conversationId: 'general-chat' });
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'general-chat' },
+      data: { name: 'All Staff', memberIds: ['staff-1', 'staff-2'], isSystem: true },
+    });
+  });
+
+  it('reuses the system chat created by a concurrent setup request', async () => {
+    const { controller, prisma } = makeController();
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'general-winner', memberIds: ['staff-1'], isSystem: true });
+    prisma.conversation.create.mockRejectedValue({ code: 'P2002' });
+
+    await expect(controller.ensureChatSetup(staffScope)).resolves.toEqual({ conversationId: 'general-winner' });
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: 'general-winner' },
+      data: { name: 'All Staff', memberIds: ['staff-1'], isSystem: true },
     });
   });
 
@@ -276,6 +363,7 @@ describe('ChatController', () => {
     );
 
     prisma.conversation.create.mockResolvedValue({ id: 'group-1' });
+    prisma.profile.findMany.mockResolvedValue([{ id: 'manager-1' }, { id: 'staff-2' }]);
 
     await expect(controller.createGroup(managerScope, {
       name: '  Closing Crew  ',
@@ -291,6 +379,17 @@ describe('ChatController', () => {
     });
   });
 
+  it('rejects foreign, inactive, or missing profiles from a custom group', async () => {
+    const { controller, prisma } = makeController();
+    prisma.profile.findMany.mockResolvedValue([{ id: 'manager-1' }]);
+
+    await expect(controller.createGroup(managerScope, {
+      name: 'Cross-venue group',
+      memberIds: ['foreign-profile'],
+    })).rejects.toThrow('All members must be active profiles in this venue');
+    expect(prisma.conversation.create).not.toHaveBeenCalled();
+  });
+
   it('does not let managers delete direct messages or system conversations', async () => {
     const { controller, prisma } = makeController();
     prisma.conversation.findFirst.mockResolvedValue({
@@ -299,6 +398,7 @@ describe('ChatController', () => {
       type: 'dm',
       name: null,
       memberIds: ['staff-1', 'staff-2'],
+      isSystem: false,
     });
 
     await expect(controller.deleteConversation(managerScope, 'conv-1')).rejects.toThrow(
@@ -315,12 +415,30 @@ describe('ChatController', () => {
       type: 'group',
       name: 'Closing Crew',
       memberIds: ['staff-1', 'staff-2'],
+      isSystem: false,
     });
 
     await expect(controller.deleteConversation(managerScope, 'conv-1')).resolves.toEqual({ ok: true });
     expect(prisma.message.deleteMany).toHaveBeenCalledWith({ where: { conversationId: 'conv-1' } });
     expect(prisma.conversation.delete).toHaveBeenCalledWith({ where: { id: 'conv-1' } });
     expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('does not allow a renamed system group to be deleted', async () => {
+    const { controller, prisma } = makeController();
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: 'conv-system',
+      venueId: 'venue-1',
+      type: 'group',
+      name: 'Renamed by mistake',
+      memberIds: ['staff-1'],
+      isSystem: true,
+    });
+
+    await expect(controller.deleteConversation(managerScope, 'conv-system')).rejects.toThrow(
+      'Only custom group chats can be deleted',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('returns dm messages, read receipts, and signed image paths', async () => {

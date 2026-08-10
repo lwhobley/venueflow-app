@@ -11,9 +11,8 @@ export const DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS = 10;
  *
  * Enforced by default (fail-closed): every venue-scoped query is AND-scoped to
  * the request's tenant as a database-layer backstop to the manual
- * `where: { venueId }` filters throughout the app. Set
- * TENANT_ISOLATION_ENFORCED=false only to roll back instantly if the
- * extension itself is suspected of causing a production issue.
+ * `where: { venueId }` filters throughout the app. The flag may be disabled
+ * only outside production for local diagnosis; production always fails closed.
  */
 export function databasePoolSize(raw = process.env['DATABASE_POOL_SIZE']): number {
   const parsed = Number.parseInt(raw ?? '', 10);

@@ -16,13 +16,14 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { IsArray, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
-import { todayInZone, weekStartFor } from '../../common/pay-period';
+import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
+import { tryAcquireSharedLease } from '../../common/shared-lease';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -51,6 +52,7 @@ class CreateGroupDto {
   name!: string;
 
   @IsArray()
+  @ArrayMaxSize(500)
   @IsString({ each: true })
   memberIds!: string[];
 }
@@ -99,13 +101,7 @@ function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
 
 @Controller('v1/chat')
 export class ChatController {
-  // Per-process throttle so listConversations (called on every chat screen
-  // open/refresh) doesn't re-run the full role/crew sync — with its per-role
-  // and per-day create/update writes — on every single request. Roster and
-  // schedule changes aren't second-to-second, so a short debounce is enough;
-  // worst case each replica re-syncs independently on its own cadence, which
-  // is still far less write amplification than per-request.
-  private readonly lastContextualSyncAt = new Map<string, number>();
+  // Postgres-backed lease keeps role/crew synchronization bounded across all replicas.
   private static readonly CONTEXTUAL_SYNC_THROTTLE_MS = 5 * 60 * 1000;
 
   constructor(
@@ -115,11 +111,14 @@ export class ChatController {
   ) {}
 
   private async ensureContextualConversationsThrottled(venueId: string) {
-    const lastSync = this.lastContextualSyncAt.get(venueId);
-    if (lastSync && Date.now() - lastSync < ChatController.CONTEXTUAL_SYNC_THROTTLE_MS) {
+    const acquired = await tryAcquireSharedLease(
+      this.prisma,
+      `chat-context:${venueId}`,
+      ChatController.CONTEXTUAL_SYNC_THROTTLE_MS,
+    );
+    if (!acquired) {
       return;
     }
-    this.lastContextualSyncAt.set(venueId, Date.now());
     await this.ensureContextualConversations(venueId);
   }
 
@@ -148,12 +147,6 @@ export class ChatController {
     const existingRolesMap = new Map(existingConvs.filter((c) => c.type === 'role' && c.roleName).map((c) => [c.roleName!, c]));
     const existingShiftsMap = new Map(existingConvs.filter((c) => c.type === 'shift' && c.shiftDate).map((c) => [c.shiftDate!, c]));
 
-    const helperArraysEqual = (a: string[], b: string[]) => {
-      if (a.length !== b.length) return false;
-      const setA = new Set(a);
-      return b.every((x) => setA.has(x));
-    };
-
     // 1. Ensure Role Channels
     const roles = Array.from(new Set(profiles.map((p) => p.jobTitle || p.role).filter(Boolean)));
     for (const role of roles) {
@@ -172,25 +165,21 @@ export class ChatController {
             roleName: role,
             name,
             memberIds: roleMemberIds,
+            isSystem: true,
           }
         });
       } else {
         const sortedExistingMembers = [...existing.memberIds].sort();
-        if (!helperArraysEqual(roleMemberIds, sortedExistingMembers) || existing.name !== name) {
+        if (!sameMembers(roleMemberIds, sortedExistingMembers) || existing.name !== name || !existing.isSystem) {
           await this.prisma.conversation.update({
             where: { id: existing.id },
-            data: { memberIds: roleMemberIds, name },
+            data: { memberIds: roleMemberIds, name, isSystem: true },
           });
         }
       }
     }
 
     // 2. Ensure Shift Crew Channels for the current week
-    const today = new Date();
-    const sunday = new Date(today);
-    sunday.setDate(today.getDate() - today.getDay());
-    sunday.setHours(0, 0, 0, 0);
-
     const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     // Group shifts by dayIndex in memory
@@ -202,9 +191,8 @@ export class ChatController {
     }
 
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-      const d = new Date(sunday);
-      d.setDate(sunday.getDate() + dayIndex);
-      const dateStr = d.toISOString().split('T')[0];
+      if (!weekStart) continue;
+      const dateStr = addDays(weekStart, dayIndex);
       const dayLabel = dayLabels[dayIndex];
 
       const scheduledProfileIds = shiftsByDay[dayIndex];
@@ -215,7 +203,7 @@ export class ChatController {
 
       if (crewMemberIds.length > 0) {
         const existing = existingShiftsMap.get(dateStr);
-        const name = `#Crew - ${dayLabel} (${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
+        const name = `#Crew - ${dayLabel} (${formatMonthDay(dateStr)})`;
         if (!existing) {
           await this.prisma.conversation.create({
             data: {
@@ -224,14 +212,15 @@ export class ChatController {
               shiftDate: dateStr,
               name,
               memberIds: crewMemberIds,
+              isSystem: true,
             }
           });
         } else {
           const sortedExistingMembers = [...existing.memberIds].sort();
-          if (!helperArraysEqual(crewMemberIds, sortedExistingMembers) || existing.name !== name) {
+          if (!sameMembers(crewMemberIds, sortedExistingMembers) || existing.name !== name || !existing.isSystem) {
             await this.prisma.conversation.update({
               where: { id: existing.id },
-              data: { memberIds: crewMemberIds, name },
+              data: { memberIds: crewMemberIds, name, isSystem: true },
             });
           }
         }
@@ -332,22 +321,54 @@ export class ChatController {
   async ensureChatSetup(@VenueScope() scope: Scope) {
     if (!scope) throw new ForbiddenException('No venue profile found');
 
-    const existing = await this.prisma.conversation.findFirst({
+    const [systemConversation, activeProfiles] = await Promise.all([
+      this.prisma.conversation.findFirst({
+        where: { venueId: scope.venueId, type: 'group', isSystem: true },
+      }),
+      this.prisma.profile.findMany({
+        where: { venueId: scope.venueId, OR: ACTIVE_MEMBERSHIP },
+        select: { id: true },
+      }),
+    ]);
+    const existing = systemConversation ?? await this.prisma.conversation.findFirst({
       where: { venueId: scope.venueId, type: 'group', name: GENERAL_GROUP_NAME },
     });
+    const memberIds = Array.from(new Set([scope.profileId, ...activeProfiles.map((profile) => profile.id)])).sort();
 
-    if (existing) return { conversationId: existing.id };
+    if (existing) {
+      const existingMembers = [...existing.memberIds].sort();
+      if (!sameMembers(existingMembers, memberIds) || existing.name !== GENERAL_GROUP_NAME || !existing.isSystem) {
+        await this.prisma.conversation.update({
+          where: { id: existing.id },
+          data: { name: GENERAL_GROUP_NAME, memberIds, isSystem: true },
+        });
+      }
+      return { conversationId: existing.id };
+    }
 
-    const conv = await this.prisma.conversation.create({
-      data: {
-        venueId: scope.venueId,
-        type: 'group',
-        name: GENERAL_GROUP_NAME,
-        memberIds: [],
-      },
-    });
-
-    return { conversationId: conv.id };
+    try {
+      const conv = await this.prisma.conversation.create({
+        data: {
+          venueId: scope.venueId,
+          type: 'group',
+          name: GENERAL_GROUP_NAME,
+          memberIds,
+          isSystem: true,
+        },
+      });
+      return { conversationId: conv.id };
+    } catch (error: any) {
+      if (error?.code !== 'P2002') throw error;
+      const winner = await this.prisma.conversation.findFirst({
+        where: { venueId: scope.venueId, type: 'group', isSystem: true },
+      });
+      if (!winner) throw error;
+      await this.prisma.conversation.update({
+        where: { id: winner.id },
+        data: { name: GENERAL_GROUP_NAME, memberIds, isSystem: true },
+      });
+      return { conversationId: winner.id };
+    }
   }
 
   @RequireSubscription('active')
@@ -393,6 +414,13 @@ export class ChatController {
     if (name.length > 100) throw new BadRequestException('Group name must be 100 characters or fewer');
 
     const memberIds = Array.from(new Set([scope.profileId, ...body.memberIds]));
+    const activeMembers = await this.prisma.profile.findMany({
+      where: { id: { in: memberIds }, venueId: scope.venueId, OR: ACTIVE_MEMBERSHIP },
+      select: { id: true },
+    });
+    if (activeMembers.length !== memberIds.length) {
+      throw new BadRequestException('All members must be active profiles in this venue');
+    }
     const conv = await this.prisma.conversation.create({
       data: {
         venueId: scope.venueId,
@@ -414,7 +442,7 @@ export class ChatController {
       where: { id, venueId: scope.venueId },
     });
     if (!conv) throw new NotFoundException('Conversation not found');
-    if (!canDeleteConversation(conv.type, conv.name)) {
+    if (!canDeleteConversation(conv.type, conv.isSystem)) {
       throw new ForbiddenException('Only custom group chats can be deleted');
     }
 
@@ -735,6 +763,18 @@ function canAccessConversation(memberIds: string[], type: string, profileId: str
   return false;
 }
 
-function canDeleteConversation(type: string, name: string | null) {
-  return type === 'group' && name !== GENERAL_GROUP_NAME;
+function canDeleteConversation(type: string, isSystem: boolean) {
+  return type === 'group' && !isSystem;
+}
+
+function sameMembers(a: string[], b: string[]) {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+function formatMonthDay(isoDate: string) {
+  return new Date(`${isoDate}T12:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
 }
