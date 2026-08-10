@@ -38,12 +38,22 @@ const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 // Human-typeable invite codes. Excludes look-alike characters (0/O, 1/I/L) so
 // codes read aloud or written down don't get mistyped. Format: VW-XXXXXX.
 const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-function makeInviteCode(): string {
+function makeHumanCode(length: number): string {
   let body = '';
-  for (let i = 0; i < 6; i += 1) {
+  for (let i = 0; i < length; i += 1) {
     body += INVITE_CODE_ALPHABET[randomInt(INVITE_CODE_ALPHABET.length)];
   }
   return `VW-${body}`;
+}
+
+function makeInviteCode(): string {
+  return makeHumanCode(6);
+}
+
+function makeVenueCode(): string {
+  // Ten characters from a 30-character alphabet provides roughly 49 bits of
+  // entropy while remaining practical to read or type.
+  return makeHumanCode(10);
 }
 
 class BootstrapProfileDto {
@@ -105,12 +115,17 @@ class UpdateVenueDto {
 
 class ClockDto {
   @IsNumber()
+  @Min(-90)
+  @Max(90)
   lat!: number;
 
   @IsNumber()
+  @Min(-180)
+  @Max(180)
   lng!: number;
 
   @IsNumber()
+  @Min(0)
   accuracy!: number;
 
   @IsBoolean()
@@ -338,9 +353,11 @@ export class AppController {
         orderBy: { createdAt: 'asc' },
       });
 
+      const venueCode = await this.uniqueVenueCode(tx);
       const venue = await tx.venue.create({
         data: {
           name: businessName,
+          code: venueCode,
           latitude: 0,
           longitude: 0,
           geofenceRadiusM: 150,
@@ -382,6 +399,24 @@ export class AppController {
 
     const venues = await this.profiles.listUserVenues(user.sub);
     return { profile: mapProfile(result.profile, true), venue: mapVenue(result.venue), venues };
+  }
+
+  @UseGuards(AuthGuard)
+  @RequireSubscription()
+  @Get('venue/join-code')
+  async getVenueJoinCode(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    return { code: profile.venue!.code };
+  }
+
+  @UseGuards(AuthGuard)
+  @RequireSubscription()
+  @Post('venue/join-code/rotate')
+  async rotateVenueJoinCode(@CurrentUser() user: AuthUser) {
+    const profile = await this.requireManagerProfile(user);
+    const code = await this.uniqueVenueCode(this.prisma);
+    await this.prisma.venue.update({ where: { id: profile.venueId! }, data: { code } });
+    return { code };
   }
 
   @UseGuards(AuthGuard)
@@ -1106,6 +1141,15 @@ export class AppController {
       });
     }
     return { ok: true };
+  }
+
+  private async uniqueVenueCode(db: Pick<Prisma.TransactionClient, 'venue'> | PrismaService): Promise<string> {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const code = makeVenueCode();
+      const clash = await db.venue.findUnique({ where: { code }, select: { id: true } });
+      if (!clash) return code;
+    }
+    return `${makeVenueCode()}${randomBytes(2).toString('hex').toUpperCase()}`;
   }
 
   private ensureUser(user: AuthUser) {

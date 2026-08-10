@@ -17,6 +17,21 @@ describe('assertWithinGeofence', () => {
     expect(() => assertWithinGeofence(40.0, -73.0, 51, false, venue)).toThrow(BadRequestException);
   });
 
+  it('rejects negative accuracy values', () => {
+    expect(() => assertWithinGeofence(40.0, -73.0, -1, false, venue)).toThrow('Location accuracy is invalid.');
+  });
+
+  it('rejects coordinates outside latitude/longitude bounds', () => {
+    expect(() => assertWithinGeofence(91, -73.0, 10, false, venue)).toThrow('Location coordinates are invalid.');
+    expect(() => assertWithinGeofence(40.0, 181, 10, false, venue)).toThrow('Location coordinates are invalid.');
+  });
+
+  it('rejects the unconfigured venue coordinate sentinel', () => {
+    expect(() => assertWithinGeofence(40.0, -73.0, 10, false, {
+      latitude: 0, longitude: 0, geofenceRadiusM: 100,
+    })).toThrow('location is not configured');
+  });
+
   it('rejects a point outside the geofence radius', () => {
     // ~1.1km north of the venue, well beyond the 100m radius.
     expect(() => assertWithinGeofence(40.01, -73.0, 10, false, venue)).toThrow(BadRequestException);

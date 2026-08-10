@@ -295,11 +295,12 @@ describe('SchedulingAssignmentService', () => {
   });
 
   it('restores shifts and drops assignments for non-members', async () => {
-    const prisma = {
+    const prisma: any = {
       profile: {
         findMany: vi.fn().mockResolvedValue([{ id: 'profile-1' }]),
       },
       scheduleShift: {
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi
           .fn()
           .mockResolvedValueOnce({ id: 'shift-5' })
@@ -308,7 +309,8 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
-      $transaction: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $transaction: vi.fn(async (callback: any) => callback(prisma)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
 
@@ -366,7 +368,7 @@ describe('SchedulingAssignmentService', () => {
   });
 
   it('copies one day of shifts into target days as open shifts', async () => {
-    const prisma = {
+    const prisma: any = {
       scheduleShift: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -392,7 +394,8 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
-      $transaction: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $transaction: vi.fn(async (callback: any) => callback(prisma)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
 
@@ -447,7 +450,7 @@ describe('SchedulingAssignmentService', () => {
         notes: null,
       },
     ];
-    const prisma = {
+    const prisma: any = {
       scheduleShift: {
         findMany: vi.fn().mockResolvedValue(shifts),
         deleteMany: vi.fn().mockResolvedValue({ count: 2 }),
@@ -455,6 +458,8 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $transaction: vi.fn(async (callback: any) => callback(prisma)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
 
@@ -473,7 +478,7 @@ describe('SchedulingAssignmentService', () => {
   });
 
   it('applies a template by optionally replacing the week and creating open shifts', async () => {
-    const prisma = {
+    const prisma: any = {
       scheduleShift: {
         create: vi
           .fn()
@@ -484,7 +489,8 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
-      $transaction: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $transaction: vi.fn(async (callback: any) => callback(prisma)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
 

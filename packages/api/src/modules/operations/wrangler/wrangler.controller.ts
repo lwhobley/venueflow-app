@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, Post } 
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { canManageVenue, isAdminRole } from '../../../auth/roles';
 import { RequireSubscription } from '../../../billing/require-subscription.decorator';
+import { aiBudgetWarningPercent, monthlyAiBudgetUsd } from '../../../common/ai-json-parse';
 import { zonedIsoDate } from '../../../common/venue-time';
 import { NotificationsService } from '../../../notifications/notifications.service';
 import { VenueScope } from '../../../venue/venue-scope.decorator';
@@ -43,8 +44,8 @@ export class WranglerController {
     const cachedTokens = rows.reduce((sum, row) => sum + Number(row.cachedTokens), 0);
     const totalTokens = breakdown.reduce((sum, row) => sum + row.totalTokens, 0);
     const estimatedCostUsd = breakdown.reduce((sum, row) => sum + row.estimatedCostUsd, 0);
-    const budgetUsd = Math.max(0, Number(process.env.AI_MONTHLY_VENUE_BUDGET_USD ?? 25));
-    const warningPercent = Math.min(100, Math.max(1, Number(process.env.AI_MONTHLY_VENUE_WARNING_PERCENT ?? 80)));
+    const budgetUsd = monthlyAiBudgetUsd();
+    const warningPercent = aiBudgetWarningPercent();
     const percentUsed = budgetUsd > 0 ? Math.round((estimatedCostUsd / budgetUsd) * 1000) / 10 : 0;
     const status = budgetUsd <= 0 ? 'unlimited' : estimatedCostUsd >= budgetUsd ? 'over_budget' : percentUsed >= warningPercent ? 'warning' : 'healthy';
     return {

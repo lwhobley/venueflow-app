@@ -18,6 +18,7 @@ type Route = {
 
 const queryRoutes: Record<string, Route> = {
   'app.getMe': { path: '/v1/app/me' },
+  'app.getVenueJoinCode': { path: '/v1/app/venue/join-code' },
   'app.getDashboard': { path: '/v1/app/dashboard' },
   'app.getNotifications': { path: '/v1/app/notifications' },
   'app.getClockBoard': { path: '/v1/time-clock/board' },
@@ -114,6 +115,12 @@ const mutationRoutes: Record<string, Route> = {
     method: 'PATCH',
     body: ({ name, latitude, longitude, geofenceRadiusM }) => ({ name, latitude, longitude, geofenceRadiusM }),
     invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
+  },
+  'app.rotateVenueJoinCode': {
+    path: '/v1/app/venue/join-code/rotate',
+    method: 'POST',
+    body: () => ({}),
+    invalidate: [['app', 'getVenueJoinCode']],
   },
   'app.switchVenue': {
     path: '/v1/app/switch-venue',

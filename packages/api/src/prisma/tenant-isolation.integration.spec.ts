@@ -28,14 +28,14 @@ describe('tenant isolation extension (integration)', () => {
     // Two tenants, each with one bar inventory item. Seeded WITHOUT a tenant
     // context so the extension stays inert during setup.
     const [a, b] = await Promise.all([
-      base.venue.create({ data: { name: 'Venue A', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
-      base.venue.create({ data: { name: 'Venue B', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
+      base.venue.create({ data: { name: 'Venue A', code: 'VW-TENANTA001', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
+      base.venue.create({ data: { name: 'Venue B', code: 'VW-TENANTB001', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
     ]);
     venueA = a.id;
     venueB = b.id;
     await Promise.all([
-      base.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Gin', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
-      base.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Rum', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      base.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Gin', normalizedName: 'a-gin', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      base.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Rum', normalizedName: 'b-rum', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     ]);
   }, 60_000);
 
@@ -77,7 +77,7 @@ describe('tenant isolation extension (integration)', () => {
 
   it('create forces the bound venueId regardless of supplied data', async () => {
     const created = await asTenant(venueA, () =>
-      db.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Vodka', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      db.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Vodka', normalizedName: 'a-vodka', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     );
     expect(created.venueId).toBe(venueA);
     await base.barInventoryItem.delete({ where: { id: created.id } });

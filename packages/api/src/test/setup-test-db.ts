@@ -65,6 +65,7 @@ export async function seedSchedulingFixtures(prisma: PrismaClient) {
   const venue = await prisma.venue.create({
     data: {
       name: 'Test Venue',
+      code: 'VW-SCHEDULE01',
       latitude: 40.7,
       longitude: -74.0,
       geofenceRadiusM: 100,

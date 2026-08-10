@@ -13,9 +13,9 @@ export class WranglerHistoryService {
     const today = zonedIsoDate(args.timezone, args.nowMs);
     const weekday = new Date(`${today}T12:00:00Z`).getUTCDay();
     const [reservations, checks, punches] = await Promise.all([
-      this.prisma.reservation.findMany({ where: { venueId: args.venueId, reservationTime: { gte: lookbackStart, lt: new Date(args.nowMs) } }, select: { reservationTime: true, partySize: true, status: true }, take: 2000 }),
-      this.prisma.posCheck.findMany({ where: { venueId: args.venueId, openedAt: { gte: lookbackStart, lt: new Date(args.nowMs) }, status: 'paid' }, select: { openedAt: true, totalCents: true, guestCount: true }, take: 5000 }),
-      this.prisma.posLaborPunch.findMany({ where: { venueId: args.venueId, clockInAt: { gte: lookbackStart, lt: new Date(args.nowMs) } }, select: { businessDate: true, totalPayCents: true, regularMinutes: true, overtimeMinutes: true }, take: 5000 }),
+      this.prisma.reservation.findMany({ where: { venueId: args.venueId, reservationTime: { gte: lookbackStart, lt: new Date(args.nowMs) } }, select: { reservationTime: true, partySize: true, status: true }, orderBy: { reservationTime: 'desc' }, take: 2000 }),
+      this.prisma.posCheck.findMany({ where: { venueId: args.venueId, openedAt: { gte: lookbackStart, lt: new Date(args.nowMs) }, status: 'paid' }, select: { openedAt: true, totalCents: true, guestCount: true }, orderBy: { openedAt: 'desc' }, take: 5000 }),
+      this.prisma.posLaborPunch.findMany({ where: { venueId: args.venueId, clockInAt: { gte: lookbackStart, lt: new Date(args.nowMs) } }, select: { businessDate: true, totalPayCents: true, regularMinutes: true, overtimeMinutes: true }, orderBy: { clockInAt: 'desc' }, take: 5000 }),
     ]);
     const serviceDates = new Map<string, { reservations: number; covers: number; noShows: number; salesCents: number; laborCents: number }>();
     const get = (date: string) => { const current = serviceDates.get(date) ?? { reservations: 0, covers: 0, noShows: 0, salesCents: 0, laborCents: 0 }; serviceDates.set(date, current); return current; };

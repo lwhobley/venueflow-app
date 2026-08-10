@@ -127,6 +127,36 @@ describe('AppController redeem-my-invite', () => {
 });
 
 describe('AppController multi-venue invariants', () => {
+  it('returns the active venue join code only through the manager endpoint', async () => {
+    const profiles = {
+      requireManagerProfile: vi.fn().mockResolvedValue({
+        venueId: 'venue-1', venue: { code: 'VW-ABCDEFGHJK' },
+      }),
+    };
+    const controller = new AppController({} as any, {} as any, profiles as any);
+
+    await expect(controller.getVenueJoinCode({ sub: 'manager-1' } as any))
+      .resolves.toEqual({ code: 'VW-ABCDEFGHJK' });
+  });
+
+  it('rotates the active venue join code to a new high-entropy human code', async () => {
+    const prisma = {
+      venue: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const profiles = {
+      requireManagerProfile: vi.fn().mockResolvedValue({ venueId: 'venue-1', venue: { code: 'VW-OLD' } }),
+    };
+    const controller = new AppController(prisma as any, {} as any, profiles as any);
+
+    const result = await controller.rotateVenueJoinCode({ sub: 'manager-1' } as any);
+
+    expect(result.code).toMatch(/^VW-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{10}$/);
+    expect(prisma.venue.update).toHaveBeenCalledWith({ where: { id: 'venue-1' }, data: { code: result.code } });
+  });
+
   it('clears the current tenant only while verifying membership in the target venue', async () => {
     const targetProfile = {
       id: 'profile-b', userId: 'user-1', venueId: 'venue-b', role: 'owner', allAccess: false,

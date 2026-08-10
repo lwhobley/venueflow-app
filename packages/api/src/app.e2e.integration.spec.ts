@@ -30,8 +30,8 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     jwt = boot.jwt;
     teardown = boot.teardown;
     const [activeVenue, expiredVenue] = await Promise.all([
-      prisma.venue.create({ data: { name: 'E2E Active Venue', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC', subscriptionStatus: 'active' } }),
-      prisma.venue.create({ data: { name: 'E2E Expired Venue', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC', subscriptionStatus: 'expired' } }),
+      prisma.venue.create({ data: { name: 'E2E Active Venue', code: 'VW-E2EACTIVE1', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC', subscriptionStatus: 'active' } }),
+      prisma.venue.create({ data: { name: 'E2E Expired Venue', code: 'VW-E2EEXPIRE1', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC', subscriptionStatus: 'expired' } }),
     ]);
     venueIds = [activeVenue.id, expiredVenue.id];
 

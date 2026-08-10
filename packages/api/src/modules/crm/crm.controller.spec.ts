@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CrmController } from './crm.controller';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+
+vi.mock('../../common/rate-limit', () => ({
+  assertWithinSharedRateLimit: vi.fn().mockResolvedValue(undefined),
+}));
 
 function makeController() {
   const prisma = {
@@ -70,6 +75,7 @@ const staffScope = { venueId: 'venue-1', profileId: 'staff-1', role: 'staff', al
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.clearAllMocks();
   vi.restoreAllMocks();
 });
 
@@ -694,6 +700,12 @@ describe('CrmController', () => {
         to: 'jo@example.com',
         subject: 'Test Venue - Banquet Event Order: Gala',
       }));
+      expect(assertWithinSharedRateLimit).toHaveBeenNthCalledWith(
+        1, prisma, 'crm-beo-email:manager:manager-1', 20, 15 * 60 * 1000, 'Too many BEO emails. Try again later.',
+      );
+      expect(assertWithinSharedRateLimit).toHaveBeenNthCalledWith(
+        2, prisma, 'crm-beo-email:venue:venue-1', 100, 60 * 60 * 1000, 'This venue has sent too many BEO emails. Try again later.',
+      );
       expect(prisma.crmActivityLog.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ leadId: 'lead-1', kind: 'beo_emailed', detail: '-> jo@example.com' }),
       }));

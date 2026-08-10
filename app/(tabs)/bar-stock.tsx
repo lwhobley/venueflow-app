@@ -431,7 +431,7 @@ export default function BarStockScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: '#000' }}>
         <CameraView
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           facing="back"
           barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39', 'qr'] }}
           onBarcodeScanned={onBarcodeScanned}
