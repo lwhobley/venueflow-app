@@ -59,8 +59,8 @@ export function mapProfile(
     address: profile.address ?? null,
     dateOfBirth: profile.dateOfBirth?.toISOString() ?? null,
     certifications: profile.certifications ?? [],
-    sickHoursAccrued: profile.sickHoursAccrued ?? 40.0,
-    ptoHoursAccrued: profile.ptoHoursAccrued ?? 80.0,
+    sickHoursAccrued: profile.sickHoursAccrued ?? 0,
+    ptoHoursAccrued: profile.ptoHoursAccrued ?? 0,
   };
 }
 
