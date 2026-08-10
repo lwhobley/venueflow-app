@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { PosController } from './pos.controller';
-import { hashWebhookSecret } from '../../common/webhook-auth';
+import { hashWebhookSecret, secretsMatch } from '../../common/webhook-auth';
 
 vi.mock('../../common/rate-limit', () => ({
   assertWithinSharedRateLimit: vi.fn().mockResolvedValue(undefined),
@@ -277,6 +277,34 @@ describe('PosController', () => {
         data: expect.objectContaining({ webhookSecret: expect.stringMatching(/^sha256:/) }),
       }));
       expect(result.webhookSecret).toEqual(expect.any(String));
+    });
+  });
+
+  describe('rotatePosConnectionSecret', () => {
+    it('rotates a venue-scoped connection and returns the plaintext once', async () => {
+      const { controller, prisma } = makeController();
+      prisma.posConnection.findFirst.mockResolvedValue({ id: 'conn-1' });
+
+      const result = await controller.rotatePosConnectionSecret(managerScope, 'conn-1');
+
+      expect(prisma.posConnection.findFirst).toHaveBeenCalledWith({
+        where: { id: 'conn-1', venueId: 'venue-1' },
+        select: { id: true },
+      });
+      const update = prisma.posConnection.update.mock.calls[0][0];
+      expect(update.where).toEqual({ id: 'conn-1' });
+      expect(update.data.webhookSecret).toMatch(/^sha256:/);
+      expect(secretsMatch(result.webhookSecret, update.data.webhookSecret)).toBe(true);
+      expect(secretsMatch('old-secret', update.data.webhookSecret)).toBe(false);
+    });
+
+    it('does not reveal whether another venue owns a connection', async () => {
+      const { controller, prisma } = makeController();
+      prisma.posConnection.findFirst.mockResolvedValue(null);
+
+      await expect(controller.rotatePosConnectionSecret(managerScope, 'foreign-connection'))
+        .rejects.toThrow('POS connection not found');
+      expect(prisma.posConnection.update).not.toHaveBeenCalled();
     });
   });
 

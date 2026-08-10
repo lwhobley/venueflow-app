@@ -55,6 +55,7 @@ function IntegrationsScreenInner() {
     isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip',
   ) as any;
   const upsertConnection = useMutation(api.pos.upsertPosConnection);
+  const rotatePosSecret = useMutation(api.pos.rotatePosConnectionSecret);
   const upsertReservationConnection = useMutation(api.reservationIntegrations.upsertReservationConnection);
   const rotateLeadsSecret = useMutation(api.guests.rotateLeadsWebhookSecret);
 
@@ -63,7 +64,7 @@ function IntegrationsScreenInner() {
   const [reservationProvider, setReservationProvider] = useState<ReservationProvider>('opentable');
   const [externalVenueId, setExternalVenueId] = useState('');
   // Which action is in flight, so only its button spins (not all three).
-  const [pending, setPending] = useState<'pos' | 'reservation' | 'leads' | null>(null);
+  const [pending, setPending] = useState<'pos' | 'reservation' | 'leads' | `pos-rotate:${string}` | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   // A freshly generated webhook secret, shown once. It cannot be read back, so
   // the manager must copy it now; rotating issues a new one.
@@ -104,6 +105,21 @@ function IntegrationsScreenInner() {
       setMessage(t('integrations.messages.reservationSaved'));
     } catch (e) {
       setMessage(errorMessage(e, t('integrations.messages.reservationSaveError')));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const rotateConnectionSecret = async (connectionId: string) => {
+    if (!venue?.id) return;
+    setPending(`pos-rotate:${connectionId}`);
+    setMessage(null);
+    try {
+      const result = await rotatePosSecret({ venueId: venue.id, connectionId });
+      setNewSecret(result.webhookSecret);
+      setMessage(t('integrations.messages.posRotated'));
+    } catch (error) {
+      setMessage(errorMessage(error, t('integrations.messages.posRotateError')));
     } finally {
       setPending(null);
     }
@@ -240,6 +256,15 @@ function IntegrationsScreenInner() {
                 <Text style={{ color: colors.muted }}>
                   {t('integrations.connections.lastSync', { value: connection.lastSyncAt ? formatShortDateTime(connection.lastSyncAt) : t('integrations.metrics.never') })}
                 </Text>
+                <Button
+                  compact
+                  mode="outlined"
+                  loading={pending === `pos-rotate:${connection._id}`}
+                  disabled={pending !== null}
+                  onPress={() => void rotateConnectionSecret(connection._id)}
+                >
+                  {t('integrations.connections.rotateSecret')}
+                </Button>
               </View>
             ))
           )}

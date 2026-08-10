@@ -2,7 +2,7 @@
 
 ## Health and monitoring
 
-- API: `https://venue-wrangler-api-c57mm72zpa-ue.a.run.app/api/health`
+- API: `https://venue-wrangler-api-922889404273.us-east1.run.app/api/health`
 - Cloud Run service: `venue-wrangler-api` in `us-east1`
 - The `venue_wrangler_5xx` log-based metric counts HTTP 5xx responses.
 - Alert policy: `Venue Wrangler API 5xx errors` (`projects/venuewrangler/alertPolicies/7994759751285739344`).
@@ -33,7 +33,11 @@ Never store a database password in this repository. For a restore, pause Cloud R
 
 ### Connection budget
 
-Set `DATABASE_POOL_SIZE=5` for each Cloud Run revision unless the Supabase connection budget and Cloud Run maximum instance count have been reviewed together. The current database permits 60 backend connections; reserve headroom for Supabase administration, migrations, and incident response instead of allowing every instance to open a 20-connection Prisma pool.
+Set `DATABASE_POOL_SIZE=5` for each Cloud Run revision unless the Supabase connection budget and Cloud Run maximum instance count have been reviewed together. The current database permits 60 backend connections. Cloud Run service-level autoscaling is capped at 8 instances (40 pooled connections), leaving 20 connections for Supabase administration, migrations, and incident response. Recheck this budget before changing either limit.
+
+## POS webhook secret rotation
+
+Managers can rotate a compromised or stale POS secret with `POST /api/v1/pos/connections/:id/rotate-secret`. The connection lookup is venue-scoped. The response displays the new plaintext secret once; only its SHA-256 digest is stored. Update the POS integration immediately because the old secret stops authenticating as soon as rotation completes. Never paste the plaintext secret into source control, tickets, or logs.
 
 ## Release checklist
 

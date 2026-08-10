@@ -537,6 +537,7 @@ model Conversation {
   type            String
   name            String?
   memberIds       String[]
+  isSystem        Boolean            @default(false)
   lastMessageAt   DateTime?
   lastMessageText String?
   roleName        String?

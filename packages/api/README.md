@@ -45,3 +45,8 @@ separate `supabase/migrations` history and is not the deployment path here.
   values) that Prisma's schema language cannot express. It lives in migration
   `20260614000000_workforce_signup` and is intentionally omitted from
   `schema.prisma`.
+- `Conversation` has a partial unique index
+  (`Conversation_one_system_group_per_venue_key`) that permits only one system
+  group per venue while allowing any number of custom groups. It lives in
+  migration `20260809220000_mark_system_conversations` and is intentionally
+  omitted from `schema.prisma`.

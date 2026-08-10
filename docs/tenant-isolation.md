@@ -16,9 +16,9 @@ Before enabling any direct Supabase client access, add narrowly scoped SQL polic
 As defense-in-depth for the manual `where: { venueId }` controls above, a Prisma
 Client extension scopes venue-owned models to the request's tenant
 automatically. It is inert without a bound tenant context (auth flows,
-webhooks, system/background tasks), and can be disabled instantly by setting
-`TENANT_ISOLATION_ENFORCED=false` if it is ever suspected of causing a
-production issue.
+webhooks, system/background tasks). Production rejects startup when
+`TENANT_ISOLATION_ENFORCED=false`; local and staging environments may use that
+value temporarily for diagnosis.
 
 | File | Responsibility |
 |------|----------------|
@@ -43,8 +43,8 @@ production issue.
 
 ### Enablement (fail-closed by default)
 
-Both pieces are active unless `TENANT_ISOLATION_ENFORCED` is explicitly set to
-the literal string `"false"`.
+Both pieces are active by default. The literal string `"false"` disables them
+only when `NODE_ENV` is not `production`; production fails startup instead.
 
 1. **`prisma.service.ts`** — unless disabled, the service applies the
    extension via `this.$extends(tenantIsolationExtension())` and wraps itself in
@@ -57,5 +57,5 @@ the literal string `"false"`.
    rest of the request. Tokens without a venueId (auth flows, system tasks)
    stay unscoped, which is correct.
 
-Rollback: set `TENANT_ISOLATION_ENFORCED=false` in the environment to disable
-instantly if the extension is ever suspected of causing a production issue.
+Production incident response: roll back to the last known-good Cloud Run
+revision. Do not disable the isolation layer in a production revision.

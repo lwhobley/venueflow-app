@@ -626,6 +626,7 @@ export const en = {
       statusLocation: 'Status: {status} · Location: {location}',
       lastSync: 'Last sync: {value}',
       notSet: 'not set',
+      rotateSecret: 'Rotate webhook secret',
     },
     reservationConnections: {
       title: 'Reservation connections',
@@ -644,6 +645,8 @@ export const en = {
     messages: {
       posSaved: 'POS connection saved.',
       posSaveError: 'Could not save POS connection.',
+      posRotated: 'POS webhook secret rotated. Update the provider now; the old secret no longer works.',
+      posRotateError: 'Could not rotate the POS webhook secret.',
       reservationSaved: 'Reservation connection saved.',
       reservationSaveError: 'Could not save reservation connection.',
       leadsGenerated: 'Lead webhook secret generated.',
@@ -1362,6 +1365,7 @@ export const es: GuestOpsDictionary = {
       statusLocation: 'Estado: {status} · Ubicación: {location}',
       lastSync: 'Última sincronización: {value}',
       notSet: 'sin definir',
+      rotateSecret: 'Rotar secreto del webhook',
     },
     reservationConnections: {
       title: 'Conexiones de reservas',
@@ -1380,6 +1384,8 @@ export const es: GuestOpsDictionary = {
     messages: {
       posSaved: 'Conexión de POS guardada.',
       posSaveError: 'No se pudo guardar la conexión de POS.',
+      posRotated: 'Se rotó el secreto del webhook de POS. Actualiza el proveedor ahora; el secreto anterior ya no funciona.',
+      posRotateError: 'No se pudo rotar el secreto del webhook de POS.',
       reservationSaved: 'Conexión de reservas guardada.',
       reservationSaveError: 'No se pudo guardar la conexión de reservas.',
       leadsGenerated: 'Secreto de webhook de leads generado.',
@@ -2096,6 +2102,7 @@ export const fr: GuestOpsDictionary = {
       statusLocation: 'Statut : {status} · Établissement : {location}',
       lastSync: 'Dernière synchronisation : {value}',
       notSet: 'non défini',
+      rotateSecret: 'Régénérer le secret du webhook',
     },
     reservationConnections: {
       title: 'Connexions de réservation',
@@ -2114,6 +2121,8 @@ export const fr: GuestOpsDictionary = {
     messages: {
       posSaved: 'Connexion POS enregistrée.',
       posSaveError: "Impossible d'enregistrer la connexion POS.",
+      posRotated: "Le secret du webhook POS a été régénéré. Mettez à jour le fournisseur maintenant ; l'ancien secret ne fonctionne plus.",
+      posRotateError: 'Impossible de régénérer le secret du webhook POS.',
       reservationSaved: 'Connexion de réservation enregistrée.',
       reservationSaveError: "Impossible d'enregistrer la connexion de réservation.",
       leadsGenerated: 'Secret du webhook de leads généré.',
