@@ -114,6 +114,35 @@ jobs:
       - name: Apply migrations
         run: npm run prisma:migrate:deploy -w @venue-wrangler/api
 
+      - name: Verify critical partial indexes and open-state check
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -Eeuo pipefail
+          # Prisma cannot express partial indexes in schema.prisma. Guard the
+          # production invariants that live only in SQL migrations.
+          required_indexes=(
+            TimeEntry_profileId_open_key
+            WorkplaceJoinRequest_one_pending_per_user_venue_idx
+            Invite_phone_idx
+          )
+          for index in "${required_indexes[@]}"; do
+            found="$(psql -h localhost -U postgres -d venuetest -Atc \
+              "SELECT 1 FROM pg_indexes WHERE indexname = '${index}'")"
+            if [[ "$found" != "1" ]]; then
+              echo "::error::Missing required index: ${index}"
+              exit 1
+            fi
+            echo "✓ ${index}"
+          done
+          found_check="$(psql -h localhost -U postgres -d venuetest -Atc \
+            "SELECT 1 FROM pg_constraint WHERE conname = 'TimeEntry_open_state_check'")"
+          if [[ "$found_check" != "1" ]]; then
+            echo "::error::Missing TimeEntry_open_state_check constraint"
+            exit 1
+          fi
+          echo "✓ TimeEntry_open_state_check"
+
       - name: Smoke-test health endpoint
         run: |
           node packages/api/dist/main.js &
