@@ -1,9 +1,11 @@
+import type { ComponentProps } from 'react';
+import type { Tabs } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { radius, useDesignTheme } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
 
-type TabRoute = BottomTabBarProps['state']['routes'][number];
+type ExpoTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
+type TabRoute = ExpoTabBarProps['state']['routes'][number];
 
 export const SIDEBAR_WIDTH = 248;
 
@@ -14,7 +16,7 @@ export const SIDEBAR_WIDTH = 248;
  * the screen content is offset by SIDEBAR_WIDTH via the navigator's
  * sceneContainerStyle.
  */
-export function DesktopSidebar({ state, descriptors, navigation }: BottomTabBarProps) {
+export function DesktopSidebar({ state, descriptors, navigation }: ExpoTabBarProps) {
   const palette = useDesignTheme();
   const { t } = useI18n();
 
