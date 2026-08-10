@@ -7,7 +7,7 @@ export type AiUsage = { promptTokens: number; completionTokens: number; totalTok
 export type AiJsonCallResult = { data: unknown; usage: AiUsage };
 
 const MICROS_PER_USD = 1_000_000;
-const DEFAULT_MONTHLY_BUDGET_USD = 25;
+const DEFAULT_MONTHLY_BUDGET_USD = 10;
 const DEFAULT_MAX_OUTPUT_TOKENS = 2048;
 const DEFAULT_RESERVATION_TTL_SECONDS = 120;
 

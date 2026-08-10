@@ -58,12 +58,17 @@ describe('Gemini configuration', () => {
     expect(resolveAiModel(undefined, 'fallback')).toBe('fallback');
   });
 
+  it('defaults monthly AI budget to $10 when env is unset', () => {
+    delete process.env.AI_MONTHLY_VENUE_BUDGET_USD;
+    expect(monthlyAiBudgetUsd()).toBe(10);
+  });
+
   it('blocks provider calls after a venue reaches its monthly AI budget', async () => {
-    process.env.AI_MONTHLY_VENUE_BUDGET_USD = '25';
+    delete process.env.AI_MONTHLY_VENUE_BUDGET_USD;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ totalTokens: 10 }), { status: 200 }),
     );
-    const prisma = makeBudgetPrisma(25_000_000);
+    const prisma = makeBudgetPrisma(10_000_000);
 
     await expect(runWithAiUsageContext(
       { venueId: 'venue-1', profileId: 'profile-1', prisma: prisma as any },
