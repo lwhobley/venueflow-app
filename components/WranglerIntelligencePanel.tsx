@@ -16,7 +16,7 @@ function formatOperatorResult(result: unknown): string {
     return result.slice(0, 8).map((row) => {
       if (!row || typeof row !== 'object') return String(row);
       const item = row as Record<string, unknown>;
-      const name = String(item.guestName ?? item.staffName ?? item.fullName ?? item.jobTitle ?? 'Record');
+      const name = String(item.guestName ?? item.staffName ?? item.fullName ?? item.jobTitle ?? item.label ?? item.title ?? item.name ?? 'Record');
       const pieces: string[] = [];
       if (item.partySize != null) pieces.push(`party ${item.partySize}`);
       if (item.status != null) pieces.push(String(item.status));
@@ -30,8 +30,13 @@ function formatOperatorResult(result: unknown): string {
   }
   if (result && typeof result === 'object') {
     const item = result as Record<string, unknown>;
-    if (item.guestName) return `${item.guestName}${item.status ? ` — ${item.status}` : ''}`;
-    if (item.fullName) return `${item.fullName}${item.jobTitle ? ` — ${item.jobTitle}` : ''}`;
+    const name = String(item.guestName ?? item.staffName ?? item.fullName ?? item.jobTitle ?? item.label ?? item.title ?? item.itemName ?? item.name ?? 'Done');
+    const pieces: string[] = [];
+    if (item.partySize != null) pieces.push(`party ${item.partySize}`);
+    if (item.status != null) pieces.push(String(item.status));
+    if (item.onHand != null) pieces.push(`on hand: ${item.onHand}`);
+    if (item.startMinutes != null && item.endMinutes != null) pieces.push(`${item.startMinutes}-${item.endMinutes}`);
+    return `• ${name}${pieces.length ? ` — ${pieces.join(' · ')}` : ''}`;
   }
   return result == null ? 'Done.' : String(result);
 }
@@ -141,9 +146,9 @@ export function WranglerIntelligencePanel({
 
       <View style={{ gap: spacing.sm, borderTopWidth: 1, borderColor: palette.divider, paddingTop: spacing.lg }}>
         <CommandText palette={palette} variant="title">Wrangler Operator</CommandText>
-        <CommandText palette={palette} variant="caption">Tell Wrangler what to find or change. Read-only commands run immediately. Schedule, reservation, roster, and timecard changes are previewed before execution.</CommandText>
+        <CommandText palette={palette} variant="caption">Tell Wrangler what to find or change. Operational commands run and perform tasks immediately. Sensitive roster and timecard actions are previewed before execution.</CommandText>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-          {['Find Jordan’s reservation tonight', 'Who is working tonight?', 'Show Ashley’s clock punches today'].map((preset) => (
+          {['Clear table 3', 'Add Jose to schedule Monday Aug 3 3pm - 12 am', '86 Tuna Tartare', 'Who is working tonight?'].map((preset) => (
             <Pressable key={preset} onPress={() => void runOperator(preset)} style={{ borderWidth: 1, borderColor: palette.border, paddingHorizontal: spacing.sm, paddingVertical: 7 }}>
               <CommandText palette={palette} variant="caption">{preset}</CommandText>
             </Pressable>
@@ -153,7 +158,7 @@ export function WranglerIntelligencePanel({
           <TextInput
             value={command}
             onChangeText={setCommand}
-            placeholder="Move Marcus to 5 PM tomorrow…"
+            placeholder="Clear table 3, 86 tuna tartare, add Jose to schedule…"
             placeholderTextColor={palette.muted}
             style={{ flex: 1, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, color: palette.muted }}
             onSubmitEditing={() => void runOperator()}
@@ -167,9 +172,9 @@ export function WranglerIntelligencePanel({
 
       <View style={{ gap: spacing.sm }}>
         <CommandText palette={palette} variant="title">Ask Wrangler</CommandText>
-        <CommandText palette={palette} variant="caption">Ask for analysis of the live operating picture without changing anything.</CommandText>
+        <CommandText palette={palette} variant="caption">Ask for analysis of the live operating picture across all 9 venue domains.</CommandText>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-          {['What needs attention?', 'How is staffing?', 'What should I fix next?'].map((preset) => (
+          {['What needs attention?', 'How is staffing?', 'How are sales today?'].map((preset) => (
             <Pressable key={preset} onPress={() => void submit(preset)} style={{ borderWidth: 1, borderColor: palette.border, paddingHorizontal: spacing.sm, paddingVertical: 7 }}>
               <CommandText palette={palette} variant="caption">{preset}</CommandText>
             </Pressable>

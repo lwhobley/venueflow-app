@@ -113,6 +113,25 @@ export class WranglerOperatorService {
     }
 
     const normalized = await this.resolveWritePlan(input.venueId, input.timezone, { ...parsed, risk });
+
+    if (risk === 'operational_write') {
+      const result = await this.executeWrite(input.venueId, input.timezone, input.actor, normalized);
+      await this.prisma.auditLog.create({
+        data: {
+          venueId: input.venueId,
+          actorProfileId: input.actor.profileId,
+          actorName: input.actor.fullName,
+          actorRole: input.actor.role,
+          entityType: 'wrangler_operator',
+          entityId: String((result as any)?.id ?? (normalized.args.reservationId ?? normalized.args.shiftId ?? normalized.args.profileId ?? normalized.args.entryId ?? normalized.tool)),
+          action: `wrangler_operator_${normalized.tool.toLowerCase()}`,
+          summary: normalized.summary,
+          metadata: { tool: normalized.tool, risk, args: this.auditArgs(normalized.args) } as any,
+        },
+      });
+      return { status: 'executed' as const, tool: normalized.tool, risk, summary: normalized.summary, result };
+    }
+
     return {
       status: 'confirmation_required' as const,
       tool: normalized.tool,
@@ -236,7 +255,8 @@ export class WranglerOperatorService {
     if ([
       'ADD_STAFF', 'CREATE_SHIFT', 'CLEAR_TABLE', 'UPDATE_TABLE_STATUS',
       'ADD_WAITLIST', 'CREATE_CRM_LEAD', 'POST_CHAT_ANNOUNCEMENT',
-      'UPDATE_ITEM_86', 'UPDATE_BAR_STOCK',
+      'UPDATE_ITEM_86', 'UPDATE_BAR_STOCK', 'CREATE_RESERVATION',
+      'UPDATE_RESERVATION', 'UPDATE_SHIFT', 'ASSIGN_SHIFT',
     ].includes(tool)) return 'operational_write';
 
     if (['REMOVE_STAFF', 'CORRECT_PUNCH', 'CANCEL_RESERVATION', 'UPDATE_CRM_LEAD'].includes(tool)) return 'sensitive_write';
@@ -297,7 +317,6 @@ export class WranglerOperatorService {
 
     if (tool === 'LIST_INVENTORY') {
       const lowStockOnly = Boolean(args.lowStockOnly);
-      const eightySixOnly = Boolean(args.eightySixOnly);
       const barItems = await this.prisma.barInventoryItem.findMany({
         where: { venueId },
         orderBy: { name: 'asc' },

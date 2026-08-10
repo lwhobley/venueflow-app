@@ -31,7 +31,7 @@ function formatOperatorResult(result: unknown): string {
       .map((row) => {
         if (!row || typeof row !== 'object') return String(row);
         const item = row as Record<string, unknown>;
-        const name = String(item.guestName ?? item.staffName ?? item.fullName ?? item.jobTitle ?? 'Record');
+        const name = String(item.guestName ?? item.staffName ?? item.fullName ?? item.jobTitle ?? item.label ?? item.title ?? item.name ?? 'Record');
         const pieces: string[] = [];
         if (item.partySize != null) pieces.push(`party ${item.partySize}`);
         if (item.status != null) pieces.push(String(item.status));
@@ -41,7 +41,21 @@ function formatOperatorResult(result: unknown): string {
       })
       .join('\n');
   }
+  if (result && typeof result === 'object') {
+    const item = result as Record<string, unknown>;
+    const name = String(item.guestName ?? item.staffName ?? item.fullName ?? item.jobTitle ?? item.label ?? item.title ?? item.itemName ?? item.name ?? 'Done');
+    const pieces: string[] = [];
+    if (item.partySize != null) pieces.push(`party ${item.partySize}`);
+    if (item.status != null) pieces.push(String(item.status));
+    if (item.onHand != null) pieces.push(`on hand: ${item.onHand}`);
+    if (item.startMinutes != null && item.endMinutes != null) pieces.push(`${item.startMinutes}-${item.endMinutes}`);
+    return `• ${name}${pieces.length ? ` — ${pieces.join(' · ')}` : ''}`;
+  }
   return result == null ? 'Done.' : String(result);
+}
+
+function isCommandInput(text: string): boolean {
+  return /^\s*(?:clear|bus|add|schedule|create|86|update|set|remove|assign|post|cancel|correct|mark|clean)\b/i.test(text);
 }
 
 export function HomeWranglerSurface({ enabled }: Props) {
@@ -78,6 +92,9 @@ export function HomeWranglerSurface({ enabled }: Props) {
   const handleAsk = async (text?: string) => {
     const query = (text ?? prompt).trim();
     if (query.length < 2) return;
+    if (isCommandInput(query)) {
+      return handleCommand(query);
+    }
     setPendingPlan(null);
     setPendingPreview([]);
     try {
@@ -109,9 +126,18 @@ export function HomeWranglerSurface({ enabled }: Props) {
     }
   };
 
+  const handleSubmit = (text?: string) => {
+    const val = (text ?? prompt).trim();
+    if (isCommandInput(val) || mode === 'command') {
+      void handleCommand(val);
+    } else {
+      void handleAsk(val);
+    }
+  };
+
   const handleRouteToWrangler = (text?: string) => {
     const val = (text ?? prompt).trim();
-    if (mode === 'command') {
+    if (isCommandInput(val) || mode === 'command') {
       router.push({ pathname: '/wrangler', params: { command: val || undefined } });
     } else {
       router.push({ pathname: '/wrangler', params: { q: val || undefined } });
@@ -261,15 +287,14 @@ export function HomeWranglerSurface({ enabled }: Props) {
 
         <View style={{ flexDirection: 'row', gap: spacing.xs, flexWrap: 'wrap' }}>
           {(mode === 'ask'
-            ? ['What needs attention?', 'How is staffing?', 'What should I fix next?']
-            : ['Who is working tonight?', 'Find Jordan’s reservation', 'Show Ashley’s clock punches']
+            ? ['What needs attention?', 'How is staffing?', 'Clear table 3']
+            : ['Clear table 3', 'Add Jose to schedule Monday Aug 3 3pm - 12 am', '86 Tuna Tartare']
           ).map((preset) => (
             <Pressable
               key={preset}
               onPress={() => {
                 setPrompt(preset);
-                if (mode === 'ask') void handleAsk(preset);
-                else void handleCommand(preset);
+                handleSubmit(preset);
               }}
               style={{
                 borderWidth: 1,
@@ -291,7 +316,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
           <TextInput
             value={prompt}
             onChangeText={setPrompt}
-            placeholder={mode === 'ask' ? 'Ask Gemini about tonight’s service…' : 'Give command to Gemini (e.g. Move Marcus to 5 PM)…'}
+            placeholder={mode === 'ask' ? 'Ask or command Gemini (e.g. Clear table 3)…' : 'Give command to Gemini (e.g. Clear table 3)…'}
             placeholderTextColor={palette.muted}
             style={{
               flex: 1,
@@ -303,10 +328,10 @@ export function HomeWranglerSurface({ enabled }: Props) {
               color: palette.charcoal,
               fontSize: 13,
             }}
-            onSubmitEditing={() => (mode === 'ask' ? void handleAsk() : void handleCommand())}
+            onSubmitEditing={() => handleSubmit()}
           />
           <Pressable
-            onPress={() => (mode === 'ask' ? void handleAsk() : void handleCommand())}
+            onPress={() => handleSubmit()}
             style={{
               backgroundColor: '#7A5A35',
               justifyContent: 'center',
@@ -316,7 +341,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
             }}
           >
             <CommandText palette={palette} variant="label" style={{ color: '#FFFFFF' }}>
-              {ask.isPending || operatorPlan.isPending ? '...' : mode === 'ask' ? 'ASK' : 'RUN'}
+              {ask.isPending || operatorPlan.isPending ? '...' : mode === 'ask' ? 'SUBMIT' : 'RUN'}
             </CommandText>
           </Pressable>
           <Pressable
