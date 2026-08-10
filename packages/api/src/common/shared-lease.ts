@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { maybeCleanupExpiredBuckets } from './rate-limit';
 
 /**
  * Atomically claim a short-lived, cross-instance lease in Postgres.
@@ -7,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
  * RateLimitBucket already provides a keyed expiry store shared by every API
  * replica. A conditional ON CONFLICT update lets exactly one caller insert or
  * renew an expired key; callers observing a live lease receive no row.
+ * Expired lease keys (lease:*) are periodically cleaned up via RateLimitBucket pruning.
  */
 export async function tryAcquireSharedLease(
   prisma: PrismaService,
@@ -14,6 +16,7 @@ export async function tryAcquireSharedLease(
   ttlMs: number,
   now = new Date(),
 ): Promise<boolean> {
+  await maybeCleanupExpiredBuckets(prisma, now);
   const resetAt = new Date(now.getTime() + ttlMs);
   const rows = await prisma.$queryRaw<Array<{ key: string }>>(Prisma.sql`
     INSERT INTO "RateLimitBucket" ("key", "count", "resetAt")
