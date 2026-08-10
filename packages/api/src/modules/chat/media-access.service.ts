@@ -18,14 +18,21 @@ const BUCKET_SECONDS = 180;
  * Each token is valid for the current 3-minute time bucket plus the previous
  * one (to handle requests near a bucket boundary), giving an effective window
  * of 3–6 minutes.
+ *
+ * Prefer MEDIA_TOKEN_SECRET so media tokens can be rotated independently of
+ * session JWTs. JWT_SECRET remains a compatible fallback.
  */
 @Injectable()
 export class MediaAccessService {
   private readonly secret: string;
 
   constructor(config: ConfigService) {
-    const secret = config.get<string>('JWT_SECRET');
-    if (!secret) throw new Error('JWT_SECRET is required for media access tokens');
+    const secret =
+      config.get<string>('MEDIA_TOKEN_SECRET')?.trim() ||
+      config.get<string>('JWT_SECRET')?.trim();
+    if (!secret) {
+      throw new Error('MEDIA_TOKEN_SECRET or JWT_SECRET is required for media access tokens');
+    }
     this.secret = secret;
   }
 

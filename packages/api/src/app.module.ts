@@ -48,7 +48,12 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
       isGlobal: true,
       envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env.local', '.env'],
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    // default: higher ceiling for authenticated dashboard polling
+    // auth: tighter named bucket applied via @Throttle({ auth: ... }) on auth routes
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60_000, limit: 300 },
+      { name: 'auth', ttl: 60_000, limit: 20 },
+    ]),
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
