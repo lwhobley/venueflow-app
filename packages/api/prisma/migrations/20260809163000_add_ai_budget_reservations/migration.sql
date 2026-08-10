@@ -19,4 +19,13 @@ CREATE INDEX "AiBudgetReservation_venueId_expiresAt_idx"
 
 -- This server-owned table is not a Supabase Data API surface.
 ALTER TABLE "AiBudgetReservation" ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE "AiBudgetReservation" FROM anon, authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON TABLE "AiBudgetReservation" FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON TABLE "AiBudgetReservation" FROM authenticated;
+  END IF;
+END
+$$;
