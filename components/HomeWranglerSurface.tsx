@@ -253,7 +253,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
       <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: palette.divider, paddingTop: spacing.sm, gap: spacing.xs }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <CommandText palette={palette} variant="label" style={{ color: '#7A5A35' }}>
-            OPERATIONS COMMAND · GEMINI PROMPT
+            OPERATIONS COMMAND
           </CommandText>
           <View style={{ flexDirection: 'row', gap: spacing.xs }}>
             <Pressable
