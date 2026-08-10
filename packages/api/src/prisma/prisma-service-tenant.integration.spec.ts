@@ -29,14 +29,14 @@ describe('PrismaService cutover (integration)', () => {
 
     // Seed without a tenant context — extension stays inert during setup.
     const [a, b] = await Promise.all([
-      setup.prisma.venue.create({ data: { name: 'Cutover A', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
-      setup.prisma.venue.create({ data: { name: 'Cutover B', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
+      setup.prisma.venue.create({ data: { name: 'Cutover A', code: 'VW-CUTOVERA01', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
+      setup.prisma.venue.create({ data: { name: 'Cutover B', code: 'VW-CUTOVERB01', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' } }),
     ]);
     venueA = a.id;
     venueB = b.id;
     await Promise.all([
-      setup.prisma.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
-      setup.prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      setup.prisma.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Item', normalizedName: 'a-item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      setup.prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Item', normalizedName: 'b-item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     ]);
   }, 60_000);
 
@@ -65,7 +65,7 @@ describe('PrismaService cutover (integration)', () => {
 
   it('PrismaService.create forces the bound venueId', async () => {
     const created = (await asTenant(venueA, () =>
-      prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Forced', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
+      prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'A-Forced', normalizedName: 'a-forced', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     )) as { venueId: string };
     expect(created.venueId).toBe(venueA);
   });

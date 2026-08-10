@@ -19,6 +19,12 @@ export function assertWithinGeofence(
   mocked: boolean,
   venue: GeofenceVenue,
 ): void {
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new BadRequestException('Location coordinates are invalid.');
+  }
+  if (!Number.isFinite(accuracy) || accuracy < 0) {
+    throw new BadRequestException('Location accuracy is invalid.');
+  }
   if (mocked) {
     throw new BadRequestException('Mocked locations are not allowed.');
   }
@@ -30,6 +36,13 @@ export function assertWithinGeofence(
   // Gulf of Guinea and fail with a confusing "outside the venue" error.
   if (venue.latitude === 0 && venue.longitude === 0) {
     throw new BadRequestException('This venue\'s location is not configured yet. Ask a manager to set it in Venue Settings.');
+  }
+  if (
+    !Number.isFinite(venue.latitude) || venue.latitude < -90 || venue.latitude > 90
+    || !Number.isFinite(venue.longitude) || venue.longitude < -180 || venue.longitude > 180
+    || !Number.isFinite(venue.geofenceRadiusM) || venue.geofenceRadiusM <= 0
+  ) {
+    throw new BadRequestException('This venue\'s geofence configuration is invalid. Ask a manager to update Venue Settings.');
   }
   const earthRadius = 6371000;
   const toRadians = (value: number) => (value * Math.PI) / 180;

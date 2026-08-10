@@ -18,6 +18,7 @@ type Route = {
 
 const queryRoutes: Record<string, Route> = {
   'app.getMe': { path: '/v1/app/me' },
+  'app.getVenueJoinCode': { path: '/v1/app/venue/join-code' },
   'app.getDashboard': { path: '/v1/app/dashboard' },
   'app.getNotifications': { path: '/v1/app/notifications' },
   'app.getClockBoard': { path: '/v1/time-clock/board' },
@@ -113,6 +114,24 @@ const mutationRoutes: Record<string, Route> = {
     path: '/v1/app/venue',
     method: 'PATCH',
     body: ({ name, latitude, longitude, geofenceRadiusM }) => ({ name, latitude, longitude, geofenceRadiusM }),
+    invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
+  },
+  'app.rotateVenueJoinCode': {
+    path: '/v1/app/venue/join-code/rotate',
+    method: 'POST',
+    body: () => ({}),
+    invalidate: [['app', 'getVenueJoinCode']],
+  },
+  'app.switchVenue': {
+    path: '/v1/app/switch-venue',
+    method: 'POST',
+    body: ({ venueId }) => ({ venueId }),
+    invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
+  },
+  'app.registerVenue': {
+    path: '/v1/app/register-venue',
+    method: 'POST',
+    body: ({ businessName, ownerName, phone, address, venueType, staffRange }) => ({ businessName, ownerName, phone, address, venueType, staffRange }),
     invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
   },
   'app.deleteMyAccount': { path: '/v1/app/me', method: 'DELETE' },
@@ -496,7 +515,10 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
   const authEpoch = useAuthStore((state) => state.authEpoch);
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const venueId = useAuthStore((state) => state.venue?.id ?? null);
-  const enabled = args !== 'skip';
+  const token = useAuthStore((state) => state.token);
+  // Never fire authenticated API queries without a session token — route
+  // protection must not depend on every screen remembering to gate its query.
+  const enabled = args !== 'skip' && Boolean(token);
   const query = useReactQuery({
     queryKey: [...key.split('.'), args, authEpoch, userId, venueId],
     enabled,
@@ -514,7 +536,8 @@ export function useQueryState<T = any>(ref: RailwayFunctionRef, args?: QueryArgs
   const authEpoch = useAuthStore((state) => state.authEpoch);
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const venueId = useAuthStore((state) => state.venue?.id ?? null);
-  const enabled = args !== 'skip';
+  const token = useAuthStore((state) => state.token);
+  const enabled = args !== 'skip' && Boolean(token);
   const query = useReactQuery({
     queryKey: [...key.split('.'), args, authEpoch, userId, venueId],
     enabled,

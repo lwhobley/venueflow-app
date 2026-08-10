@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   ForbiddenException,
   Get,
@@ -215,6 +216,10 @@ function cleanText(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeInventoryName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function toMs(date: Date | null | undefined): number | null {
   return date ? date.getTime() : null;
 }
@@ -336,9 +341,11 @@ export class BarInventoryController {
     const now = new Date();
     const name = body.name.trim();
     if (!name) throw new BadRequestException('Item name is required');
+    const normalizedName = normalizeInventoryName(name);
     const payload = {
       venueId,
       name,
+      normalizedName,
       category: body.category,
       area: cleanText(body.area) ?? null,
       unit: body.unit.trim() || 'unit',
@@ -351,21 +358,28 @@ export class BarInventoryController {
       notes: cleanText(body.notes) ?? null,
       updatedAt: now,
     };
-    if (body.itemId) {
-      const existing = await this.prisma.barInventoryItem.findFirst({
-        where: { id: body.itemId, venueId },
+    try {
+      if (body.itemId) {
+        const existing = await this.prisma.barInventoryItem.findFirst({
+          where: { id: body.itemId, venueId },
+        });
+        if (!existing) throw new NotFoundException('Item not found');
+        const updated = await this.prisma.barInventoryItem.update({
+          where: { id: existing.id },
+          data: payload,
+        });
+        return mapItem(updated);
+      }
+      const created = await this.prisma.barInventoryItem.create({
+        data: { ...payload, createdAt: now },
       });
-      if (!existing) throw new NotFoundException('Item not found');
-      const updated = await this.prisma.barInventoryItem.update({
-        where: { id: existing.id },
-        data: payload,
-      });
-      return mapItem(updated);
+      return mapItem(created);
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new ConflictException('An inventory item with this name already exists.');
+      }
+      throw error;
     }
-    const created = await this.prisma.barInventoryItem.create({
-      data: { ...payload, createdAt: now },
-    });
-    return mapItem(created);
   }
 
   @RequireSubscription('active')
@@ -424,24 +438,20 @@ export class BarInventoryController {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
     const items = body.items ?? [];
-    const existingRows = await this.prisma.barInventoryItem.findMany({
-      where: { venueId },
-      take: 500,
-    });
-    const existingByName = new Map(existingRows.map((row) => [row.name.toLowerCase(), row]));
     const seenNames = new Set<string>();
     const writes = [];
     let imported = 0;
     for (const item of items.slice(0, MAX_IMPORT_ITEMS)) {
       const name = item.name?.trim() ?? '';
       if (!name) continue;
-      const nameKey = name.toLowerCase();
+      const nameKey = normalizeInventoryName(name);
       if (seenNames.has(nameKey)) continue;
       seenNames.add(nameKey);
       const now = new Date();
       const payload = {
         venueId,
         name,
+        normalizedName: nameKey,
         category: item.category,
         area: cleanText(item.area) ?? null,
         unit: item.unit?.trim() || 'unit',
@@ -454,12 +464,11 @@ export class BarInventoryController {
         notes: cleanText(item.notes) ?? null,
         updatedAt: now,
       };
-      const existing = existingByName.get(nameKey);
-      if (existing) {
-        writes.push(this.prisma.barInventoryItem.update({ where: { id: existing.id }, data: payload }));
-      } else {
-        writes.push(this.prisma.barInventoryItem.create({ data: { ...payload, createdAt: now } }));
-      }
+      writes.push(this.prisma.barInventoryItem.upsert({
+        where: { venueId_normalizedName: { venueId, normalizedName: nameKey } },
+        create: { ...payload, createdAt: now },
+        update: payload,
+      }));
       imported += 1;
     }
     if (writes.length) {

@@ -67,10 +67,12 @@ describe('BarInventoryParserService', () => {
 
   it('calls Gemini with the configured key', async () => {
     process.env.GEMINI_API_KEY = 'gemini-key';
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ candidates: [{ content: { parts: [{ text: '{"notes":"","items":[]}' }] } }] }),
-    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalTokens: 10 }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: '{"notes":"","items":[]}' }] } }] }),
+      });
     vi.stubGlobal('fetch', fetchMock);
 
     await new BarInventoryParserService().parse({ text: 'two bottles of gin' });

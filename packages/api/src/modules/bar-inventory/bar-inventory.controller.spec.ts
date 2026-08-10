@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { BarInventoryController } from './bar-inventory.controller';
 
 vi.mock('../../common/rate-limit', () => ({
@@ -26,6 +26,7 @@ function makeItem(overrides: Partial<Record<string, any>> = {}) {
     id: 'item-1',
     venueId: 'venue-1',
     name: 'House Vodka',
+    normalizedName: 'house vodka',
     category: 'spirit',
     area: 'Bar 1',
     unit: 'bottle',
@@ -76,6 +77,7 @@ function makeController() {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockImplementation((args: any) => Promise.resolve(makeItem(args.data))),
       update: vi.fn().mockImplementation((args: any) => Promise.resolve(makeItem(args.data))),
+      upsert: vi.fn().mockImplementation((args: any) => Promise.resolve(makeItem(args.update))),
     },
     barInventoryMovement: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -282,6 +284,7 @@ describe('BarInventoryController', () => {
         data: expect.objectContaining({
           venueId: 'venue-1',
           name: 'New Item',
+          normalizedName: 'new item',
           unit: 'Bottle',
           parLevel: 0,
           onHand: 0,
@@ -337,6 +340,15 @@ describe('BarInventoryController', () => {
           onHand: 6,
         } as any),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('returns a conflict when a normalized item name already exists', async () => {
+      const { controller, prisma } = makeController();
+      prisma.barInventoryItem.create.mockRejectedValue({ code: 'P2002' });
+
+      await expect(controller.upsertBarItem(managerUser, {
+        name: '  HOUSE VODKA ', category: 'spirit', unit: 'bottle', parLevel: 4, onHand: 6,
+      } as any)).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
@@ -467,9 +479,8 @@ describe('BarInventoryController', () => {
   });
 
   describe('importParsedBarItems', () => {
-    it('updates items matched case-insensitively by name and creates the rest', async () => {
+    it('atomically upserts items by normalized venue/name', async () => {
       const { controller, prisma } = makeController();
-      prisma.barInventoryItem.findMany.mockResolvedValue([makeItem({ id: 'existing-1', name: 'House Vodka' })]);
 
       const result = await controller.importParsedBarItems(managerUser, {
         items: [
@@ -478,12 +489,14 @@ describe('BarInventoryController', () => {
         ],
       });
 
-      expect(prisma.barInventoryItem.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'existing-1' } }),
-      );
-      expect(prisma.barInventoryItem.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ name: 'New Item' }) }),
-      );
+      expect(prisma.barInventoryItem.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        where: { venueId_normalizedName: { venueId: 'venue-1', normalizedName: 'house vodka' } },
+        update: expect.objectContaining({ name: 'house vodka', normalizedName: 'house vodka' }),
+      }));
+      expect(prisma.barInventoryItem.upsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        where: { venueId_normalizedName: { venueId: 'venue-1', normalizedName: 'new item' } },
+        create: expect.objectContaining({ name: 'New Item', normalizedName: 'new item' }),
+      }));
       expect(result).toEqual({ imported: 2 });
     });
 
@@ -498,7 +511,7 @@ describe('BarInventoryController', () => {
         ],
       });
 
-      expect(prisma.barInventoryItem.create).toHaveBeenCalledTimes(1);
+      expect(prisma.barInventoryItem.upsert).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ imported: 1 });
     });
 
@@ -512,7 +525,7 @@ describe('BarInventoryController', () => {
 
       const result = await controller.importParsedBarItems(managerUser, { items });
 
-      expect(prisma.barInventoryItem.create).toHaveBeenCalledTimes(100);
+      expect(prisma.barInventoryItem.upsert).toHaveBeenCalledTimes(100);
       expect(result).toEqual({ imported: 100 });
     });
 

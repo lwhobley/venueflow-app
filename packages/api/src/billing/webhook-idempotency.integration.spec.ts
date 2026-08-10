@@ -37,7 +37,7 @@ describe('billing webhook idempotency (integration)', () => {
 
   beforeEach(async () => {
     const venue = await prisma.venue.create({
-      data: { name: 'Idempotency Test Venue', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' },
+      data: { name: 'Idempotency Test Venue', code: 'VW-IDEMPOTENT', latitude: 0, longitude: 0, geofenceRadiusM: 100, timezone: 'UTC' },
     });
     venueId = venue.id;
   });

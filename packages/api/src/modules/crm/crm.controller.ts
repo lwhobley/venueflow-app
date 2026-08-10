@@ -26,6 +26,7 @@ import { Type } from 'class-transformer';
 import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
 import { canManageVenue } from '../../auth/roles';
 import { ACTIVE_MEMBERSHIP } from '../../common/membership';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -40,6 +41,10 @@ type Scope = VenueScopedRequest['venueScope'];
 const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'proposal_sent', 'negotiating', 'won', 'lost', 'unqualified', 'on_hold'] as const;
 const BEO_STATUSES = ['draft', 'sent', 'reviewed', 'confirmed', 'amended', 'cancelled'] as const;
 const CONTRACT_STATUSES = ['draft', 'sent', 'viewed', 'partially_signed', 'fully_signed', 'expired', 'cancelled', 'disputed'] as const;
+const BEO_EMAIL_MANAGER_LIMIT_MAX = 20;
+const BEO_EMAIL_MANAGER_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const BEO_EMAIL_VENUE_LIMIT_MAX = 100;
+const BEO_EMAIL_VENUE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 class SaveLeadDto {
   @IsString()
@@ -1024,6 +1029,20 @@ export class CrmController {
   @Post('beos/:id/email')
   async emailBeo(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: EmailBeoDto) {
     requireManager(scope);
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `crm-beo-email:manager:${scope.profileId}`,
+      BEO_EMAIL_MANAGER_LIMIT_MAX,
+      BEO_EMAIL_MANAGER_LIMIT_WINDOW_MS,
+      'Too many BEO emails. Try again later.',
+    );
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `crm-beo-email:venue:${scope.venueId}`,
+      BEO_EMAIL_VENUE_LIMIT_MAX,
+      BEO_EMAIL_VENUE_LIMIT_WINDOW_MS,
+      'This venue has sent too many BEO emails. Try again later.',
+    );
     const [beo, venue] = await Promise.all([
       this.prisma.crmBeo.findFirst({
         where: { id, venueId: scope.venueId },

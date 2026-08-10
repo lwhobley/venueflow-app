@@ -283,7 +283,7 @@ model Venue {
   // IANA timezone (e.g. "America/New_York"). Null falls back to UTC; used to
   // bucket daily reports in the venue's business day rather than server time.
   timezone                      String?
-  code                          String?                   @unique
+  code                          String                    @unique
   phone                         String?
   address                       String?
   venueType                     String?
@@ -358,6 +358,7 @@ model Venue {
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
   aiUsageEvents                 AiUsageEvent[]
+  aiBudgetReservations          AiBudgetReservation[]
   joinRequests                  WorkplaceJoinRequest[]
   eventExecutionWorkspaces      EventExecutionWorkspace[]
   documents                     VenueDocument[]
@@ -1385,6 +1386,7 @@ model BarInventoryItem {
   id            String                 @id @default(cuid())
   venueId       String
   name          String
+  normalizedName String
   category      BarStockCategory
   area          String?
   unit          String
@@ -1403,6 +1405,7 @@ model BarInventoryItem {
   @@index([venueId])
   @@index([venueId, category])
   @@index([venueId, name])
+  @@unique([venueId, normalizedName])
 }
 
 model BarInventoryMovement {

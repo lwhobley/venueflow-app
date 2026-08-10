@@ -5,7 +5,7 @@ import {
   Get,
   Post,
 } from '@nestjs/common';
-import { IsBoolean, IsNumber, IsString, IsIn } from 'class-validator';
+import { IsBoolean, IsNumber, IsString, IsIn, Max, Min } from 'class-validator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
@@ -23,12 +23,17 @@ type Scope = VenueScopedRequest['venueScope'];
 
 class ClockPunchDto {
   @IsNumber()
+  @Min(-90)
+  @Max(90)
   lat!: number;
 
   @IsNumber()
+  @Min(-180)
+  @Max(180)
   lng!: number;
 
   @IsNumber()
+  @Min(0)
   accuracy!: number;
 
   @IsBoolean()

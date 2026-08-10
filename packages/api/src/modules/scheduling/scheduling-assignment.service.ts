@@ -227,41 +227,52 @@ export class SchedulingAssignmentService {
     const referencedIds = Array.from(
       new Set(args.shifts.map((shift) => shift.profileId).filter((id): id is string => Boolean(id))),
     );
-    const members = referencedIds.length
-      ? await this.prisma.profile.findMany({
-          where: {
-            id: { in: referencedIds },
+    const restored = await withSerializableRetry(this.prisma, async (tx) => {
+      await this.lockBulkSchedule(tx, args.venueId, args.weekStart);
+      const members = referencedIds.length
+        ? await tx.profile.findMany({
+            where: {
+              id: { in: referencedIds },
+              venueId: args.venueId,
+              OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+            },
+            select: { id: true },
+          })
+        : [];
+      const memberIds = new Set(members.map((member) => member.id));
+      const prepared = args.shifts.map((shift) => ({
+        shift,
+        profileId: shift.profileId && memberIds.has(shift.profileId) ? shift.profileId : undefined,
+      }));
+      await this.lockAssignmentKeys(tx, prepared.flatMap(({ shift, profileId }) => profileId ? [{
+        venueId: args.venueId, profileId, weekStart: args.weekStart, dayIndex: shift.dayIndex,
+      }] : []));
+      for (const { shift, profileId } of prepared) {
+        if (profileId) {
+          await this.assertNotUnavailable(tx, args.venueId, profileId, shift.dayIndex, args.weekStart);
+          await this.assertNoDoubleBookInWeekTx(
+            tx, args.venueId, profileId, args.weekStart, shift.dayIndex, shift.startMinutes, shift.endMinutes,
+          );
+        }
+        await tx.scheduleShift.create({
+          data: {
             venueId: args.venueId,
-            OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+            ...(args.weekStart ? { weekStart: args.weekStart } : {}),
+            profileId,
+            dayIndex: shift.dayIndex,
+            startMinutes: shift.startMinutes,
+            endMinutes: shift.endMinutes,
+            jobTitle: shift.jobTitle,
+            station: shift.station,
+            status: profileId ? shift.status : 'open',
+            notes: shift.notes,
           },
-          select: { id: true },
-        })
-      : [];
-    const memberIds = new Set(members.map((member) => member.id));
-
-    const creates = args.shifts.map((shift) => {
-      const profileId =
-        shift.profileId && memberIds.has(shift.profileId) ? shift.profileId : undefined;
-
-      return this.prisma.scheduleShift.create({
-        data: {
-          venueId: args.venueId,
-          ...(args.weekStart ? { weekStart: args.weekStart } : {}),
-          profileId,
-          dayIndex: shift.dayIndex,
-          startMinutes: shift.startMinutes,
-          endMinutes: shift.endMinutes,
-          jobTitle: shift.jobTitle,
-          station: shift.station,
-          status: profileId ? shift.status : 'open',
-          notes: shift.notes,
-        },
-      });
+        });
+      }
+      return prepared.length;
     });
-
-    await this.prisma.$transaction(creates);
     await this.markScheduleEdited(args.venueId);
-    return { restored: creates.length };
+    return { restored };
   }
 
   async copyDayShifts(args: {
@@ -270,14 +281,15 @@ export class SchedulingAssignmentService {
     fromDay: number;
     toDays: number[];
   }) {
-    const source = await this.prisma.scheduleShift.findMany({
-      where: { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}), dayIndex: args.fromDay },
-    });
-    const creates = [...new Set(args.toDays)]
-      .filter((day) => day !== args.fromDay)
-      .flatMap((day) =>
-        source.map((shift) =>
-          this.prisma.scheduleShift.create({
+    const added = await withSerializableRetry(this.prisma, async (tx) => {
+      await this.lockBulkSchedule(tx, args.venueId, args.weekStart);
+      const source = await tx.scheduleShift.findMany({
+        where: { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}), dayIndex: args.fromDay },
+      });
+      let count = 0;
+      for (const day of [...new Set(args.toDays)].filter((value) => value !== args.fromDay)) {
+        for (const shift of source) {
+          await tx.scheduleShift.create({
             data: {
               venueId: args.venueId,
               ...(args.weekStart ? { weekStart: args.weekStart } : {}),
@@ -288,12 +300,14 @@ export class SchedulingAssignmentService {
               station: shift.station,
               status: 'open',
             },
-          }),
-        ),
-      );
-    await this.prisma.$transaction(creates);
+          });
+          count += 1;
+        }
+      }
+      return count;
+    });
     await this.markScheduleEdited(args.venueId);
-    return { added: creates.length };
+    return { added };
   }
 
   async clearWeek(args: {
@@ -301,20 +315,23 @@ export class SchedulingAssignmentService {
     weekStart?: string;
   }) {
     const weekWhere = { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}) };
-    const shifts = await this.prisma.scheduleShift.findMany({ where: weekWhere });
-    const snapshots = shifts.map((shift) => ({
-      dayIndex: shift.dayIndex,
-      startMinutes: shift.startMinutes,
-      endMinutes: shift.endMinutes,
-      jobTitle: shift.jobTitle,
-      station: shift.station,
-      status: shift.status,
-      profileId: shift.profileId,
-      notes: shift.notes,
-    }));
-    await this.prisma.scheduleShift.deleteMany({ where: weekWhere });
+    const snapshots = await withSerializableRetry(this.prisma, async (tx) => {
+      await this.lockBulkSchedule(tx, args.venueId, args.weekStart);
+      const shifts = await tx.scheduleShift.findMany({ where: weekWhere });
+      await tx.scheduleShift.deleteMany({ where: weekWhere });
+      return shifts.map((shift) => ({
+        dayIndex: shift.dayIndex,
+        startMinutes: shift.startMinutes,
+        endMinutes: shift.endMinutes,
+        jobTitle: shift.jobTitle,
+        station: shift.station,
+        status: shift.status,
+        profileId: shift.profileId,
+        notes: shift.notes,
+      }));
+    });
     await this.markScheduleEdited(args.venueId);
-    return { removed: shifts.length, shifts: snapshots };
+    return { removed: snapshots.length, shifts: snapshots };
   }
 
   async applyTemplate(args: {
@@ -330,25 +347,27 @@ export class SchedulingAssignmentService {
       notes?: string | null;
     }>;
   }) {
-    const creates = args.slots.map((slot) =>
-      this.prisma.scheduleShift.create({
-        data: {
-          venueId: args.venueId,
-          ...(args.weekStart ? { weekStart: args.weekStart } : {}),
-          dayIndex: slot.dayIndex,
-          startMinutes: slot.startMinutes,
-          endMinutes: slot.endMinutes,
-          jobTitle: slot.jobTitle,
-          station: slot.station,
-          notes: slot.notes?.trim() || null,
-          status: 'open',
-        },
-      }),
-    );
-    await this.prisma.$transaction([
-      ...(args.replace ? [this.prisma.scheduleShift.deleteMany({ where: { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}) } })] : []),
-      ...creates,
-    ]);
+    await withSerializableRetry(this.prisma, async (tx) => {
+      await this.lockBulkSchedule(tx, args.venueId, args.weekStart);
+      if (args.replace) {
+        await tx.scheduleShift.deleteMany({ where: { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}) } });
+      }
+      for (const slot of args.slots) {
+        await tx.scheduleShift.create({
+          data: {
+            venueId: args.venueId,
+            ...(args.weekStart ? { weekStart: args.weekStart } : {}),
+            dayIndex: slot.dayIndex,
+            startMinutes: slot.startMinutes,
+            endMinutes: slot.endMinutes,
+            jobTitle: slot.jobTitle,
+            station: slot.station,
+            notes: slot.notes?.trim() || null,
+            status: 'open',
+          },
+        });
+      }
+    });
     await this.markScheduleEdited(args.venueId);
     return { added: args.slots.length };
   }
@@ -795,6 +814,11 @@ export class SchedulingAssignmentService {
     for (const key of uniqueKeys) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
     }
+  }
+
+  private async lockBulkSchedule(tx: Prisma.TransactionClient, venueId: string, weekStart?: string) {
+    const key = `schedule-bulk:${venueId}:${weekStart ?? 'legacy'}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
   }
 
   markScheduleEdited(venueId: string) {

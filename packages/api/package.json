@@ -6,9 +6,6 @@
   "engines": {
     "node": ">=22"
   },
-  "prisma": {
-    "schema": "prisma"
-  },
   "scripts": {
     "build": "prisma generate && nest build",
     "start": "node scripts/assert-database-target.mjs && node dist/main.js",
@@ -51,6 +48,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^24.10.1",
     "@types/supertest": "^7.2.0",
+    "dotenv": "^17.4.2",
     "supertest": "^7.2.2",
     "testcontainers": "^12.0.3",
     "typescript": "~5.9.2"
