@@ -28,3 +28,17 @@ export async function tryAcquireSharedLease(
   `);
   return rows.length === 1;
 }
+
+/**
+ * Release a previously acquired lease so another caller can immediately retry.
+ * Use this when the work protected by the lease fails — without release, other
+ * replicas would wait until the TTL expires before retrying.
+ */
+export async function releaseSharedLease(
+  prisma: PrismaService,
+  key: string,
+): Promise<void> {
+  await prisma.$executeRaw(Prisma.sql`
+    DELETE FROM "RateLimitBucket" WHERE "key" = ${`lease:${key}`}
+  `);
+}

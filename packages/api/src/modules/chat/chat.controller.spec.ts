@@ -48,8 +48,8 @@ function makeController() {
   ));
 
   const mediaAccess = {
-    createPath: vi.fn().mockImplementation(async (_kind: string, _id: string, _venueId: string, path: string) => `signed:${path}`),
-    assertToken: vi.fn().mockResolvedValue(undefined),
+    createPath: vi.fn().mockImplementation((_kind: string, _id: string, _venueId: string, path: string) => `signed:${path}`),
+    assertToken: vi.fn(),
   } as any;
 
   const s3ImageService = {
