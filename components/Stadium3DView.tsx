@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Canvas } from '@react-three/fiber/native';
@@ -13,7 +13,7 @@ type Tab = 'overview' | 'amenities' | 'beo';
 
 /**
  * Rotatable procedural NRG Stadium for the home page.
- * Drag to spin · pinch-friendly via camera · tap glowing hotspots for zone details.
+ * Drag to spin · tap glowing hotspots for zone details (rooms / amenities / menu·BEO).
  */
 export function Stadium3DView() {
   const palette = useDesignTheme();
@@ -21,6 +21,7 @@ export function Stadium3DView() {
   const [rotationY, setRotationY] = useState(0.55);
   const [rotationX, setRotationX] = useState(-0.42);
   const [tab, setTab] = useState<Tab>('overview');
+  const lastPan = useRef({ x: 0, y: 0 });
 
   const zone: StadiumZone | undefined = useMemo(() => getZoneById(selectedId), [selectedId]);
 
@@ -31,10 +32,16 @@ export function Stadium3DView() {
   }, []);
 
   const pan = Gesture.Pan()
+    .onBegin(() => {
+      lastPan.current = { x: 0, y: 0 };
+    })
     .onUpdate((e) => {
-      setRotationY((y) => y + e.changeX * 0.008);
+      const dx = e.translationX - lastPan.current.x;
+      const dy = e.translationY - lastPan.current.y;
+      lastPan.current = { x: e.translationX, y: e.translationY };
+      setRotationY((y) => y + dx * 0.008);
       setRotationX((x) => {
-        const next = x + e.changeY * 0.005;
+        const next = x + dy * 0.005;
         return Math.max(-1.1, Math.min(0.15, next));
       });
     });
@@ -76,7 +83,6 @@ export function Stadium3DView() {
             />
           </Canvas>
 
-          {/* Zone legend chips — small, Ticketmaster-style */}
           <View
             pointerEvents="box-none"
             style={{
@@ -117,7 +123,6 @@ export function Stadium3DView() {
         </View>
       </GestureDetector>
 
-      {/* Detail panel — rooms / amenities / menu·BEO */}
       {zone ? (
         <View
           style={{
