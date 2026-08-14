@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber/native';
 import * as THREE from 'three';
-import { NRG_ZONES, type StadiumZone } from './nrgZones';
+import { STADIUM_ZONES, type StadiumZone } from './stadiumZones';
 
 type Props = {
   selectedId: string | null;
@@ -19,7 +19,7 @@ function Field() {
   );
 }
 
-/** Elliptical seating bowl ring — procedural stand-in for NRG's oval. */
+/** Elliptical seating bowl ring — generic multi-purpose stadium oval. */
 function BowlRing({
   y,
   rx,
@@ -105,9 +105,6 @@ function ZoneHotspot({
         e.stopPropagation();
         onSelect(zone.id);
       }}
-      onPointerOver={() => {
-        // no-op cursor hint on native
-      }}
     >
       <sphereGeometry args={[0.38, 24, 24]} />
       <meshStandardMaterial
@@ -130,7 +127,6 @@ export function StadiumScene({ selectedId, onSelect, rotationY, rotationX }: Pro
       <directionalLight position={[8, 14, 6]} intensity={1.05} castShadow />
       <directionalLight position={[-6, 8, -4]} intensity={0.35} />
 
-      {/* Field */}
       <Field />
 
       {/* Lower bowl */}
@@ -142,13 +138,12 @@ export function StadiumScene({ selectedId, onSelect, rotationY, rotationX }: Pro
       {/* Rim */}
       <BowlRing y={2.85} rx={7.5} rz={9.4} height={0.22} color="#2C3A32" opacity={0.95} />
 
-      {/* Subtle field lines */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
         <ringGeometry args={[0.35, 0.42, 32]} />
         <meshBasicMaterial color="#E8F0EA" transparent opacity={0.35} />
       </mesh>
 
-      {NRG_ZONES.map((zone) => (
+      {STADIUM_ZONES.map((zone) => (
         <ZoneHotspot
           key={zone.id}
           zone={zone}

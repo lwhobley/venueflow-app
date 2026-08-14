@@ -7,12 +7,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CommandText } from './FutureUI';
 import { spacing, useDesignTheme } from '../lib/theme';
 import { StadiumScene } from './stadium/StadiumScene';
-import { getZoneById, NRG_ZONES, type StadiumZone } from './stadium/nrgZones';
+import { getZoneById, STADIUM_ZONES, type StadiumZone } from './stadium/stadiumZones';
 
 type Tab = 'overview' | 'amenities' | 'beo';
 
 /**
- * Rotatable procedural NRG Stadium for the home page.
+ * Rotatable procedural stadium for the home page.
  * Drag to spin · tap glowing hotspots for zone details (rooms / amenities / menu·BEO).
  */
 export function Stadium3DView() {
@@ -50,7 +50,7 @@ export function Stadium3DView() {
     <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.md, gap: spacing.sm }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
         <View>
-          <CommandText palette={palette} variant="label">NRG STADIUM · SPATIAL</CommandText>
+          <CommandText palette={palette} variant="label">STADIUM · SPATIAL</CommandText>
           <CommandText palette={palette} variant="title" style={{ marginTop: 2 }}>
             Venue map
           </CommandText>
@@ -95,7 +95,7 @@ export function Stadium3DView() {
               gap: 6,
             }}
           >
-            {NRG_ZONES.map((z) => {
+            {STADIUM_ZONES.map((z) => {
               const active = z.id === selectedId;
               return (
                 <Pressable
