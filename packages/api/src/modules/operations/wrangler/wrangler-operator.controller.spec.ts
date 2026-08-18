@@ -24,4 +24,24 @@ describe('WranglerOperatorController', () => {
     }, { plan: { tool: 'CREATE_RESERVATION', args: {} } })).rejects.toBeInstanceOf(ForbiddenException);
     expect(operator.execute).not.toHaveBeenCalled();
   });
+
+  it('rate limits execute before it performs any write', async () => {
+    // execute accepts a client-supplied plan and does the actual writes, so it
+    // must not fall back to the looser global throttle that /plan avoids.
+    const operator = { execute: vi.fn() };
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ count: 21 }]),
+      rateLimitBucket: { deleteMany: vi.fn() },
+      venue: { findUnique: vi.fn() },
+    };
+    const controller = new WranglerOperatorController(prisma as never, operator as never);
+
+    await expect(controller.execute({
+      profileId: 'manager-1', fullName: 'Manager', venueId: 'venue-1', venueName: 'Venue',
+      role: 'manager', allAccess: false, subscriptionStatus: 'active', trialEndsAt: null,
+    }, { plan: { tool: 'CREATE_RESERVATION', args: {} } })).rejects.toThrow('Too many attempts. Try again later.');
+
+    expect(operator.execute).not.toHaveBeenCalled();
+    expect(prisma.venue.findUnique).not.toHaveBeenCalled();
+  });
 });

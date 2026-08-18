@@ -61,6 +61,15 @@ export class WranglerOperatorController {
     if (!canManageVenue(scope.role, scope.allAccess)) {
       throw new ForbiddenException('Manager access required for Wrangler operator actions');
     }
+    // Same bucket as /plan: execute accepts a client-supplied plan and performs
+    // the actual writes, so it must not be throttled more loosely than the
+    // cheaper planning call that normally precedes it.
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `wrangler-operator:${scope.venueId}:${scope.profileId}`,
+      OPERATOR_RATE_LIMIT_MAX,
+      OPERATOR_RATE_LIMIT_WINDOW_MS,
+    );
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } });
     if (!venue) return null;
     const plan = body.plan as any;
