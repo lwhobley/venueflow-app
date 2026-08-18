@@ -189,4 +189,35 @@ describe('SafeWranglerOperatorService', () => {
     })).rejects.toThrow('Invalid table status');
     expect(prisma.floorTable.findMany).not.toHaveBeenCalled();
   });
+
+  it('never searches tables outside the venue when there is no active floor plan', async () => {
+    // FloorTable has no venueId column, so the tenant-isolation extension cannot
+    // scope it. This mock mirrors Prisma semantics — a where clause with no
+    // floorPlanId/floorPlan predicate matches every venue's tables — so a
+    // regression that drops the predicate resolves the foreign table below.
+    const foreignTable = { id: 'table-other-venue', label: '3' };
+    const findMany = vi.fn(async ({ where }: any) => {
+      const scopedToVenue = where?.floorPlan?.venueId === 'venue-1' || typeof where?.floorPlanId === 'string';
+      return scopedToVenue ? [] : [foreignTable];
+    });
+    const prisma = {
+      floorPlan: { findFirst: vi.fn().mockResolvedValue(null) },
+      floorTable: { findMany },
+      tableState: { findFirst: vi.fn(), update: vi.fn() },
+      tableAssignment: { updateMany: vi.fn() },
+      auditLog: { create: vi.fn() },
+    };
+    const service = new WranglerOperatorService(prisma as never);
+
+    await expect(service.execute({
+      venueId: 'venue-1',
+      actor: { profileId: 'manager-1', fullName: 'Manager', role: 'manager', allAccess: true },
+      plan: { tool: 'CLEAR_TABLE', args: { tableLabel: '3', status: 'available' }, summary: 'Clear table 3.', risk: 'operational_write' },
+    })).rejects.toThrow('No table found matching "3"');
+
+    for (const [args] of findMany.mock.calls) {
+      expect(args.where.floorPlan?.venueId).toBe('venue-1');
+    }
+    expect(prisma.tableState.update).not.toHaveBeenCalled();
+  });
 });

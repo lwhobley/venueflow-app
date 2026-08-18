@@ -827,13 +827,21 @@ export class WranglerOperatorService {
 
   private async resolveTable(venueId: string, label: string) {
     const activePlan = await this.prisma.floorPlan.findFirst({ where: { venueId, isActive: true } });
-    const tables = await this.prisma.floorTable.findMany({
-      where: {
-        floorPlanId: activePlan?.id ?? undefined,
-        label: { contains: label, mode: 'insensitive' },
-      },
-      take: 10,
-    });
+    // FloorTable carries no venueId column, so the tenant-isolation extension
+    // cannot scope it — this predicate is the only tenant boundary. Skip the
+    // query outright when there is no active plan: `floorPlanId: undefined` is
+    // dropped by Prisma, widening the search to every venue's tables. venueId is
+    // also stated explicitly so the scope never depends on the plan lookup.
+    const tables = activePlan
+      ? await this.prisma.floorTable.findMany({
+          where: {
+            floorPlanId: activePlan.id,
+            floorPlan: { venueId },
+            label: { contains: label, mode: 'insensitive' },
+          },
+          take: 10,
+        })
+      : [];
     if (tables.length === 0) {
       const allTables = await this.prisma.floorTable.findMany({
         where: { floorPlan: { venueId }, label: { contains: label, mode: 'insensitive' } },
