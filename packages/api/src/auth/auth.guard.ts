@@ -91,10 +91,17 @@ export class AuthGuard implements CanActivate {
       ? rawVenueHeader.trim()
       : undefined;
     const requestedVenueId = headerVenueId || payload.venueId || undefined;
+    // With no explicit venue requested, only match a profile that actually
+    // carries a venue. A user can hold both a venueless profile (created at
+    // signup, before any venue exists) and a venued one (created afterward);
+    // without this filter `orderBy: createdAt asc` picks the older venueless
+    // row, which desyncs from VenueScopeInterceptor's resolution (that one
+    // already requires venueId) and leaves tenant isolation unbound for a
+    // request that is really operating on a real venue.
     let liveProfile = await this.prisma.profile.findFirst({
       where: {
         userId: payload.sub,
-        ...(requestedVenueId ? { venueId: requestedVenueId } : {}),
+        ...(requestedVenueId ? { venueId: requestedVenueId } : { venueId: { not: null } }),
         OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
       },
       select: {

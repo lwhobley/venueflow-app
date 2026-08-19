@@ -393,6 +393,15 @@ export class AppController {
           trialEndsAt,
         },
       });
+      // Signup creates a venueless profile before any venue exists. Once this
+      // venue's profile is created, that older venueless row is a redundant
+      // duplicate — left in place it can outrank the real venue profile in
+      // fallback profile lookups (see profile.service.ts / auth.guard.ts) and
+      // silently disable tenant-scoped queries for this user. Only ever remove
+      // the caller's own still-venueless row, never another user's profile.
+      if (existingProfile && existingProfile.venueId == null && existingProfile.userId === user.sub) {
+        await tx.profile.delete({ where: { id: existingProfile.id } });
+      }
       await syncTeamMemberCount(tx, venue.id);
       return { profile, venue };
     }));
