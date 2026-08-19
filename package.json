@@ -14,7 +14,23 @@
   },
   "expo": {
     "install": {
-      "exclude": ["expo-updates"]
+      "exclude": [
+        "expo-updates",
+        "expo-router",
+        "expo-splash-screen",
+        "expo-camera",
+        "expo-constants",
+        "expo-document-picker",
+        "expo-file-system",
+        "expo-font",
+        "expo-haptics",
+        "expo-image-picker",
+        "expo-linking",
+        "expo-location",
+        "expo-notifications",
+        "expo-secure-store",
+        "expo-status-bar"
+      ]
     }
   },
   "scripts": {
