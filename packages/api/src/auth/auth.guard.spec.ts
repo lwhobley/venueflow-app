@@ -111,6 +111,23 @@ describe('AuthGuard', () => {
     });
   });
 
+  it('prefers a venued profile over an older venueless one when no venue is requested', async () => {
+    // A user can hold both a venueless profile (created at signup) and a
+    // venued one (created afterward). With no x-venue-id header and no
+    // venueId claim on the token, the guard must not fall back to picking
+    // whichever profile is oldest — that would silently leave tenant
+    // isolation unbound for a request that is really scoped to a venue.
+    const { guard, prisma } = makeGuard({
+      payload: { sub: 'user-1', sid: 'session-1', venueId: undefined },
+    });
+
+    await guard.canActivate(makeContext('token-1'));
+
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ venueId: { not: null } }) }),
+    );
+  });
+
   it('rejects when a stored token hash does not match the presented bearer token', async () => {
     const { guard } = makeGuard({
       session: {

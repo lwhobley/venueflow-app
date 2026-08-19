@@ -44,6 +44,19 @@ type OperatorRisk = 'read' | 'low_risk_write' | 'operational_write' | 'sensitive
 type OperatorPlan = { tool: OperatorTool; args: Record<string, unknown>; summary: string; risk: OperatorRisk; preview?: string[] };
 type OperatorExecutionResponse = { ok: true; tool: OperatorTool; risk: OperatorRisk; result: unknown };
 
+// Nominal brand: a plan is only ever "resolved" by resolveWritePlan(), which is
+// the sole place every entity reference in `args` (tableId, reservationId,
+// shiftId, leadId, profileId, ...) gets re-derived and re-scoped to `venueId`
+// server-side — even when the caller supplied a client-controlled OperatorPlan
+// via POST /operator/execute. executeWrite() performs bare `where: { id }`
+// writes trusting those args are already venue-scoped, so its plan parameter
+// requires this brand: TypeScript then refuses any OperatorPlan that didn't
+// pass through resolveWritePlan, closing off the class of bug fixed in
+// 9664b3f (a resolver that returned a cross-tenant row) at compile time
+// instead of relying on every future call site remembering the invariant.
+declare const RESOLVED_PLAN: unique symbol;
+type ResolvedOperatorPlan = OperatorPlan & { readonly [RESOLVED_PLAN]: true };
+
 type Actor = {
   profileId: string;
   fullName: string;
@@ -378,7 +391,7 @@ export class WranglerOperatorService {
     throw new BadRequestException('That operation is not a read command');
   }
 
-  private async resolveWritePlan(venueId: string, timezone: string | null | undefined, plan: OperatorPlan): Promise<OperatorPlan> {
+  private async resolveWritePlan(venueId: string, timezone: string | null | undefined, plan: OperatorPlan): Promise<ResolvedOperatorPlan> {
     const args = { ...plan.args };
     const preview: string[] = [];
 
@@ -540,10 +553,10 @@ export class WranglerOperatorService {
       preview.push(`Corrected: ${finalIn.toLocaleString()} → ${finalOut?.toLocaleString() ?? 'OPEN'}`);
     }
 
-    return { ...plan, args, preview };
+    return { ...plan, args, preview } as ResolvedOperatorPlan;
   }
 
-  private async executeWrite(venueId: string, timezone: string | null | undefined, actor: Actor, plan: OperatorPlan) {
+  private async executeWrite(venueId: string, timezone: string | null | undefined, actor: Actor, plan: ResolvedOperatorPlan) {
     const args = plan.args;
 
     if (plan.tool === 'CLEAR_TABLE' || plan.tool === 'UPDATE_TABLE_STATUS') {

@@ -204,6 +204,90 @@ describe('AppController multi-venue invariants', () => {
     expect(prisma.venue.create).not.toHaveBeenCalled();
   });
 
+  it('deletes the caller\'s venueless signup profile once a venue profile is created', async () => {
+    // Signup always creates a venueless Profile row. Registering a venue then
+    // creates a second, venued row for the same user. If the venueless row is
+    // left behind, "oldest matching profile" fallbacks elsewhere (see
+    // profile.service.ts / auth.guard.ts) can pick it over the real venue
+    // membership and silently disable venue-scoped behavior.
+    const existingProfile = { id: 'profile-signup', userId: 'user-1', venueId: null, email: 'owner@example.com', fullName: 'Owner' };
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      profile: {
+        findMany: vi.fn().mockResolvedValue([]),
+        // Distinguish the duplicate-venue-name check (has a `venue` filter)
+        // from the plain existingProfile lookup by userId only.
+        findFirst: vi.fn().mockImplementation((args: any) =>
+          Promise.resolve(args?.where?.venue ? null : existingProfile)),
+        create: vi.fn().mockResolvedValue({ id: 'profile-venue', venueId: 'venue-new', userId: 'user-1' }),
+        delete: vi.fn().mockResolvedValue(existingProfile),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      venue: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 'venue-new', name: 'New Venue' }),
+      },
+      subscription: { create: vi.fn().mockResolvedValue({}) },
+      staffOnboardingTask: { createMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      team: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}), update: vi.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const profiles = {
+      ensureUser: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      isEmailVerified: vi.fn().mockResolvedValue(true),
+      listUserVenues: vi.fn().mockResolvedValue([{ id: 'venue-new', name: 'New Venue', role: 'admin', profileId: 'profile-venue' }]),
+    };
+    const controller = new AppController(prisma, {} as any, profiles as any);
+
+    await controller.registerVenue(
+      { sub: 'user-1', email: 'owner@example.com' } as any,
+      { businessName: 'New Venue', staffRange: '1-15' } as any,
+    );
+
+    expect(prisma.profile.delete).toHaveBeenCalledWith({ where: { id: 'profile-signup' } });
+  });
+
+  it('does not delete an existing profile that already belongs to another venue', async () => {
+    // A user registering an additional venue (multi-venue) already has a
+    // venued profile as their "existingProfile" match; that one must survive.
+    const existingProfile = { id: 'profile-other-venue', userId: 'user-1', venueId: 'venue-a', email: 'owner@example.com', fullName: 'Owner' };
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      profile: {
+        findMany: vi.fn().mockResolvedValue([{ venueId: 'venue-a' }]),
+        findFirst: vi.fn().mockImplementation((args: any) =>
+          Promise.resolve(args?.where?.venue ? null : existingProfile)),
+        create: vi.fn().mockResolvedValue({ id: 'profile-venue-b', venueId: 'venue-b', userId: 'user-1' }),
+        delete: vi.fn(),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      venue: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 'venue-b', name: 'Second Venue' }),
+      },
+      subscription: {
+        create: vi.fn().mockResolvedValue({}),
+        findFirst: vi.fn().mockResolvedValue({ id: 'sub-multi' }),
+      },
+      staffOnboardingTask: { createMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      team: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}), update: vi.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const profiles = {
+      ensureUser: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      isEmailVerified: vi.fn().mockResolvedValue(true),
+      listUserVenues: vi.fn().mockResolvedValue([]),
+    };
+    const controller = new AppController(prisma, {} as any, profiles as any);
+
+    await controller.registerVenue(
+      { sub: 'user-1', email: 'owner@example.com' } as any,
+      { businessName: 'Second Venue', staffRange: '1-15' } as any,
+    );
+
+    expect(prisma.profile.delete).not.toHaveBeenCalled();
+  });
+
   it('checks last-admin safety for every venue before deleting a multi-venue account', async () => {
     const profiles = [
       { id: 'profile-a', email: 'owner@example.com', fullName: 'Owner', role: 'owner', venueId: 'venue-a', membershipStatus: 'active' },

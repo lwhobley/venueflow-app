@@ -100,8 +100,18 @@ async function meter(input: AiJsonCallInput, usage: AiUsage, reservation: Budget
 }
 
 async function reserveMonthlyVenueBudget(reservationCost: number): Promise<BudgetReservation | null> {
+  if (monthlyAiBudgetUsd() === 0 || reservationCost === 0) return null;
   const context = currentAiUsageContext();
-  if (!context || monthlyAiBudgetUsd() === 0 || reservationCost === 0) return null;
+  if (!context) {
+    // Every current AI caller (staff import, bar-inventory parsing, the
+    // scheduler, and the Wrangler operator) runs behind VenueScopeInterceptor,
+    // which always binds this context. A call reaching here with no context
+    // bound — e.g. a future AI call added to a route decorated
+    // @SkipVenueScope — would otherwise run completely unmetered and outside
+    // the venue's monthly budget with no error at all. Fail closed instead of
+    // silently skipping enforcement.
+    throw new HttpException('AI usage could not be attributed to a venue and was blocked.', HttpStatus.INTERNAL_SERVER_ERROR);
+  }
   const now = new Date();
   const monthStart = utcMonthStart(now);
   const budget = monthlyAiBudgetMicros();
