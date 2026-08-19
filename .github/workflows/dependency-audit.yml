@@ -33,8 +33,45 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Fail on high/critical API production vulnerabilities
-        run: npm audit --omit=dev --workspace=@venue-wrangler/api --audit-level=high
+      - name: Fail on high/critical API production vulnerabilities outside the documented exception
+        run: |
+          set -Eeuo pipefail
+          # Documented exception (owner: repo maintainers; re-review monthly):
+          # deepmerge-ts <8.0.0 (GHSA-ggr8-5vv4-36mx) is pulled in by
+          # prisma -> @prisma/config, used only by the `prisma` CLI (schema
+          # merge/env loading) at generate/migrate time — never in a request
+          # path. @prisma/config@6.19.3 pins deepmerge-ts to an *exact*
+          # "7.1.5" (no range), not a caret/tilde range: forcing an override
+          # to the patched 8.x line would run Prisma's own config-merge logic
+          # against a dependency version it never tested against, which is a
+          # worse production risk than the DoS-class advisory itself for a
+          # merge-time DoS. Revisit when prisma/@prisma/config bumps its own
+          # deepmerge-ts requirement. Any OTHER high/critical advisory in the
+          # production graph fails this gate.
+          ALLOWED='["GHSA-ggr8-5vv4-36mx"]'
+          npm audit --omit=dev --workspace=@venue-wrangler/api --audit-level=high --json > audit.json || true
+          unexpected="$(jq -r --argjson allowed "$ALLOWED" '
+            [.vulnerabilities // {} | to_entries[] | .value
+             | select(.severity == "high" or .severity == "critical") | .via[]
+             | select(type == "object") | .url | sub("https://github.com/advisories/";"")]
+            | unique
+            | map(select(. as $id | ($allowed | index($id)) | not))
+            | .[]' audit.json)"
+          if [ -n "$unexpected" ]; then
+            echo "::error::High/critical API production advisories outside the documented exception:"
+            echo "$unexpected"
+            exit 1
+          fi
+          echo "Only the documented deepmerge-ts advisory is present; gate passes."
+      - name: Fail when the deepmerge-ts exception becomes fixable
+        run: |
+          set -Eeuo pipefail
+          pinned="$(npm view @prisma/config@latest dependencies.deepmerge-ts)"
+          if [ "$(printf '%s\n8.0.0\n' "$pinned" | sort -V | head -1)" = "8.0.0" ]; then
+            echo "::error::@prisma/config now depends on deepmerge-ts $pinned (>= 8.0.0) — the advisory is resolved upstream, remove this exception and update prisma."
+            exit 1
+          fi
+          echo "@prisma/config latest still depends on deepmerge-ts $pinned (still within the excepted range)."
 
   mobile-toolchain:
     name: Mobile production dependency gate
@@ -49,12 +86,20 @@ jobs:
       - name: Fail on high/critical advisories outside the documented exception
         run: |
           set -Eeuo pipefail
-          # Documented exception (owner: repo maintainers; re-review monthly):
-          # image-size <=2.0.2 (GHSA-w3rx-r6r6-pgpr, GHSA-5p2g-fcmc-qvqq) has no
-          # patched release and runs only in Node build tooling (Metro) — it is
-          # not shipped in the mobile runtime or the NestJS API. Any OTHER
-          # high/critical advisory in the production graph fails this gate.
-          ALLOWED='["GHSA-w3rx-r6r6-pgpr","GHSA-5p2g-fcmc-qvqq"]'
+          # Documented exceptions (owner: repo maintainers; re-review monthly):
+          # - image-size <=2.0.2 (GHSA-w3rx-r6r6-pgpr, GHSA-5p2g-fcmc-qvqq) has
+          #   no patched release and runs only in Node build tooling (Metro) —
+          #   it is not shipped in the mobile runtime or the NestJS API.
+          # - deepmerge-ts <8.0.0 (GHSA-ggr8-5vv4-36mx), pulled in by
+          #   prisma -> @prisma/config, runs only in the `prisma` CLI at
+          #   generate/migrate time. @prisma/config pins deepmerge-ts to an
+          #   *exact* version (no range) — forcing the patched 8.x line via
+          #   an override would run Prisma's config-merge logic against a
+          #   dependency version it never tested against. See the API
+          #   production gate above for the fuller rationale.
+          # Any OTHER high/critical advisory in the production graph fails
+          # this gate.
+          ALLOWED='["GHSA-w3rx-r6r6-pgpr","GHSA-5p2g-fcmc-qvqq","GHSA-ggr8-5vv4-36mx"]'
           npm audit --omit=dev --audit-level=high --json > audit.json || true
           unexpected="$(jq -r --argjson allowed "$ALLOWED" '
             [.vulnerabilities // {} | to_entries[] | .value
@@ -68,7 +113,7 @@ jobs:
             echo "$unexpected"
             exit 1
           fi
-          echo "Only the documented image-size advisories are present; gate passes."
+          echo "Only the documented image-size/deepmerge-ts advisories are present; gate passes."
       - name: Fail when the image-size exception becomes patchable
         run: |
           set -Eeuo pipefail
