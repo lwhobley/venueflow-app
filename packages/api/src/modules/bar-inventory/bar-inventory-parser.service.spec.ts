@@ -1,6 +1,26 @@
 import { BadRequestException } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runWithAiUsageContext } from '../../common/ai-usage-context';
 import { BarInventoryParserService } from './bar-inventory-parser.service';
+
+function makeAiUsagePrisma() {
+  const tx = {
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
+    aiUsageEvent: {
+      aggregate: vi.fn().mockResolvedValue({ _sum: { estimatedCostMicros: 0 } }),
+      create: vi.fn().mockResolvedValue(undefined),
+    },
+    aiBudgetReservation: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      aggregate: vi.fn().mockResolvedValue({ _sum: { reservedCostMicros: 0 } }),
+      create: vi.fn().mockResolvedValue(undefined),
+    },
+  };
+  return {
+    $transaction: vi.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+    aiBudgetReservation: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  } as any;
+}
 
 describe('BarInventoryParserService', () => {
   const originalGeminiApiKey = process.env.GEMINI_API_KEY;
@@ -75,7 +95,10 @@ describe('BarInventoryParserService', () => {
       });
     vi.stubGlobal('fetch', fetchMock);
 
-    await new BarInventoryParserService().parse({ text: 'two bottles of gin' });
+    await runWithAiUsageContext(
+      { venueId: 'venue-1', profileId: 'profile-1', prisma: makeAiUsagePrisma() },
+      () => new BarInventoryParserService().parse({ text: 'two bottles of gin' }),
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',

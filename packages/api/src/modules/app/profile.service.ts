@@ -19,7 +19,7 @@ import { runWithoutTenant } from '../../prisma/tenant-context';
 export class ProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
-  getProfile(user: AuthUser, venueId?: string | null) {
+  async getProfile(user: AuthUser, venueId?: string | null) {
     const resolvedVenueId = venueId ?? user.venueId;
     if (resolvedVenueId) {
       return this.prisma.profile.findFirst({
@@ -28,6 +28,17 @@ export class ProfileService {
       });
     }
     // Backwards-compat: return the first profile with a venue (or any profile).
+    // A user can hold a venueless profile (created at signup, before any venue
+    // exists) alongside a venued one; `orderBy: createdAt asc` alone would
+    // return whichever is older, which is usually the venueless signup row.
+    // Prefer the venued profile first so callers that check `.venue` (e.g.
+    // requireVenueProfile) see the real membership instead of failing.
+    const venued = await this.prisma.profile.findFirst({
+      where: { userId: user.sub, venueId: { not: null } },
+      include: { venue: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (venued) return venued;
     return this.prisma.profile.findFirst({
       where: { userId: user.sub },
       include: { venue: true },
