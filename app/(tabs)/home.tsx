@@ -8,7 +8,6 @@ import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { CommandButton, CommandText } from '../../components/FutureUI';
 import { HomeWranglerSurface } from '../../components/HomeWranglerSurface';
-import { Stadium3DView } from '../../components/Stadium3DView';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
@@ -103,9 +102,6 @@ export default function HomeScreen() {
           </CommandText>
         </View>
       </View>
-
-      {/* Rotatable 3D NRG Stadium spatial view — replaces prior spatial placeholder */}
-      <Stadium3DView />
 
       <HomeWranglerSurface enabled={isReady && canManage && Boolean(venue?.id)} />
 
