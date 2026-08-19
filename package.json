@@ -12,6 +12,11 @@
     "postcss": "8.5.25",
     "uuid": "11.1.1"
   },
+  "expo": {
+    "install": {
+      "exclude": ["expo-updates"]
+    }
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
