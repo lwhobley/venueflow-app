@@ -2,8 +2,10 @@
 # script-src/style-src keep 'unsafe-inline' because the pages ship inline
 # scripts and <style> blocks; the remaining directives still block framing,
 # object embeds, and cross-origin exfiltration to anything but the API.
+# createcdn.com is the site analytics tag loaded in index.html <head>; it needs
+# both script-src (to load) and connect-src (to send beacons).
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://venue-wrangler-api-c57mm72zpa-ue.a.run.app; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://createcdn.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://createcdn.com; connect-src 'self' https://venue-wrangler-api-c57mm72zpa-ue.a.run.app https://createcdn.com; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
