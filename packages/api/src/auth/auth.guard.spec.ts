@@ -1,6 +1,12 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { getTenantVenueId, runWithoutTenant } from '../prisma/tenant-context';
 import { AuthGuard } from './auth.guard';
+
+// Every case below authenticates with this token; the default session fixture
+// carries its hash so the guard's token-binding check passes.
+const DEFAULT_TOKEN = 'token-1';
+const DEFAULT_TOKEN_HASH = createHash('sha256').update(DEFAULT_TOKEN).digest('hex');
 
 function makeContext(token: string, venueId?: string) {
   const request = {
@@ -42,7 +48,7 @@ function makeGuard(options?: {
         options?.session ?? {
           userId: 'user-1',
           expiresAt: new Date(Date.now() + 60_000),
-          tokenHash: null,
+          tokenHash: DEFAULT_TOKEN_HASH,
         },
       ),
     },
@@ -138,5 +144,17 @@ describe('AuthGuard', () => {
     });
 
     await expect(guard.canActivate(makeContext('token-1'))).rejects.toThrow('Session is no longer valid. Please sign in again.');
+  });
+
+  it('rejects a session row with no stored token hash instead of skipping the binding check', async () => {
+    const { guard } = makeGuard({
+      session: {
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() + 60_000),
+        tokenHash: null,
+      },
+    });
+
+    await expect(guard.canActivate(makeContext(DEFAULT_TOKEN))).rejects.toThrow('Session is no longer valid. Please sign in again.');
   });
 });

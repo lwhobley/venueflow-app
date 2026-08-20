@@ -211,7 +211,7 @@ export const appApi = {
     apiRequest<{ url: string }>('/v1/app/billing/stripe/portal', { method: 'POST' }),
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),
   getNotifications: () => apiRequest<any[]>('/v1/app/notifications'),
-  markNotificationRead: (notificationId: string) => apiRequest('/v1/app/notifications/' + notificationId + '/read', { method: 'POST' }),
+  markNotificationRead: (notificationId: string) => apiRequest(`/v1/app/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' }),
   getClockBoard: () => apiRequest<any | null>('/v1/time-clock/board'),
   getMyTimeClock: () => apiRequest<any | null>('/v1/time-clock/me'),
   clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-in', { method: 'POST', body }),
@@ -221,7 +221,7 @@ export const appApi = {
   listVenueStaff: () => apiRequest<any[]>('/v1/app/staff'),
   upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string; phone?: string; altPhone?: string; address?: string; dateOfBirth?: string; certifications?: string[] }) =>
     apiRequest('/v1/app/staff', { method: 'POST', body }),
-  deactivateVenueStaff: (staffId: string) => apiRequest('/v1/app/staff/' + staffId, { method: 'DELETE' }),
+  deactivateVenueStaff: (staffId: string) => apiRequest(`/v1/app/staff/${encodeURIComponent(staffId)}`, { method: 'DELETE' }),
   createStaffRequest: (body: { kind: string; title: string; details: string; availability?: any; timeCorrection?: { timeEntryId?: string | null; clockInAt: number; clockOutAt?: number | null; reason?: string } }) =>
     apiRequest('/v1/staff-requests', { method: 'POST', body }),
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
@@ -238,11 +238,11 @@ export const appApi = {
   listMyJoinRequests: () =>
     apiRequest<{ requests: any[] }>('/v1/workforce/join-requests'),
   cancelJoinRequest: (id: string) =>
-    apiRequest('/v1/workforce/join-request/' + id, { method: 'DELETE' }),
+    apiRequest(`/v1/workforce/join-request/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listManagerJoinRequests: () =>
     apiRequest<{ requests: any[] }>('/v1/workforce/manager/join-requests'),
   approveJoinRequest: (id: string) =>
-    apiRequest('/v1/workforce/manager/join-request/' + id + '/approve', { method: 'POST', body: {} }),
+    apiRequest(`/v1/workforce/manager/join-request/${encodeURIComponent(id)}/approve`, { method: 'POST', body: {} }),
   rejectJoinRequest: (id: string, note?: string) =>
-    apiRequest('/v1/workforce/manager/join-request/' + id + '/reject', { method: 'POST', body: { note } }),
+    apiRequest(`/v1/workforce/manager/join-request/${encodeURIComponent(id)}/reject`, { method: 'POST', body: { note } }),
 };

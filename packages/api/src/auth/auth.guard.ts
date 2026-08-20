@@ -82,7 +82,11 @@ export class AuthGuard implements CanActivate {
     if (!session || session.userId !== payload.sub || session.expiresAt <= now) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
-    if (session.tokenHash && session.tokenHash !== createHash('sha256').update(token).digest('hex')) {
+    // Fail closed when the hash is absent. The column is nullable and is set in
+    // a follow-up update after the Session row is created, so a row whose hash
+    // never landed must be rejected rather than silently skipping the binding
+    // check — otherwise any validly-signed JWT carrying that sid is accepted.
+    if (!session.tokenHash || session.tokenHash !== createHash('sha256').update(token).digest('hex')) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 

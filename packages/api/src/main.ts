@@ -56,13 +56,11 @@ async function bootstrap() {
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin && isAllowedOrigin(origin, isProduction));
-  const allowedOrigins = Array.from(
-    new Set([
-      ...DEFAULT_CORS_ORIGINS,
-      ...(isProduction ? [] : origins),
-      ...(isProduction ? origins.filter((o) => isAllowedOrigin(o, true)) : origins),
-    ]),
-  );
+  // `origins` is already filtered by isAllowedOrigin with this same
+  // isProduction flag above, so no further per-environment filtering is needed
+  // here — in production that filter has already dropped non-venuewrangler.com
+  // hosts.
+  const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
 
   app.use(helmet());
   const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';

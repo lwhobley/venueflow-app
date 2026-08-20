@@ -1,6 +1,8 @@
-import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { currentAiUsageContext } from './ai-usage-context';
+
+const logger = new Logger('AiJsonParse');
 
 export type AiJsonCallInput = { apiKey: string; model: string; prompt: string; userText?: string; imageBase64?: string; imageMimeType?: string; feature?: string };
 export type AiUsage = { promptTokens: number; completionTokens: number; totalTokens: number; cachedTokens: number };
@@ -94,7 +96,7 @@ async function meter(input: AiJsonCallInput, usage: AiUsage, reservation: Budget
   } catch (error) {
     // Leave a failed meter's reservation in place until it expires. This fails
     // closed for the budget without taking down an operational AI request.
-    console.error('AI usage metering failed', error);
+    logger.error(`AI usage metering failed for venue ${context.venueId}`, error instanceof Error ? error.stack : String(error));
     return false;
   }
 }
@@ -138,6 +140,26 @@ async function reserveMonthlyVenueBudget(reservationCost: number): Promise<Budge
   return reservation;
 }
 
+/**
+ * Map a failed provider response onto an accurate client-facing error.
+ * Collapsing everything to 400 tells callers their input was malformed, so they
+ * retry the same payload immediately and amplify load against a provider that
+ * is actually rate-limiting or down. Rate-limit and server-side failures are
+ * surfaced as retryable upstream conditions instead, and the provider's own
+ * response body is logged so operators can tell a dead API key from bad input.
+ */
+async function providerFailure(response: Response, clientMessage: string): Promise<HttpException> {
+  const detail = await response.text().catch(() => '');
+  logger.error(`Gemini request failed with status ${response.status}: ${detail.slice(0, 500)}`);
+  if (response.status === 429) {
+    return new HttpException('AI is rate limited right now. Try again shortly.', HttpStatus.TOO_MANY_REQUESTS);
+  }
+  if (response.status >= 500 || response.status === 401 || response.status === 403) {
+    return new HttpException('AI is temporarily unavailable. Try again shortly.', HttpStatus.SERVICE_UNAVAILABLE);
+  }
+  return new BadRequestException(clientMessage);
+}
+
 async function countInputTokens(input: AiJsonCallInput, parts: Array<Record<string, unknown>>): Promise<number> {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:countTokens`,
@@ -149,7 +171,7 @@ async function countInputTokens(input: AiJsonCallInput, parts: Array<Record<stri
     },
   );
   if (!response.ok) {
-    throw new BadRequestException('AI parsing is temporarily unavailable. Try again or enter the details manually.');
+    throw await providerFailure(response, 'AI parsing is temporarily unavailable. Try again or enter the details manually.');
   }
   const body: unknown = await response.json();
   const totalTokens = (body as { totalTokens?: unknown })?.totalTokens;
@@ -163,7 +185,7 @@ async function releaseReservation(reservation: BudgetReservation | null): Promis
   const context = currentAiUsageContext();
   if (!context || !reservation) return;
   await context.prisma.aiBudgetReservation.deleteMany({ where: { id: reservation.id, venueId: context.venueId } }).catch((error) => {
-    console.error('AI budget reservation release failed', error);
+    logger.error(`AI budget reservation release failed for venue ${context.venueId}`, error instanceof Error ? error.stack : String(error));
   });
 }
 
@@ -184,7 +206,7 @@ export async function callAiJsonWithUsage(input: AiJsonCallInput): Promise<AiJso
   }));
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': input.apiKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: outputCap } }), signal: AbortSignal.timeout(30_000) });
-    if (!response.ok) throw new BadRequestException('AI parsing failed. Try again or enter the details manually.');
+    if (!response.ok) throw await providerFailure(response, 'AI parsing failed. Try again or enter the details manually.');
     const json: any = await response.json();
     const rawText = json?.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('') ?? '{}';
     let data: unknown;
