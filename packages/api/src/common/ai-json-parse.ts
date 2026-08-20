@@ -160,25 +160,33 @@ async function providerFailure(response: Response, clientMessage: string): Promi
   return new BadRequestException(clientMessage);
 }
 
-async function countInputTokens(input: AiJsonCallInput, parts: Array<Record<string, unknown>>): Promise<number> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:countTokens`,
-    {
-      method: 'POST',
-      headers: { 'x-goog-api-key': input.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts }] }),
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
-  if (!response.ok) {
-    throw await providerFailure(response, 'AI parsing is temporarily unavailable. Try again or enter the details manually.');
+// Gemini averages roughly 4 characters per token; 3 deliberately over-estimates.
+const ESTIMATED_CHARS_PER_TOKEN = 3;
+// Generous upper bound for a single inline image part.
+const ESTIMATED_TOKENS_PER_IMAGE = 1600;
+
+/**
+ * Local, deliberately conservative estimate of a request's input tokens, used
+ * only to size the pre-spend budget reservation.
+ *
+ * This replaces a second provider round-trip (models:countTokens) that ran
+ * before every generation, doubling both latency and the failure surface. Only
+ * the reservation depends on this number: actual spend is metered from the
+ * provider's own usageMetadata after the call, so recorded cost stays exact.
+ * Over-estimating is the safe direction — it can decline an edge-case request
+ * slightly early, whereas under-estimating would let a venue exceed its cap.
+ */
+function estimateInputTokens(parts: Array<Record<string, unknown>>): number {
+  let tokens = 0;
+  for (const part of parts) {
+    if (typeof part.text === 'string') {
+      tokens += Math.ceil(part.text.length / ESTIMATED_CHARS_PER_TOKEN);
+    }
+    if (part.inline_data) {
+      tokens += ESTIMATED_TOKENS_PER_IMAGE;
+    }
   }
-  const body: unknown = await response.json();
-  const totalTokens = (body as { totalTokens?: unknown })?.totalTokens;
-  if (typeof totalTokens !== 'number' || !Number.isSafeInteger(totalTokens) || totalTokens < 0) {
-    throw new BadRequestException('AI parsing is temporarily unavailable. Try again or enter the details manually.');
-  }
-  return totalTokens;
+  return tokens;
 }
 
 async function releaseReservation(reservation: BudgetReservation | null): Promise<void> {
@@ -197,9 +205,10 @@ export async function callAiJsonWithUsage(input: AiJsonCallInput): Promise<AiJso
   const parts: Array<Record<string, unknown>> = [{ text: input.prompt }];
   if (input.userText) parts.push({ text: input.userText });
   if (input.imageBase64) parts.push({ inline_data: { mime_type: input.imageMimeType ?? 'image/jpeg', data: input.imageBase64 } });
-  // Count the exact multimodal input first, then reserve its configured
-  // maximum output cost. The generation request applies the same output cap.
-  const inputTokens = await countInputTokens(input, parts);
+  // Estimate the multimodal input locally, then reserve against it plus the
+  // configured maximum output cost. The generation request applies the same
+  // output cap, and meter() trues the reservation up to real usage afterwards.
+  const inputTokens = estimateInputTokens(parts);
   const outputCap = maxOutputTokens();
   const reservation = await reserveMonthlyVenueBudget(estimatedCostMicros(input.model, {
     promptTokens: inputTokens, completionTokens: outputCap, totalTokens: inputTokens + outputCap, cachedTokens: 0,

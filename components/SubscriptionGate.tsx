@@ -6,7 +6,7 @@ import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { config } from '../lib/config';
 import { hasAllAccess } from '../lib/permissions';
 import type { SubscriptionRequiredReason } from '../lib/subscription-types';
-import { useApiQuery } from '../lib/api-client';
+import { useApiQuery, type MeResponse } from '../lib/api-client';
 
 const blockedStatuses = new Set(['past_due', 'cancelled', 'expired', 'paused']);
 const allowedBlockedRoutes = ['/billing/locked', '/settings/billing', '/settings/account', '/venues'];
@@ -34,7 +34,7 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const token = useAuthStore((state: AuthState) => state.token);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
-  const { data: me, isLoading: meLoading } = useApiQuery<any | null>(['app', 'me'], '/v1/app/me', hydrated && Boolean(user) && Boolean(token));
+  const { data: me, isLoading: meLoading } = useApiQuery<MeResponse | null>(['app', 'me'], '/v1/app/me', hydrated && Boolean(user) && Boolean(token));
   const { data: billing, isLoading: billingLoading } = useApiQuery<any | null>(['app', 'billing'], '/v1/app/billing', Boolean(me?.venue?._id));
   const route = `/${segments.join('/')}`;
   const navigationReady = Boolean(rootNavigationState?.key);

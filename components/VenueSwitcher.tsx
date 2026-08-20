@@ -80,7 +80,7 @@ export function VenueSwitcher() {
       }
       setRegisterVisible(false);
       setBusinessName('');
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 402) {
         setError('Multi-Venue Pro subscription ($399/mo) required to register additional venues.');
       } else {

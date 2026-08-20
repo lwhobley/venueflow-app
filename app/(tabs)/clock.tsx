@@ -9,7 +9,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { formatTime, errorMessage } from '../../lib/format';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
-import { appApi, useApiMutation, useApiQuery } from '../../lib/api-client';
+import { appApi, useApiMutation, useApiQuery, type ApiClockBreak } from '../../lib/api-client';
 import { useI18n } from '../../lib/i18n';
 
 type ActiveClockEntry = {
@@ -21,7 +21,7 @@ type ActiveClockEntry = {
   clockInLat?: number | null;
   clockInLng?: number | null;
   clockInAccuracyM?: number | null;
-  breaks?: any[];
+  breaks?: ApiClockBreak[];
 };
 
 type ManagerAlert = {
@@ -91,8 +91,8 @@ export default function ClockScreen() {
   const isClockedIn = timeClock?.isClockedIn ?? Boolean(clockBoard?.employeeEntry);
 
   const employeeEntry = clockBoard?.employeeEntry;
-  const breaks = (employeeEntry?.breaks || []) as any[];
-  const activeBreak = breaks.find((b: any) => b.endAt === null);
+  const breaks = (employeeEntry?.breaks || []) as ApiClockBreak[];
+  const activeBreak = breaks.find((b) => b.endAt === null);
   const isOnBreak = Boolean(activeBreak);
   const breakType = activeBreak?.type;
 

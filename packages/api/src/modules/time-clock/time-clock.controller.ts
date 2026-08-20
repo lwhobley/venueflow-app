@@ -10,7 +10,7 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { assertWithinGeofence } from '../../common/geofence';
+import { assertFixNotReplayed, assertWithinGeofence, type PriorFix } from '../../common/geofence';
 import { parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
@@ -200,6 +200,23 @@ export class TimeClockController {
     };
   }
 
+  /**
+   * Coordinates from this profile's most recent punch on an *earlier* day.
+   * Used to catch a replayed (hardcoded) GPS fix — see assertFixNotReplayed.
+   * Same-day punches are excluded because a clock-out shortly after a clock-in
+   * can legitimately reuse the OS's cached fix and repeat exactly.
+   */
+  private async priorDayFix(profileId: string, timezone: string | null | undefined): Promise<PriorFix | null> {
+    const startOfToday = zonedDayBounds(timezone, 0).start;
+    const previous = await this.prisma.timeEntry.findFirst({
+      where: { profileId, clockInAt: { lt: new Date(startOfToday) } },
+      orderBy: { clockInAt: 'desc' },
+      select: { clockInLat: true, clockInLng: true },
+    });
+    if (!previous) return null;
+    return { lat: previous.clockInLat, lng: previous.clockInLng };
+  }
+
   @RequireSubscription()
   @Post('clock-in')
   async clockIn(@VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
@@ -207,6 +224,7 @@ export class TimeClockController {
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
+    assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
 
     const active = await this.prisma.timeEntry.findFirst({
       where: { profileId: scope.profileId, isOpen: true },
@@ -270,6 +288,7 @@ export class TimeClockController {
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
+    assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
 
     const active = await this.prisma.timeEntry.findFirst({
       where: { profileId: scope.profileId, isOpen: true },

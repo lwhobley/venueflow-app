@@ -6,6 +6,37 @@ type GeofenceVenue = {
   geofenceRadiusM: number;
 };
 
+export type PriorFix = {
+  lat: number | null;
+  lng: number | null;
+};
+
+/**
+ * Rejects a punch whose coordinates are bit-for-bit identical to a fix the same
+ * profile submitted on an earlier day.
+ *
+ * IMPORTANT — this is a spoofing *signal*, not proof of location. lat/lng/mocked
+ * are all supplied by the client, so a caller with a valid token can still post
+ * the venue's coordinates from anywhere; only device attestation (App Attest /
+ * Play Integrity) or a venue-side signal (BLE beacon, NFC tap, WiFi BSSID) can
+ * actually establish presence. What this does catch is the common naive attack:
+ * hardcoding the venue's coordinates and replaying them. A real GNSS fix carries
+ * metre-level jitter in the low bits, so two independent fixes taken on
+ * different days never match exactly.
+ *
+ * Deliberately compares only across *different days*: a clock-out minutes after
+ * a clock-in can legitimately reuse the OS's cached fix and repeat exactly, so
+ * same-day repeats are not treated as suspicious.
+ */
+export function assertFixNotReplayed(lat: number, lng: number, prior: PriorFix | null): void {
+  if (!prior || prior.lat === null || prior.lng === null) return;
+  if (lat === prior.lat && lng === prior.lng) {
+    throw new BadRequestException(
+      'This location reading is identical to a previous day\'s punch, which means it did not come from a live GPS fix. Turn location services on and try again, or ask a manager to record this punch for you.',
+    );
+  }
+}
+
 /**
  * Asserts a clock punch is physically within the venue geofence.
  * Uses Haversine distance.

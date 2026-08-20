@@ -87,8 +87,9 @@ describe('BarInventoryParserService', () => {
 
   it('calls Gemini with the configured key', async () => {
     process.env.GEMINI_API_KEY = 'gemini-key';
+    // Input tokens are now estimated locally, so generateContent is the only
+    // provider round-trip.
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalTokens: 10 }) })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ candidates: [{ content: { parts: [{ text: '{"notes":"","items":[]}' }] } }] }),

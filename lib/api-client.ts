@@ -44,6 +44,94 @@ export type AuthSessionResponse = {
   venue: ApiVenue | null;
 };
 
+/** One entry of MeResponse.venues — mirrors ProfileService.listUserVenues(). */
+export type ApiVenueMembership = {
+  id: string;
+  name: string;
+  role: Role;
+  profileId: string;
+};
+
+/**
+ * GET /v1/app/me (and POST /v1/app/switch-venue, which returns the same shape).
+ * `venues` lists every active membership and is what the venue switcher reads;
+ * it was missing from the previous inline type, which is why callers reaching
+ * for it had to fall back to `any`.
+ */
+export type MeResponse = {
+  profile: ApiProfile;
+  venue: ApiVenue | null;
+  venues: ApiVenueMembership[];
+};
+
+/** GET /v1/app/notifications — mirrors app.controller getNotifications(). */
+export type ApiNotification = {
+  _id: string;
+  kind: string;
+  title: string;
+  body: string;
+  createdAt: number;
+  read: boolean;
+};
+
+/**
+ * A time-clock punch — mirrors mappers.mapClockEntry(). Location fields are
+ * null when the server omits them (includeLocation: false).
+ */
+export type ApiClockEntry = {
+  _id: string;
+  memberId: string;
+  memberName: string;
+  role: Role;
+  jobTitle: string;
+  venueId: string;
+  venueName: string;
+  clockInAt: number;
+  clockOutAt: number | null;
+  clockInLat: number | null;
+  clockInLng: number | null;
+  clockInAccuracyM: number | null;
+  clockInMocked: boolean | null;
+  clockOutLat: number | null;
+  clockOutLng: number | null;
+  clockOutAccuracyM: number | null;
+  clockOutMocked: boolean | null;
+  isOpen: boolean;
+  breaks: ApiClockBreak[] | null;
+};
+
+export type ApiClockBreak = { type: 'paid' | 'unpaid'; startAt: number; endAt: number | null };
+
+/** GET /v1/workforce/join-requests — mirrors workforce.controller. */
+export type ApiJoinRequest = {
+  id: string;
+  venueId: string;
+  venueName: string;
+  venueAddress: string | null;
+  status: string;
+  decidedAt: number | null;
+  decisionNote: string | null;
+  createdAt: number;
+};
+
+/** GET /v1/app/staff — mirrors mappers.mapProfile(). */
+export type ApiStaffMember = {
+  _id: string;
+  email: string;
+  fullName: string;
+  role: Role;
+  jobTitle: string;
+  phone: string | null;
+  altPhone: string | null;
+  address: string | null;
+  dateOfBirth: string | null;
+  certifications: string[];
+  venueId: string | null;
+  allAccess: boolean;
+  sickHoursAccrued: number;
+  ptoHoursAccrued: number;
+};
+
 function getApiBaseUrl() {
   if (!configuredApiBaseUrl) {
     throw new ApiError('The app is missing EXPO_PUBLIC_API_URL. Set it before signing in.', 500);
@@ -201,7 +289,7 @@ export const appApi = {
     apiRequest<{ redeemed: boolean; profile?: ApiProfile; venue?: ApiVenue | null }>('/v1/app/redeem-invite', { method: 'POST', body: { codeOrToken } }),
   redeemMyInvite: () =>
     apiRequest<{ redeemed: boolean; profile?: ApiProfile; venue?: ApiVenue | null }>('/v1/app/redeem-my-invite', { method: 'POST' }),
-  getMe: () => apiRequest<{ profile: ApiProfile; venue: ApiVenue | null } | null>('/v1/app/me'),
+  getMe: () => apiRequest<MeResponse | null>('/v1/app/me'),
   getBilling: () => apiRequest<any | null>('/v1/app/billing'),
   syncAppleSubscription: (body: { productId: string; entitlementId?: string }) =>
     apiRequest<any>('/v1/app/billing/apple/sync', { method: 'POST', body }),
@@ -210,7 +298,7 @@ export const appApi = {
   createStripePortal: () =>
     apiRequest<{ url: string }>('/v1/app/billing/stripe/portal', { method: 'POST' }),
   getDashboard: () => apiRequest<any | null>('/v1/app/dashboard'),
-  getNotifications: () => apiRequest<any[]>('/v1/app/notifications'),
+  getNotifications: () => apiRequest<ApiNotification[]>('/v1/app/notifications'),
   markNotificationRead: (notificationId: string) => apiRequest(`/v1/app/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' }),
   getClockBoard: () => apiRequest<any | null>('/v1/time-clock/board'),
   getMyTimeClock: () => apiRequest<any | null>('/v1/time-clock/me'),
@@ -218,14 +306,14 @@ export const appApi = {
   clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-out', { method: 'POST', body }),
   breakStart: (body: { type: 'paid' | 'unpaid' }) => apiRequest('/v1/time-clock/break-start', { method: 'POST', body }),
   breakEnd: () => apiRequest('/v1/time-clock/break-end', { method: 'POST' }),
-  listVenueStaff: () => apiRequest<any[]>('/v1/app/staff'),
+  listVenueStaff: () => apiRequest<ApiStaffMember[]>('/v1/app/staff'),
   upsertVenueStaff: (body: { venueId: string; email: string; fullName: string; role: string; jobTitle: string; phone?: string; altPhone?: string; address?: string; dateOfBirth?: string; certifications?: string[] }) =>
     apiRequest('/v1/app/staff', { method: 'POST', body }),
   deactivateVenueStaff: (staffId: string) => apiRequest(`/v1/app/staff/${encodeURIComponent(staffId)}`, { method: 'DELETE' }),
   createStaffRequest: (body: { kind: string; title: string; details: string; availability?: any; timeCorrection?: { timeEntryId?: string | null; clockInAt: number; clockOutAt?: number | null; reason?: string } }) =>
     apiRequest('/v1/staff-requests', { method: 'POST', body }),
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
-    apiRequest<any>('/v1/app/venue', { method: 'PATCH', body }),
+    apiRequest<ApiVenue>('/v1/app/venue', { method: 'PATCH', body }),
   deleteMyAccount: () => apiRequest('/v1/app/me', { method: 'DELETE' }),
 
   // ─── Workforce ───────────────────────────────────────────────────────────────
@@ -236,7 +324,7 @@ export const appApi = {
   submitJoinRequest: (body: { venueId: string; code: string }) =>
     apiRequest<JoinRequestResult>('/v1/workforce/join-request', { method: 'POST', body }),
   listMyJoinRequests: () =>
-    apiRequest<{ requests: any[] }>('/v1/workforce/join-requests'),
+    apiRequest<{ requests: ApiJoinRequest[] }>('/v1/workforce/join-requests'),
   cancelJoinRequest: (id: string) =>
     apiRequest(`/v1/workforce/join-request/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listManagerJoinRequests: () =>

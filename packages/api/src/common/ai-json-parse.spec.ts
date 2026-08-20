@@ -65,16 +65,16 @@ describe('Gemini configuration', () => {
 
   it('blocks provider calls after a venue reaches its monthly AI budget', async () => {
     delete process.env.AI_MONTHLY_VENUE_BUDGET_USD;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ totalTokens: 10 }), { status: 200 }),
-    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const prisma = makeBudgetPrisma(10_000_000);
 
     await expect(runWithAiUsageContext(
       { venueId: 'venue-1', profileId: 'profile-1', prisma: prisma as any },
       () => callAiJson({ apiKey: 'key', model: 'gemini-flash-latest', prompt: 'Return JSON' }),
     )).rejects.toThrow('monthly AI usage budget');
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    // Input tokens are now estimated locally, so an over-budget venue is
+    // rejected without spending a provider round-trip at all.
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(prisma.tx.aiBudgetReservation.create).not.toHaveBeenCalled();
   });
 
@@ -82,7 +82,6 @@ describe('Gemini configuration', () => {
     process.env.AI_MONTHLY_VENUE_BUDGET_USD = '25';
     const prisma = makeBudgetPrisma(0);
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({ totalTokens: 10 }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
         usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
@@ -95,7 +94,10 @@ describe('Gemini configuration', () => {
     expect(prisma.tx.aiBudgetReservation.create).toHaveBeenCalledOnce();
     expect(prisma.tx.aiUsageEvent.create).toHaveBeenCalledOnce();
     expect(prisma.tx.aiBudgetReservation.deleteMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1' }) }));
-    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({ body: expect.stringContaining('"maxOutputTokens":2048') });
+    // Exactly one provider round-trip: generateContent, with the output cap applied.
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0]?.[0]).toEqual(expect.stringContaining(':generateContent'));
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({ body: expect.stringContaining('"maxOutputTokens":2048') });
   });
 
   it('fails closed before provider usage when AI pricing configuration is invalid', async () => {
