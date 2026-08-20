@@ -13,6 +13,7 @@ import { CosmicInsights } from '../../components/CosmicInsights';
 import { OperationsAutopilotPanel } from '../../components/OperationsAutopilotPanel';
 import { ProfitabilityPulsePanel } from '../../components/ProfitabilityPulsePanel';
 import { HomeWranglerSurface } from '../../components/HomeWranglerSurface';
+import { Stadium3DView } from '../../components/Stadium3DView';
 import { Skeleton } from '../../components/Skeleton';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { usePushNotifications } from '../../lib/usePushNotifications';
@@ -184,6 +185,8 @@ export default function HomeScreen() {
           ))}
         </View>
       </View>
+
+      <Stadium3DView />
 
       <HomeWranglerSurface enabled={isReady && canManage && Boolean(venue?.id)} />
 
