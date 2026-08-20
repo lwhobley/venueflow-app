@@ -1,6 +1,4 @@
--- Apple App Attest device attestation. The geofenced time clock validates
--- client-supplied coordinates, so attestation is what establishes that a punch
--- came from a genuine build of the app on real Apple hardware.
+-- CreateTable
 CREATE TABLE "DeviceAttestation" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -11,14 +9,10 @@ CREATE TABLE "DeviceAttestation" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lastUsedAt" TIMESTAMP(3),
 
-    CONSTRAINT "DeviceAttestation_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "DeviceAttestation_signCount_check" CHECK ("signCount" >= 0),
-    CONSTRAINT "DeviceAttestation_environment_check"
-      CHECK ("environment" IN ('production', 'development'))
+    CONSTRAINT "DeviceAttestation_pkey" PRIMARY KEY ("id")
 );
 
--- Single-use, short-lived nonce binding an attestation or assertion to one
--- server-issued request.
+-- CreateTable
 CREATE TABLE "AttestationChallenge" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -27,8 +21,7 @@ CREATE TABLE "AttestationChallenge" (
     "consumedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "AttestationChallenge_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "AttestationChallenge_expiry_check" CHECK ("expiresAt" > "createdAt")
+    CONSTRAINT "AttestationChallenge_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -51,20 +44,3 @@ ALTER TABLE "DeviceAttestation" ADD CONSTRAINT "DeviceAttestation_userId_fkey" F
 
 -- AddForeignKey
 ALTER TABLE "AttestationChallenge" ADD CONSTRAINT "AttestationChallenge_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- These server-owned tables are not a Supabase Data API surface. Attestation
--- public keys and challenges must never be reachable from a browser role.
-ALTER TABLE "DeviceAttestation" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "AttestationChallenge" ENABLE ROW LEVEL SECURITY;
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    REVOKE ALL ON TABLE "DeviceAttestation" FROM anon;
-    REVOKE ALL ON TABLE "AttestationChallenge" FROM anon;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-    REVOKE ALL ON TABLE "DeviceAttestation" FROM authenticated;
-    REVOKE ALL ON TABLE "AttestationChallenge" FROM authenticated;
-  END IF;
-END
-$$;
