@@ -238,6 +238,48 @@ model User {
   joinRequests              WorkplaceJoinRequest[]      @relation("WorkplaceJoinRequestUser")
   decidedJoinRequests       WorkplaceJoinRequest[]      @relation("WorkplaceJoinRequestDecider")
   joinRequestEvents         WorkplaceJoinRequestEvent[]
+  attestedDevices           DeviceAttestation[]
+  attestationChallenges     AttestationChallenge[]
+}
+
+/// An Apple App Attest key attested for one install of the app on one device.
+/// Deliberately keyed to the *user*, not a Profile or Venue: a physical device
+/// belongs to a person, who may hold memberships at several venues. It
+/// therefore carries no venueId and must stay out of VENUE_SCOPED_MODELS
+/// (see prisma/tenant-scope.ts).
+model DeviceAttestation {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Base64 App Attest key identifier (SHA-256 of the attested public key).
+  keyId       String    @unique
+  /// PEM-encoded public key extracted from the verified attestation.
+  publicKey   String
+  /// Apple's monotonic assertion counter. Must strictly increase; a replayed
+  /// assertion carries an equal or lower counter and is rejected.
+  signCount   Int       @default(0)
+  /// 'production' or 'development'. A development attestation must never be
+  /// accepted by a production API.
+  environment String
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([userId])
+}
+
+/// Single-use, short-lived nonce binding an attestation or assertion to one
+/// server-issued request, so a captured payload cannot be replayed later.
+model AttestationChallenge {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value      String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Session {

@@ -256,6 +256,19 @@ export type InviteCheckResult =
   | { status: 'found'; emailSent?: boolean; venueName?: string; jobTitle?: string; role?: string; expiresAt?: number }
   | { status: 'not_found' | 'expired' | 'used' };
 
+/**
+ * A time-clock punch. `attestation` is optional while the server has
+ * ATTESTATION_ENFORCED=false, so devices that cannot attest keep working during
+ * the staged rollout.
+ */
+export type ClockPunchBody = {
+  lat: number;
+  lng: number;
+  accuracy: number;
+  mocked: boolean;
+  attestation?: { keyId: string; assertion: string; challenge: string };
+};
+
 export type JoinRequestResult = { requestId: string; status: 'pending'; venueName: string };
 export type VenueSearchResult = { id: string; name: string; address: string | null };
 
@@ -302,8 +315,8 @@ export const appApi = {
   markNotificationRead: (notificationId: string) => apiRequest(`/v1/app/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' }),
   getClockBoard: () => apiRequest<any | null>('/v1/time-clock/board'),
   getMyTimeClock: () => apiRequest<any | null>('/v1/time-clock/me'),
-  clockIn: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-in', { method: 'POST', body }),
-  clockOut: (body: { lat: number; lng: number; accuracy: number; mocked: boolean }) => apiRequest('/v1/time-clock/clock-out', { method: 'POST', body }),
+  clockIn: (body: ClockPunchBody) => apiRequest('/v1/time-clock/clock-in', { method: 'POST', body }),
+  clockOut: (body: ClockPunchBody) => apiRequest('/v1/time-clock/clock-out', { method: 'POST', body }),
   breakStart: (body: { type: 'paid' | 'unpaid' }) => apiRequest('/v1/time-clock/break-start', { method: 'POST', body }),
   breakEnd: () => apiRequest('/v1/time-clock/break-end', { method: 'POST' }),
   listVenueStaff: () => apiRequest<ApiStaffMember[]>('/v1/app/staff'),

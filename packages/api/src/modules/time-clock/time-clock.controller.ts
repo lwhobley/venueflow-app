@@ -5,7 +5,8 @@ import {
   Get,
   Post,
 } from '@nestjs/common';
-import { IsBoolean, IsNumber, IsString, IsIn, Max, Min } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, IsIn, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
@@ -16,10 +17,27 @@ import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AttestationService } from '../attestation/attestation.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
+
+/**
+ * The exact fields the device signs. Only the location values are included:
+ * they are the ones the server acts on and the ones an attacker would forge.
+ * Client and server must build this identically (see AttestationService
+ * canonicalPayload, which sorts keys).
+ */
+function punchPayload(body: ClockPunchDto) {
+  return { lat: body.lat, lng: body.lng, accuracy: body.accuracy, mocked: body.mocked };
+}
+
+class PunchAttestationDto {
+  @IsString() @MinLength(1) @MaxLength(256) keyId!: string;
+  @IsString() @MinLength(1) @MaxLength(20_000) assertion!: string;
+  @IsString() @MinLength(1) @MaxLength(256) challenge!: string;
+}
 
 class ClockPunchDto {
   @IsNumber()
@@ -38,6 +56,16 @@ class ClockPunchDto {
 
   @IsBoolean()
   mocked!: boolean;
+
+  /**
+   * App Attest assertion over this punch payload. Optional while
+   * ATTESTATION_ENFORCED is false so already-installed builds keep working
+   * during the staged rollout; once enforced, a punch without it is rejected.
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PunchAttestationDto)
+  attestation?: PunchAttestationDto;
 }
 
 class BreakStartDto {
@@ -48,7 +76,10 @@ class BreakStartDto {
 
 @Controller('v1/time-clock')
 export class TimeClockController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly attestation: AttestationService,
+  ) {}
 
   @RequireSubscription()
   @Get('board')
@@ -219,10 +250,14 @@ export class TimeClockController {
 
   @RequireSubscription()
   @Post('clock-in')
-  async clockIn(@VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
+  async clockIn(@CurrentUser() user: AuthUser, @VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
     if (!scope) throw new BadRequestException('Profile is not initialized');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
+    // Attestation first: the geofence checks below operate entirely on
+    // client-supplied coordinates, so they only mean anything once we know the
+    // request came from a genuine, unmodified build on real Apple hardware.
+    await this.attestation.verifyRequest(user.sub, punchPayload(body), body.attestation);
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
 
@@ -283,10 +318,11 @@ export class TimeClockController {
 
   @RequireSubscription()
   @Post('clock-out')
-  async clockOut(@VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
+  async clockOut(@CurrentUser() user: AuthUser, @VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
     if (!scope) throw new BadRequestException('Profile is not initialized');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
+    await this.attestation.verifyRequest(user.sub, punchPayload(body), body.attestation);
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
     assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
 

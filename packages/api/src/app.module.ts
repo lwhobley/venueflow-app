@@ -22,6 +22,8 @@ import { StaffImportParserService } from './modules/app/staff-import-parser.serv
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
+import { AttestationController } from './modules/attestation/attestation.controller';
+import { AttestationService } from './modules/attestation/attestation.service';
 import { SchedulingController } from './modules/scheduling/scheduling.controller';
 import { PosModule } from './modules/pos/pos.module';
 import { BarInventoryModule } from './modules/bar-inventory/bar-inventory.module';
@@ -84,6 +86,7 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     AppStaffController,
     SchedulingController,
     TimeClockController,
+    AttestationController,
     StaffRequestsController,
     StaffController,
     WranglerOperatorController,
@@ -104,6 +107,8 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     StaffImportParserService,
     SchedulingAssignmentService,
     AiSchedulerService,
+    // Consumed by TimeClockController as well as its own enrolment routes.
+    AttestationService,
     { provide: WranglerOperatorService, useClass: SafeWranglerOperatorService },
   ],
 })

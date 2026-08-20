@@ -10,6 +10,7 @@ import { canManageVenue } from '../../lib/permissions';
 import { formatTime, errorMessage } from '../../lib/format';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
 import { appApi, useApiMutation, useApiQuery, type ApiClockBreak } from '../../lib/api-client';
+import { attestPayload } from '../../lib/attestation';
 import { useI18n } from '../../lib/i18n';
 
 type ActiveClockEntry = {
@@ -122,7 +123,12 @@ export default function ClockScreen() {
     if (!location || !canClock || busy) return;
     setBusy(true);
     try {
-      const args = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
+      const punch = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
+      // Prove this punch came from a genuine build on real hardware. Returns
+      // null on devices that cannot attest; the server still accepts those
+      // until ATTESTATION_ENFORCED is turned on.
+      const attestation = await attestPayload(punch);
+      const args = { ...punch, ...(attestation ? { attestation } : {}) };
       if (isClockedIn) await clockOut.mutateAsync(args);
       else await clockIn.mutateAsync(args);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
