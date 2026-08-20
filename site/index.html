@@ -8,7 +8,7 @@
   <meta name="description" content="Venue Wrangler runs the whole operation for restaurants, bars, hotels, and enterprise-scale venues — stadiums, arenas, and convention centers. Scheduling, time clock, reservations, floor plans, suite and club-level catering, BEOs, inventory, and reporting in one workspace." />
   <meta property="og:title" content="Venue Wrangler | One workspace, any scale" />
   <meta property="og:description" content="From a 40-seat dining room to a 65,000-seat stadium — scheduling, live floor and suite management, BEOs, inventory, reports, and staff tools in one platform." />
-  <meta property="og:image" content="https://venue-wrangler.pages.dev/assets/screen-command.png" />
+  <meta property="og:image" content="https://venuewrangler.com/assets/screen-command.png" />
   <style>
     :root {
       --green: #2f7d46;
@@ -381,6 +381,7 @@
     }
     .enterprise-stat .num { font-size: clamp(28px, 3vw, 40px); font-weight: 950; color: var(--gold); line-height: 1; margin-bottom: 8px; }
     .enterprise-stat .label { color: #c9d4c8; font-size: 14px; font-weight: 700; }
+    .stats-note { margin: -34px 0 52px; color: #9fb0a1; font-size: 13px; max-width: 760px; position: relative; z-index: 1; }
     .zone-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -861,6 +862,7 @@
           <div class="enterprise-stat"><div class="num">8,200</div><div class="label">Reception capacity coordinated live</div></div>
           <div class="enterprise-stat"><div class="num">6+</div><div class="label">Departments staffed from one schedule</div></div>
         </div>
+        <p class="stats-note">Figures describe a representative large-format stadium configuration modeled in Venue Wrangler, shown to illustrate the scale the platform is built to handle.</p>
         <div class="zone-grid">
           <div class="zone-card">
             <span class="tag">FIELD / FLOOR</span>
@@ -1018,7 +1020,9 @@
     <button class="close" type="button" data-close-demo aria-label="Close">×</button>
     <div class="modal-card">
       <div class="modal-media">
-        <video src="assets/venue-wrangler-ad.mp4" autoplay muted loop playsinline controls></video>
+        <!-- preload="none": the modal starts hidden, so the ~13MB ad must not
+             be fetched on initial page load. It loads when the modal opens. -->
+        <video src="assets/venue-wrangler-ad.mp4" preload="none" autoplay muted loop playsinline controls></video>
       </div>
       <div class="modal-copy">
         <h2>Service moves fast. The app should keep up.</h2>
@@ -1030,7 +1034,7 @@
   </div>
 
   <script>
-    const API_BASE = "https://venue-wranglerapi-production.up.railway.app/api";
+    const API_BASE = "https://venue-wrangler-api-c57mm72zpa-ue.a.run.app/api";
     // Where the web app is served (same origin). Workspace creation continues here.
     const APP_PATH = "/app";
     const modal = document.getElementById("demoModal");

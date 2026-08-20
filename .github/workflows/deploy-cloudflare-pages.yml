@@ -2,8 +2,13 @@ name: Deploy Cloudflare Pages
 
 on:
   push:
+    # Only desktop-web deploys. It is the Cloudflare Pages project's
+    # Production Branch, so it is the single source of what venuewrangler.com
+    # serves. Do NOT add main here: this job always deploys under the
+    # --branch desktop-web label, so a main push would publish main's site/
+    # straight to production and silently clobber desktop-web's live content.
+    # Site changes made on main must be ported to desktop-web to go live.
     branches:
-      - main
       - desktop-web
     paths:
       - 'site/**'
@@ -33,7 +38,7 @@ jobs:
       # pushes to actually reach venuewrangler.com. If the Cloudflare project
       # setting is ever changed, update this to match.
       - name: Deploy landing site to Cloudflare Pages
-        run: npx wrangler@3 pages deploy site --project-name venue-wrangler --branch desktop-web
+        run: npx wrangler@3.114.17 pages deploy site --project-name venue-wrangler --branch desktop-web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
