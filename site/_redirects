@@ -1,0 +1,3 @@
+# The Expo web app uses static output, so Cloudflare Pages resolves clean URLs
+# such as /app/sign-in to their generated HTML files. Do not add an /app/*
+# fallback here: it also rewrites JavaScript, fonts, and other assets to HTML.

@@ -93,9 +93,12 @@
           }),
         });
         if (!session.profile?.venueId) throw new Error("Your account was created, but the invitation could not be redeemed. Ask your manager for a new link.");
+        window.localStorage.setItem("venuewrangler_token", session.token);
+        window.localStorage.setItem("venuewrangler_workspace", JSON.stringify(session.venue || null));
         status.className = "status success";
-        status.textContent = `Your account is ready and you joined ${session.venue?.name || "the team"}. You can now sign in to Venue Wrangler.`;
+        status.textContent = `Your account is ready and you joined ${session.venue?.name || "the team"}. Opening Venue Wrangler...`;
         form.reset();
+        window.location.assign("../app/");
       } catch (error) {
         status.className = "status error";
         status.textContent = error.message || "Could not create your account.";
