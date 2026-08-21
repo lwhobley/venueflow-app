@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable } 
 import { Reflector } from '@nestjs/core';
 import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
 import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.decorator';
+import { ACTIVE_MEMBERSHIP, isActiveMembership } from '../common/membership';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveVenueSubscriptionStatus } from './subscription-status';
 
@@ -73,12 +74,20 @@ export class SubscriptionGuard implements CanActivate {
     const profile = await this.prisma.profile.findFirst({
       where: {
         userId: user.sub,
-        ...(requestedVenueId ? { venueId: requestedVenueId } : {}),
+        // With no explicit venue requested, only match a profile that
+        // actually carries one — mirrors AuthGuard/VenueScopeInterceptor.
+        // Without this, `orderBy: createdAt asc` could pick an older
+        // venueless profile ahead of the user's real membership.
+        ...(requestedVenueId ? { venueId: requestedVenueId } : { venueId: { not: null } }),
+        OR: ACTIVE_MEMBERSHIP,
       },
       include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
       orderBy: { createdAt: 'asc' },
     });
     if (!profile?.venueId || !profile.venue) return null;
+    // Defense-in-depth: the WHERE clause above already excludes inactive
+    // memberships, but re-check here too (matches the tenant-isolation
+    // extension's pattern of layering a manual check under a DB filter).
     if (!isActiveMembership(profile.membershipStatus)) return null;
 
     const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
@@ -99,10 +108,6 @@ export class SubscriptionGuard implements CanActivate {
     };
     return request.venueScope;
   }
-}
-
-function isActiveMembership(status: string | null): boolean {
-  return status === null || status === 'active';
 }
 
 function reasonMessage(status: string | null): string {

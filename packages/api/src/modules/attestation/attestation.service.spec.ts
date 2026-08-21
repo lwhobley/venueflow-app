@@ -3,6 +3,7 @@ import { AttestationService, canonicalPayload } from './attestation.service';
 
 function makePrisma(overrides?: {
   challengeUpdateCount?: number;
+  challengeDeleteCount?: number;
   device?: unknown;
   deviceUpdateCount?: number;
 }) {
@@ -10,6 +11,7 @@ function makePrisma(overrides?: {
     attestationChallenge: {
       create: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: overrides?.challengeUpdateCount ?? 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: overrides?.challengeDeleteCount ?? 5 }),
     },
     deviceAttestation: {
       findUnique: vi.fn().mockResolvedValue(
@@ -91,6 +93,22 @@ describe('AttestationService', () => {
     ).rejects.toThrow('Device integrity check failed');
     // A failed assertion must never advance the stored counter.
     expect(prisma.deviceAttestation.updateMany).not.toHaveBeenCalled();
+  });
+
+  describe('cleanupExpiredChallenges', () => {
+    it('purges expired and consumed challenges and returns deleted count', async () => {
+      const prisma = makePrisma({ challengeDeleteCount: 12 });
+      const count = await new AttestationService(prisma).cleanupExpiredChallenges();
+      expect(count).toBe(12);
+      expect(prisma.attestationChallenge.deleteMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { expiresAt: { lt: expect.any(Date) } },
+            { consumedAt: { lt: expect.any(Date) } },
+          ],
+        },
+      });
+    });
   });
 });
 

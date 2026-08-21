@@ -80,20 +80,24 @@ async function bootstrap() {
     }),
   );
   const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
+  const verifyRawBody = (req: Request & { rawBody?: Buffer }, _res: Response, buf: Buffer) => {
+    const urlInner = req.originalUrl ?? req.url ?? '';
+    const pathInner = urlInner.split('?')[0].replace(/\/+$/, '');
+    if (pathInner === STRIPE_WEBHOOK_PATH) {
+      req.rawBody = buf;
+    }
+  };
+  // jsonBodyLimitForPath only ever returns one of these two limits, and both
+  // are fixed for the process lifetime — build each json() parser once at
+  // bootstrap instead of constructing a new middleware instance on every
+  // request.
+  const defaultJsonParser = json({ limit: '1mb', verify: verifyRawBody });
+  const largeJsonParser = json({ limit: config.get<string>('JSON_BODY_LIMIT', '16mb'), verify: verifyRawBody });
   app.use((req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl ?? req.url ?? '';
     const path = url.split('?')[0].replace(/\/+$/, '');
-    const limit = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '16mb'));
-    json({
-      limit,
-      verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
-        const urlInner = req.originalUrl ?? req.url ?? '';
-        const pathInner = urlInner.split('?')[0].replace(/\/+$/, '');
-        if (pathInner === STRIPE_WEBHOOK_PATH) {
-          req.rawBody = buf;
-        }
-      },
-    })(req, res, next);
+    const isLarge = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '16mb')) !== '1mb';
+    (isLarge ? largeJsonParser : defaultJsonParser)(req, res, next);
   });
   app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
   // Fail closed: only origins explicitly listed (and production-filtered) are

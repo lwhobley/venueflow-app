@@ -96,6 +96,16 @@ class ForgotPasswordDto {
   email!: string;
 }
 
+class LogoutDto {
+  // The Expo push token registered for THIS device (see usePushNotifications).
+  // Optional and unvalidated in shape beyond being a string — deleteMany
+  // below matches it against profileId, so a wrong value simply deletes
+  // nothing rather than something belonging to another profile.
+  @IsString()
+  @IsOptional()
+  pushToken?: string;
+}
+
 class ResetPasswordDto {
   @IsEmail()
   email!: string;
@@ -137,23 +147,36 @@ export class AuthController {
       const passwordMatches = credential
         ? await this.authService.verifyPassword(body.password, credential.salt, credential.iterations, credential.passwordHash)
         : await this.authService.verifyPassword(body.password, DUMMY_PASSWORD_SALT, PASSWORD_ITERATIONS, DUMMY_PASSWORD_HASH);
+      // Checked after running the KDF above (not before) so response timing
+      // stays uniform regardless of lock state. A locked account is rejected
+      // even on a correct password — recordFailedSignIn already sets
+      // lockedUntil after MAX_FAILED_SIGN_INS failures, but nothing previously
+      // consulted it, so the lockout had no effect at all. reset-password
+      // remains the recovery path (it clears lockedUntil).
+      const isLocked = Boolean(user?.lockedUntil && user.lockedUntil.getTime() > Date.now());
       if (!credential || !passwordMatches) {
         // Apply the account-level limiter only after password verification so
         // a valid credential can always clear an attacker-induced lockout.
         await assertWithinSharedRateLimit(this.prisma, `auth:email:${email}`, AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
-        if (user) {
+        if (user && !isLocked) {
           await this.recordFailedSignIn(user.id);
         }
         void this.audit?.record({
-          action: 'auth.login.failed',
+          action: isLocked ? 'auth.login.blocked' : 'auth.login.failed',
           entityType: 'User',
           entityId: user?.id,
-          summary: `Failed login attempt for ${email}`,
+          summary: isLocked
+            ? `Sign-in blocked for ${email}: account temporarily locked`
+            : `Failed login attempt for ${email}`,
           ipAddress: getClientIp(request),
           userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
-          metadata: { email, reason: 'invalid_credentials' },
+          metadata: { email, reason: isLocked ? 'account_locked' : 'invalid_credentials' },
         });
-        throw new UnauthorizedException('Invalid email or password.');
+        throw new UnauthorizedException(
+          isLocked
+            ? 'Too many failed sign-in attempts. Try again later or reset your password.'
+            : 'Invalid email or password.',
+        );
       }
       if (user.failedSignInCount > 0 || user.lockedUntil) {
         await this.prisma.user.update({
@@ -190,12 +213,12 @@ export class AuthController {
       return session;
     }
 
-    // Reject signup whenever a password already exists, regardless of
-    // verification state. Unverified accounts must use resend-verification or
-    // password-reset to recover — allowing signup to overwrite an existing
-    // password would let an attacker hijack unverified accounts.
-    if (user?.password) {
-      throw new BadRequestException("We couldn't create your account. Check your details or try signing in.");
+    // Reject signup whenever an account already exists for this email (with or
+    // without a password). Allowing signup to attach or overwrite credentials on
+    // an existing User record would allow claiming passwordless/OAuth/invited
+    // accounts without proving ownership.
+    if (user) {
+      throw new BadRequestException('An account already exists for this email. Sign in instead.');
     }
     // The DTO's MinLength(6) is a floor shared with sign-in (existing users may
     // have shorter legacy passwords); new passwords must meet the current bar.
@@ -238,29 +261,16 @@ export class AuthController {
     let nextUserId: string;
     try {
       nextUserId = await this.prisma.$transaction(async (tx) => {
-        const nextUser = await tx.user.upsert({
-          where: { email },
-          update: {
-            ...(phone ? { phone } : {}),
-            ...(emailInvite ? {
-              emailVerifiedAt: new Date(),
-              emailVerificationCodeHash: null,
-              emailVerificationSentAt: null,
-            } : {}),
+        const nextUser = await tx.user.create({
+          data: {
+            email,
+            phone,
             termsAcceptedAt: new Date(),
-            failedSignInCount: 0,
-            lockedUntil: null,
+            ...(emailInvite ? { emailVerifiedAt: new Date() } : {}),
           },
-          create: { email, phone, termsAcceptedAt: new Date(), ...(emailInvite ? { emailVerifiedAt: new Date() } : {}) },
         });
-        await tx.passwordCredential.upsert({
-          where: { userId: nextUser.id },
-          update: {
-            salt: result.salt,
-            passwordHash: result.hash,
-            iterations: PASSWORD_ITERATIONS,
-          },
-          create: {
+        await tx.passwordCredential.create({
+          data: {
             userId: nextUser.id,
             salt: result.salt,
             passwordHash: result.hash,
@@ -270,7 +280,7 @@ export class AuthController {
         return nextUser.id;
       });
     } catch (error: any) {
-      // Unique violation on userId: the concurrent signup won the race.
+      // Unique violation on email or userId: the concurrent signup won the race.
       if (error?.code === 'P2002') {
         throw new BadRequestException('An account already exists for this email. Sign in instead.');
       }
@@ -586,12 +596,20 @@ export class AuthController {
   // Revoke the current session (this device). The bearer token stops working
   // immediately on the next request.
   @Post('logout')
-  async logout(@CurrentUser() user: AuthUser, @Req() request?: Request) {
+  async logout(@CurrentUser() user: AuthUser, @Body() body?: LogoutDto, @Req() request?: Request) {
     if (user.sid) {
+      const pushToken = body?.pushToken?.trim();
       await this.prisma.$transaction([
         this.prisma.session.deleteMany({ where: { id: user.sid } }),
-        ...(user.profileId
-          ? [this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } })]
+        // Delete only THIS device's push token, not every token the profile
+        // has ever registered — deleting all of them (the prior behaviour)
+        // silently killed push delivery to the user's other signed-in devices
+        // whenever any single device signed out. Without a token, leave push
+        // registrations untouched; a genuinely stale token still gets
+        // disabled automatically by the delivery-failure path in
+        // notifications.service.ts.
+        ...(user.profileId && pushToken
+          ? [this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId, token: pushToken } })]
           : []),
       ]);
       void this.audit?.record({

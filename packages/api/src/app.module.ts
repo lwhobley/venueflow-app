@@ -3,6 +3,7 @@ import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { validateEnv } from './common/validate-env';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
@@ -50,6 +51,7 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env.local', '.env'],
+      validate: validateEnv,
     }),
     // default: higher ceiling for authenticated dashboard polling
     // auth: tighter named bucket applied via @Throttle({ auth: ... }) on auth routes

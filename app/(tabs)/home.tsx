@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { TextInput } from 'react-native-paper';
-import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { useMutation, useQuery, useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { CommandButton, CommandText } from '../../components/FutureUI';
@@ -31,7 +31,7 @@ export default function HomeScreen() {
   const venues = useAuthStore((state) => state.venues);
   const { isReady } = useAuthenticatedSession();
   const palette = useDesignTheme();
-  const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip');
+  const { data: dashboard, error: dashboardError, isLoading: dashboardLoading, refetch: refetchDashboard } = useQueryState(api.app.getDashboard, isReady ? {} : 'skip');
   const notifications = useQuery(api.app.getNotifications, isReady ? {} : 'skip');
   const markNotificationRead = useMutation(api.app.markNotificationRead);
   const upsertManagerGoal = useMutation(api.operations.upsertManagerGoal);
@@ -48,7 +48,7 @@ export default function HomeScreen() {
   const readiness = commandCenter?.readiness;
   const pulse = dailyBrief?.profitabilityPulse;
   const events = commandCenter?.events?.slice(0, 4) ?? managerDashboard?.events?.slice(0, 4) ?? [];
-  const loading = dashboard === undefined;
+  const loading = dashboardLoading || (isReady && dashboard === undefined);
 
   const currentDate = todayLabel.format(new Date());
   const readinessRows = useMemo(() => {
@@ -106,6 +106,13 @@ export default function HomeScreen() {
       <HomeWranglerSurface enabled={isReady && canManage && Boolean(venue?.id)} />
 
       <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.xl }}>
+        {dashboardError && !dashboard ? (
+          <View style={{ padding: spacing.md, borderRadius: 8, backgroundColor: '#FDE7E9', borderWidth: 1, borderColor: '#F5A9AC', gap: spacing.xs }}>
+            <CommandText palette={palette} variant="body" style={{ color: '#A81C24', fontWeight: '700' }}>Failed to load operations dashboard</CommandText>
+            <CommandText palette={palette} variant="caption" style={{ color: '#A81C24' }}>{dashboardError instanceof Error ? dashboardError.message : 'Please check your connection.'}</CommandText>
+            <CommandButton palette={palette} onPress={() => void refetchDashboard()} style={{ alignSelf: 'flex-start', marginTop: 4 }}>Retry</CommandButton>
+          </View>
+        ) : null}
         {showNotifications ? (
           <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider, paddingVertical: spacing.md, gap: spacing.sm }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

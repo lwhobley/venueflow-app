@@ -6,7 +6,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { resolveMediaUrl } from '../../lib/api-client';
+import { apiRequest, resolveMediaUrl } from '../../lib/api-client';
 import type { Id } from '../../lib/ids';
 import { accents, colors, radius, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
@@ -202,9 +202,21 @@ export default function ConversationScreen() {
   const [reactMsgId, setReactMsgId] = useState<string | null>(null);
   const [showShareDialog, setShowShareDialog] = useState(false);
 
+  // Older pages loaded by "Load earlier messages", kept separate from the
+  // live query's tail page so paging back never disturbs the auto-scroll
+  // that runs when a new message arrives (see the effect below, which keys
+  // off the tail page only).
+  const [olderMessages, setOlderMessages] = useState<ChatMessage[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
   const scrollRef = useRef<ScrollView>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
-  const messages = (data?.messages ?? []) as ChatMessage[];
+  const latestMessages = (data?.messages ?? []) as ChatMessage[];
+  const messages = useMemo(
+    () => [...olderMessages, ...latestMessages],
+    [olderMessages, latestMessages],
+  );
   messagesRef.current = messages;
   const readReceipts = (data?.readReceipts ?? []) as Array<{ name: string; readAt: number }>;
   const mineShifts = myScheduleData?.mine ?? [];
@@ -212,9 +224,41 @@ export default function ConversationScreen() {
   const renderItems = useMemo(() => groupMessages(messages, t), [messages, t]);
 
   useEffect(() => {
+    setOlderMessages([]);
+    setHasMoreOlder(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    // Only the initial (unpaginated) load reports hasMore for the whole
+    // history; once older pages are loaded, loadEarlier keeps this in sync
+    // from each page's own hasMore instead.
+    if (olderMessages.length === 0) setHasMoreOlder(Boolean(data?.hasMore));
+  }, [data?.hasMore, olderMessages.length]);
+
+  const loadEarlier = async () => {
+    const oldestId = messages[0]?.id;
+    if (!conversationId || !oldestId || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await apiRequest<{ messages: ChatMessage[]; hasMore: boolean }>(
+        `/v1/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(oldestId)}`,
+      );
+      setOlderMessages((prev) => [...page.messages, ...prev]);
+      setHasMoreOlder(page.hasMore);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  useEffect(() => {
+    // Keyed on the live tail page only (not the combined `messages`, which
+    // also grows when older history is paged in) so loading earlier history
+    // never yanks the scroll position back down to the bottom.
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 70);
     return () => clearTimeout(timer);
-  }, [messages.length]);
+  }, [latestMessages.length]);
 
   useEffect(() => {
     if (!toast) return;
@@ -477,6 +521,19 @@ export default function ConversationScreen() {
           contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xl }}
           showsVerticalScrollIndicator={false}
         >
+          {hasMoreOlder ? (
+            <View style={{ alignItems: 'center', paddingBottom: spacing.sm }}>
+              <Button
+                mode="text"
+                compact
+                loading={loadingOlder}
+                disabled={loadingOlder}
+                onPress={() => void loadEarlier()}
+              >
+                {t('chatThread.loadEarlier')}
+              </Button>
+            </View>
+          ) : null}
           {messages.length === 0 ? (
             <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, gap: spacing.sm }}>
               <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.cream, alignItems: 'center', justifyContent: 'center' }}>

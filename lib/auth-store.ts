@@ -59,13 +59,18 @@ const createAuthStore = (set: any): AuthState => ({
   token: null,
   setHydrated: (hydrated: boolean) => set({ hydrated }),
   setSession: (session: { user: UserSummary; venue: Venue | null; venues?: VenueSummary[]; token?: string | null }) =>
-    set((state: AuthState) => ({
-      user: session.user,
-      venue: session.venue,
-      venues: session.venues ?? state.venues,
-      ...(session.token !== undefined ? { token: session.token } : {}),
-      authEpoch: state.authEpoch + 1,
-    })),
+    set((state: AuthState) => {
+      if (state.user && state.user.id !== session.user.id) {
+        void SecureStore.deleteItemAsync('venuewrangler.appattest.keyId').catch(() => {});
+      }
+      return {
+        user: session.user,
+        venue: session.venue,
+        venues: session.venues ?? state.venues,
+        ...(session.token !== undefined ? { token: session.token } : {}),
+        authEpoch: state.authEpoch + 1,
+      };
+    }),
   setVenue: (venue: Venue) => set({ venue }),
   setVenues: (venues: VenueSummary[]) => set({ venues }),
   switchVenue: (venue: Venue) =>
@@ -73,14 +78,16 @@ const createAuthStore = (set: any): AuthState => ({
       venue,
       authEpoch: state.authEpoch + 1,
     })),
-  clearSession: () =>
-    set((state: AuthState) => ({
+  clearSession: () => {
+    void SecureStore.deleteItemAsync('venuewrangler.appattest.keyId').catch(() => {});
+    return set((state: AuthState) => ({
       user: null,
       venue: null,
       venues: [],
       token: null,
       authEpoch: state.authEpoch + 1,
-    })),
+    }));
+  },
 });
 
 export const useAuthStore = create<AuthState>()(

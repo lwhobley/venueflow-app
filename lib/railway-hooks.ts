@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useMutation as useReactMutation, useQuery as useReactQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from './api-client';
 import { useAuthStore } from './auth-store';
+import { getLastRegisteredPushToken, setLastRegisteredPushToken } from './push-token-registry';
 import type { RailwayFunctionRef } from './railway-api';
 
 type QueryArgs = Record<string, unknown> | 'skip' | undefined;
@@ -585,7 +586,16 @@ export function useAuthActions() {
     signIn: async () => {
       throw new Error('Use Railway password auth instead.');
     },
-    signOut: async () => apiRequest<{ ok: true }>('/v1/auth/logout', { method: 'POST' }),
+    // Pass this device's push token so the server unregisters only it, not
+    // every device the account has ever signed into.
+    signOut: async () => {
+      const result = await apiRequest<{ ok: true }>('/v1/auth/logout', {
+        method: 'POST',
+        body: { pushToken: getLastRegisteredPushToken() ?? undefined },
+      });
+      setLastRegisteredPushToken(null);
+      return result;
+    },
   };
 }
 

@@ -41,4 +41,5 @@ COPY --from=build /app/packages/api/scripts/assert-database-target.mjs packages/
 RUN chown -R node:node /app
 USER node
 EXPOSE 8080
-CMD ["sh", "-c", "node packages/api/scripts/assert-database-target.mjs && DATABASE_URL=\"${DATABASE_DIRECT_URL:-$DATABASE_URL}\" ./node_modules/.bin/prisma migrate deploy --schema packages/api/prisma && exec node packages/api/dist/main.js"]
+# Set AUTO_MIGRATE=true in single-run deployment jobs to run migrations before instance traffic.
+CMD ["sh", "-c", "node packages/api/scripts/assert-database-target.mjs && if [ \"$AUTO_MIGRATE\" = \"true\" ]; then DATABASE_URL=\"${DATABASE_DIRECT_URL:-$DATABASE_URL}\" ./node_modules/.bin/prisma migrate deploy --schema packages/api/prisma; fi && exec node packages/api/dist/main.js"]

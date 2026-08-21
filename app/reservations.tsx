@@ -4,7 +4,7 @@ import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-nat
 import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { router } from 'expo-router';
 import { useI18n } from '../lib/i18n';
-import { useMutation, useQuery } from '../lib/railway-hooks';
+import { useMutation, useQuery, useQueryState } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import type { Id } from '../lib/ids';
 import { accents, colors, spacing, radius, type } from '../lib/theme';
@@ -88,7 +88,7 @@ function ReservationsScreen() {
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
-  const page = useQuery(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const { data: page, error: pageError, isLoading: pageLoading, refetch: refetchPage } = useQueryState(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const waitlistData = useQuery(api.floorBinding.getOpenWaitlist, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const unassignedData = useQuery(api.floorBinding.getUnassignedReservations, isReady && venue?.id ? { venueId: venue.id, withinMinutes: 120 } : 'skip') as any;
@@ -741,7 +741,12 @@ function ReservationsScreen() {
             ))}
           </View>
           {deleteError ? <Text style={{ color: colors.danger, marginTop: spacing.sm }}>{deleteError}</Text> : null}
-          {page === undefined ? (
+          {pageError ? (
+            <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
+              <Text style={{ color: colors.danger }}>Failed to load reservations</Text>
+              <Button compact mode="outlined" textColor={colors.primary} onPress={() => refetchPage()}>Retry</Button>
+            </View>
+          ) : pageLoading || page === undefined ? (
             <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.loading')}</Text>
           ) : visibleReservations.length === 0 ? (
             <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.empty', { range: listDateRange.shortLabel.toLowerCase() })}</Text>

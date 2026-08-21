@@ -157,6 +157,17 @@ export class AppBillingController {
       if (this.cachedStripeMultiVenuePriceId) return this.cachedStripeMultiVenuePriceId;
     }
 
+    // Never mint Stripe Products/Prices from a customer checkout request in
+    // production: if an operator archives the current price in the Stripe
+    // dashboard to change pricing, this lookup-then-create path would just
+    // recreate a new price at the hardcoded amount below, silently reverting
+    // the change (and leaving an orphaned Product behind on retry). Require
+    // the price id to be configured explicitly instead.
+    if (process.env.NODE_ENV === 'production') {
+      const envKey = planType === 'multi_venue' ? 'STRIPE_MULTI_VENUE_PRICE_ID' : 'STRIPE_PRICE_ID';
+      throw new ServiceUnavailableException(`${envKey} is not configured on the server.`);
+    }
+
     const lookupKey = planType === 'multi_venue' ? STRIPE_MULTI_PRICE_LOOKUP_KEY : STRIPE_PRICE_LOOKUP_KEY;
     const amountCents = planType === 'multi_venue' ? STRIPE_MULTI_AMOUNT_CENTS : STRIPE_PLAN_AMOUNT_CENTS;
     const productName = planType === 'multi_venue' ? 'Venue Wrangler Multi-Venue Pro' : 'Venue Wrangler';

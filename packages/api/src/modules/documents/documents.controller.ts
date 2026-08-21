@@ -70,11 +70,19 @@ export class DocumentsController {
   @Get()
   async list(@VenueScope() scope: Scope) {
     requireScope(scope);
+    // Safety cap, not organic pagination: the document library is expected to
+    // stay well under this for any real venue. Without a bound this query
+    // grows without limit over a venue's lifetime.
+    const LIST_CAP = 1000;
     const documents = await this.prisma.venueDocument.findMany({
       where: { venueId: scope.venueId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { uploadedBy: { select: { fullName: true } } },
+      take: LIST_CAP,
     });
+    if (documents.length === LIST_CAP) {
+      this.logger.warn(`Document list for venue ${scope.venueId} hit the ${LIST_CAP}-row cap; older documents are not shown.`);
+    }
     return documents.map((document) => ({
       id: document.id,
       _id: document.id,

@@ -27,7 +27,62 @@ describe('AuthController email invite signup', () => {
     );
   });
 
-  it('allows a correct password to clear an active lockout', async () => {
+  it('allows a correct password to clear an attacker-induced lockout, while an incorrect password is blocked', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const verifyPasswordSuccess = vi.fn().mockResolvedValue(true);
+    const controllerSuccess = new AuthController(
+      {
+        user: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'user-1',
+            failedSignInCount: 8,
+            lockedUntil: new Date(Date.now() + 60_000),
+            password: { salt: 'salt', iterations: 600_000, passwordHash: 'hash' },
+          }),
+          update,
+        },
+      } as any,
+      {} as any,
+      {} as any,
+      { verifyPassword: verifyPasswordSuccess } as any,
+    );
+    (controllerSuccess as any).issueSession = vi.fn().mockResolvedValue({ ok: true });
+
+    // Correct password succeeds and clears lockout
+    await expect((controllerSuccess as any).password(
+      { ip: '127.0.0.1' },
+      { email: 'staff@example.com', password: 'password123', flow: 'signIn' },
+    )).resolves.toEqual({ ok: true });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { failedSignInCount: 0, lockedUntil: null },
+    });
+
+    // Incorrect password on locked account is rejected with locked message
+    const verifyPasswordFailure = vi.fn().mockResolvedValue(false);
+    const controllerFailure = new AuthController(
+      {
+        user: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'user-1',
+            failedSignInCount: 8,
+            lockedUntil: new Date(Date.now() + 60_000),
+            password: { salt: 'salt', iterations: 600_000, passwordHash: 'hash' },
+          }),
+          update: vi.fn(),
+        },
+      } as any,
+      {} as any,
+      {} as any,
+      { verifyPassword: verifyPasswordFailure } as any,
+    );
+    await expect((controllerFailure as any).password(
+      { ip: '127.0.0.1' },
+      { email: 'staff@example.com', password: 'wrongpassword', flow: 'signIn' },
+    )).rejects.toThrow('Too many failed sign-in attempts');
+  });
+
+  it('allows a correct password once the lockout has expired, and clears it', async () => {
     const update = vi.fn().mockResolvedValue({});
     const verifyPassword = vi.fn().mockResolvedValue(true);
     const controller = new AuthController(
@@ -35,8 +90,8 @@ describe('AuthController email invite signup', () => {
         user: {
           findUnique: vi.fn().mockResolvedValue({
             id: 'user-1',
-            failedSignInCount: 0,
-            lockedUntil: new Date(Date.now() + 60_000),
+            failedSignInCount: 8,
+            lockedUntil: new Date(Date.now() - 1000),
             password: { salt: 'salt', iterations: 600_000, passwordHash: 'hash' },
           }),
           update,
@@ -107,15 +162,15 @@ describe('AuthController email invite signup', () => {
     const userFindUnique = vi.fn()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ emailVerifiedAt: verifiedAt });
-    const userUpsert = vi.fn().mockResolvedValue({ id: 'user-1' });
-    const passwordUpsert = vi.fn().mockResolvedValue({});
+    const userCreate = vi.fn().mockResolvedValue({ id: 'user-1' });
+    const passwordCreate = vi.fn().mockResolvedValue({});
     const prisma = {
       user: { findUnique: userFindUnique },
       invite: { findFirst: vi.fn().mockResolvedValue({ id: 'invite-1' }) },
       session: { update: vi.fn().mockResolvedValue({}) },
       $transaction: vi.fn(async (callback: any) => callback({
-        user: { upsert: userUpsert },
-        passwordCredential: { upsert: passwordUpsert },
+        user: { create: userCreate },
+        passwordCredential: { create: passwordCreate },
       })),
     };
     const venue = {
@@ -157,9 +212,9 @@ describe('AuthController email invite signup', () => {
       },
     );
 
-    expect(userUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({ email: 'staff@example.com', emailVerifiedAt: expect.any(Date) }),
-    }));
+    expect(userCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ email: 'staff@example.com', emailVerifiedAt: expect.any(Date) }),
+    });
     expect(authService.issueSession).toHaveBeenCalledWith(
       'user-1',
       'staff@example.com',
@@ -177,8 +232,8 @@ describe('AuthController email invite signup', () => {
     const userFindUnique = vi.fn()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ emailVerifiedAt: null });
-    const userUpsert = vi.fn().mockResolvedValue({ id: 'user-1' });
-    const passwordUpsert = vi.fn().mockResolvedValue({});
+    const userCreate = vi.fn().mockResolvedValue({ id: 'user-1' });
+    const passwordCreate = vi.fn().mockResolvedValue({});
     // The real query filters on `code: null` — a manager-created invite
     // (which always has a `code`) must never match this lookup, since its
     // raw token/link is returned to the manager and could be forwarded to
@@ -189,8 +244,8 @@ describe('AuthController email invite signup', () => {
       invite: { findFirst: inviteFindFirst },
       session: { update: vi.fn().mockResolvedValue({}) },
       $transaction: vi.fn(async (callback: any) => callback({
-        user: { upsert: userUpsert },
-        passwordCredential: { upsert: passwordUpsert },
+        user: { create: userCreate },
+        passwordCredential: { create: passwordCreate },
       })),
     };
     const venue = {
@@ -235,14 +290,53 @@ describe('AuthController email invite signup', () => {
       },
     );
 
-    expect(userUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({ email: 'staff@example.com' }),
-    }));
+    expect(userCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ email: 'staff@example.com' }),
+    });
     // Must NOT auto-verify: no emailVerifiedAt in the create payload.
-    expect(userUpsert.mock.calls[0][0].create).not.toHaveProperty('emailVerifiedAt');
+    expect(userCreate.mock.calls[0][0].data).not.toHaveProperty('emailVerifiedAt');
     // The normal verification-code email must still be sent since this
     // account was not auto-verified.
     expect(email.sendOrThrow).toHaveBeenCalled();
+  });
+
+  it('rejects public signup when user already exists even without password', async () => {
+    const controller = new AuthController(
+      {
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: 'user-existing', password: null }),
+        },
+      } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect((controller as any).password(
+      { ip: '127.0.0.1' },
+      { email: 'existing@example.com', password: 'password123', flow: 'signUp', termsAccepted: true },
+    )).rejects.toThrow('An account already exists for this email');
+  });
+
+  it('handles P2002 unique violation race condition gracefully during signup transaction', async () => {
+    const prisma = {
+      user: { findUnique: vi.fn().mockResolvedValue(null) },
+      invite: { findFirst: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(async () => {
+        const error: any = new Error('Unique constraint failed');
+        error.code = 'P2002';
+        throw error;
+      }),
+    };
+    const authService = {
+      hashPassword: vi.fn().mockResolvedValue({ salt: 'salt', hash: 'hash' }),
+    };
+    const controller = new AuthController(prisma as any, {} as any, {} as any, authService as any);
+
+    await expect((controller as any).password(
+      { ip: '127.0.0.1' },
+      { email: 'concurrent@example.com', password: 'password123', flow: 'signUp', termsAccepted: true },
+    )).rejects.toThrow('An account already exists for this email');
   });
 });
 
@@ -371,5 +465,35 @@ describe('AuthController recovery and logout safety', () => {
     expect(prisma.pushToken.deleteMany).not.toHaveBeenCalled();
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { id: 'session-1' } });
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
+  });
+
+  it('logout without a pushToken leaves push registrations untouched (does not kill other devices)', async () => {
+    const prisma = {
+      session: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      pushToken: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
+    };
+    const controller = new AuthController(prisma as any, {} as any, {} as any, {} as any);
+    const user = { sub: 'user-1', sid: 'session-1', profileId: 'profile-1' } as any;
+
+    await controller.logout(user, {});
+
+    expect(prisma.pushToken.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('logout with a pushToken deletes only that device\'s token, not every token on the profile', async () => {
+    const prisma = {
+      session: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      pushToken: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
+    };
+    const controller = new AuthController(prisma as any, {} as any, {} as any, {} as any);
+    const user = { sub: 'user-1', sid: 'session-1', profileId: 'profile-1' } as any;
+
+    await controller.logout(user, { pushToken: 'ExponentPushToken[this-device]' });
+
+    expect(prisma.pushToken.deleteMany).toHaveBeenCalledWith({
+      where: { profileId: 'profile-1', token: 'ExponentPushToken[this-device]' },
+    });
   });
 });

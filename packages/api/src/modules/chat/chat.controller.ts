@@ -239,6 +239,10 @@ export class ChatController {
     const all = await this.prisma.conversation.findMany({
       where: { venueId: scope.venueId },
       orderBy: { lastMessageAt: 'desc' },
+      // Bounded by roster size in practice (DMs are per staff pair, groups
+      // per role/shift), but capped defensively — this list has no pagination
+      // on the client.
+      take: 500,
     });
 
     const staff = await this.prisma.profile.findMany({
@@ -456,7 +460,14 @@ export class ChatController {
 
   @RequireSubscription('active')
   @Get('conversations/:id/messages')
-  async getMessages(@VenueScope() scope: Scope, @Param('id') id: string) {
+  async getMessages(
+    @VenueScope() scope: Scope,
+    @Param('id') id: string,
+    // Pass the oldest message id already loaded to page further back in
+    // history. Without this, history was hard-capped at the most recent 50
+    // messages with no way to reach anything older through the API.
+    @Query('before') before?: string,
+  ) {
     if (!scope) throw new ForbiddenException('No venue profile found');
 
     const conv = await this.prisma.conversation.findFirst({
@@ -474,53 +485,67 @@ export class ChatController {
     });
     const nameById = new Map(staff.map((s) => [s.id, s.fullName]));
 
-    let title = conv.name ?? 'Chat';
-    if (conv.type === 'dm') {
-      const otherId = conv.memberIds.find((mid) => mid !== scope.profileId);
-      title = (otherId && nameById.get(otherId)) || 'Direct message';
-    }
+    // Paging further back into history isn't "opening" the conversation, so
+    // skip re-marking it read and skip recomputing title/read-receipts —
+    // the client already has those from the initial load.
+    let title: string | undefined;
+    let readReceipts: { name: string; readAt: number }[] | undefined;
+    if (!before) {
+      title = conv.name ?? 'Chat';
+      if (conv.type === 'dm') {
+        const otherId = conv.memberIds.find((mid) => mid !== scope.profileId);
+        title = (otherId && nameById.get(otherId)) || 'Direct message';
+      }
 
-    // Upsert read receipt for current user
-    await this.prisma.conversationRead.upsert({
-      where: {
-        conversationId_profileId: {
+      // Upsert read receipt for current user
+      await this.prisma.conversationRead.upsert({
+        where: {
+          conversationId_profileId: {
+            conversationId: id,
+            profileId: scope.profileId,
+          }
+        },
+        create: {
           conversationId: id,
           profileId: scope.profileId,
+          venueId: scope.venueId,
+          readAt: new Date(),
+        },
+        update: {
+          readAt: new Date(),
         }
-      },
-      create: {
-        conversationId: id,
-        profileId: scope.profileId,
-        venueId: scope.venueId,
-        readAt: new Date(),
-      },
-      update: {
-        readAt: new Date(),
-      }
-    });
+      });
 
-    const reads = await this.prisma.conversationRead.findMany({
-      where: { conversationId: id },
-      select: { profileId: true, readAt: true },
-    });
+      const reads = await this.prisma.conversationRead.findMany({
+        where: { conversationId: id },
+        select: { profileId: true, readAt: true },
+      });
 
-    const readReceipts = reads
-      .filter((r) => r.profileId !== scope.profileId)
-      .map((r) => ({
-        name: nameById.get(r.profileId) || 'Teammate',
-        readAt: r.readAt.getTime(),
-      }));
+      readReceipts = reads
+        .filter((r) => r.profileId !== scope.profileId)
+        .map((r) => ({
+          name: nameById.get(r.profileId) || 'Teammate',
+          readAt: r.readAt.getTime(),
+        }));
+    }
 
+    const PAGE_SIZE = 50;
     const recent = await this.prisma.message.findMany({
       where: { conversationId: id },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 50,
+      // cursor + skip:1 walks strictly older than `before` in the same
+      // (createdAt, id) order the initial page ended on — id is unique, so
+      // this is stable even when multiple messages share a createdAt.
+      ...(before ? { cursor: { id: before }, skip: 1 } : {}),
+      take: PAGE_SIZE + 1,
     });
-    const messages = recent.slice().reverse();
+    const hasMore = recent.length > PAGE_SIZE;
+    const messages = recent.slice(0, PAGE_SIZE).reverse();
 
     return {
-      title,
-      readReceipts,
+      ...(title !== undefined ? { title } : {}),
+      ...(readReceipts !== undefined ? { readReceipts } : {}),
+      hasMore,
       messages: await Promise.all(messages.map(async (m) => {
         const imageId = m.imageUrl?.match(/^\/v1\/chat\/images\/([a-zA-Z0-9_-]+)$/)?.[1];
         return {

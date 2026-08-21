@@ -5,6 +5,7 @@ import * as Notifications from 'expo-notifications';
 import { useMutation } from './railway-hooks';
 import { api } from './railway-api';
 import { useAuthStore, type AuthState } from './auth-store';
+import { setLastRegisteredPushToken } from './push-token-registry';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -42,6 +43,7 @@ export function usePushNotifications() {
         Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
       const token = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
       if (cancelled || !token.data) return;
+      setLastRegisteredPushToken(token.data);
       await registerPushToken({ token: token.data, platform: platformName() });
     }
 

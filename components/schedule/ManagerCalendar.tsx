@@ -3,7 +3,7 @@ import { Platform, Pressable, ScrollView, View, Modal } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, SegmentedButtons, Snackbar, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { useMutation, useQuery, useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
@@ -169,7 +169,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   }, [weekOffset]);
 
   const selectedWeekStart = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
-  const data = useQuery(api.scheduling.getManagerSchedule, { venueId, weekStart: selectedWeekStart });
+  const { data, error, isLoading, refetch } = useQueryState(api.scheduling.getManagerSchedule, { venueId, weekStart: selectedWeekStart });
   const forecast = useQuery(api.scheduling.getLaborForecast, { venueId, weekStart: selectedWeekStart }) as LaborForecast | undefined;
   const templates = useQuery(api.scheduling.listScheduleTemplates, { venueId });
   const requestRows = useQuery(api.app.listStaffRequests, { venueId });
@@ -413,7 +413,21 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     );
   }, [shifts]);
 
-  if (data === undefined) {
+  if (error) {
+    return (
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 10, padding: spacing.lg }}>
+        <Card.Content style={{ gap: spacing.md, alignItems: 'center' }}>
+          <Text style={{ color: colors.danger, fontWeight: '700' }}>Failed to load schedule</Text>
+          <Text style={{ color: colors.muted }}>{error instanceof Error ? error.message : 'Please check your connection and try again.'}</Text>
+          <Button mode="contained" buttonColor={colors.primary} onPress={() => refetch()}>
+            Retry
+          </Button>
+        </Card.Content>
+      </Card>
+    );
+  }
+
+  if (isLoading || data === undefined) {
     return <ScheduleSkeleton rows={5} />;
   }
 

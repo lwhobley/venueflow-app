@@ -238,6 +238,22 @@ describe('AppBillingController', () => {
         expect(vi.mocked(stripeRequest).mock.calls[0][2]).toBe('/checkout/sessions');
       });
     });
+
+    describe('in production, with STRIPE_PRICE_ID unset', () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      afterEach(() => {
+        process.env.NODE_ENV = originalNodeEnv;
+      });
+
+      it('refuses to auto-create a Stripe price instead of minting one at the hardcoded fallback amount', async () => {
+        process.env.NODE_ENV = 'production';
+        const { controller, profiles } = makeController({ STRIPE_PRICE_ID: undefined });
+        profiles.requireBillingProfile.mockResolvedValue(billingViewer);
+
+        await expect(controller.createStripeCheckout(user)).rejects.toThrow(ServiceUnavailableException);
+        expect(stripeRequest).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('createStripePortal', () => {

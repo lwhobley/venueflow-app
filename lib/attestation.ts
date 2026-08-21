@@ -20,9 +20,11 @@ async function requestChallenge(): Promise<string> {
  * Ensure this install has an App Attest key registered with the server.
  * Idempotent: the key id is cached in SecureStore after the first enrolment.
  */
-async function ensureRegisteredKey(): Promise<string> {
-  const cached = await SecureStore.getItemAsync(KEY_ID_STORE_KEY);
-  if (cached) return cached;
+async function ensureRegisteredKey(forceNew = false): Promise<string> {
+  if (!forceNew) {
+    const cached = await SecureStore.getItemAsync(KEY_ID_STORE_KEY);
+    if (cached) return cached;
+  }
 
   const keyId = await generateKey();
   const challenge = await requestChallenge();
@@ -52,10 +54,20 @@ export async function attestPayload(payload: unknown): Promise<PunchAttestation 
     const assertion = await generateAssertion(keyId, canonicalPayload(payload, challenge));
     return { keyId, assertion, challenge };
   } catch {
-    // A failed attestation must not block the punch while enforcement is off.
-    // The server logs every rejected assertion, which is how we measure
-    // readiness before flipping ATTESTATION_ENFORCED on.
-    return null;
+    // If the cached key was invalidated or belongs to another account,
+    // clear the key and attempt re-enrolment once.
+    try {
+      await resetAttestationKey();
+      const keyId = await ensureRegisteredKey(true);
+      const challenge = await requestChallenge();
+      const assertion = await generateAssertion(keyId, canonicalPayload(payload, challenge));
+      return { keyId, assertion, challenge };
+    } catch {
+      // A failed attestation must not block the punch while enforcement is off.
+      // The server logs every rejected assertion, which is how we measure
+      // readiness before flipping ATTESTATION_ENFORCED on.
+      return null;
+    }
   }
 }
 

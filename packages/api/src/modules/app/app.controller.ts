@@ -36,7 +36,7 @@ const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 // Human-typeable invite codes. Excludes look-alike characters (0/O, 1/I/L) so
-// codes read aloud or written down don't get mistyped. Format: VW-XXXXXX.
+// codes read aloud or written down don't get mistyped. Format: VW-XXXXXXXX.
 const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function makeHumanCode(length: number): string {
   let body = '';
@@ -47,7 +47,13 @@ function makeHumanCode(length: number): string {
 }
 
 function makeInviteCode(): string {
-  return makeHumanCode(6);
+  // 8 chars from a 31-symbol alphabet is ~39.6 bits of entropy — 6 chars
+  // (~29.7 bits) was guessable enough that a distributed attacker guessing
+  // across the pool of currently-outstanding invites (rather than one code)
+  // was a real, if rate-limited, concern. Lookup is unique-indexed exact
+  // match, so this only affects newly-generated codes — existing 6-char
+  // invites keep working.
+  return makeHumanCode(8);
 }
 
 function makeVenueCode(): string {
@@ -1106,13 +1112,10 @@ export class AppController {
         const profile = profiles.find((candidate) => candidate.venueId === venueId);
         const isActive = profile?.membershipStatus == null || profile.membershipStatus === 'active';
         if (!profile || !isActive || !isOwnerOrAdminRole(profile.role)) continue;
-        const [ownerAdminCount, memberCount] = await Promise.all([
-          tx.profile.count({
-            where: { venueId, role: { in: ['owner', 'admin'] }, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
-          }),
-          tx.profile.count({ where: { venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] } }),
-        ]);
-        if (ownerAdminCount <= 1 && memberCount > 1) {
+        const ownerAdminCount = await tx.profile.count({
+          where: { venueId, role: { in: ['owner', 'admin'] }, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+        });
+        if (ownerAdminCount <= 1) {
           throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
         }
       }

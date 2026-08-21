@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash, randomBytes } from 'node:crypto';
 import { verifyAssertion, verifyAttestation } from 'appattest-checker-node';
 import {
@@ -149,6 +150,26 @@ export class AttestationService {
       this.logger.warn(`App Attest replay rejected for user ${userId}: signCount did not advance.`);
       throw new AttestationError('Device integrity check failed for this request.');
     }
+  }
+
+  /**
+   * Nightly cron: purge expired or consumed challenges to prevent unbounded table growth.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupExpiredChallenges(): Promise<number> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = await this.prisma.attestationChallenge.deleteMany({
+      where: {
+        OR: [
+          { expiresAt: { lt: cutoff } },
+          { consumedAt: { lt: cutoff } },
+        ],
+      },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Cleaned up ${result.count} expired/consumed attestation challenges.`);
+    }
+    return result.count;
   }
 }
 
