@@ -2,6 +2,8 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "lib": ["ES2022", "DOM"],
     "paths": {
       "@/*": ["./*"]
