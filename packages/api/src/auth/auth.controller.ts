@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Logger, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Logger, Optional, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from 'class-validator';
@@ -16,6 +16,7 @@ import { assertWithinSharedRateLimit } from '../common/rate-limit';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
+import { AuditService } from '../modules/audit/audit.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 // Matches the JWT's 30-day expiry so a session and its token expire together.
@@ -117,6 +118,7 @@ export class AuthController {
     private readonly jwt: JwtService,
     private readonly email: EmailService,
     private readonly authService: AuthService,
+    @Optional() private readonly audit?: AuditService,
   ) {}
 
   @Public()
@@ -142,6 +144,15 @@ export class AuthController {
         if (user) {
           await this.recordFailedSignIn(user.id);
         }
+        void this.audit?.record({
+          action: 'auth.login.failed',
+          entityType: 'User',
+          entityId: user?.id,
+          summary: `Failed login attempt for ${email}`,
+          ipAddress: getClientIp(request),
+          userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+          metadata: { email, reason: 'invalid_credentials' },
+        });
         throw new UnauthorizedException('Invalid email or password.');
       }
       if (user.failedSignInCount > 0 || user.lockedUntil) {
@@ -163,7 +174,20 @@ export class AuthController {
           this.logger.warn(`Failed to upgrade password hash strength for user ${user.id}: ${err?.message ?? String(err)}`);
         }
       }
-      return this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
+      const session = await this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
+      void this.audit?.record({
+        venueId: session.profile.venueId,
+        actorProfileId: session.profile.id,
+        actorName: session.profile.fullName,
+        actorRole: session.profile.role,
+        action: 'auth.login.success',
+        entityType: 'User',
+        entityId: user.id,
+        summary: `User ${session.profile.fullName || email} signed in successfully`,
+        ipAddress: getClientIp(request),
+        userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+      });
+      return session;
     }
 
     // Reject signup whenever a password already exists, regardless of
@@ -253,6 +277,18 @@ export class AuthController {
       throw error;
     }
     const session = await this.issueSession(nextUserId, email, resolvedFullName, body.inviteToken, body.phone);
+    void this.audit?.record({
+      venueId: session.profile.venueId,
+      actorProfileId: session.profile.id,
+      actorName: session.profile.fullName,
+      actorRole: session.profile.role,
+      action: 'auth.signup.success',
+      entityType: 'User',
+      entityId: nextUserId,
+      summary: `User ${session.profile.fullName || email} registered account`,
+      ipAddress: getClientIp(request),
+      userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+    });
     // Swallow delivery errors: the account is already created and the session
     // token is ready to return. The user can request a new code from the
     // verify-email screen if the email didn't arrive.
@@ -369,6 +405,17 @@ export class AuthController {
           `— The Venue Wrangler Team`,
       });
     }
+    void this.audit?.record({
+      venueId: user.venueId,
+      actorProfileId: user.profileId,
+      actorName: user.name,
+      action: 'auth.password.changed',
+      entityType: 'User',
+      entityId: user.sub,
+      summary: `User password changed`,
+      ipAddress: getClientIp(request),
+      userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+    });
     return { ok: true };
   }
 
@@ -539,7 +586,7 @@ export class AuthController {
   // Revoke the current session (this device). The bearer token stops working
   // immediately on the next request.
   @Post('logout')
-  async logout(@CurrentUser() user: AuthUser) {
+  async logout(@CurrentUser() user: AuthUser, @Req() request?: Request) {
     if (user.sid) {
       await this.prisma.$transaction([
         this.prisma.session.deleteMany({ where: { id: user.sid } }),
@@ -547,6 +594,17 @@ export class AuthController {
           ? [this.prisma.pushToken.deleteMany({ where: { profileId: user.profileId } })]
           : []),
       ]);
+      void this.audit?.record({
+        venueId: user.venueId,
+        actorProfileId: user.profileId,
+        actorName: user.name,
+        action: 'auth.logout',
+        entityType: 'Session',
+        entityId: user.sid,
+        summary: `User logged out session ${user.sid}`,
+        ipAddress: request ? getClientIp(request) : undefined,
+        userAgent: typeof request?.headers?.['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+      });
     }
     return { ok: true };
   }

@@ -1,0 +1,137 @@
+name: Continuous Security & Compliance Scan (Prowler)
+
+on:
+  workflow_dispatch:
+    inputs:
+      framework:
+        description: 'Compliance framework to scan'
+        required: true
+        default: 'soc2'
+        type: choice
+        options:
+          - 'soc2'
+          - 'cis'
+          - 'all'
+  schedule:
+    # Run every Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  prowler-scan:
+    name: Prowler Compliance Assessment
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SA_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GCP_CREDENTIALS_JSON: ${{ secrets.GCP_SA_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.PROWLER_AWS_ACCESS_KEY_ID || secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PROWLER_AWS_SECRET_ACCESS_KEY || secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.PROWLER_AWS_REGION || secrets.BACKUP_AWS_REGION || 'us-east-1' }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Prowler
+        run: |
+          python -m pip install --upgrade pip
+          pip install prowler
+
+      - name: Create output directory
+        run: mkdir -p prowler_output
+
+      # =========================================================================
+      # GCP SCAN (Keyless Workload Identity Federation or Service Account Key)
+      # =========================================================================
+      - name: Authenticate to GCP via Workload Identity Federation
+        id: gcp-wif-auth
+        if: env.GCP_WIF_PROVIDER != '' && env.GCP_SA_EMAIL != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_SA_EMAIL }}
+          create_credentials_file: true
+
+      - name: Authenticate to GCP via Service Account Key (Fallback)
+        id: gcp-sa-auth
+        if: (env.GCP_WIF_PROVIDER == '' || env.GCP_SA_EMAIL == '') && env.GCP_CREDENTIALS_JSON != ''
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ env.GCP_CREDENTIALS_JSON }}
+          create_credentials_file: true
+
+      - name: Run Prowler GCP Compliance Scan
+        if: env.GCP_WIF_PROVIDER != '' || env.GCP_CREDENTIALS_JSON != ''
+        shell: bash
+        run: |
+          set -e
+          echo "Starting Prowler GCP compliance scan..."
+          
+          FRAMEWORK="${{ github.event.inputs.framework || 'soc2' }}"
+          COMPLIANCE_FLAG=""
+          if [ "$FRAMEWORK" = "soc2" ]; then
+            COMPLIANCE_FLAG="--compliance soc2_gcp"
+          elif [ "$FRAMEWORK" = "cis" ]; then
+            COMPLIANCE_FLAG="--compliance cis_1.3_gcp"
+          fi
+
+          PROJECT_ARG=""
+          if [ -n "$GCP_PROJECT_ID" ]; then
+            PROJECT_ARG="--project-ids $GCP_PROJECT_ID"
+          fi
+
+          prowler gcp $COMPLIANCE_FLAG $PROJECT_ARG \
+            --output-directory prowler_output/gcp \
+            --output-modes html csv json-ocsf \
+            --output-filename prowler-gcp-report || true
+
+      # =========================================================================
+      # AWS SCAN
+      # =========================================================================
+      - name: Run Prowler AWS Compliance Scan (if credentials provided)
+        if: env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        shell: bash
+        run: |
+          set -e
+          echo "Starting Prowler AWS compliance scan..."
+          
+          FRAMEWORK="${{ github.event.inputs.framework || 'soc2' }}"
+          COMPLIANCE_FLAG=""
+          if [ "$FRAMEWORK" = "soc2" ]; then
+            COMPLIANCE_FLAG="--compliance soc2_aws"
+          elif [ "$FRAMEWORK" = "cis" ]; then
+            COMPLIANCE_FLAG="--compliance cis_3.0_aws"
+          fi
+
+          prowler aws $COMPLIANCE_FLAG \
+            --output-directory prowler_output/aws \
+            --output-modes html csv json-ocsf \
+            --output-filename prowler-aws-report || true
+
+      - name: Verify scan outputs generated
+        shell: bash
+        run: |
+          if [ ! -d "prowler_output/gcp" ] && [ ! -d "prowler_output/aws" ]; then
+            echo "::warning ::Neither GCP nor AWS credentials were provided or generated reports. Configure GitHub secrets to enable automated compliance evidence generation."
+            echo "Sample scan status: No reports generated." > prowler_output/README.txt
+          fi
+
+      - name: Upload Compliance Assessment Reports (Evidence Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: prowler-compliance-reports-${{ github.sha }}
+          path: prowler_output/
+          retention-days: 90

@@ -1564,7 +1564,7 @@ model ChecklistCompletion {
 
 model AuditLog {
   id              String   @id @default(cuid())
-  venueId         String
+  venueId         String?
   actorProfileId  String?
   actorName       String?
   actorRole       String?
@@ -1575,13 +1575,17 @@ model AuditLog {
   entityId        String?
   action          String
   summary         String
+  ipAddress       String?
+  userAgent       String?
   metadata        Json?
   createdAt       DateTime @default(now())
-  venue           Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue           Venue?   @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, createdAt])
   @@index([venueId, action])
+  @@index([action, createdAt])
   @@index([targetProfileId])
+  @@index([actorProfileId, createdAt])
 }
 
 model ManagerGoal {

@@ -62,7 +62,23 @@ async function bootstrap() {
   // hosts.
   const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      hsts: {
+        maxAge: 31536000, // 1 year
+        includeSubDomains: true,
+        preload: true,
+      },
+      frameguard: {
+        action: 'deny',
+      },
+      noSniff: true,
+      hidePoweredBy: true,
+      referrerPolicy: {
+        policy: 'strict-origin-when-cross-origin',
+      },
+    }),
+  );
   const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
   app.use((req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl ?? req.url ?? '';

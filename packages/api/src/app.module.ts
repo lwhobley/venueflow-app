@@ -39,6 +39,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
 import { SchedulingAssignmentService } from './modules/scheduling/scheduling-assignment.service';
 import { AiSchedulerService } from './modules/scheduling/ai-scheduler.service';
+import { AuditModule } from './modules/audit/audit.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { WranglerOperatorController } from './modules/operations/wrangler/wrangler-operator.controller';
 import { WranglerOperatorService } from './modules/operations/wrangler/wrangler-operator.service';
@@ -58,6 +59,7 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     ]),
     ScheduleModule.forRoot(),
     PrismaModule,
+    AuditModule,
     AuthModule,
     VenueModule,
     BillingModule,
