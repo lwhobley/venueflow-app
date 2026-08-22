@@ -26,8 +26,13 @@ export async function setupTestDb(): Promise<{
   }
 
   const prisma = new PrismaClient({ datasources: { db: { url } } });
+  // schema.prisma declares `directUrl`, and `db push` (like all of Prisma
+  // Migrate) prefers it over `url`. Both must point at this test database:
+  // overriding only DATABASE_URL would push the schema to whatever
+  // DATABASE_DIRECT_URL happens to hold — in CI a *different* database than
+  // the client below connects to, leaving every table missing.
   execSync('npx prisma db push --skip-generate --accept-data-loss', {
-    env: { ...process.env, DATABASE_URL: url },
+    env: { ...process.env, DATABASE_URL: url, DATABASE_DIRECT_URL: url },
     cwd: process.cwd(),
     stdio: 'pipe',
   });
