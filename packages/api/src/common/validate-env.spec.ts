@@ -56,6 +56,7 @@ describe('validateEnv', () => {
       REVENUECAT_WEBHOOK_SECRET: 'x',
       REVENUECAT_API_KEY: 'x',
       EMAIL_API_KEY: 'x',
+      SENTRY_DSN: 'https://example.invalid/1',
       ATTESTATION_ENFORCED: 'true',
       APP_ATTEST_TEAM_ID: 'TEAM123',
     });

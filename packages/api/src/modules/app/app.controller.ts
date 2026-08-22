@@ -1033,6 +1033,48 @@ export class AppController {
           const job = await tx.objectDeletionJob.create({ data: { objectKeys }, select: { id: true } });
           mediaJobId = job.id;
         }
+        // Archive wage records BEFORE anything cascades. TimeEntry.venue is
+        // onDelete: Cascade, so deleting the Venue would otherwise destroy every
+        // employee's clock-in history — not just the departing account's. FLSA
+        // requires three-year retention, and those other employees are not the
+        // data subject here. RetainedTimeEntry carries no Venue FK so it
+        // survives the cascade (see its schema comment).
+        const venuesBeingDeleted = await tx.venue.findMany({
+          where: { id: { in: venuesToDelete } },
+          select: { id: true, name: true },
+        });
+        const venueNameById = new Map(venuesBeingDeleted.map((venue) => [venue.id, venue.name]));
+        const RETAIN_BATCH = 500;
+        for (;;) {
+          const batch = await tx.timeEntry.findMany({
+            where: { venueId: { in: venuesToDelete } },
+            orderBy: { id: 'asc' },
+            take: RETAIN_BATCH,
+            select: {
+              id: true, venueId: true, profileFullName: true, clockInAt: true,
+              clockOutAt: true, isOpen: true, breaks: true, createdAt: true,
+              profile: { select: { fullName: true, email: true } },
+            },
+          });
+          if (batch.length === 0) break;
+          await tx.retainedTimeEntry.createMany({
+            data: batch.map((entry) => ({
+              originVenueId: entry.venueId,
+              originVenueName: venueNameById.get(entry.venueId) ?? null,
+              // Prefer the live profile name; fall back to the snapshot already
+              // on the row for staff whose profile was removed earlier.
+              profileFullName: entry.profile?.fullName ?? entry.profileFullName,
+              profileEmail: entry.profile?.email ?? null,
+              clockInAt: entry.clockInAt,
+              clockOutAt: entry.clockOutAt,
+              isOpen: entry.isOpen,
+              breaks: entry.breaks ?? Prisma.DbNull,
+              originCreatedAt: entry.createdAt,
+            })),
+          });
+          await tx.timeEntry.deleteMany({ where: { id: { in: batch.map((entry) => entry.id) } } });
+        }
+
         // Profile.venue uses SetNull because profiles can temporarily be
         // venueless during onboarding. Tenant offboarding is different: remove
         // every venue profile explicitly before the Venue cascade.
@@ -1065,6 +1107,12 @@ export class AppController {
         mediaJobId,
         deletedVenueCount: venuesToDelete.length,
       };
+    }, {
+      // Tenant offboarding walks every venue-owned table plus a batched wage-record
+      // archive. Prisma's 5s interactive default aborts that on any venue with real
+      // history, leaving the account permanently undeletable — itself a GDPR problem.
+      timeout: 120_000,
+      maxWait: 10_000,
     }));
     if (deletion?.mediaJobId && this.mediaCleanup) {
       void this.mediaCleanup.processJob(deletion.mediaJobId).catch((error) => {

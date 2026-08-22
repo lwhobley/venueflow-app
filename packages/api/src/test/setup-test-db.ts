@@ -149,7 +149,7 @@ export async function setupTestDb(): Promise<{
     await assertDisposableTestDatabaseContents(prisma);
     // Use the production migration history, not `db push`: partial indexes,
     // check constraints, RLS, and privilege changes live only in migration SQL.
-    execSync('npx prisma migrate deploy --schema prisma/schema.prisma', {
+    execSync('npx prisma migrate deploy --schema prisma', {
       env: { ...process.env, DATABASE_URL: url, DATABASE_DIRECT_URL: url },
       cwd: resolve(__dirname, '../..'),
       stdio: 'pipe',

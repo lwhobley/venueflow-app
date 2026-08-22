@@ -33,6 +33,10 @@ const RECOMMENDED_IN_PRODUCTION: ReadonlyArray<readonly string[]> = [
   ['REVENUECAT_WEBHOOK_SECRET'],
   ['REVENUECAT_API_KEY', 'REVENUECAT_SECRET_API_KEY'],
   ['RESEND_API_KEY', 'EMAIL_API_KEY'],
+  // Without this every captureException() in the codebase is a silent no-op,
+  // including the ones guarding background deletion/erasure jobs that never
+  // pass through AllExceptionsFilter.
+  ['SENTRY_DSN'],
 ];
 
 export function validateEnv(config: Record<string, unknown>): Record<string, unknown> {

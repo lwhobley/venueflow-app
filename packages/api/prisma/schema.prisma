@@ -670,6 +670,36 @@ model ChatImage {
 
 /// Durable outbox for S3 deletion. Rows intentionally have no Venue FK so a
 /// venue can be deleted transactionally while object deletion retries safely.
+/// Wage records preserved past tenant offboarding.
+///
+/// TimeEntry.venue is onDelete: Cascade, so deleting a Venue destroyed every
+/// employee's clock-in history — including staff who were not the account
+/// being deleted and never consented. That directly contradicted TimeEntry's
+/// own retention comment and the FLSA three-year payroll requirement.
+///
+/// Deliberately carries NO Venue foreign key and NO `venueId` field: the venue
+/// is gone by the time these rows matter, and a live tenant key would both
+/// break on cascade and pull this model into VENUE_SCOPED_MODELS, where the
+/// isolation extension would make it unreadable. `originVenueId` is a
+/// historical reference, not a tenant key — same reasoning as
+/// ObjectDeletionJob above.
+model RetainedTimeEntry {
+  id                String    @id @default(cuid())
+  originVenueId     String
+  originVenueName   String?
+  profileFullName   String?
+  profileEmail      String?
+  clockInAt         DateTime
+  clockOutAt        DateTime?
+  isOpen            Boolean
+  breaks            Json?
+  originCreatedAt   DateTime
+  retainedAt        DateTime  @default(now())
+
+  @@index([originVenueId])
+  @@index([retainedAt])
+}
+
 model ObjectDeletionJob {
   id          String    @id @default(cuid())
   objectKeys  String[]

@@ -142,7 +142,7 @@ export function VenueSwitcher() {
                   <Button
                     mode="contained-tonal"
                     compact
-                    disabled={isSwitching}
+                    disabled={switchingId !== null}
                     loading={isSwitching}
                     onPress={() => void handleSwitch(v)}
                     buttonColor={colors.primary}

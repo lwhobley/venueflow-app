@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { attestKey, generateAssertion, generateKey, isAppAttestAvailable } from '../modules/app-attest';
-import { apiRequest } from './api-client';
+import { ApiError, apiRequest } from './api-client';
 import { canonicalPayload } from './attestation-payload';
 import { useAuthStore } from './auth-store';
 
@@ -59,6 +59,18 @@ async function ensureRegisteredKey(forceNew = false): Promise<string> {
  * cannot attest keeps working instead of losing the ability to clock in. Once
  * the server enforces, it rejects the unattested punch with a clear message.
  */
+/**
+ * True only for errors that mean the stored key is no longer usable, which is
+ * the sole condition that justifies discarding it. Mirrors the server-side
+ * check in app/(tabs)/clock.tsx.
+ */
+function isKeyRejection(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  // 4xx that names the key; never 408 (timeout) or 5xx.
+  if (error.status === 408 || error.status >= 500) return false;
+  return /not registered for attestation|invalid key|unknown key/i.test(error.message);
+}
+
 export async function attestPayload(payload: unknown): Promise<PunchAttestation | null> {
   if (!isAppAttestAvailable()) return null;
   try {
@@ -66,9 +78,16 @@ export async function attestPayload(payload: unknown): Promise<PunchAttestation 
     const challenge = await requestChallenge();
     const assertion = await generateAssertion(keyId, canonicalPayload(payload, challenge));
     return { keyId, assertion, challenge };
-  } catch {
-    // If the cached key was invalidated or belongs to another account,
-    // clear the key and attempt re-enrolment once.
+  } catch (error) {
+    // Only re-enrol when the key itself is the problem. A transient failure —
+    // an offline fetch, a 408 timeout, a 5xx, or the missing-user throw above —
+    // used to land here too and destroy a Secure Enclave key on every failed
+    // punch. Apple rate-limits App Attest key generation per device, so a staff
+    // member on weak venue Wi-Fi could burn through the quota and end up unable
+    // to clock in at all once enforcement is switched on.
+    if (!isKeyRejection(error)) return null;
+    // The cached key was invalidated or belongs to another account: clear it
+    // and attempt re-enrolment once.
     try {
       await resetAttestationKey();
       const keyId = await ensureRegisteredKey(true);

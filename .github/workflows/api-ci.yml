@@ -134,6 +134,7 @@ jobs:
             Profile_userId_venueless_key
             ManagerGoal_venue_title_date_open_key
             Conversation_one_system_group_per_venue_key
+            Venue_code_idx
           )
           for database in venuetest venuetest_integration; do
             for index in "${required_indexes[@]}"; do

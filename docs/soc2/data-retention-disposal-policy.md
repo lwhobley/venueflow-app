@@ -40,8 +40,9 @@ This policy defines the data classification tiers, retention periods, and secure
 When a customer cancels their subscription or requests account deletion under GDPR/CCPA:
 1. **Verification**: Request must originate from the authenticated Venue Owner or verified account email.
 2. **Cascade Deletion**: A final owner can explicitly confirm tenant offboarding in the app; the API deletes all venue-owned models (profiles, shifts, time entries, floor plans, reservations) transactionally. Non-owner account deletion removes only that user's account and profile.
-3. **Media Purge**: Associated images and documents are written to a durable deletion outbox in the same transaction. The API attempts deletion immediately and retries failed AWS S3 deletes hourly until complete.
+3. **Media Purge**: On tenant offboarding, the venue's images and documents are written to a durable deletion outbox in the same transaction. The API attempts deletion immediately and retries failed AWS S3 deletes hourly, escalating a job for manual review after repeated failures rather than retrying indefinitely. Non-owner account deletion does not purge venue media: files uploaded into a venue are that venue's operational records and are removed when the venue is deleted.
 4. **Anonymization**: Timeclock or audit records retained for legal/tax purposes replace personal names and emails with synthetic identifiers (`deleted_user_[profile_id]`).
+5. **Wage-record retention**: Before a venue is deleted, its timeclock rows are copied to `RetainedTimeEntry`, which holds no foreign key to the venue and therefore survives the cascade. This preserves the FLSA-required three-year payroll history for *all* staff at that venue, not only the account being deleted.
 5. **Confirmation**: Written confirmation of data destruction is provided to the customer within 30 days.
 
 ---

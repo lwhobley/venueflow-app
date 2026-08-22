@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Snackbar, Text, TextInput } from 'react-native-paper';
@@ -66,12 +66,24 @@ export function MyShifts() {
 
   // Surfaces mutation errors (e.g. double-booking, claim races) as a toast
   // instead of an unhandled rejection, and confirms successful actions.
+  // react-native-paper's Button forwards `disabled` to the touchable but NOT
+  // `loading`, so a spinner alone never blocks a second press. A ref (not
+  // state) because the guard has to hold before the next render commits.
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+
   const run = async (action: () => Promise<unknown>, ok?: string) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     try {
       await action();
       if (ok) setToast(ok);
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   };
 
@@ -203,7 +215,7 @@ export function MyShifts() {
                 </View>
                 <Text style={{ color: colors.charcoal }}>{s.jobTitle} · {s.station}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void run(() => requestDropShift({ shiftId: s._id }), 'Drop request sent.')}>
+                  <Button compact mode="outlined" textColor={colors.danger} disabled={busy} onPress={() => void run(() => requestDropShift({ shiftId: s._id }), 'Drop request sent.')}>
                     Request to drop
                   </Button>
                   <Button compact mode={swapShiftId === s._id ? 'contained' : 'outlined'} buttonColor={swapShiftId === s._id ? colors.primary : undefined} textColor={swapShiftId === s._id ? '#fff' : colors.primary} onPress={() => setSwapShiftId(swapShiftId === s._id ? null : s._id)}>
@@ -265,8 +277,8 @@ export function MyShifts() {
               <View key={sw._id} style={{ padding: 10, borderRadius: 12, backgroundColor: accents[0].bg, gap: 6 }}>
                 <Text>{sw.requesterName} wants you to take {sw.requesterShift}{sw.targetShift ? ` in exchange for your ${sw.targetShift}` : ''}.</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: true }), 'Swap accepted — pending manager approval.')} accessibilityLabel="Accept swap">Accept</Button>
-                  <Button compact mode="text" textColor={colors.danger} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: false }), 'Swap declined.')} accessibilityLabel="Decline swap">Decline</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} disabled={busy} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: true }), 'Swap accepted — pending manager approval.')} accessibilityLabel="Accept swap">Accept</Button>
+                  <Button compact mode="text" textColor={colors.danger} disabled={busy} onPress={() => void run(() => respondToSwap({ swapId: sw._id, accept: false }), 'Swap declined.')} accessibilityLabel="Decline swap">Decline</Button>
                 </View>
               </View>
             ))}
@@ -340,7 +352,7 @@ export function MyShifts() {
                   {s.conflict ? <Chip compact style={{ backgroundColor: '#FDE7E9' }} textStyle={{ color: colors.danger }}>Approved unavailable-day request</Chip> : null}
                 </View>
                 <Text>{s.jobTitle} · {s.station}</Text>
-                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void run(() => claimOpenShift({ shiftId: s._id }), 'Shift picked up.')}>
+                <Button compact mode="contained" buttonColor={colors.primary} disabled={busy} onPress={() => void run(() => claimOpenShift({ shiftId: s._id }), 'Shift picked up.')}>
                   Pick up shift
                 </Button>
               </View>

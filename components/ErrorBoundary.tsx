@@ -4,6 +4,7 @@ import { Button, Text } from 'react-native-paper';
 import { router } from 'expo-router';
 import { colors, spacing, radius } from '../lib/theme';
 import { queryClient } from '../lib/query-client';
+import { reportFatalError } from '../lib/report-error';
 
 type Props = { children: ReactNode };
 type State = { error: Error | null; componentStack: string | null };
@@ -25,6 +26,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (typeof __DEV__ !== 'undefined' && __DEV__) console.error('[ErrorBoundary] caught:', error);
+    // Release builds previously swallowed every caught crash: no console, no
+    // telemetry. A whitescreen in production produced zero signal.
+    reportFatalError(error, errorInfo.componentStack ?? null);
     this.setState({ componentStack: errorInfo.componentStack ?? null });
   }
 

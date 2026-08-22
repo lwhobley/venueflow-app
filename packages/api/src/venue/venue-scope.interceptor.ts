@@ -6,7 +6,7 @@ import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
 import { bindAiUsageContext } from '../common/ai-usage-context';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
-import { runWithTenant } from '../prisma/tenant-context';
+import { runWithoutTenant, runWithTenant } from '../prisma/tenant-context';
 
 export type VenueScopedRequest = AuthenticatedRequest & {
   venueScope?: {
@@ -27,7 +27,15 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
     const skip = this.reflector.getAllAndOverride<boolean>(SKIP_VENUE_SCOPE_KEY, [context.getHandler(), context.getClass()]);
-    if (skip) return next.handle();
+    if (skip) {
+      // AuthGuard has already called enterTenant() — AsyncLocalStorage.enterWith,
+      // which persists for the rest of the request. Simply not binding more
+      // context here left the Prisma tenant extension active, so a route marked
+      // @SkipVenueScope() still had every query narrowed to one venue. That
+      // silently truncated the cross-venue reads these routes exist to perform
+      // (e.g. a manager of two venues seeing join requests for only one).
+      return runWithoutTenant(() => next.handle());
+    }
 
     const request = context.switchToHttp().getRequest<VenueScopedRequest>();
     if (request.venueScope) {

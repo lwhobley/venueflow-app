@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View, Modal } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, SegmentedButtons, Snackbar, Text, TextInput } from 'react-native-paper';
@@ -283,12 +283,24 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     setTimeout(() => setActionMsg(null), 2600);
   };
 
+  // react-native-paper's Button forwards `disabled` to the touchable but NOT
+  // `loading`, so a spinner alone never blocks a second press. A ref (not
+  // state) because the guard has to hold before the next render commits.
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+
   const safe = async (action: () => Promise<unknown>, ok?: string) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     try {
       await action();
       if (ok) flash(ok);
     } catch (e) {
       flash(e instanceof Error ? e.message : 'Action failed.');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   };
 
@@ -473,7 +485,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                 icon="send"
                 style={topButtonStyle}
                 labelStyle={{ fontSize: 12 }}
-                onPress={() => void safe(async () => {
+                disabled={busy} onPress={() => void safe(async () => {
                   const r = await publishSchedule({ venueId, weekStart: selectedWeekStart });
                   setStatus('Published');
                   flash(`Published and notified ${r.notified} staff.`);
@@ -644,7 +656,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             <View style={{ gap: spacing.md }}>
               <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TextInput dense label="Template name" value={templateName} onChangeText={setTemplateName} mode="outlined" style={{ flex: 1, minWidth: 200, backgroundColor: colors.surface }} />
-                <Button mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim(), weekStart: selectedWeekStart }); setTemplateName(''); }, 'Template saved.')}>
+                <Button mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim(), weekStart: selectedWeekStart }); setTemplateName(''); }, 'Template saved.')}>
                   Save current week
                 </Button>
               </View>
@@ -656,10 +668,10 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{template.name}</Text>
                       <Text style={{ color: colors.muted, fontSize: 12 }}>{template.shiftCount} open shifts</Text>
                     </View>
-                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false, weekStart: selectedWeekStart }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
+                    <Button compact mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false, weekStart: selectedWeekStart }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
                       Add
                     </Button>
-                    <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true, weekStart: selectedWeekStart }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
+                    <Button compact mode="contained" buttonColor={colors.primary} disabled={busy} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true, weekStart: selectedWeekStart }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
                       Replace
                     </Button>
                     <IconButton
@@ -667,7 +679,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       size={18}
                       iconColor={colors.danger}
                       accessibilityLabel={`Delete ${template.name} template`}
-                      onPress={() => void safe(() => deleteTemplate({ venueId, templateId: template._id }), 'Template deleted.')}
+                      disabled={busy} onPress={() => void safe(() => deleteTemplate({ venueId, templateId: template._id }), 'Template deleted.')}
                     />
                   </View>
                 ))}

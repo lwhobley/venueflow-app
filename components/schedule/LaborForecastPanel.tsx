@@ -193,6 +193,7 @@ function AiScheduleBuilder() {
   };
 
   const onCommit = async () => {
+    if (busy) return;
     if (proposal.length === 0) return;
     setBusy(true);
     setError(null);
