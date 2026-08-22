@@ -24,6 +24,7 @@
     "doctor": "expo-doctor",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:ui": "vitest run --config vitest.ui.config.ts",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -68,6 +69,7 @@
     "@types/react": "~19.2.18",
     "@vitest/coverage-v8": "^4.1.9",
     "expo-doctor": "1.20.1",
+    "test-renderer": "^1.2.0",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
   }

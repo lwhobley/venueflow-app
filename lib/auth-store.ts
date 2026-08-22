@@ -24,7 +24,7 @@ export type AuthState = SessionState & {
   setVenue: (venue: Venue) => void;
   setVenues: (venues: VenueSummary[]) => void;
   switchVenue: (venue: Venue) => void;
-  clearSession: () => void;
+  clearSession: () => Promise<void>;
 };
 
 const secureStorage = {
@@ -60,9 +60,10 @@ const createAuthStore = (set: any): AuthState => ({
   setHydrated: (hydrated: boolean) => set({ hydrated }),
   setSession: (session: { user: UserSummary; venue: Venue | null; venues?: VenueSummary[]; token?: string | null }) =>
     set((state: AuthState) => {
-      if (state.user && state.user.id !== session.user.id) {
-        void SecureStore.deleteItemAsync('venuewrangler.appattest.keyId').catch(() => {});
-      }
+      // Attestation cache records are account-scoped and are synchronously
+      // rejected by attestation.ts when user ids differ. Do not launch a
+      // fire-and-forget delete here: it could race a new account's enrolment
+      // and erase the newly stored key after registration completes.
       return {
         user: session.user,
         venue: session.venue,
@@ -78,15 +79,17 @@ const createAuthStore = (set: any): AuthState => ({
       venue,
       authEpoch: state.authEpoch + 1,
     })),
-  clearSession: () => {
-    void SecureStore.deleteItemAsync('venuewrangler.appattest.keyId').catch(() => {});
-    return set((state: AuthState) => ({
+  clearSession: async () => {
+    // Clear in-memory authorization synchronously, then let callers await the
+    // device-key removal before another account is established.
+    set((state: AuthState) => ({
       user: null,
       venue: null,
       venues: [],
       token: null,
       authEpoch: state.authEpoch + 1,
     }));
+    await SecureStore.deleteItemAsync('venuewrangler.appattest.keyId').catch(() => {});
   },
 });
 

@@ -27,7 +27,7 @@ After rollback, verify `/api/health`, `/api/v1/documents` (expect `401` without 
 
 The production database is Supabase project `dhgyezfkgbzzsuyrdpek`. It is currently on Supabase's **Free plan**, which does **not** include scheduled backups. Point-in-time recovery (PITR) is also unavailable until the project is upgraded to Pro and the PITR add-on is enabled. Upgrade before launch, then verify **Database → Backups** and perform a restore drill against a separate project before the first customer migration.
 
-Until an upgrade is possible, `.github/workflows/database-backup.yml` provides a nightly logical backup to S3 with SSE-S3 encryption. Configure these repository secrets before relying on it: `PRODUCTION_POOLER_DATABASE_URL` (Supavisor session-mode URL), `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`, `BACKUP_AWS_REGION`, and `BACKUP_S3_BUCKET`. The backup IAM identity must allow `s3:GetLifecycleConfiguration` on that bucket in addition to object upload/read verification; the workflow fails if its enabled `database-backups/` lifecycle rule is not exactly 30 days. Perform a restore drill before launch.
+Until an upgrade is possible, `.github/workflows/database-backup.yml` provides a nightly logical backup to S3 with SSE-S3 encryption and restores every dump into an isolated disposable database. Configure these repository secrets before relying on it: `PRODUCTION_POOLER_DATABASE_URL` (Supavisor session-mode URL), `RESTORE_DRILL_DATABASE_URL` (a non-production database whose name includes `restore`, `drill`, or `test`), `RESTORE_DRILL_DATABASE_FINGERPRINT` (the exact `hostname:port/database` approved for destructive restores), `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`, `BACKUP_AWS_REGION`, and `BACKUP_S3_BUCKET`. The backup IAM identity must allow `s3:GetLifecycleConfiguration` on that bucket in addition to object upload/read verification; the workflow fails if its enabled `database-backups/` lifecycle rule is not exactly 30 days, if the restore target differs from its fingerprint, or if the restore/integrity check fails.
 
 Never store a database password in this repository. For a restore, pause Cloud Run traffic, restore or clone the Supabase project, update `DATABASE_URL` as a new Cloud Run revision, run Prisma migrations, smoke-test, and then shift traffic back.
 
@@ -42,7 +42,7 @@ Managers can rotate a compromised or stale POS secret with `POST /api/v1/pos/con
 ## Release checklist
 
 1. Confirm GitHub Mobile CI and API CI are green.
-2. Confirm the Cloud Run revision has the production secret set and 100% traffic.
+2. Deploy through `.github/workflows/deploy-api.yml`; its production gate requires verified backups/restore, secondary alerting, billing configuration, and a successful migration job before traffic changes.
 3. Confirm Stripe live checkout creates a subscription for an authenticated venue.
 4. Confirm the alert notification channel is verified.
 5. Record the current revision ID before every deploy for rollback.

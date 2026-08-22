@@ -619,6 +619,7 @@ model Message {
   venue          Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
   shift          ScheduleShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
   swap           ShiftSwap?     @relation(fields: [swapId], references: [id], onDelete: SetNull)
+  chatImage      ChatImage?
 
   @@index([conversationId, createdAt])
   @@index([senderId])
@@ -651,10 +652,33 @@ model ChatImage {
   mimeType   String
   s3Key      String
   uploadedBy String?
+  messageId  String?  @unique
+  // Set while an orphan cleanup owns this row. Message attachment only wins
+  // while this remains null, preventing cleanup/send races.
+  purgeStartedAt DateTime?
   createdAt  DateTime @default(now())
   venue      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  message    Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([venueId])
+  @@index([messageId, createdAt])
+  @@index([purgeStartedAt])
+}
+
+/// Durable outbox for S3 deletion. Rows intentionally have no Venue FK so a
+/// venue can be deleted transactionally while object deletion retries safely.
+model ObjectDeletionJob {
+  id          String    @id @default(cuid())
+  objectKeys  String[]
+  status      String    @default("pending")
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([completedAt])
 }
 
 // Private venue document library. Object bytes stay in S3; this row carries

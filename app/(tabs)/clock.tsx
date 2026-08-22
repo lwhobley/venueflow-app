@@ -9,8 +9,8 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { formatTime, errorMessage } from '../../lib/format';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
-import { appApi, useApiMutation, useApiQuery, type ApiClockBreak } from '../../lib/api-client';
-import { attestPayload } from '../../lib/attestation';
+import { ApiError, appApi, useApiMutation, useApiQuery, type ApiClockBreak } from '../../lib/api-client';
+import { attestPayload, resetAttestationKey } from '../../lib/attestation';
 import { useI18n } from '../../lib/i18n';
 
 type ActiveClockEntry = {
@@ -124,13 +124,24 @@ export default function ClockScreen() {
     setBusy(true);
     try {
       const punch = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
-      // Prove this punch came from a genuine build on real hardware. Returns
-      // null on devices that cannot attest; the server still accepts those
-      // until ATTESTATION_ENFORCED is turned on.
-      const attestation = await attestPayload(punch);
-      const args = { ...punch, ...(attestation ? { attestation } : {}) };
-      if (isClockedIn) await clockOut.mutateAsync(args);
-      else await clockIn.mutateAsync(args);
+      const submit = async () => {
+        // Prove this punch came from a genuine build on real hardware. Returns
+        // null on devices that cannot attest; the server still accepts those
+        // until ATTESTATION_ENFORCED is turned on.
+        const attestation = await attestPayload(punch);
+        const args = { ...punch, ...(attestation ? { attestation } : {}) };
+        if (isClockedIn) await clockOut.mutateAsync(args);
+        else await clockIn.mutateAsync(args);
+      };
+      try {
+        await submit();
+      } catch (error) {
+        // A shared-device account switch can invalidate a previously cached
+        // App Attest key. Re-enrol and retry exactly once on that server signal.
+        if (!(error instanceof ApiError) || !/not registered for attestation/i.test(error.message)) throw error;
+        await resetAttestationKey();
+        await submit();
+      }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert(t('clock.punchFailedTitle'), errorMessage(error, t('clock.punchFailedDefault')));

@@ -299,7 +299,7 @@ export class AppBillingController {
   private async verifyRevenueCatEntitlement(venueId: string, productId: string, entitlementId?: string) {
     const apiKey = this.config.get<string>('REVENUECAT_API_KEY') ?? this.config.get<string>('REVENUECAT_SECRET_API_KEY');
     if (!apiKey) {
-      return null;
+      throw new ServiceUnavailableException('Apple subscription verification is not configured. Please contact support.');
     }
 
     let response: Response | undefined;

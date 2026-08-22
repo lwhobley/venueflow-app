@@ -1,0 +1,92 @@
+name: Deploy API to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_uri:
+        description: Immutable Artifact Registry image URI including @sha256 digest
+        required: true
+        type: string
+      backups_and_restore_verified:
+        description: Managed/off-site backups are healthy and the latest restore drill passed
+        required: true
+        type: boolean
+      secondary_alerting_verified:
+        description: A staffed secondary production alert destination has been tested
+        required: true
+        type: boolean
+      billing_secrets_verified:
+        description: RevenueCat/Stripe production secrets and products were verified
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-api-deploy
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: venuewrangler
+  GCP_REGION: us-east1
+  CLOUD_RUN_SERVICE: venue-wrangler-api
+  CLOUD_RUN_MIGRATION_JOB: venue-wrangler-api-migrate
+
+jobs:
+  migrate-and-deploy:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an immutable image digest
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$IMAGE_URI" == *@sha256:* ]] || {
+            echo "::error::image_uri must include an immutable @sha256 digest"
+            exit 1
+          }
+          [[ "${{ inputs.backups_and_restore_verified }}" == "true" ]] || { echo "::error::Backups and restore drill must be verified"; exit 1; }
+          [[ "${{ inputs.secondary_alerting_verified }}" == "true" ]] || { echo "::error::Secondary alerting must be verified"; exit 1; }
+          [[ "${{ inputs.billing_secrets_verified }}" == "true" ]] || { echo "::error::Billing configuration must be verified"; exit 1; }
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Apply migrations in the single-run release job
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+        run: |
+          set -Eeuo pipefail
+          gcloud run jobs describe "$CLOUD_RUN_MIGRATION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null
+          gcloud run jobs update "$CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$IMAGE_URI" \
+            --command npm \
+            --args run,release,-w,@venue-wrangler/api \
+            --quiet
+          gcloud run jobs execute "$CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait
+
+      - name: Deploy only after migrations succeed
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+        run: |
+          set -Eeuo pipefail
+          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$IMAGE_URI" \
+            --quiet
+
+      - name: Verify the production health endpoint
+        run: curl --fail --retry 8 --retry-delay 5 --retry-all-errors https://venue-wrangler-api-922889404273.us-east1.run.app/api/health

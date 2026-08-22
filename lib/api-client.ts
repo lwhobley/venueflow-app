@@ -199,7 +199,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   if (!response.ok) {
     if (response.status === 401 && token) {
-      useAuthStore.getState().clearSession();
+      void useAuthStore.getState().clearSession();
     }
     const errorText = await response.text().catch(() => '');
     let errorBody: { message?: string | string[] } | null = null;
@@ -327,7 +327,8 @@ export const appApi = {
     apiRequest('/v1/staff-requests', { method: 'POST', body }),
   updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
     apiRequest<ApiVenue>('/v1/app/venue', { method: 'PATCH', body }),
-  deleteMyAccount: () => apiRequest('/v1/app/me', { method: 'DELETE' }),
+  deleteMyAccount: (deleteOwnedVenues = false) =>
+    apiRequest('/v1/app/me', { method: 'DELETE', body: { deleteOwnedVenues } }),
 
   // ─── Workforce ───────────────────────────────────────────────────────────────
   inviteCheck: (body: { email?: string; phone?: string }) =>

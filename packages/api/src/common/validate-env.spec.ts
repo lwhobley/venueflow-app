@@ -3,7 +3,6 @@ import { validateEnv } from './validate-env';
 
 const REQUIRED = {
   DATABASE_URL: 'postgres://localhost/test',
-  DATABASE_DIRECT_URL: 'postgres://localhost/test',
   JWT_SECRET: 'secret',
   AWS_ACCESS_KEY_ID: 'key',
   AWS_SECRET_ACCESS_KEY: 'secret',
@@ -18,15 +17,12 @@ describe('validateEnv', () => {
 
   it('throws naming every missing required var', () => {
     expect(() => validateEnv({ NODE_ENV: 'development' })).toThrow(
-      /DATABASE_URL, DATABASE_DIRECT_URL, JWT_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET/,
+      /DATABASE_URL, JWT_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET/,
     );
   });
 
-  it('throws when DATABASE_DIRECT_URL is missing', () => {
-    const { DATABASE_DIRECT_URL: _omitted, ...withoutDirectUrl } = REQUIRED;
-    expect(() => validateEnv({ ...withoutDirectUrl, NODE_ENV: 'development' })).toThrow(
-      /DATABASE_DIRECT_URL/,
-    );
+  it('does not require the migration-only direct URL in a serving process', () => {
+    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).not.toThrow();
   });
 
   it('throws when a required var is present but blank', () => {
@@ -38,6 +34,7 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).not.toThrow();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('STRIPE_WEBHOOK_SECRET'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('REVENUECAT_WEBHOOK_SECRET'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('REVENUECAT_API_KEY or REVENUECAT_SECRET_API_KEY'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('RESEND_API_KEY or EMAIL_API_KEY'));
     warnSpy.mockRestore();
   });
@@ -51,9 +48,22 @@ describe('validateEnv', () => {
 
   it('does not warn in production when the fallback of a pair is set', () => {
     const warnSpy = vi.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation(() => {});
-    validateEnv({ ...REQUIRED, NODE_ENV: 'production', STRIPE_WEBHOOK_SECRET: 'x', REVENUECAT_WEBHOOK_SECRET: 'x', EMAIL_API_KEY: 'x' });
+    validateEnv({ ...REQUIRED, NODE_ENV: 'production', STRIPE_WEBHOOK_SECRET: 'x', REVENUECAT_WEBHOOK_SECRET: 'x', REVENUECAT_API_KEY: 'x', EMAIL_API_KEY: 'x' });
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  it('fails fast when production billing is enabled without verification credentials', () => {
+    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production', BILLING_ENABLED: 'true' })).toThrow(
+      /REVENUECAT_WEBHOOK_SECRET, REVENUECAT_API_KEY/,
+    );
+    expect(() => validateEnv({
+      ...REQUIRED,
+      NODE_ENV: 'production',
+      BILLING_ENABLED: 'true',
+      REVENUECAT_WEBHOOK_SECRET: 'webhook',
+      REVENUECAT_API_KEY: 'secret',
+    })).not.toThrow();
   });
 
   it('throws if ATTESTATION_ENFORCED is true but APP_ATTEST_TEAM_ID is missing', () => {

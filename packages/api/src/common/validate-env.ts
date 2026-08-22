@@ -21,18 +21,17 @@ const logger = new Logger('Bootstrap');
  * operator sees the gap immediately instead of discovering it when a webhook
  * starts bouncing.
  */
-// DATABASE_DIRECT_URL is required because schema.prisma's datasource declares
-// `directUrl = env("DATABASE_DIRECT_URL")`. Prisma resolves every env() in that
-// block for essentially all CLI operations, so a missing value surfaces as an
-// opaque `P1012: Environment variable not found` from Prisma rather than the
-// clear boot-time message this function exists to produce.
-const REQUIRED_ALWAYS = ['DATABASE_URL', 'DATABASE_DIRECT_URL', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'] as const;
+// Serving instances use the pooler URL. DATABASE_DIRECT_URL belongs on the
+// single-run migration job; requiring that higher-privilege credential in
+// every Cloud Run instance would unnecessarily increase its blast radius.
+const REQUIRED_ALWAYS = ['DATABASE_URL', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'] as const;
 
 // Each entry is a group of env var names where at least one must be set —
 // mirrors the fallback pairs the services themselves already accept.
 const RECOMMENDED_IN_PRODUCTION: ReadonlyArray<readonly string[]> = [
   ['STRIPE_WEBHOOK_SECRET'],
   ['REVENUECAT_WEBHOOK_SECRET'],
+  ['REVENUECAT_API_KEY', 'REVENUECAT_SECRET_API_KEY'],
   ['RESEND_API_KEY', 'EMAIL_API_KEY'],
 ];
 
@@ -47,6 +46,15 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   }
 
   if (config.NODE_ENV === 'production') {
+    if (config.BILLING_ENABLED === 'true') {
+      const missingBilling = [
+        !String(config.REVENUECAT_WEBHOOK_SECRET ?? '').trim() ? 'REVENUECAT_WEBHOOK_SECRET' : null,
+        !String(config.REVENUECAT_API_KEY ?? config.REVENUECAT_SECRET_API_KEY ?? '').trim() ? 'REVENUECAT_API_KEY' : null,
+      ].filter((value): value is string => Boolean(value));
+      if (missingBilling.length > 0) {
+        throw new Error(`Billing is enabled but required environment variable(s) are missing: ${missingBilling.join(', ')}`);
+      }
+    }
     for (const group of RECOMMENDED_IN_PRODUCTION) {
       const isSet = group.some((key) => String(config[key] ?? '').trim());
       if (!isSet) {

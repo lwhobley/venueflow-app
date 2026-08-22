@@ -1,7 +1,68 @@
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
+import { resolve } from 'path';
 
 let containerCleanup: (() => Promise<void>) | null = null;
+
+type TestDatabaseSafetyEnv = Partial<Pick<NodeJS.ProcessEnv,
+  | 'NODE_ENV'
+  | 'DATABASE_URL'
+  | 'DATABASE_DIRECT_URL'
+  | 'ALLOW_REMOTE_TEST_DB_RESET'
+  | 'TEST_DATABASE_FINGERPRINT'
+>>;
+
+function databaseIdentity(rawUrl: string): string {
+  const parsed = new URL(rawUrl);
+  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+  return `${parsed.hostname.toLowerCase()}:${parsed.port || '5432'}/${database}`;
+}
+
+/**
+ * Integration setup applies migrations and may therefore change the target
+ * schema. Keep that capability constrained to an unmistakably disposable DB.
+ * Remote branches require an exact host/port/database fingerprint in addition
+ * to an explicit opt-in so a copied production URL cannot be reset by typo.
+ */
+export function assertDisposableTestDatabase(url: string, env: TestDatabaseSafetyEnv = process.env): void {
+  if (env.NODE_ENV === 'production') {
+    throw new Error('Refusing integration database setup while NODE_ENV=production.');
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('TEST_DATABASE_URL must be a valid PostgreSQL URL.');
+  }
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
+    throw new Error('TEST_DATABASE_URL must use the postgres or postgresql protocol.');
+  }
+
+  const targetIdentity = databaseIdentity(url);
+  for (const [name, runtimeUrl] of [
+    ['DATABASE_URL', env.DATABASE_URL],
+    ['DATABASE_DIRECT_URL', env.DATABASE_DIRECT_URL],
+  ] as const) {
+    if (runtimeUrl && databaseIdentity(runtimeUrl) === targetIdentity) {
+      throw new Error(`Refusing integration setup: TEST_DATABASE_URL matches ${name}.`);
+    }
+  }
+
+  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+  if (!/(^|[_-])(test|integration)($|[_-])/i.test(database)) {
+    throw new Error(`Refusing integration setup for database without a test marker: ${database || '(empty)'}.`);
+  }
+
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname.toLowerCase());
+  if (isLocal) return;
+  if (env.ALLOW_REMOTE_TEST_DB_RESET !== 'true') {
+    throw new Error('Remote integration databases require ALLOW_REMOTE_TEST_DB_RESET=true.');
+  }
+  if (!env.TEST_DATABASE_FINGERPRINT || env.TEST_DATABASE_FINGERPRINT !== targetIdentity) {
+    throw new Error(`Remote integration database fingerprint must exactly equal ${targetIdentity}.`);
+  }
+}
 
 /**
  * Provision a test Postgres database. Tries, in order:
@@ -25,15 +86,14 @@ export async function setupTestDb(): Promise<{
     containerCleanup = pg.stop;
   }
 
+  assertDisposableTestDatabase(url);
+
   const prisma = new PrismaClient({ datasources: { db: { url } } });
-  // schema.prisma declares `directUrl`, and `db push` (like all of Prisma
-  // Migrate) prefers it over `url`. Both must point at this test database:
-  // overriding only DATABASE_URL would push the schema to whatever
-  // DATABASE_DIRECT_URL happens to hold — in CI a *different* database than
-  // the client below connects to, leaving every table missing.
-  execSync('npx prisma db push --skip-generate --accept-data-loss', {
+  // Use the production migration history, not `db push`: partial indexes,
+  // check constraints, RLS, and privilege changes live only in migration SQL.
+  execSync('npx prisma migrate deploy --schema prisma/schema.prisma', {
     env: { ...process.env, DATABASE_URL: url, DATABASE_DIRECT_URL: url },
-    cwd: process.cwd(),
+    cwd: resolve(__dirname, '../..'),
     stdio: 'pipe',
   });
   await prisma.$connect();

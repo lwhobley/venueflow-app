@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, Logger, NotFoundException, Optional, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
@@ -24,6 +24,7 @@ import { runWithoutTenant } from '../../prisma/tenant-context';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
 import { ProfileService } from './profile.service';
 import { syncTeamMemberCount } from '../../common/team-sync';
+import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
@@ -177,6 +178,12 @@ class SwitchVenueDto {
   venueId!: string;
 }
 
+class DeleteAccountDto {
+  @IsBoolean()
+  @IsOptional()
+  deleteOwnedVenues?: boolean;
+}
+
 function planForStaffRange(range: string) {
   void range;
   return { planId: FLAT_PLAN_ID, priceCents: FLAT_PLAN_PRICE_CENTS };
@@ -184,10 +191,13 @@ function planForStaffRange(range: string) {
 
 @Controller('v1/app')
 export class AppController {
+  private readonly logger = new Logger(AppController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly profiles: ProfileService,
+    @Optional() private readonly mediaCleanup?: MediaCleanupService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -1107,8 +1117,8 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @Delete('me')
-  async deleteMyAccount(@CurrentUser() user: AuthUser) {
-    const deletedAccount = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
+  async deleteMyAccount(@CurrentUser() user: AuthUser, @Body() body: DeleteAccountDto = {}) {
+    const deletion = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
       const [account, profiles] = await Promise.all([
         tx.user.findUnique({ where: { id: user.sub }, select: { email: true } }),
         tx.profile.findMany({
@@ -1122,6 +1132,7 @@ export class AppController {
       const venueIds = Array.from(new Set(
         profiles.map((profile) => profile.venueId).filter((id): id is string => Boolean(id)),
       )).sort();
+      const venuesToDelete: string[] = [];
       for (const venueId of venueIds) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${venueId}`}))`;
       }
@@ -1133,8 +1144,40 @@ export class AppController {
           where: { venueId, role: { in: ['owner', 'admin'] }, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
         });
         if (ownerAdminCount <= 1) {
-          throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
+          if (!body.deleteOwnedVenues) {
+            throw new ConflictException('Transfer venue ownership or confirm deletion of the owned venue before deleting this account');
+          }
+          if (profile.role !== 'owner') {
+            throw new ForbiddenException('Only a venue owner can delete the venue; transfer ownership before deleting this account');
+          }
+          venuesToDelete.push(venueId);
         }
+      }
+
+      let mediaJobId: string | null = null;
+      if (venuesToDelete.length > 0) {
+        const [chatImages, documents, checklistPhotos] = await Promise.all([
+          tx.chatImage.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
+          tx.venueDocument.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
+          tx.checklistCompletion.findMany({
+            where: { venueId: { in: venuesToDelete }, photoKey: { not: null } },
+            select: { photoKey: true },
+          }),
+        ]);
+        const objectKeys = Array.from(new Set([
+          ...chatImages.map((row) => row.s3Key),
+          ...documents.map((row) => row.s3Key),
+          ...checklistPhotos.map((row) => row.photoKey).filter((key): key is string => Boolean(key)),
+        ]));
+        if (objectKeys.length > 0) {
+          const job = await tx.objectDeletionJob.create({ data: { objectKeys }, select: { id: true } });
+          mediaJobId = job.id;
+        }
+        // Profile.venue uses SetNull because profiles can temporarily be
+        // venueless during onboarding. Tenant offboarding is different: remove
+        // every venue profile explicitly before the Venue cascade.
+        await tx.profile.deleteMany({ where: { venueId: { in: venuesToDelete } } });
+        await tx.venue.deleteMany({ where: { id: { in: venuesToDelete } } });
       }
 
       const profileIds = profiles.map((profile) => profile.id);
@@ -1144,7 +1187,7 @@ export class AppController {
         for (const profile of profiles) {
           await tx.timeEntry.updateMany({
             where: { profileId: profile.id },
-            data: { profileFullName: profile.fullName, isOpen: false },
+            data: { profileFullName: `deleted_user_${profile.id}`, isOpen: false },
           });
         }
         await tx.scheduleShift.updateMany({ where: { profileId: { in: profileIds } }, data: { profileId: null, status: 'open' } });
@@ -1153,19 +1196,31 @@ export class AppController {
       await tx.authAccount.deleteMany({ where: { userId: user.sub } });
       if (profileIds.length) await tx.profile.deleteMany({ where: { id: { in: profileIds } } });
       await tx.user.deleteMany({ where: { id: user.sub } });
-      for (const venueId of venueIds) await syncTeamMemberCount(tx, venueId);
+      for (const venueId of venueIds.filter((id) => !venuesToDelete.includes(id))) await syncTeamMemberCount(tx, venueId);
 
       const primary = profiles[0];
-      return { email: account?.email ?? primary?.email ?? user.email, name: primary?.fullName ?? user.name ?? 'there' };
+      return {
+        email: account?.email ?? primary?.email ?? user.email,
+        name: primary?.fullName ?? user.name ?? 'there',
+        mediaJobId,
+        deletedVenueCount: venuesToDelete.length,
+      };
     }));
-    if (deletedAccount?.email) {
+    if (deletion?.mediaJobId && this.mediaCleanup) {
+      void this.mediaCleanup.processJob(deletion.mediaJobId).catch((error) => {
+        this.logger.error(`Initial media purge failed for deletion job ${deletion.mediaJobId}`, error instanceof Error ? error.stack : String(error));
+      });
+    }
+    if (deletion?.email) {
       void this.email.send({
-        to: deletedAccount.email,
+        to: deletion.email,
         subject: 'Your Venue Wrangler Account Has Been Deleted',
         text:
-          `Hi ${deletedAccount.name},\n\n` +
+          `Hi ${deletion.name},\n\n` +
           `Your Venue Wrangler account has been successfully deleted.\n\n` +
-          `Please note that any retained timeclock records remain available to the venue as employer wage and compliance records in accordance with federal and local regulations.\n\n` +
+          (deletion.deletedVenueCount > 0
+            ? `${deletion.deletedVenueCount} owned venue${deletion.deletedVenueCount === 1 ? '' : 's'} and associated operational data were also deleted. Media deletion is processed by a durable purge queue.\n\n`
+            : `Any legally retained timeclock records have been de-identified and remain available to the venue only for wage and compliance purposes.\n\n`) +
           `Thank you for using Venue Wrangler.\n\n` +
           `Questions? support@venuewrangler.com\n\n` +
           `— The Venue Wrangler Team`,

@@ -3,12 +3,13 @@ import { View, ScrollView } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { router } from 'expo-router';
 import { colors, spacing, radius } from '../lib/theme';
+import { queryClient } from '../lib/query-client';
 
 type Props = { children: ReactNode };
 type State = { error: Error | null; componentStack: string | null };
 
-// App-wide error boundary. A thrown error during render (e.g. a failing
-// A failed async data hook would otherwise unmount the whole tree, which is a hard
+// App-wide error boundary. A failed async data hook would otherwise unmount the
+// whole tree, which is a hard
 // crash in a release build. This catches it and shows a recoverable screen
 // instead, so a single screen's data error never takes down the app.
 export function ScreenErrorBoundary({ children }: { children: ReactNode }) {
@@ -28,6 +29,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   private reset = (goHome: boolean) => {
+    void queryClient.resetQueries({
+      predicate: (query) => query.state.status === 'error',
+    });
     this.setState({ error: null, componentStack: null });
     if (goHome) {
       try {

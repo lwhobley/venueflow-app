@@ -31,7 +31,7 @@ export default function ProfileScreen() {
     try {
       await signOut();
     } finally {
-      clearSession();
+      await clearSession();
       router.replace('/(auth)/welcome');
     }
   };
@@ -47,8 +47,10 @@ export default function ProfileScreen() {
   const onDeleteAccount = async () => {
     setDeleting(true);
     try {
-      await deleteAccount({});
-      clearSession();
+      // The API uses this explicit confirmation only when this account is the
+      // final owner of a venue; otherwise it performs personal deletion only.
+      await deleteAccount({ deleteOwnedVenues: true });
+      await clearSession();
       router.replace('/(auth)/welcome');
     } catch (e) {
       Alert.alert(t('profile.deleteError.title'), e instanceof Error ? e.message : t('profile.deleteError.default'));
@@ -118,6 +120,11 @@ export default function ProfileScreen() {
               <Text style={{ color: colors.danger, fontWeight: '700' }}>
                 {t('profile.accountDeletion.confirmWarning')}
               </Text>
+              {serverRole === 'owner' ? (
+                <Text style={{ color: colors.danger }}>
+                  {t('profile.accountDeletion.ownerWarning')}
+                </Text>
+              ) : null}
               <Button mode="contained" buttonColor={colors.danger} icon="delete-forever-outline" loading={deleting} disabled={deleting} onPress={() => void onDeleteAccount()}>
                 {t('profile.accountDeletion.confirmButton')}
               </Button>

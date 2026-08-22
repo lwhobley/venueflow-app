@@ -2,10 +2,12 @@ import * as SecureStore from 'expo-secure-store';
 import { attestKey, generateAssertion, generateKey, isAppAttestAvailable } from '../modules/app-attest';
 import { apiRequest } from './api-client';
 import { canonicalPayload } from './attestation-payload';
+import { useAuthStore } from './auth-store';
 
 export { canonicalPayload };
 
 const KEY_ID_STORE_KEY = 'venuewrangler.appattest.keyId';
+type StoredAttestationKey = { userId: string; keyId: string };
 
 export type PunchAttestation = { keyId: string; assertion: string; challenge: string };
 
@@ -21,9 +23,20 @@ async function requestChallenge(): Promise<string> {
  * Idempotent: the key id is cached in SecureStore after the first enrolment.
  */
 async function ensureRegisteredKey(forceNew = false): Promise<string> {
+  const userId = useAuthStore.getState().user?.id;
+  if (!userId) throw new Error('An authenticated user is required for device attestation.');
   if (!forceNew) {
     const cached = await SecureStore.getItemAsync(KEY_ID_STORE_KEY);
-    if (cached) return cached;
+    if (cached) {
+      try {
+        const stored = JSON.parse(cached) as StoredAttestationKey;
+        if (stored.userId === userId && stored.keyId) return stored.keyId;
+      } catch {
+        // Legacy versions stored the bare key id. It cannot be safely tied to
+        // the current account, so replace it instead of risking cross-account use.
+      }
+      await resetAttestationKey();
+    }
   }
 
   const keyId = await generateKey();
@@ -33,7 +46,7 @@ async function ensureRegisteredKey(forceNew = false): Promise<string> {
     method: 'POST',
     body: { keyId, attestation, challenge },
   });
-  await SecureStore.setItemAsync(KEY_ID_STORE_KEY, keyId);
+  await SecureStore.setItemAsync(KEY_ID_STORE_KEY, JSON.stringify({ userId, keyId } satisfies StoredAttestationKey));
   return keyId;
 }
 

@@ -19,6 +19,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
       BACKUP_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+      RESTORE_DRILL_DATABASE_URL: ${{ secrets.RESTORE_DRILL_DATABASE_URL }}
+      RESTORE_DRILL_DATABASE_FINGERPRINT: ${{ secrets.RESTORE_DRILL_DATABASE_FINGERPRINT }}
       BACKUP_RETENTION_DAYS: "30"
     steps:
       - name: Install backup tools
@@ -40,6 +42,27 @@ jobs:
           : "${AWS_SECRET_ACCESS_KEY:?BACKUP_AWS_SECRET_ACCESS_KEY is not configured}"
           : "${AWS_DEFAULT_REGION:?BACKUP_AWS_REGION is not configured}"
           : "${BACKUP_BUCKET:?BACKUP_S3_BUCKET is not configured}"
+          : "${RESTORE_DRILL_DATABASE_URL:?RESTORE_DRILL_DATABASE_URL is not configured}"
+          : "${RESTORE_DRILL_DATABASE_FINGERPRINT:?RESTORE_DRILL_DATABASE_FINGERPRINT is not configured}"
+          [[ "$RESTORE_DRILL_DATABASE_URL" != "$DATABASE_URL" ]] || {
+            echo "::error::Restore drill target must never equal production DATABASE_URL"
+            exit 1
+          }
+          restore_database="$(python3 -c 'import os,urllib.parse; print(urllib.parse.urlparse(os.environ["RESTORE_DRILL_DATABASE_URL"]).path.lstrip("/"))')"
+          restore_fingerprint="$(python3 -c 'import os,urllib.parse; u=urllib.parse.urlparse(os.environ["RESTORE_DRILL_DATABASE_URL"]); print(f"{u.hostname}:{u.port or 5432}/{u.path.lstrip(chr(47))}")')"
+          production_fingerprint="$(python3 -c 'import os,urllib.parse; u=urllib.parse.urlparse(os.environ["DATABASE_URL"]); print(f"{u.hostname}:{u.port or 5432}/{u.path.lstrip(chr(47))}")')"
+          [[ "$restore_fingerprint" == "$RESTORE_DRILL_DATABASE_FINGERPRINT" ]] || {
+            echo "::error::Restore target fingerprint does not match the approved disposable database"
+            exit 1
+          }
+          [[ "$restore_fingerprint" != "$production_fingerprint" ]] || {
+            echo "::error::Restore target resolves to the production database"
+            exit 1
+          }
+          [[ "$restore_database" =~ (test|restore|drill) ]] || {
+            echo "::error::Restore target database name must contain test, restore, or drill"
+            exit 1
+          }
 
           timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
           dump="/tmp/venue-wrangler-${timestamp}.dump"
@@ -54,6 +77,17 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" --volume /tmp:/backup \
             postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
             pg_restore --list "/backup/$(basename "$dump")" >/dev/null
+          # Prove recoverability, not merely archive readability. This target is
+          # a dedicated disposable database enforced by the checks above.
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            --volume /tmp:/backup \
+            postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+            pg_restore --clean --if-exists --no-owner --no-acl \
+            --dbname "$RESTORE_DRILL_DATABASE_URL" "/backup/$(basename "$dump")"
+          docker run --rm --network host \
+            postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+            psql "$RESTORE_DRILL_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc \
+            'SELECT COUNT(*) > 0 FROM "_prisma_migrations" WHERE finished_at IS NOT NULL' | grep -qx t
           gzip --best "$dump"
           gzip --test "$archive"
           aws s3 cp "$archive" "s3://${BACKUP_BUCKET}/database-backups/$(basename "$archive")" \

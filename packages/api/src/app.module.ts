@@ -45,6 +45,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { WranglerOperatorController } from './modules/operations/wrangler/wrangler-operator.controller';
 import { WranglerOperatorService } from './modules/operations/wrangler/wrangler-operator.service';
 import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-wrangler-operator.service';
+import { MediaCleanupModule } from './modules/media-cleanup/media-cleanup.module';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     IntegrationsModule,
     WorkforceModule,
     DocumentsModule,
+    MediaCleanupModule,
   ],
   controllers: [
     HealthController,

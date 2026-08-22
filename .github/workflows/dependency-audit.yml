@@ -49,6 +49,11 @@ jobs:
           # deepmerge-ts requirement. Any OTHER high/critical advisory in the
           # production graph fails this gate.
           ALLOWED='["GHSA-ggr8-5vv4-36mx"]'
+          EXCEPTION_REVIEW_BY='2026-09-21'
+          if [[ "$(date -u +%F)" > "$EXCEPTION_REVIEW_BY" ]]; then
+            echo "::error::Dependency exception review expired on ${EXCEPTION_REVIEW_BY}"
+            exit 1
+          fi
           npm audit --omit=dev --workspace=@venue-wrangler/api --audit-level=high --json > audit.json || true
           unexpected="$(jq -r --argjson allowed "$ALLOWED" '
             [.vulnerabilities // {} | to_entries[] | .value
@@ -100,6 +105,11 @@ jobs:
           # Any OTHER high/critical advisory in the production graph fails
           # this gate.
           ALLOWED='["GHSA-w3rx-r6r6-pgpr","GHSA-5p2g-fcmc-qvqq","GHSA-ggr8-5vv4-36mx"]'
+          EXCEPTION_REVIEW_BY='2026-09-21'
+          if [[ "$(date -u +%F)" > "$EXCEPTION_REVIEW_BY" ]]; then
+            echo "::error::Dependency exception review expired on ${EXCEPTION_REVIEW_BY}"
+            exit 1
+          fi
           npm audit --omit=dev --audit-level=high --json > audit.json || true
           unexpected="$(jq -r --argjson allowed "$ALLOWED" '
             [.vulnerabilities // {} | to_entries[] | .value

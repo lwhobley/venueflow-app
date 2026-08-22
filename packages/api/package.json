@@ -12,6 +12,7 @@
     "start:dev": "node scripts/assert-database-target.mjs && nest start --watch",
     "start:prod": "node scripts/assert-database-target.mjs && node dist/main.js",
     "release": "node scripts/assert-database-target.mjs && prisma migrate deploy",
+    "verify:schema": "node scripts/assert-database-target.mjs && node scripts/assert-migrations-current.mjs",
     "test": "vitest run",
     "test:integration": "vitest run --config ../../vitest.integration.config.ts",
     "lint": "prisma generate && tsc --noEmit",

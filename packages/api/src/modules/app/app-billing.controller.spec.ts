@@ -324,21 +324,21 @@ describe('AppBillingController', () => {
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);
       profiles.getProfile.mockResolvedValue(null);
 
-      await expect(controller.syncAppleSubscription(user, { productId: 'com.venuewrangler.annual' } as any)).resolves.toBeNull();
+      await expect(controller.syncAppleSubscription(user, { productId: 'com.venuewrangler.annual' } as any)).rejects.toThrow(
+        'Apple subscription verification is not configured',
+      );
     });
 
-    it('no-ops (returns current billing, does not grant access) when REVENUECAT_API_KEY is not configured', async () => {
+    it('fails explicitly when REVENUECAT_API_KEY is not configured', async () => {
       const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: undefined });
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);
       profiles.getProfile.mockResolvedValue(null);
       const fetchSpy = vi.fn();
       vi.stubGlobal('fetch', fetchSpy);
 
-      const result = await controller.syncAppleSubscription(user, allowedBody as any);
-
+      await expect(controller.syncAppleSubscription(user, allowedBody as any)).rejects.toThrow(ServiceUnavailableException);
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(prisma.$transaction).not.toHaveBeenCalled();
-      expect(result).toBeNull();
     });
 
     it('throws when the RevenueCat lookup itself fails', async () => {
@@ -519,7 +519,7 @@ describe('AppBillingController', () => {
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);
       profiles.getProfile.mockResolvedValue(null);
 
-      await controller.syncAppleSubscription(user, allowedBody as any);
+      await expect(controller.syncAppleSubscription(user, allowedBody as any)).rejects.toThrow(ServiceUnavailableException);
 
       expect(assertWithinSharedRateLimit).toHaveBeenCalledWith(expect.anything(), 'apple-sync:user-1', 10, 60_000);
     });

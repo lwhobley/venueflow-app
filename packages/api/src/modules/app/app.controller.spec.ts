@@ -311,7 +311,7 @@ describe('AppController multi-venue invariants', () => {
     const controller = new AppController(prisma, {} as any, {} as any);
 
     await expect(controller.deleteMyAccount({ sub: 'user-1' } as any)).rejects.toThrow(
-      'Transfer venue ownership or add another admin',
+      'Transfer venue ownership or confirm deletion',
     );
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
     expect(prisma.user.deleteMany).not.toHaveBeenCalled();
@@ -337,8 +337,47 @@ describe('AppController multi-venue invariants', () => {
     const controller = new AppController(prisma, {} as any, {} as any);
 
     await expect(controller.deleteMyAccount({ sub: 'user-1' } as any)).rejects.toThrow(
-      'Transfer venue ownership or add another admin',
+      'Transfer venue ownership or confirm deletion',
     );
     expect(prisma.user.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('deletes an owned venue only after explicit final-owner confirmation', async () => {
+    const profiles = [
+      { id: 'profile-sole', email: 'owner@example.com', fullName: 'Sole Owner', role: 'owner', venueId: 'venue-single', membershipStatus: 'active' },
+    ];
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
+      profile: {
+        findMany: vi.fn().mockResolvedValue(profiles),
+        count: vi.fn().mockResolvedValue(1),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      venue: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      chatImage: { findMany: vi.fn().mockResolvedValue([]) },
+      venueDocument: { findMany: vi.fn().mockResolvedValue([]) },
+      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]) },
+      objectDeletionJob: { create: vi.fn() },
+      pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn() }, scheduleShift: { updateMany: vi.fn() },
+      session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const email = { send: vi.fn().mockResolvedValue(undefined) };
+    const controller = new AppController(prisma, email as any, {} as any);
+
+    await expect(controller.deleteMyAccount(
+      { sub: 'user-1' } as any,
+      { deleteOwnedVenues: true },
+    )).resolves.toEqual({ ok: true });
+
+    expect(prisma.profile.deleteMany).toHaveBeenCalledWith({ where: { venueId: { in: ['venue-single'] } } });
+    expect(prisma.venue.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['venue-single'] } } });
+    expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
+      where: { profileId: 'profile-sole' },
+      data: { profileFullName: 'deleted_user_profile-sole', isOpen: false },
+    });
+    expect(prisma.user.deleteMany).toHaveBeenCalledWith({ where: { id: 'user-1' } });
   });
 });

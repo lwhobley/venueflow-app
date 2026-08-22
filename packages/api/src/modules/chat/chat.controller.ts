@@ -29,6 +29,7 @@ import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { MediaAccessService } from './media-access.service';
 import { S3ImageService } from './s3-image.service';
+import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 
 // Chat photo uploads. Kept small — images are picker-compressed (quality 0.5)
 // before they reach us; reject anything larger so the DB store stays lean.
@@ -108,6 +109,7 @@ export class ChatController {
     private readonly prisma: PrismaService,
     private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
+    private readonly mediaCleanup: MediaCleanupService,
   ) {}
 
   private async ensureContextualConversationsThrottled(venueId: string) {
@@ -450,10 +452,23 @@ export class ChatController {
       throw new ForbiddenException('Only custom group chats can be deleted');
     }
 
-    await this.prisma.$transaction([
-      this.prisma.message.deleteMany({ where: { conversationId: id } }),
-      this.prisma.conversation.delete({ where: { id: conv.id } }),
-    ]);
+    const images = await this.prisma.chatImage.findMany({
+      where: { message: { conversationId: id } },
+      select: { id: true, s3Key: true },
+    });
+    const jobId = await this.prisma.$transaction(async (tx) => {
+      const job = images.length
+        ? await tx.objectDeletionJob.create({
+          data: { objectKeys: images.map((image) => image.s3Key) },
+          select: { id: true },
+        })
+        : null;
+      if (images.length) await tx.chatImage.deleteMany({ where: { id: { in: images.map((image) => image.id) } } });
+      await tx.message.deleteMany({ where: { conversationId: id } });
+      await tx.conversation.delete({ where: { id: conv.id } });
+      return job?.id ?? null;
+    });
+    if (jobId) await this.mediaCleanup.processJob(jobId);
 
     return { ok: true };
   }
@@ -601,14 +616,15 @@ export class ChatController {
     const text = body.text.trim();
 
     let imageUrl: string | null = null;
+    let imageId: string | null = null;
     if (body.imageUrl) {
       const match = body.imageUrl.match(/\/v1\/chat\/images\/([a-zA-Z0-9_-]+)/);
       if (!match) {
         throw new BadRequestException('Invalid image URL format');
       }
-      const imageId = match[1];
+      imageId = match[1];
       const image = await this.prisma.chatImage.findUnique({ where: { id: imageId } });
-      if (!image || image.venueId !== scope.venueId) {
+      if (!image || image.venueId !== scope.venueId || image.messageId || image.purgeStartedAt) {
         throw new BadRequestException('Image not found or does not belong to this venue');
       }
       imageUrl = `/v1/chat/images/${image.id}`;
@@ -634,6 +650,15 @@ export class ChatController {
           createdAt: now,
         },
       });
+      if (imageId) {
+        const attached = await transaction.chatImage.updateMany({
+          where: { id: imageId, venueId: scope.venueId, messageId: null, purgeStartedAt: null },
+          data: { messageId: created.id },
+        });
+        if (attached.count !== 1) {
+          throw new ConflictException('This image is no longer available. Upload it again.');
+        }
+      }
       await transaction.conversation.update({
         where: { id: conv.id },
         data: {

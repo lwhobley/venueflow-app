@@ -43,10 +43,12 @@ COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/packages/api/dist packages/api/dist
 COPY --from=build /app/packages/api/prisma packages/api/prisma
 COPY --from=build /app/packages/api/scripts/assert-database-target.mjs packages/api/scripts/assert-database-target.mjs
+COPY --from=build /app/packages/api/scripts/assert-migrations-current.mjs packages/api/scripts/assert-migrations-current.mjs
 
-# Prisma migrations run at startup as the non-root node user.
+# Migrations run once in the release job. Every serving instance independently
+# verifies that the complete packaged migration history is present before it
+# accepts traffic, so an accidentally skipped release job fails closed.
 RUN chown -R node:node /app
 USER node
 EXPOSE 8080
-# Set AUTO_MIGRATE=true in single-run deployment jobs to run migrations before instance traffic.
-CMD ["sh", "-c", "node packages/api/scripts/assert-database-target.mjs && if [ \"$AUTO_MIGRATE\" = \"true\" ]; then DATABASE_URL=\"${DATABASE_DIRECT_URL:-$DATABASE_URL}\" ./node_modules/.bin/prisma migrate deploy --schema packages/api/prisma; fi && exec node packages/api/dist/main.js"]
+CMD ["sh", "-c", "node packages/api/scripts/assert-database-target.mjs && node packages/api/scripts/assert-migrations-current.mjs && exec node packages/api/dist/main.js"]

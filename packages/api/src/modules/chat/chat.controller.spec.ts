@@ -38,8 +38,12 @@ function makeController() {
     },
     chatImage: {
       findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue({ id: 'img-created' }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    objectDeletionJob: { create: vi.fn().mockResolvedValue({ id: 'delete-job-1' }) },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $queryRaw: vi.fn().mockResolvedValue([{ key: 'lease:chat-context:venue-1' }]),
   };
@@ -58,8 +62,10 @@ function makeController() {
     getPresignedUrl: vi.fn().mockResolvedValue('https://signed.example/image.webp'),
   } as any;
 
-  const controller = new ChatController(prisma, mediaAccess, s3ImageService);
-  return { controller, prisma, mediaAccess, s3ImageService };
+  const mediaCleanup = { processJob: vi.fn().mockResolvedValue(true) } as any;
+
+  const controller = new ChatController(prisma, mediaAccess, s3ImageService, mediaCleanup);
+  return { controller, prisma, mediaAccess, s3ImageService, mediaCleanup };
 }
 
 const managerScope = {
@@ -687,7 +693,7 @@ describe('ChatController', () => {
       name: 'Closing Crew',
       memberIds: ['staff-1'],
     });
-    prisma.chatImage.findUnique.mockResolvedValue({ id: 'img-1', venueId: 'venue-1' });
+    prisma.chatImage.findUnique.mockResolvedValue({ id: 'img-1', venueId: 'venue-1', messageId: null, purgeStartedAt: null });
     prisma.message.create.mockResolvedValue({ id: 'msg-1' });
 
     await expect(controller.sendMessage(staffScope, 'conv-1', {
@@ -710,6 +716,10 @@ describe('ChatController', () => {
         lastMessageText: expect.stringContaining('Image'),
       }),
     }));
+    expect(prisma.chatImage.updateMany).toHaveBeenCalledWith({
+      where: { id: 'img-1', venueId: 'venue-1', messageId: null, purgeStartedAt: null },
+      data: { messageId: 'msg-1' },
+    });
     expect(prisma.$executeRaw).toHaveBeenCalledOnce();
     expect(prisma.$transaction).toHaveBeenCalledOnce();
   });

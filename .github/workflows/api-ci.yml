@@ -119,7 +119,7 @@ jobs:
       - name: Apply migrations
         run: npm run prisma:migrate:deploy -w @venue-wrangler/api
 
-      - name: Verify critical partial indexes and open-state check
+      - name: Verify critical constraints in runtime and integration databases
         env:
           PGPASSWORD: postgres
         run: |
@@ -134,22 +134,24 @@ jobs:
             Profile_userId_venueless_key
             ManagerGoal_venue_title_date_open_key
           )
-          for index in "${required_indexes[@]}"; do
-            found="$(psql -h localhost -U postgres -d venuetest -Atc \
-              "SELECT 1 FROM pg_indexes WHERE indexname = '${index}'")"
-            if [[ "$found" != "1" ]]; then
-              echo "::error::Missing required index: ${index}"
+          for database in venuetest venuetest_integration; do
+            for index in "${required_indexes[@]}"; do
+              found="$(psql -h localhost -U postgres -d "$database" -Atc \
+                "SELECT 1 FROM pg_indexes WHERE indexname = '${index}'")"
+              if [[ "$found" != "1" ]]; then
+                echo "::error::Missing required index in ${database}: ${index}"
+                exit 1
+              fi
+              echo "✓ ${database}: ${index}"
+            done
+            found_check="$(psql -h localhost -U postgres -d "$database" -Atc \
+              "SELECT 1 FROM pg_constraint WHERE conname = 'TimeEntry_open_state_check'")"
+            if [[ "$found_check" != "1" ]]; then
+              echo "::error::Missing TimeEntry_open_state_check constraint in ${database}"
               exit 1
             fi
-            echo "✓ ${index}"
+            echo "✓ ${database}: TimeEntry_open_state_check"
           done
-          found_check="$(psql -h localhost -U postgres -d venuetest -Atc \
-            "SELECT 1 FROM pg_constraint WHERE conname = 'TimeEntry_open_state_check'")"
-          if [[ "$found_check" != "1" ]]; then
-            echo "::error::Missing TimeEntry_open_state_check constraint"
-            exit 1
-          fi
-          echo "✓ TimeEntry_open_state_check"
 
       - name: Smoke-test health endpoint
         run: |

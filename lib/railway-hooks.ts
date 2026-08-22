@@ -135,7 +135,11 @@ const mutationRoutes: Record<string, Route> = {
     body: ({ businessName, ownerName, phone, address, venueType, staffRange }) => ({ businessName, ownerName, phone, address, venueType, staffRange }),
     invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
   },
-  'app.deleteMyAccount': { path: '/v1/app/me', method: 'DELETE' },
+  'app.deleteMyAccount': {
+    path: '/v1/app/me',
+    method: 'DELETE',
+    body: ({ deleteOwnedVenues }) => ({ deleteOwnedVenues: Boolean(deleteOwnedVenues) }),
+  },
   'app.clockIn': { path: '/v1/time-clock/clock-in', method: 'POST', body: locationBody, invalidate: clockInvalidations() },
   'app.clockOut': { path: '/v1/time-clock/clock-out', method: 'POST', body: locationBody, invalidate: clockInvalidations() },
   'app.breakStart': { path: '/v1/time-clock/break-start', method: 'POST', body: (args) => ({ type: args.type }), invalidate: clockInvalidations() },
@@ -510,6 +514,7 @@ const mutationRoutes: Record<string, Route> = {
   },
 };
 
+/** Exposed only for the contract-parity test and developer diagnostics. */
 export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T | undefined {
   const key = getKey(ref);
   const route = queryRoutes[key];
@@ -525,9 +530,13 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
     queryKey: [...key.split('.'), args, authEpoch, userId, venueId],
     enabled,
     queryFn: ({ signal }) => requestRoute<T>(route, args, signal),
+    // Legacy data-only callers cannot represent an error state. Throw into the
+    // nearest recoverable screen/root boundary instead of returning undefined
+    // forever and rendering an endless loading skeleton.
+    throwOnError: true,
   });
-  // Loading/error leave data undefined — callers must treat as T | undefined.
-  // Do not cast away undefined; that hid loading races and silent failures.
+  // Only a pending/disabled query leaves data undefined. Errors are handled by
+  // ErrorBoundary; new screens should still prefer useQueryState for inline UX.
   return query.data;
 }
 
@@ -609,7 +618,9 @@ function requestRoute<T>(route: Route, args: any, signal?: AbortSignal): Promise
     method: route.method ?? 'GET',
     signal,
     timeoutMs: route.timeoutMs,
-    body: route.method && route.method !== 'GET' && route.method !== 'DELETE' ? route.body?.(args ?? {}) ?? args ?? {} : undefined,
+    body: route.method && route.method !== 'GET'
+      ? route.body?.(args ?? {}) ?? (route.method === 'DELETE' ? undefined : args ?? {})
+      : undefined,
   });
 }
 
