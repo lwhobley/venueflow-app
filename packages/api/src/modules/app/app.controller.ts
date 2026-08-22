@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, NotFoundException, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, Logger, NotFoundException, Optional, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Prisma, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
@@ -9,7 +9,6 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { assertWithinGeofence } from '../../common/geofence';
 import { unpaidBreakMs } from '../../common/break-duration';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
@@ -17,13 +16,15 @@ import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
-import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
+import { zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { runWithoutTenant } from '../../prisma/tenant-context';
-import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
+import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappers';
 import { ProfileService } from './profile.service';
 import { syncTeamMemberCount } from '../../common/team-sync';
+import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
+import { endBreakForProfile, startBreakForProfile } from '../time-clock/break-transitions';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
@@ -36,7 +37,7 @@ const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 // Human-typeable invite codes. Excludes look-alike characters (0/O, 1/I/L) so
-// codes read aloud or written down don't get mistyped. Format: VW-XXXXXX.
+// codes read aloud or written down don't get mistyped. Format: VW-XXXXXXXX.
 const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function makeHumanCode(length: number): string {
   let body = '';
@@ -47,7 +48,13 @@ function makeHumanCode(length: number): string {
 }
 
 function makeInviteCode(): string {
-  return makeHumanCode(6);
+  // 8 chars from a 31-symbol alphabet is ~39.6 bits of entropy — 6 chars
+  // (~29.7 bits) was guessable enough that a distributed attacker guessing
+  // across the pool of currently-outstanding invites (rather than one code)
+  // was a real, if rate-limited, concern. Lookup is unique-indexed exact
+  // match, so this only affects newly-generated codes — existing 6-char
+  // invites keep working.
+  return makeHumanCode(8);
 }
 
 function makeVenueCode(): string {
@@ -113,25 +120,6 @@ class UpdateVenueDto {
   geofenceRadiusM?: number;
 }
 
-class ClockDto {
-  @IsNumber()
-  @Min(-90)
-  @Max(90)
-  lat!: number;
-
-  @IsNumber()
-  @Min(-180)
-  @Max(180)
-  lng!: number;
-
-  @IsNumber()
-  @Min(0)
-  accuracy!: number;
-
-  @IsBoolean()
-  mocked!: boolean;
-}
-
 class BreakStartDto {
   @IsString()
   @IsIn(['paid', 'unpaid'])
@@ -171,6 +159,12 @@ class SwitchVenueDto {
   venueId!: string;
 }
 
+class DeleteAccountDto {
+  @IsBoolean()
+  @IsOptional()
+  deleteOwnedVenues?: boolean;
+}
+
 function planForStaffRange(range: string) {
   void range;
   return { planId: FLAT_PLAN_ID, priceCents: FLAT_PLAN_PRICE_CENTS };
@@ -178,10 +172,13 @@ function planForStaffRange(range: string) {
 
 @Controller('v1/app')
 export class AppController {
+  private readonly logger = new Logger(AppController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly profiles: ProfileService,
+    @Optional() private readonly mediaCleanup?: MediaCleanupService,
   ) {}
 
   @UseGuards(AuthGuard)
@@ -237,17 +234,34 @@ export class AppController {
           },
           include: { venue: true },
         })
-      : await this.prisma.profile.create({
-          data: {
-            userId: user.sub,
-            email,
-            fullName,
-            role: 'staff',
-            jobTitle: body.jobTitle ?? 'Staff',
-            trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
-          },
-          include: { venue: true },
-        });
+      : await this.prisma.profile
+          .create({
+            data: {
+              userId: user.sub,
+              email,
+              fullName,
+              role: 'staff',
+              jobTitle: body.jobTitle ?? 'Staff',
+              trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
+            },
+            include: { venue: true },
+          })
+          .catch(async (err) => {
+            // findFirst-then-create has no transaction or lock around it, so a
+            // double-tap or client retry can race here. Profile_userId_venueless_key
+            // (a partial unique index on userId WHERE venueId IS NULL) turns the
+            // loser's insert into a P2002 instead of a second venueless row —
+            // fetch the row the winner just created instead of failing the request.
+            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+              const raced = await this.prisma.profile.findFirst({
+                where: { userId: user.sub, venueId: null },
+                orderBy: { createdAt: 'asc' },
+                include: { venue: true },
+              });
+              if (raced) return raced;
+            }
+            throw err;
+          });
 
     const venueName = profile.venue?.name ?? 'your venue';
     void this.email.send({
@@ -663,142 +677,21 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @RequireSubscription()
-  @Post('clock-in')
-  async clockIn(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
-    const profile = await this.requireVenueProfile(user);
-    const venue = profile.venue;
-    if (!venue) throw new ForbiddenException('Assigned venue not found');
-    assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
-    const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
-    if (existing) throw new BadRequestException('Already clocked in');
-
-    if (!canManageVenue(profile.role, profile.allAccess)) {
-      const nowMs = Date.now();
-      const today = zonedDayOfWeek(venue.timezone, nowMs);
-      const weekStart = weekStartFor(todayInZone(venue.timezone));
-      const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
-      const shift = await this.prisma.scheduleShift.findFirst({
-        where: {
-          venueId: venue.id,
-          profileId: profile.id,
-          weekStart,
-          dayIndex: today,
-          status: { in: ['scheduled', 'covered'] },
-        },
-        orderBy: { startMinutes: 'asc' },
-      });
-      if (shift) {
-        const earlyWindow = venue.earlyClockInWindowMin ?? 10;
-        if (minutesNow < shift.startMinutes - earlyWindow) {
-          const formattedStart = minutesToTime(shift.startMinutes);
-          throw new BadRequestException(
-            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
-          );
-        }
-      }
-    }
-
-    try {
-      const entry = await this.prisma.timeEntry.create({
-        data: {
-          profileId: profile.id,
-          venueId: venue.id,
-          clockInAt: new Date(),
-          clockInLat: body.lat,
-          clockInLng: body.lng,
-          clockInAccuracyM: body.accuracy,
-          clockInMocked: body.mocked,
-          isOpen: true,
-        },
-        include: { profile: true, venue: true },
-      });
-      return mapClockEntry(entry, entry.profile, entry.venue);
-    } catch (error: any) {
-      // Partial unique index (one open entry per profile): a concurrent
-      // double-tap loses the race here instead of creating a second open entry.
-      if (error?.code === 'P2002') throw new BadRequestException('Already clocked in');
-      throw error;
-    }
-  }
-
-  @UseGuards(AuthGuard)
-  @RequireSubscription()
-  @Post('clock-out')
-  async clockOut(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
-    const profile = await this.requireVenueProfile(user);
-    const venue = profile.venue;
-    if (!venue) throw new ForbiddenException('Assigned venue not found');
-    assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
-    const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
-    if (!existing) throw new BadRequestException('No active clock-in found');
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: existing.id, isOpen: true, updatedAt: existing.updatedAt },
-      data: {
-        clockOutAt: new Date(),
-        clockOutLat: body.lat,
-        clockOutLng: body.lng,
-        clockOutAccuracyM: body.accuracy,
-        clockOutMocked: body.mocked,
-        isOpen: false,
-      },
-    });
-    if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');
-    const entry = await this.prisma.timeEntry.findUniqueOrThrow({
-      where: { id: existing.id },
-      include: { profile: true, venue: true },
-    });
-    return mapClockEntry(entry, entry.profile, entry.venue);
-  }
-
-  @UseGuards(AuthGuard)
-  @RequireSubscription()
+  @Header('Deprecation', 'true')
   @Post('time-clock/break-start')
   async startBreak(@CurrentUser() user: AuthUser, @Body() body: BreakStartDto) {
     const profile = await this.requireVenueProfile(user);
-    const entry = await this.prisma.timeEntry.findFirst({
-      where: { profileId: profile.id, isOpen: true },
-      include: { profile: true, venue: true },
-    });
-    if (!entry) throw new BadRequestException('No active clock-in found');
-    const breaks = (entry.breaks as any[]) || [];
-    if (breaks.find((b: any) => b.endAt === null)) throw new BadRequestException('Already on a break');
-    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
-      data: { breaks: newBreaks },
-    });
-    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
-    const updated = await this.prisma.timeEntry.findUniqueOrThrow({
-      where: { id: entry.id },
-      include: { profile: true, venue: true },
-    });
+    const updated = await startBreakForProfile(this.prisma, profile.id, body.type);
     return mapClockEntry(updated, updated.profile, updated.venue);
   }
 
   @UseGuards(AuthGuard)
   @RequireSubscription()
+  @Header('Deprecation', 'true')
   @Post('time-clock/break-end')
   async endBreak(@CurrentUser() user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
-    const entry = await this.prisma.timeEntry.findFirst({
-      where: { profileId: profile.id, isOpen: true },
-      include: { profile: true, venue: true },
-    });
-    if (!entry) throw new BadRequestException('No active clock-in found');
-    const breaks = (entry.breaks as any[]) || [];
-    const activeBreakIndex = breaks.findIndex((b: any) => b.endAt === null);
-    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
-    const newBreaks = [...breaks];
-    newBreaks[activeBreakIndex] = { ...newBreaks[activeBreakIndex], endAt: Date.now() };
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
-      data: { breaks: newBreaks },
-    });
-    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
-    const updated = await this.prisma.timeEntry.findUniqueOrThrow({
-      where: { id: entry.id },
-      include: { profile: true, venue: true },
-    });
+    const updated = await endBreakForProfile(this.prisma, profile.id);
     return mapClockEntry(updated, updated.profile, updated.venue);
   }
 
@@ -1084,8 +977,8 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @Delete('me')
-  async deleteMyAccount(@CurrentUser() user: AuthUser) {
-    const deletedAccount = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
+  async deleteMyAccount(@CurrentUser() user: AuthUser, @Body() body: DeleteAccountDto = {}) {
+    const deletion = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
       const [account, profiles] = await Promise.all([
         tx.user.findUnique({ where: { id: user.sub }, select: { email: true } }),
         tx.profile.findMany({
@@ -1099,6 +992,7 @@ export class AppController {
       const venueIds = Array.from(new Set(
         profiles.map((profile) => profile.venueId).filter((id): id is string => Boolean(id)),
       )).sort();
+      const venuesToDelete: string[] = [];
       for (const venueId of venueIds) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${venueId}`}))`;
       }
@@ -1106,15 +1000,44 @@ export class AppController {
         const profile = profiles.find((candidate) => candidate.venueId === venueId);
         const isActive = profile?.membershipStatus == null || profile.membershipStatus === 'active';
         if (!profile || !isActive || !isOwnerOrAdminRole(profile.role)) continue;
-        const [ownerAdminCount, memberCount] = await Promise.all([
-          tx.profile.count({
-            where: { venueId, role: { in: ['owner', 'admin'] }, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
-          }),
-          tx.profile.count({ where: { venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] } }),
-        ]);
-        if (ownerAdminCount <= 1 && memberCount > 1) {
-          throw new ForbiddenException('Transfer venue ownership or add another admin before deleting this account');
+        const ownerAdminCount = await tx.profile.count({
+          where: { venueId, role: { in: ['owner', 'admin'] }, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+        });
+        if (ownerAdminCount <= 1) {
+          if (!body.deleteOwnedVenues) {
+            throw new ConflictException('Transfer venue ownership or confirm deletion of the owned venue before deleting this account');
+          }
+          if (profile.role !== 'owner') {
+            throw new ForbiddenException('Only a venue owner can delete the venue; transfer ownership before deleting this account');
+          }
+          venuesToDelete.push(venueId);
         }
+      }
+
+      let mediaJobId: string | null = null;
+      if (venuesToDelete.length > 0) {
+        const [chatImages, documents, checklistPhotos] = await Promise.all([
+          tx.chatImage.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
+          tx.venueDocument.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
+          tx.checklistCompletion.findMany({
+            where: { venueId: { in: venuesToDelete }, photoKey: { not: null } },
+            select: { photoKey: true },
+          }),
+        ]);
+        const objectKeys = Array.from(new Set([
+          ...chatImages.map((row) => row.s3Key),
+          ...documents.map((row) => row.s3Key),
+          ...checklistPhotos.map((row) => row.photoKey).filter((key): key is string => Boolean(key)),
+        ]));
+        if (objectKeys.length > 0) {
+          const job = await tx.objectDeletionJob.create({ data: { objectKeys }, select: { id: true } });
+          mediaJobId = job.id;
+        }
+        // Profile.venue uses SetNull because profiles can temporarily be
+        // venueless during onboarding. Tenant offboarding is different: remove
+        // every venue profile explicitly before the Venue cascade.
+        await tx.profile.deleteMany({ where: { venueId: { in: venuesToDelete } } });
+        await tx.venue.deleteMany({ where: { id: { in: venuesToDelete } } });
       }
 
       const profileIds = profiles.map((profile) => profile.id);
@@ -1124,7 +1047,7 @@ export class AppController {
         for (const profile of profiles) {
           await tx.timeEntry.updateMany({
             where: { profileId: profile.id },
-            data: { profileFullName: profile.fullName, isOpen: false },
+            data: { profileFullName: `deleted_user_${profile.id}`, isOpen: false },
           });
         }
         await tx.scheduleShift.updateMany({ where: { profileId: { in: profileIds } }, data: { profileId: null, status: 'open' } });
@@ -1133,19 +1056,31 @@ export class AppController {
       await tx.authAccount.deleteMany({ where: { userId: user.sub } });
       if (profileIds.length) await tx.profile.deleteMany({ where: { id: { in: profileIds } } });
       await tx.user.deleteMany({ where: { id: user.sub } });
-      for (const venueId of venueIds) await syncTeamMemberCount(tx, venueId);
+      for (const venueId of venueIds.filter((id) => !venuesToDelete.includes(id))) await syncTeamMemberCount(tx, venueId);
 
       const primary = profiles[0];
-      return { email: account?.email ?? primary?.email ?? user.email, name: primary?.fullName ?? user.name ?? 'there' };
+      return {
+        email: account?.email ?? primary?.email ?? user.email,
+        name: primary?.fullName ?? user.name ?? 'there',
+        mediaJobId,
+        deletedVenueCount: venuesToDelete.length,
+      };
     }));
-    if (deletedAccount?.email) {
+    if (deletion?.mediaJobId && this.mediaCleanup) {
+      void this.mediaCleanup.processJob(deletion.mediaJobId).catch((error) => {
+        this.logger.error(`Initial media purge failed for deletion job ${deletion.mediaJobId}`, error instanceof Error ? error.stack : String(error));
+      });
+    }
+    if (deletion?.email) {
       void this.email.send({
-        to: deletedAccount.email,
+        to: deletion.email,
         subject: 'Your Venue Wrangler Account Has Been Deleted',
         text:
-          `Hi ${deletedAccount.name},\n\n` +
+          `Hi ${deletion.name},\n\n` +
           `Your Venue Wrangler account has been successfully deleted.\n\n` +
-          `Please note that any retained timeclock records remain available to the venue as employer wage and compliance records in accordance with federal and local regulations.\n\n` +
+          (deletion.deletedVenueCount > 0
+            ? `${deletion.deletedVenueCount} owned venue${deletion.deletedVenueCount === 1 ? '' : 's'} and associated operational data were also deleted. Media deletion is processed by a durable purge queue.\n\n`
+            : `Any legally retained timeclock records have been de-identified and remain available to the venue only for wage and compliance purposes.\n\n`) +
           `Thank you for using Venue Wrangler.\n\n` +
           `Questions? support@venuewrangler.com\n\n` +
           `— The Venue Wrangler Team`,

@@ -5,8 +5,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * tenant-isolation extension can scope queries without every call site passing
  * venueId by hand.
  *
- * Set once per request (e.g. from AuthGuard after the JWT is verified) via
- * `enterTenant(venueId)`; read by the extension via `getTenantVenueId()`. When
+ * Seeded for downstream guards by AuthGuard via `enterTenant(venueId)`, then
+ * explicitly bracketed around controller/RxJS execution by
+ * VenueScopeInterceptor via `runWithTenant`. When
  * no context is set (auth flows, webhooks, system tasks, tests) the extension is
  * a no-op, so this is purely additive defense-in-depth.
  */

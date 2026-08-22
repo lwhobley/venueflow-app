@@ -34,6 +34,6 @@ describe('unpaidBreakMs', () => {
 
 describe('htmlEscape', () => {
   it('escapes HTML special characters', () => {
-    expect(htmlEscape(`a<b>"c"&d`)).toBe('a&lt;b&gt;&quot;c&quot;&amp;d');
+    expect(htmlEscape(`a<b>"c"&d'e'`)).toBe('a&lt;b&gt;&quot;c&quot;&amp;d&#39;e&#39;');
   });
 });

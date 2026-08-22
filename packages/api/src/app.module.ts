@@ -3,6 +3,7 @@ import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { validateEnv } from './common/validate-env';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthController } from './auth/auth.controller';
 import { AuthModule } from './auth/auth.module';
@@ -22,6 +23,8 @@ import { StaffImportParserService } from './modules/app/staff-import-parser.serv
 import { StaffController } from './modules/staff/staff.controller';
 import { StaffRequestsController } from './modules/staff-requests/staff-requests.controller';
 import { TimeClockController } from './modules/time-clock/time-clock.controller';
+import { AttestationController } from './modules/attestation/attestation.controller';
+import { AttestationService } from './modules/attestation/attestation.service';
 import { SchedulingController } from './modules/scheduling/scheduling.controller';
 import { PosModule } from './modules/pos/pos.module';
 import { BarInventoryModule } from './modules/bar-inventory/bar-inventory.module';
@@ -37,16 +40,19 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
 import { SchedulingAssignmentService } from './modules/scheduling/scheduling-assignment.service';
 import { AiSchedulerService } from './modules/scheduling/ai-scheduler.service';
+import { AuditModule } from './modules/audit/audit.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { WranglerOperatorController } from './modules/operations/wrangler/wrangler-operator.controller';
 import { WranglerOperatorService } from './modules/operations/wrangler/wrangler-operator.service';
 import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-wrangler-operator.service';
+import { MediaCleanupModule } from './modules/media-cleanup/media-cleanup.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env.local', '.env'],
+      validate: validateEnv,
     }),
     // default: higher ceiling for authenticated dashboard polling
     // auth: tighter named bucket applied via @Throttle({ auth: ... }) on auth routes
@@ -56,6 +62,7 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     ]),
     ScheduleModule.forRoot(),
     PrismaModule,
+    AuditModule,
     AuthModule,
     VenueModule,
     BillingModule,
@@ -74,6 +81,7 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     IntegrationsModule,
     WorkforceModule,
     DocumentsModule,
+    MediaCleanupModule,
   ],
   controllers: [
     HealthController,
@@ -84,6 +92,7 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     AppStaffController,
     SchedulingController,
     TimeClockController,
+    AttestationController,
     StaffRequestsController,
     StaffController,
     WranglerOperatorController,
@@ -104,6 +113,8 @@ import { SafeWranglerOperatorService } from './modules/operations/wrangler/safe-
     StaffImportParserService,
     SchedulingAssignmentService,
     AiSchedulerService,
+    // Consumed by TimeClockController as well as its own enrolment routes.
+    AttestationService,
     { provide: WranglerOperatorService, useClass: SafeWranglerOperatorService },
   ],
 })

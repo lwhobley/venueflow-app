@@ -64,6 +64,13 @@ describe('MediaAccessService', () => {
       .toThrow(UnauthorizedException);
   });
 
+  it('rejects a non-string token (query arrays fail closed)', () => {
+    const service = makeService();
+
+    expect(() => service.assertToken(['a', 'b'], 'chat-image', 'image-1', 'venue-1'))
+      .toThrow(UnauthorizedException);
+  });
+
   it('rejects a tampered token', () => {
     const service = makeService();
 

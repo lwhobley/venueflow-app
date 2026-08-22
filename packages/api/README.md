@@ -13,7 +13,15 @@ npm run api:dev
 
 ## Production migrations
 
-Run `npx prisma migrate deploy` (or the project equivalent) against the production database as part of every release that includes a new migration under `packages/api/prisma/migrations/`.
+Use `.github/workflows/deploy-api.yml` for production releases. It requires an
+immutable image digest, executes the preconfigured `venue-wrangler-api-migrate`
+Cloud Run job, waits for `prisma migrate deploy` to succeed, and only then
+updates the serving service. The migration job must carry `DATABASE_URL` and
+`DATABASE_DIRECT_URL` through Secret Manager and must not serve traffic.
+
+Every API container also runs `assert-migrations-current.mjs` before NestJS, so
+a skipped or failed release job leaves the new revision unhealthy instead of
+serving against a stale schema.
 
 Do **not** rely on `prisma db push` in production; it does not record migration history.
 

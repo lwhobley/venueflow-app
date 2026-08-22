@@ -42,8 +42,8 @@ export class MediaAccessService {
     return `${path}?token=${token}&t=${bucket}`;
   }
 
-  assertToken(token: string | undefined, kind: MediaKind, mediaId: string, venueId: string): void {
-    if (!token) throw new UnauthorizedException('Media access token is required');
+  assertToken(token: unknown, kind: MediaKind, mediaId: string, venueId: string): void {
+    if (typeof token !== 'string' || !token) throw new UnauthorizedException('Media access token is required');
 
     const now = currentBucket();
 

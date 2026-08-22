@@ -52,10 +52,14 @@ function makeController() {
     },
     scheduleShift: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
   } as any;
-  const controller = new TimeClockController(prisma);
-  return { controller, prisma };
+  // Attestation is exercised in attestation.service.spec.ts; here it is a
+  // no-op stub so these tests stay focused on clock/geofence behaviour.
+  const attestation = { verifyRequest: vi.fn().mockResolvedValue(undefined) } as any;
+  const controller = new TimeClockController(prisma, attestation);
+  return { controller, prisma, attestation };
 }
 
+const authUser = { sub: 'user-1' } as any;
 const scope = { venueId: 'venue-1', profileId: 'staff-1', role: 'staff', allAccess: false } as any;
 const managerScope = { venueId: 'venue-1', profileId: 'manager-1', role: 'manager', allAccess: false } as any;
 
@@ -68,23 +72,23 @@ describe('TimeClockController', () => {
   describe('clockIn', () => {
     it('rejects a missing scope', async () => {
       const { controller } = makeController();
-      await expect(controller.clockIn(undefined as any, validPunch)).rejects.toThrow('Profile is not initialized');
+      await expect(controller.clockIn(authUser, undefined as any, validPunch)).rejects.toThrow('Profile is not initialized');
     });
 
     it('rejects a mocked location', async () => {
       const { controller } = makeController();
-      await expect(controller.clockIn(scope, { ...validPunch, mocked: true })).rejects.toThrow('Mocked locations are not allowed.');
+      await expect(controller.clockIn(authUser, scope, { ...validPunch, mocked: true })).rejects.toThrow('Mocked locations are not allowed.');
     });
 
     it('rejects a punch outside the geofence', async () => {
       const { controller } = makeController();
-      await expect(controller.clockIn(scope, { ...validPunch, lat: 41, lng: -74 })).rejects.toThrow('outside the venue geofence');
+      await expect(controller.clockIn(authUser, scope, { ...validPunch, lat: 41, lng: -74 })).rejects.toThrow('outside the venue geofence');
     });
 
     it('rejects a second clock-in while one is already open', async () => {
       const { controller, prisma } = makeController();
       prisma.timeEntry.findFirst.mockResolvedValue({ id: 'open-entry' });
-      await expect(controller.clockIn(scope, validPunch)).rejects.toThrow('Already clocked in');
+      await expect(controller.clockIn(authUser, scope, validPunch)).rejects.toThrow('Already clocked in');
     });
 
     it('blocks staff from clocking in too early for their shift', async () => {
@@ -93,14 +97,14 @@ describe('TimeClockController', () => {
       vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z')); // Wed noon UTC = 08:00 America/New_York
       prisma.scheduleShift.findFirst.mockResolvedValue({ startMinutes: 600, dayIndex: 3, status: 'scheduled' });
 
-      await expect(controller.clockIn(scope, validPunch)).rejects.toThrow('Too early to clock in');
+      await expect(controller.clockIn(authUser, scope, validPunch)).rejects.toThrow('Too early to clock in');
     });
 
     it('does not apply the early-shift check to managers', async () => {
       const { controller, prisma } = makeController();
       prisma.profile.findUniqueOrThrow.mockResolvedValue({ ...profile, id: 'manager-1', role: 'manager' });
 
-      const result = await controller.clockIn(managerScope, validPunch);
+      const result = await controller.clockIn(authUser, managerScope, validPunch);
 
       expect(prisma.scheduleShift.findFirst).not.toHaveBeenCalled();
       expect(result.memberId).toBe('manager-1');
@@ -109,7 +113,7 @@ describe('TimeClockController', () => {
     it('creates an open time entry on a valid punch', async () => {
       const { controller, prisma } = makeController();
 
-      const result = await controller.clockIn(scope, validPunch);
+      const result = await controller.clockIn(authUser, scope, validPunch);
 
       expect(prisma.timeEntry.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -127,21 +131,21 @@ describe('TimeClockController', () => {
       const { controller, prisma } = makeController();
       prisma.timeEntry.create.mockRejectedValue({ code: 'P2002' });
 
-      await expect(controller.clockIn(scope, validPunch)).rejects.toThrow('Already clocked in');
+      await expect(controller.clockIn(authUser, scope, validPunch)).rejects.toThrow('Already clocked in');
     });
 
     it('rethrows unrelated errors from entry creation', async () => {
       const { controller, prisma } = makeController();
       prisma.timeEntry.create.mockRejectedValue(new Error('db down'));
 
-      await expect(controller.clockIn(scope, validPunch)).rejects.toThrow('db down');
+      await expect(controller.clockIn(authUser, scope, validPunch)).rejects.toThrow('db down');
     });
   });
 
   describe('clockOut', () => {
     it('rejects when there is no active clock-in', async () => {
       const { controller } = makeController();
-      await expect(controller.clockOut(scope, validPunch)).rejects.toThrow('No active clock-in found');
+      await expect(controller.clockOut(authUser, scope, validPunch)).rejects.toThrow('No active clock-in found');
     });
 
     it('closes the open entry on a valid punch', async () => {
@@ -156,7 +160,7 @@ describe('TimeClockController', () => {
         breaks: [],
       });
 
-      await controller.clockOut(scope, validPunch);
+      await controller.clockOut(authUser, scope, validPunch);
 
       expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
         where: { id: 'entry-1', isOpen: true, updatedAt: openEntry.updatedAt },
@@ -169,7 +173,7 @@ describe('TimeClockController', () => {
       prisma.timeEntry.findFirst.mockResolvedValue({ id: 'entry-1', updatedAt: new Date() });
       prisma.timeEntry.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(controller.clockOut(scope, validPunch)).rejects.toThrow('Clock-out state changed. Refresh and try again.');
+      await expect(controller.clockOut(authUser, scope, validPunch)).rejects.toThrow('Clock-out state changed. Refresh and try again.');
     });
   });
 

@@ -24,7 +24,7 @@ export async function bootstrapE2eApp(): Promise<{
   // DATABASE_URL et al. onto the shared process.env — safe today only because
   // vitest's default fork pool isolates files, but a fragile implicit
   // dependency on that pool config.
-  const ENV_KEYS = ['DATABASE_URL', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'] as const;
+  const ENV_KEYS = ['DATABASE_URL', 'DATABASE_DIRECT_URL', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'] as const;
   const envSnapshot: Record<string, string | undefined> = {};
   for (const key of ENV_KEYS) envSnapshot[key] = process.env[key];
   const restoreEnv = () => {
@@ -37,10 +37,12 @@ export async function bootstrapE2eApp(): Promise<{
   const db = await setupTestDb();
   dbTeardown = db.teardown;
   process.env.DATABASE_URL = db.url;
+  // The test DB is a direct connection (no pooler), so both point at it.
+  process.env.DATABASE_DIRECT_URL = db.url;
 
   // Boot-time required env vars — same placeholders api-ci.yml already sets;
   // fall back to safe test values so this also runs from a bare `npm test`.
-  process.env.JWT_SECRET ??= 'e2e-test-secret-not-used-in-prod';
+  process.env.JWT_SECRET ??= 'e2e-test-secret-not-used-in-prod!';
   process.env.AWS_ACCESS_KEY_ID ??= 'e2e-test-access-key';
   process.env.AWS_SECRET_ACCESS_KEY ??= 'e2e-test-secret-key';
   process.env.AWS_S3_BUCKET ??= 'e2e-test-bucket';

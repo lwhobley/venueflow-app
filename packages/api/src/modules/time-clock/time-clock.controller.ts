@@ -5,21 +5,40 @@ import {
   Get,
   Post,
 } from '@nestjs/common';
-import { IsBoolean, IsNumber, IsString, IsIn, Max, Min } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, IsIn, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { assertWithinGeofence } from '../../common/geofence';
+import { assertFixNotReplayed, assertWithinGeofence, type PriorFix } from '../../common/geofence';
 import { parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
 import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AttestationService } from '../attestation/attestation.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { endBreakForProfile, startBreakForProfile } from './break-transitions';
 
 type Scope = VenueScopedRequest['venueScope'];
+
+/**
+ * The exact fields the device signs. Only the location values are included:
+ * they are the ones the server acts on and the ones an attacker would forge.
+ * Client and server must build this identically (see AttestationService
+ * canonicalPayload, which sorts keys).
+ */
+function punchPayload(body: ClockPunchDto) {
+  return { lat: body.lat, lng: body.lng, accuracy: body.accuracy, mocked: body.mocked };
+}
+
+class PunchAttestationDto {
+  @IsString() @MinLength(1) @MaxLength(256) keyId!: string;
+  @IsString() @MinLength(1) @MaxLength(20_000) assertion!: string;
+  @IsString() @MinLength(1) @MaxLength(256) challenge!: string;
+}
 
 class ClockPunchDto {
   @IsNumber()
@@ -38,6 +57,16 @@ class ClockPunchDto {
 
   @IsBoolean()
   mocked!: boolean;
+
+  /**
+   * App Attest assertion over this punch payload. Optional while
+   * ATTESTATION_ENFORCED is false so already-installed builds keep working
+   * during the staged rollout; once enforced, a punch without it is rejected.
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PunchAttestationDto)
+  attestation?: PunchAttestationDto;
 }
 
 class BreakStartDto {
@@ -48,7 +77,10 @@ class BreakStartDto {
 
 @Controller('v1/time-clock')
 export class TimeClockController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly attestation: AttestationService,
+  ) {}
 
   @RequireSubscription()
   @Get('board')
@@ -200,13 +232,35 @@ export class TimeClockController {
     };
   }
 
+  /**
+   * Coordinates from this profile's most recent punch on an *earlier* day.
+   * Used to catch a replayed (hardcoded) GPS fix — see assertFixNotReplayed.
+   * Same-day punches are excluded because a clock-out shortly after a clock-in
+   * can legitimately reuse the OS's cached fix and repeat exactly.
+   */
+  private async priorDayFix(profileId: string, timezone: string | null | undefined): Promise<PriorFix | null> {
+    const startOfToday = zonedDayBounds(timezone, 0).start;
+    const previous = await this.prisma.timeEntry.findFirst({
+      where: { profileId, clockInAt: { lt: new Date(startOfToday) } },
+      orderBy: { clockInAt: 'desc' },
+      select: { clockInLat: true, clockInLng: true },
+    });
+    if (!previous) return null;
+    return { lat: previous.clockInLat, lng: previous.clockInLng };
+  }
+
   @RequireSubscription()
   @Post('clock-in')
-  async clockIn(@VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
+  async clockIn(@CurrentUser() user: AuthUser, @VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
     if (!scope) throw new BadRequestException('Profile is not initialized');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
+    // Attestation first: the geofence checks below operate entirely on
+    // client-supplied coordinates, so they only mean anything once we know the
+    // request came from a genuine, unmodified build on real Apple hardware.
+    await this.attestation.verifyRequest(user.sub, punchPayload(body), body.attestation);
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
+    assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
 
     const active = await this.prisma.timeEntry.findFirst({
       where: { profileId: scope.profileId, isOpen: true },
@@ -265,11 +319,13 @@ export class TimeClockController {
 
   @RequireSubscription()
   @Post('clock-out')
-  async clockOut(@VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
+  async clockOut(@CurrentUser() user: AuthUser, @VenueScope() scope: Scope, @Body() body: ClockPunchDto) {
     if (!scope) throw new BadRequestException('Profile is not initialized');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
+    await this.attestation.verifyRequest(user.sub, punchPayload(body), body.attestation);
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
+    assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
 
     const active = await this.prisma.timeEntry.findFirst({
       where: { profileId: scope.profileId, isOpen: true },
@@ -299,24 +355,8 @@ export class TimeClockController {
     if (!scope) throw new BadRequestException('Profile is not initialized');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
-
-    const entry = await this.prisma.timeEntry.findFirst({
-      where: { profileId: scope.profileId, isOpen: true },
-    });
-    if (!entry) throw new BadRequestException('No active clock-in found');
-
-    const breaks = parseTimeBreaks(entry.breaks);
-    const activeBreak = breaks.find((breakRow) => breakRow.endAt === null);
-    if (activeBreak) throw new BadRequestException('Already on a break');
-
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
-      data: { breaks: newBreaks },
-    });
-    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
-    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    const updated = await startBreakForProfile(this.prisma, scope.profileId, body.type);
     return mapClockEntry(updated, profile, venue);
   }
 
@@ -327,28 +367,8 @@ export class TimeClockController {
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
 
-    const entry = await this.prisma.timeEntry.findFirst({
-      where: { profileId: scope.profileId, isOpen: true },
-    });
-    if (!entry) throw new BadRequestException('No active clock-in found');
-
-    const breaks = parseTimeBreaks(entry.breaks);
-    const activeBreakIndex = breaks.findIndex((breakRow) => breakRow.endAt === null);
-    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
-
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const newBreaks = [...breaks];
-    newBreaks[activeBreakIndex] = {
-      ...newBreaks[activeBreakIndex],
-      endAt: Date.now(),
-    };
-
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
-      data: { breaks: newBreaks },
-    });
-    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
-    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    const updated = await endBreakForProfile(this.prisma, scope.profileId);
     return mapClockEntry(updated, profile, venue);
   }
 }

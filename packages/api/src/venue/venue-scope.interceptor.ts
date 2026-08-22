@@ -1,11 +1,12 @@
 import { CallHandler, ExecutionContext, ForbiddenException, Injectable, NestInterceptor } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import type { AuthenticatedRequest } from '../auth/auth.guard';
 import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
 import { bindAiUsageContext } from '../common/ai-usage-context';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { runWithTenant } from '../prisma/tenant-context';
 
 export type VenueScopedRequest = AuthenticatedRequest & {
   venueScope?: {
@@ -30,10 +31,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
     const request = context.switchToHttp().getRequest<VenueScopedRequest>();
     if (request.venueScope) {
-      return bindAiUsageContext(
-        { venueId: request.venueScope.venueId, profileId: request.venueScope.profileId, prisma: this.prisma },
-        () => next.handle(),
-      );
+      return this.bindRequestContexts(request.venueScope, next);
     }
 
     const user = request.user;
@@ -73,9 +71,18 @@ export class VenueScopeInterceptor implements NestInterceptor {
     const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, { venueId: profile.venueId, venueStatus: profile.venue.subscriptionStatus, trialEndsAt: profile.trialEndsAt });
     request.venueScope = { profileId: profile.id, fullName: profile.fullName, venueId: profile.venueId, venueName: profile.venue.name, role: profile.role, allAccess: profile.allAccess, subscriptionStatus, trialEndsAt: profile.trialEndsAt ?? null };
 
-    return bindAiUsageContext(
-      { venueId: profile.venueId, profileId: profile.id, prisma: this.prisma },
-      () => next.handle(),
+    return this.bindRequestContexts(request.venueScope, next);
+  }
+
+  /** Bind both deferred RxJS execution contexts and restore them on teardown. */
+  private bindRequestContexts(scope: NonNullable<VenueScopedRequest['venueScope']>, next: CallHandler) {
+    return new Observable<unknown>((subscriber) =>
+      runWithTenant(scope.venueId, () =>
+        bindAiUsageContext(
+          { venueId: scope.venueId, profileId: scope.profileId, prisma: this.prisma },
+          () => next.handle(),
+        ).subscribe(subscriber),
+      ),
     );
   }
 }

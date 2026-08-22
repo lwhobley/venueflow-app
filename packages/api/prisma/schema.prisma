@@ -4,8 +4,14 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations must run DDL against a direct (non-pooled) connection — a
+  // PgBouncer transaction pooler can misbehave with Prisma Migrate's session
+  // advisory lock. Previously only the Dockerfile's CMD substituted this in;
+  // `prisma migrate deploy` run any other way (npm scripts, a release hook)
+  // silently used the pooled DATABASE_URL instead.
+  directUrl = env("DATABASE_DIRECT_URL")
 }
 
 enum Role {
@@ -238,6 +244,48 @@ model User {
   joinRequests              WorkplaceJoinRequest[]      @relation("WorkplaceJoinRequestUser")
   decidedJoinRequests       WorkplaceJoinRequest[]      @relation("WorkplaceJoinRequestDecider")
   joinRequestEvents         WorkplaceJoinRequestEvent[]
+  attestedDevices           DeviceAttestation[]
+  attestationChallenges     AttestationChallenge[]
+}
+
+/// An Apple App Attest key attested for one install of the app on one device.
+/// Deliberately keyed to the *user*, not a Profile or Venue: a physical device
+/// belongs to a person, who may hold memberships at several venues. It
+/// therefore carries no venueId and must stay out of VENUE_SCOPED_MODELS
+/// (see prisma/tenant-scope.ts).
+model DeviceAttestation {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Base64 App Attest key identifier (SHA-256 of the attested public key).
+  keyId       String    @unique
+  /// PEM-encoded public key extracted from the verified attestation.
+  publicKey   String
+  /// Apple's monotonic assertion counter. Must strictly increase; a replayed
+  /// assertion carries an equal or lower counter and is rejected.
+  signCount   Int       @default(0)
+  /// 'production' or 'development'. A development attestation must never be
+  /// accepted by a production API.
+  environment String
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([userId])
+}
+
+/// Single-use, short-lived nonce binding an attestation or assertion to one
+/// server-issued request, so a captured payload cannot be replayed later.
+model AttestationChallenge {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value      String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Session {
@@ -354,6 +402,7 @@ model Venue {
   managerGoals                  ManagerGoal[]
   venueEvents                   VenueEvent[]
   scheduleMemoryNotes           ScheduleMemoryNote[]
+  floorChairs                   FloorChair[]
   reservationSetting            ReservationSetting?
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
@@ -529,6 +578,8 @@ model StaffRequest {
   @@index([venueId])
   @@index([profileId])
   @@index([status])
+  @@index([requestedShiftId])
+  @@index([reviewerId])
 }
 
 model Conversation {
@@ -571,6 +622,7 @@ model Message {
   venue          Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
   shift          ScheduleShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
   swap           ShiftSwap?     @relation(fields: [swapId], references: [id], onDelete: SetNull)
+  chatImage      ChatImage?
 
   @@index([conversationId, createdAt])
   @@index([senderId])
@@ -603,10 +655,33 @@ model ChatImage {
   mimeType   String
   s3Key      String
   uploadedBy String?
+  messageId  String?  @unique
+  // Set while an orphan cleanup owns this row. Message attachment only wins
+  // while this remains null, preventing cleanup/send races.
+  purgeStartedAt DateTime?
   createdAt  DateTime @default(now())
   venue      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  message    Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([venueId])
+  @@index([messageId, createdAt])
+  @@index([purgeStartedAt])
+}
+
+/// Durable outbox for S3 deletion. Rows intentionally have no Venue FK so a
+/// venue can be deleted transactionally while object deletion retries safely.
+model ObjectDeletionJob {
+  id          String    @id @default(cuid())
+  objectKeys  String[]
+  status      String    @default("pending")
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([completedAt])
 }
 
 // Private venue document library. Object bytes stay in S3; this row carries
@@ -932,6 +1007,7 @@ model FloorChair {
   rotation    Float
   label       String?
   floorPlan   FloorPlan @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
+  venue       Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([floorPlanId])
   @@index([venueId])
@@ -1312,7 +1388,7 @@ model Team {
   memberCount Int
   venue       Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
-  @@index([venueId])
+  @@unique([venueId])
 }
 
 model ScheduleEmailEvent {
@@ -1522,7 +1598,7 @@ model ChecklistCompletion {
 
 model AuditLog {
   id              String   @id @default(cuid())
-  venueId         String
+  venueId         String?
   actorProfileId  String?
   actorName       String?
   actorRole       String?
@@ -1533,13 +1609,17 @@ model AuditLog {
   entityId        String?
   action          String
   summary         String
+  ipAddress       String?
+  userAgent       String?
   metadata        Json?
   createdAt       DateTime @default(now())
-  venue           Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue           Venue?   @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, createdAt])
   @@index([venueId, action])
+  @@index([action, createdAt])
   @@index([targetProfileId])
+  @@index([actorProfileId, createdAt])
 }
 
 model ManagerGoal {

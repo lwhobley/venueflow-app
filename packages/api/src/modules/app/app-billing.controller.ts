@@ -157,6 +157,17 @@ export class AppBillingController {
       if (this.cachedStripeMultiVenuePriceId) return this.cachedStripeMultiVenuePriceId;
     }
 
+    // Never mint Stripe Products/Prices from a customer checkout request in
+    // production: if an operator archives the current price in the Stripe
+    // dashboard to change pricing, this lookup-then-create path would just
+    // recreate a new price at the hardcoded amount below, silently reverting
+    // the change (and leaving an orphaned Product behind on retry). Require
+    // the price id to be configured explicitly instead.
+    if (process.env.NODE_ENV === 'production') {
+      const envKey = planType === 'multi_venue' ? 'STRIPE_MULTI_VENUE_PRICE_ID' : 'STRIPE_PRICE_ID';
+      throw new ServiceUnavailableException(`${envKey} is not configured on the server.`);
+    }
+
     const lookupKey = planType === 'multi_venue' ? STRIPE_MULTI_PRICE_LOOKUP_KEY : STRIPE_PRICE_LOOKUP_KEY;
     const amountCents = planType === 'multi_venue' ? STRIPE_MULTI_AMOUNT_CENTS : STRIPE_PLAN_AMOUNT_CENTS;
     const productName = planType === 'multi_venue' ? 'Venue Wrangler Multi-Venue Pro' : 'Venue Wrangler';
@@ -288,19 +299,33 @@ export class AppBillingController {
   private async verifyRevenueCatEntitlement(venueId: string, productId: string, entitlementId?: string) {
     const apiKey = this.config.get<string>('REVENUECAT_API_KEY') ?? this.config.get<string>('REVENUECAT_SECRET_API_KEY');
     if (!apiKey) {
-      return null;
+      throw new ServiceUnavailableException('Apple subscription verification is not configured. Please contact support.');
     }
 
-    const response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(venueId)}`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(10000),
-    });
-    const json: any = await response.json().catch(() => null);
-    if (!response.ok) {
-      this.logger.warn(`RevenueCat verification failed for venue ${venueId}: ${json?.message ?? response.statusText}`);
+    let response: Response | undefined;
+    let json: any = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(venueId)}`, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: 'application/json',
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+        json = await response.json().catch(() => null);
+        if (response.ok || (response.status >= 400 && response.status < 500)) {
+          break;
+        }
+      } catch (error) {
+        if (attempt === 2) throw error;
+      }
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+    if (!response || !response.ok) {
+      this.logger.warn(`RevenueCat verification failed for venue ${venueId}: ${json?.message ?? response?.statusText ?? 'Unknown error'}`);
       throw new BadRequestException('Could not verify RevenueCat subscription.');
     }
 

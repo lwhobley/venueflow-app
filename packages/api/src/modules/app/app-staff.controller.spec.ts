@@ -28,9 +28,7 @@ function makeController() {
     },
     session: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     team: {
-      findFirst: vi.fn().mockResolvedValue(null),
-      create: vi.fn().mockResolvedValue({ id: 'team-1' }),
-      update: vi.fn(),
+      upsert: vi.fn().mockResolvedValue({ id: 'team-1' }),
     },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
   };

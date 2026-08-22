@@ -238,6 +238,22 @@ describe('AppBillingController', () => {
         expect(vi.mocked(stripeRequest).mock.calls[0][2]).toBe('/checkout/sessions');
       });
     });
+
+    describe('in production, with STRIPE_PRICE_ID unset', () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      afterEach(() => {
+        process.env.NODE_ENV = originalNodeEnv;
+      });
+
+      it('refuses to auto-create a Stripe price instead of minting one at the hardcoded fallback amount', async () => {
+        process.env.NODE_ENV = 'production';
+        const { controller, profiles } = makeController({ STRIPE_PRICE_ID: undefined });
+        profiles.requireBillingProfile.mockResolvedValue(billingViewer);
+
+        await expect(controller.createStripeCheckout(user)).rejects.toThrow(ServiceUnavailableException);
+        expect(stripeRequest).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('createStripePortal', () => {
@@ -308,21 +324,21 @@ describe('AppBillingController', () => {
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);
       profiles.getProfile.mockResolvedValue(null);
 
-      await expect(controller.syncAppleSubscription(user, { productId: 'com.venuewrangler.annual' } as any)).resolves.toBeNull();
+      await expect(controller.syncAppleSubscription(user, { productId: 'com.venuewrangler.annual' } as any)).rejects.toThrow(
+        'Apple subscription verification is not configured',
+      );
     });
 
-    it('no-ops (returns current billing, does not grant access) when REVENUECAT_API_KEY is not configured', async () => {
+    it('fails explicitly when REVENUECAT_API_KEY is not configured', async () => {
       const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: undefined });
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);
       profiles.getProfile.mockResolvedValue(null);
       const fetchSpy = vi.fn();
       vi.stubGlobal('fetch', fetchSpy);
 
-      const result = await controller.syncAppleSubscription(user, allowedBody as any);
-
+      await expect(controller.syncAppleSubscription(user, allowedBody as any)).rejects.toThrow(ServiceUnavailableException);
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(prisma.$transaction).not.toHaveBeenCalled();
-      expect(result).toBeNull();
     });
 
     it('throws when the RevenueCat lookup itself fails', async () => {
@@ -359,6 +375,32 @@ describe('AppBillingController', () => {
       }));
 
       await expect(controller.syncAppleSubscription(user, allowedBody as any)).rejects.toThrow(BadRequestException);
+    });
+
+    it('retries RevenueCat verification when encountering a transient 500 server error', async () => {
+      const { controller, prisma, profiles } = makeController({ REVENUECAT_API_KEY: 'rc_key' });
+      profiles.requireBillingProfile.mockResolvedValue(billingViewer);
+      profiles.getProfile.mockResolvedValue({ venueId: 'venue-1' });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ message: 'server error' }) })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            subscriber: {
+              entitlements: { pro: { product_identifier: 'com.venuewrangler.monthly', expires_date: '2030-01-01T00:00:00Z' } },
+              subscriptions: {},
+            },
+          }),
+        });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await controller.syncAppleSubscription(user, allowedBody as any);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(prisma.venue.update).toHaveBeenCalledWith({
+        where: { id: 'venue-1' },
+        data: { subscriptionStatus: 'active', subscriptionPlatform: 'apple' },
+      });
     });
 
     it('rejects an active entitlement that belongs to a different product', async () => {
@@ -477,7 +519,7 @@ describe('AppBillingController', () => {
       profiles.requireBillingProfile.mockResolvedValue(billingViewer);
       profiles.getProfile.mockResolvedValue(null);
 
-      await controller.syncAppleSubscription(user, allowedBody as any);
+      await expect(controller.syncAppleSubscription(user, allowedBody as any)).rejects.toThrow(ServiceUnavailableException);
 
       expect(assertWithinSharedRateLimit).toHaveBeenCalledWith(expect.anything(), 'apple-sync:user-1', 10, 60_000);
     });

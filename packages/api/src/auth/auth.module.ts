@@ -15,7 +15,14 @@ import { AuthService } from './auth.service';
         if (!secret) {
           throw new Error('JWT_SECRET environment variable is required');
         }
-        return { secret, signOptions: { expiresIn: '30d' } };
+        // Only a symmetric secret is configured here, so algorithm confusion
+        // isn't exploitable today — but pin it explicitly as defense in depth
+        // against a future change that adds an asymmetric verification path.
+        return {
+          secret,
+          signOptions: { expiresIn: '30d', algorithm: 'HS256' },
+          verifyOptions: { algorithms: ['HS256'] },
+        };
       },
     }),
   ],

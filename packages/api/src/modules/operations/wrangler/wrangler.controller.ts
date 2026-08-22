@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Post } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { canManageVenue, isAdminRole } from '../../../auth/roles';
 import { RequireSubscription } from '../../../billing/require-subscription.decorator';
@@ -34,10 +35,10 @@ export class WranglerController {
   async getAiUsage(@VenueScope() scope: Scope) {
     if (!scope) return null;
     if (!isAdminRole(scope.role)) throw new ForbiddenException('Manager access required to view AI usage');
-    const rows = await this.prisma.$queryRawUnsafe<Array<{ feature: string; model: string; requests: bigint; promptTokens: bigint; completionTokens: bigint; cachedTokens: bigint; totalTokens: bigint; estimatedCostMicros: bigint }>>(
-      `SELECT "feature", "model", COUNT(*)::bigint AS requests, COALESCE(SUM("promptTokens"),0)::bigint AS "promptTokens", COALESCE(SUM("completionTokens"),0)::bigint AS "completionTokens", COALESCE(SUM("cachedTokens"),0)::bigint AS "cachedTokens", COALESCE(SUM("totalTokens"),0)::bigint AS "totalTokens", COALESCE(SUM("estimatedCostMicros"),0)::bigint AS "estimatedCostMicros" FROM "AiUsageEvent" WHERE "venueId" = $1 AND "createdAt" >= date_trunc('month', NOW()) GROUP BY "feature", "model" ORDER BY "estimatedCostMicros" DESC`, scope.venueId,
+    const rows = await this.prisma.$queryRaw<Array<{ feature: string; model: string; requests: bigint; promptTokens: bigint; completionTokens: bigint; cachedTokens: bigint; totalTokens: bigint; estimatedCostMicros: bigint }>>(
+      Prisma.sql`SELECT "feature", "model", COUNT(*)::bigint AS requests, COALESCE(SUM("promptTokens"),0)::bigint AS "promptTokens", COALESCE(SUM("completionTokens"),0)::bigint AS "completionTokens", COALESCE(SUM("cachedTokens"),0)::bigint AS "cachedTokens", COALESCE(SUM("totalTokens"),0)::bigint AS "totalTokens", COALESCE(SUM("estimatedCostMicros"),0)::bigint AS "estimatedCostMicros" FROM "AiUsageEvent" WHERE "venueId" = ${scope.venueId} AND "createdAt" >= date_trunc('month', NOW()) GROUP BY "feature", "model" ORDER BY "estimatedCostMicros" DESC`,
     );
-    const breakdown = rows.map((row) => ({ feature: row.feature, model: row.model, requests: Number(row.requests), promptTokens: Number(row.promptTokens), completionTokens: Number(row.completionTokens), totalTokens: Number(row.totalTokens), estimatedCostUsd: Number(row.estimatedCostMicros) / 1_000_000 }));
+    const breakdown = rows.map((row) => ({ feature: row.feature, model: row.model, requests: Number(row.requests), promptTokens: Number(row.promptTokens), completionTokens: Number(row.completionTokens), cachedTokens: Number(row.cachedTokens), totalTokens: Number(row.totalTokens), estimatedCostUsd: Number(row.estimatedCostMicros) / 1_000_000 }));
     const requests = breakdown.reduce((sum, row) => sum + row.requests, 0);
     const promptTokens = rows.reduce((sum, row) => sum + Number(row.promptTokens), 0);
     const completionTokens = rows.reduce((sum, row) => sum + Number(row.completionTokens), 0);
@@ -75,7 +76,20 @@ export class WranglerController {
       if (!body.priorityId) throw new BadRequestException('priorityId is required');
       const snapshot = await this.wrangler.getSnapshot(scope.venueId, venue.timezone); const priority = snapshot.priorities.find((item) => item.id === body.priorityId); if (!priority || priority.kind === 'steady') throw new BadRequestException('Wrangler priority is no longer active');
       const targetDate = zonedIsoDate(venue.timezone, Date.now()); const title = `Wrangler: ${priority.title}`; const existing = await this.prisma.managerGoal.findFirst({ where: { venueId: scope.venueId, title, targetDate, status: 'open' }, select: { id: true, title: true } }); if (existing) return { ok: true, type: body.type, followUpId: existing.id, title: existing.title, existing: true };
-      const created = await this.prisma.managerGoal.create({ data: { venueId: scope.venueId, title, details: `${priority.reason} Recommended move: ${priority.cta}.`, period: 'day', targetDate, status: 'open', createdBy: scope.profileId }, select: { id: true, title: true } });
+      let created: { id: string; title: string };
+      try {
+        created = await this.prisma.managerGoal.create({ data: { venueId: scope.venueId, title, details: `${priority.reason} Recommended move: ${priority.cta}.`, period: 'day', targetDate, status: 'open', createdBy: scope.profileId }, select: { id: true, title: true } });
+      } catch (err) {
+        // The findFirst above is not in a transaction, so two concurrent calls
+        // can both miss and both insert. ManagerGoal_venue_title_date_open_key
+        // turns the loser into a P2002 — return the winner's follow-up rather
+        // than failing the request, and skip the audit entry since this call
+        // created nothing.
+        if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') throw err;
+        const raced = await this.prisma.managerGoal.findFirst({ where: { venueId: scope.venueId, title, targetDate, status: 'open' }, select: { id: true, title: true } });
+        if (!raced) throw err;
+        return { ok: true, type: body.type, followUpId: raced.id, title: raced.title, existing: true };
+      }
       await this.prisma.auditLog.create({ data: { venueId: scope.venueId, actorProfileId: scope.profileId, actorName: scope.fullName, actorRole: scope.role, entityType: 'manager_goal', entityId: created.id, action: 'wrangler_follow_up_created', summary: `Created follow-up from Wrangler priority: ${priority.title}` } });
       return { ok: true, type: body.type, followUpId: created.id, title: created.title, existing: false };
     }

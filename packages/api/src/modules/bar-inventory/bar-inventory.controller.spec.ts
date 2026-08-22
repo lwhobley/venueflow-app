@@ -148,6 +148,8 @@ describe('BarInventoryController', () => {
       const result = await controller.getBarStock(staffUser);
 
       expect(result.items).toHaveLength(1);
+      expect(result.items[0].unitCostCents).toBeNull();
+      expect(result.totalValueCents).toBeNull();
       expect(prisma.barInventoryItem.findMany).toHaveBeenCalledWith({
         where: { venueId: 'venue-1' },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],

@@ -5,7 +5,7 @@ import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../../common/ve
 import { PrismaService } from '../../../prisma/prisma.service';
 import { buildDailyBriefPriorityActions, type DailyBriefPriorityAction } from '../daily-brief-priority-actions';
 import { buildWranglerFloorActions } from './wrangler-floor-rules';
-import { buildWranglerPatterns, buildWranglerRecap, answerWranglerQuestion } from './wrangler-intelligence';
+import { buildWranglerPatterns, buildWranglerRecap, answerWranglerQuestion, type WranglerSummary } from './wrangler-intelligence';
 import { sortWranglerPrioritiesForPhase } from './wrangler-phase-priority';
 import { buildWranglerRuleActions } from './wrangler-rules';
 import { deriveWranglerServicePhase, phaseLabel, type WranglerServicePhase } from './wrangler-service-phase';
@@ -26,15 +26,60 @@ export class WranglerService {
     const fourHoursFromNow = new Date(nowMs + 4 * 60 * 60_000);
     const thirtyMinutesFromNowMs = nowMs + 30 * 60_000;
 
-    const [reservations, shifts, pendingRequests, barItems, prepItems, events, tableStates, futureAssignments] = await Promise.all([
-      this.prisma.reservation.findMany({ where: { venueId, reservationTime: { gte: todayStart, lt: todayEnd }, status: { notIn: ['cancelled', 'no_show'] } }, orderBy: { reservationTime: 'asc' }, take: 200 }),
-      this.prisma.scheduleShift.findMany({ where: { venueId, weekStart, dayIndex }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 200 }),
-      this.prisma.staffRequest.findMany({ where: { venueId, status: 'pending' }, select: { id: true }, take: 100 }),
-      this.prisma.barInventoryItem.findMany({ where: { venueId }, orderBy: { name: 'asc' }, take: 300 }),
-      this.prisma.prepBoardItem.findMany({ where: { venueId, status: 'open', OR: [{ dueDate: null }, { dueDate: { lte: today } }] }, orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }], take: 100 }),
-      this.prisma.venueEvent.findMany({ where: { venueId, startsAt: { gte: todayStart, lt: todayEnd } }, orderBy: { startsAt: 'asc' }, take: 20 }),
-      this.prisma.tableState.findMany({ where: { venueId }, include: { table: { select: { id: true, label: true, seats: true, section: true, isReservable: true } } }, take: 300 }),
-      this.prisma.tableAssignment.findMany({ where: { venueId, releasedAt: null, endsAt: { gt: now }, startsAt: { lt: fourHoursFromNow } }, include: { table: { select: { id: true, label: true, section: true } }, reservation: { select: { id: true, guestName: true, partySize: true, tags: true, status: true } } }, orderBy: { startsAt: 'asc' }, take: 300 }),
+    const [
+      reservations,
+      shifts,
+      pendingRequests,
+      barItems,
+      prepItems,
+      events,
+      tableStates,
+      futureAssignments,
+      waitlistEntries,
+      crmLeads,
+      posConnections,
+      resConnections,
+      posChecks,
+    ] = await Promise.all([
+      this.prisma.reservation?.findMany
+        ? this.prisma.reservation.findMany({ where: { venueId, reservationTime: { gte: todayStart, lt: todayEnd }, status: { notIn: ['cancelled', 'no_show'] } }, orderBy: { reservationTime: 'asc' }, take: 200 })
+        : Promise.resolve([]),
+      this.prisma.scheduleShift?.findMany
+        ? this.prisma.scheduleShift.findMany({ where: { venueId, weekStart, dayIndex }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 200 })
+        : Promise.resolve([]),
+      this.prisma.staffRequest?.findMany
+        ? this.prisma.staffRequest.findMany({ where: { venueId, status: 'pending' }, select: { id: true }, take: 100 })
+        : Promise.resolve([]),
+      this.prisma.barInventoryItem?.findMany
+        ? this.prisma.barInventoryItem.findMany({ where: { venueId }, orderBy: { name: 'asc' }, take: 300 })
+        : Promise.resolve([]),
+      this.prisma.prepBoardItem?.findMany
+        ? this.prisma.prepBoardItem.findMany({ where: { venueId, status: 'open', OR: [{ dueDate: null }, { dueDate: { lte: today } }] }, orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }], take: 100 })
+        : Promise.resolve([]),
+      this.prisma.venueEvent?.findMany
+        ? this.prisma.venueEvent.findMany({ where: { venueId, startsAt: { gte: todayStart, lt: todayEnd } }, orderBy: { startsAt: 'asc' }, take: 20 })
+        : Promise.resolve([]),
+      this.prisma.tableState?.findMany
+        ? this.prisma.tableState.findMany({ where: { venueId }, include: { table: { select: { id: true, label: true, seats: true, section: true, isReservable: true } } }, take: 300 })
+        : Promise.resolve([]),
+      this.prisma.tableAssignment?.findMany
+        ? this.prisma.tableAssignment.findMany({ where: { venueId, releasedAt: null, endsAt: { gt: now }, startsAt: { lt: fourHoursFromNow } }, include: { table: { select: { id: true, label: true, section: true } }, reservation: { select: { id: true, guestName: true, partySize: true, tags: true, status: true } } }, orderBy: { startsAt: 'asc' }, take: 300 })
+        : Promise.resolve([]),
+      this.prisma.waitlist?.findMany
+        ? this.prisma.waitlist.findMany({ where: { venueId, status: 'waiting' }, take: 100 })
+        : Promise.resolve([]),
+      this.prisma.crmLead?.findMany
+        ? this.prisma.crmLead.findMany({ where: { venueId, deletedAt: null, status: { notIn: ['won', 'lost', 'unqualified'] } }, take: 100 })
+        : Promise.resolve([]),
+      this.prisma.posConnection?.findMany
+        ? this.prisma.posConnection.findMany({ where: { venueId } })
+        : Promise.resolve([]),
+      this.prisma.reservationConnection?.findMany
+        ? this.prisma.reservationConnection.findMany({ where: { venueId } })
+        : Promise.resolve([]),
+      this.prisma.posCheck?.findMany
+        ? this.prisma.posCheck.findMany({ where: { venueId, openedAt: { gte: todayStart, lt: todayEnd } }, take: 200 })
+        : Promise.resolve([]),
     ]);
 
     const openShiftCount = shifts.filter((shift) => shift.status === 'open').length;
@@ -49,9 +94,42 @@ export class WranglerService {
     const floorPriorities = buildWranglerFloorActions({ now: nowMs, tables: tableStates.map((tableState) => ({ tableId: tableState.tableId, label: tableState.table.label, status: tableState.status, seatedAt: tableState.seatedAt?.getTime() ?? null })), upcomingAssignments: upcomingAssignments.map((assignment) => { const alternate = this.findAlternateTable({ assignment, tableStates, futureAssignments }); return { assignmentId: assignment.id, tableId: assignment.tableId, tableLabel: assignment.table.label, startsAt: assignment.startsAt.getTime(), endsAt: assignment.endsAt.getTime(), reservationId: assignment.reservation?.id ?? null, guestName: assignment.reservation?.guestName ?? null, partySize: assignment.reservation?.partySize ?? null, tags: assignment.reservation?.tags ?? [], alternateTableId: alternate?.tableId ?? null, alternateTableLabel: alternate?.label ?? null }; }) });
 
     const priorities = this.mergePriorities([...floorPriorities, ...rulePriorities, ...eventPriorities], servicePhase);
-    const summary = { covers: reservations.reduce((sum, reservation) => sum + reservation.partySize, 0), reservations: reservations.length, vipArrivals: reservations.filter((reservation) => reservation.tags.some((tag) => tag.toLowerCase().includes('vip'))).length, scheduledStaff: shifts.filter((shift) => shift.status === 'scheduled').length, openShifts: openShiftCount, lowStockItems: lowStockItems.length, eightySixItems: eightySixCount, pendingStaffRequests: pendingRequests.length, seatedTables };
+    
+    const allConnections = [...posConnections, ...resConnections];
+    const connectedCount = allConnections.filter((c) => c.status === 'connected').length;
+    const disconnectedCount = allConnections.filter((c) => c.status !== 'connected').length;
+    const totalSalesCents = posChecks.reduce((sum, c) => sum + (c.totalCents ?? 0), 0);
+    const openChecksCount = posChecks.filter((c) => c.status === 'open').length;
 
-    return { generatedAt: nowMs, date: today, servicePhase, servicePhaseLabel: phaseLabel(servicePhase), summary, status: priorities.some((item) => item.severity === 'critical') ? 'critical' : priorities.some((item) => item.severity === 'warning') ? 'attention' : priorities.some((item) => item.severity === 'watch') ? 'watch' : 'clear', priorities, recap: buildWranglerRecap({ phase: servicePhase, summary, priorities }), patterns: buildWranglerPatterns({ summary, priorities }) };
+    const summary: WranglerSummary = {
+      covers: reservations.reduce((sum, reservation) => sum + reservation.partySize, 0),
+      reservations: reservations.length,
+      vipArrivals: reservations.filter((reservation) => reservation.tags.some((tag) => tag.toLowerCase().includes('vip'))).length,
+      scheduledStaff: shifts.filter((shift) => shift.status === 'scheduled').length,
+      openShifts: openShiftCount,
+      lowStockItems: lowStockItems.length,
+      eightySixItems: eightySixCount,
+      pendingStaffRequests: pendingRequests.length,
+      seatedTables,
+      activeWaitlist: waitlistEntries.length,
+      totalSalesCents,
+      openChecksCount,
+      activeLeadsCount: crmLeads.length,
+      connectedIntegrationsCount: connectedCount,
+      disconnectedIntegrationsCount: disconnectedCount,
+    };
+
+    return {
+      generatedAt: nowMs,
+      date: today,
+      servicePhase,
+      servicePhaseLabel: phaseLabel(servicePhase),
+      summary,
+      status: priorities.some((item) => item.severity === 'critical') ? 'critical' : priorities.some((item) => item.severity === 'warning') ? 'attention' : priorities.some((item) => item.severity === 'watch') ? 'watch' : 'clear',
+      priorities,
+      recap: buildWranglerRecap({ phase: servicePhase, summary, priorities }),
+      patterns: buildWranglerPatterns({ summary, priorities }),
+    };
   }
 
   async ask(venueId: string, timezone: string | null | undefined, question: string) {
@@ -66,10 +144,6 @@ export class WranglerService {
     const tableId = input.tableId;
     const reassignment = await withSerializableRetry(this.prisma, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`reservation-holds:${venueId}`}))`;
-      // Load the reservation and table under the same lock as the assignment.
-      // This prevents a stale Wrangler suggestion from reviving a cancelled,
-      // completed, or no-show reservation, or assigning a table whose capacity
-      // or floor-plan eligibility changed after the snapshot was generated.
       const reservation = await tx.reservation.findFirst({
         where: { id: reservationId, venueId, deletedAt: null, status: { notIn: ['cancelled', 'no_show', 'completed'] } },
         select: { id: true, partySize: true, reservationTime: true, durationMinutes: true },

@@ -190,6 +190,51 @@ describe('WorkforceController invite check email', () => {
   });
 });
 
+describe('WorkforceController manager join-request names', () => {
+  it('uses the applicant oldest profile even when it already belongs to a venue', async () => {
+    const prisma = {
+      profile: {
+        findMany: vi.fn().mockResolvedValue([{ venueId: 'venue-1' }]),
+      },
+      workplaceJoinRequest: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'request-1',
+          venueId: 'venue-1',
+          userId: 'applicant-1',
+          status: 'pending',
+          createdAt: new Date('2026-08-01T00:00:00.000Z'),
+          venue: { id: 'venue-1', name: 'Test Venue' },
+          user: {
+            id: 'applicant-1',
+            email: 'applicant@example.com',
+            profiles: [{ fullName: 'Alex Applicant' }],
+          },
+        }]),
+      },
+    };
+    const controller = new WorkforceController(prisma as never, {} as never, {} as never);
+
+    const result = await controller.listManagerJoinRequests({ sub: 'manager-1' } as never);
+
+    expect(prisma.workplaceJoinRequest.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        user: {
+          select: {
+            id: true,
+            email: true,
+            profiles: {
+              select: { fullName: true },
+              orderBy: { createdAt: 'asc' },
+              take: 1,
+            },
+          },
+        },
+      }),
+    }));
+    expect(result.requests[0]?.userName).toBe('Alex Applicant');
+  });
+});
+
 describe('WorkforceController venue search', () => {
   const findMany = vi.fn();
   const prisma = {

@@ -161,7 +161,7 @@ export class WorkforceController {
       return this.reportStaleInviteStatus(email, undefined);
     }
 
-    const appUrl = (this.config.get<string>('APP_WEB_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
+    const appUrl = (this.config.get<string>('APP_WEB_URL') ?? this.config.get<string>('WEB_BASE_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
     // A URL fragment (not a query string) so the token never reaches
     // server/CDN access logs — fragments aren't sent in the HTTP request at
     // all. site/join/index.html reads from the fragment first.
@@ -359,7 +359,6 @@ export class WorkforceController {
             id: true,
             email: true,
             profiles: {
-              where: { venueId: null },
               select: { fullName: true },
               orderBy: { createdAt: 'asc' },
               take: 1,
@@ -443,7 +442,6 @@ export class WorkforceController {
             id: true,
             email: true,
             profiles: {
-              where: { venueId: null },
               select: { fullName: true },
               orderBy: { createdAt: 'asc' },
               take: 1,
@@ -505,7 +503,6 @@ export class WorkforceController {
           select: {
             email: true,
             profiles: {
-              where: { venueId: null },
               select: { fullName: true },
               orderBy: { createdAt: 'asc' },
               take: 1,

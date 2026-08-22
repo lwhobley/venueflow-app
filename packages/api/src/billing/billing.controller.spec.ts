@@ -132,3 +132,44 @@ describe('BillingController webhook authentication', () => {
     expect(assertWithinSharedRateLimit).toHaveBeenCalledOnce();
   });
 });
+
+describe('BillingController applySubscription P2002 handling', () => {
+  function makeController(transactionImpl: () => Promise<unknown>) {
+    const prisma = { $transaction: vi.fn(transactionImpl) };
+    const controller = new BillingController(prisma as any, { get: vi.fn() } as any);
+    return { controller, prisma };
+  }
+
+  const input = {
+    venueId: 'venue-1',
+    status: 'active' as const,
+    planId: 'plan-1',
+    eventId: 'evt-1',
+    eventType: 'customer.subscription.updated',
+  };
+
+  it('swallows a P2002 on the SubscriptionEvent replay-dedupe constraint', async () => {
+    const error = Object.assign(new Error('duplicate'), { code: 'P2002', meta: { target: ['source', 'externalEventId'] } });
+    const { controller } = makeController(() => Promise.reject(error));
+
+    await expect(controller.applyStripeSubscription(input)).resolves.toEqual({ ok: true, duplicate: true });
+  });
+
+  it('re-throws a P2002 on any other constraint instead of returning a fake success', async () => {
+    // e.g. Subscription.externalSubscriptionId already bound to a different
+    // venue — a real conflict, not a replayed webhook delivery. Swallowing
+    // this would tell Stripe/RevenueCat the event was handled when the
+    // venue's subscription state was never actually updated.
+    const error = Object.assign(new Error('duplicate'), { code: 'P2002', meta: { target: ['externalSubscriptionId'] } });
+    const { controller } = makeController(() => Promise.reject(error));
+
+    await expect(controller.applyStripeSubscription(input)).rejects.toBe(error);
+  });
+
+  it('re-throws a P2002 with no meta.target at all', async () => {
+    const error = Object.assign(new Error('duplicate'), { code: 'P2002' });
+    const { controller } = makeController(() => Promise.reject(error));
+
+    await expect(controller.applyStripeSubscription(input)).rejects.toBe(error);
+  });
+});

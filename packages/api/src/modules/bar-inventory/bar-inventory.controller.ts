@@ -240,7 +240,7 @@ function mapItem(item: {
   lastCountedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-}) {
+}, includeCosts = true) {
   return {
     _id: item.id,
     venueId: item.venueId,
@@ -250,7 +250,7 @@ function mapItem(item: {
     unit: item.unit,
     parLevel: item.parLevel,
     onHand: item.onHand,
-    unitCostCents: item.unitCostCents ?? null,
+    unitCostCents: includeCosts ? item.unitCostCents ?? null : null,
     supplier: item.supplier ?? null,
     sku: item.sku ?? null,
     notes: item.notes ?? null,
@@ -315,6 +315,7 @@ export class BarInventoryController {
     // Read-only inventory is visible to any venue member; mutations below
     // still require a manager profile.
     const profile = await this.requireVenueProfile(user);
+    const includeCosts = canManageVenue(profile.role, profile.allAccess);
     const items = await this.prisma.barInventoryItem.findMany({
       where: { venueId: profile.venueId! },
       // Do not silently truncate inventory: totals and count workflows must be
@@ -324,12 +325,14 @@ export class BarInventoryController {
     });
     const sorted = items.slice().sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return {
-      items: sorted.map(mapItem),
+      items: sorted.map((item) => mapItem(item, includeCosts)),
       lowStockCount: items.filter((item) => item.onHand <= item.parLevel).length,
-      totalValueCents: items.reduce(
-        (sum, item) => sum + Math.round(item.onHand * (item.unitCostCents ?? 0)),
-        0,
-      ),
+      totalValueCents: includeCosts
+        ? items.reduce(
+          (sum, item) => sum + Math.round(item.onHand * (item.unitCostCents ?? 0)),
+          0,
+        )
+        : null,
     };
   }
 

@@ -1015,6 +1015,7 @@ describe('OperationsController', () => {
 
       expect(mediaAccess.assertToken).toHaveBeenCalledWith('tok', 'checklist-photo', 'comp-1', 'venue-1');
       expect(s3ImageService.getPresignedUrl).toHaveBeenCalledWith('photos/comp-1.jpg');
+      expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
       expect(res.setHeader).toHaveBeenCalledWith('Referrer-Policy', 'no-referrer');
       expect(res.redirect).toHaveBeenCalledWith(302, 'https://signed.example/img.jpg');
     });

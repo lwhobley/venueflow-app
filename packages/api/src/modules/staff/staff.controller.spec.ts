@@ -15,9 +15,7 @@ function makeController() {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     team: {
-      findFirst: vi.fn().mockResolvedValue(null),
-      update: vi.fn().mockResolvedValue({}),
-      create: vi.fn().mockResolvedValue({}),
+      upsert: vi.fn().mockResolvedValue({ id: 'team-1' }),
     },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
   };
@@ -361,7 +359,6 @@ describe('StaffController', () => {
       const { controller, prisma } = makeController();
       prisma.profile.findMany.mockResolvedValue([]);
       prisma.profile.count.mockResolvedValue(7);
-      prisma.team.findFirst.mockResolvedValue(null);
 
       await controller.upsertVenueStaff(managerScope, {
         email: 'new@x.com',
@@ -370,8 +367,10 @@ describe('StaffController', () => {
         jobTitle: 'Server',
       } as any);
 
-      expect(prisma.team.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ venueId: 'venue-1', memberCount: 7 }),
+      expect(prisma.team.upsert).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1' },
+        create: expect.objectContaining({ venueId: 'venue-1', memberCount: 7 }),
+        update: { memberCount: 7 },
       });
     });
   });
@@ -425,7 +424,6 @@ describe('StaffController', () => {
     it('deactivates a staff member, clears sessions, and syncs the team count', async () => {
       const { controller, prisma } = makeController();
       prisma.profile.findUnique.mockResolvedValue({ id: 'staff-2', venueId: 'venue-1', role: 'staff', userId: 'user-2' });
-      prisma.team.findFirst.mockResolvedValue({ id: 'team-1' });
 
       const result = await controller.deactivateVenueStaff(managerScope, 'staff-2');
 
@@ -434,7 +432,11 @@ describe('StaffController', () => {
         data: { venueId: null },
       });
       expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-2' } });
-      expect(prisma.team.update).toHaveBeenCalledWith({ where: { id: 'team-1' }, data: expect.objectContaining({ memberCount: expect.any(Number) }) });
+      expect(prisma.team.upsert).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1' },
+        create: expect.objectContaining({ venueId: 'venue-1', memberCount: expect.any(Number) }),
+        update: { memberCount: expect.any(Number) },
+      });
       expect(result).toEqual(expect.objectContaining({ venueId: null }));
     });
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
-import { assertWithinGeofence } from './geofence';
+import { assertFixNotReplayed, assertWithinGeofence } from './geofence';
 
 const venue = { latitude: 40.0, longitude: -73.0, geofenceRadiusM: 100 };
 
@@ -40,5 +40,28 @@ describe('assertWithinGeofence', () => {
   it('allows a point just inside the radius', () => {
     // ~33m north (0.0003 deg lat ≈ 33m) — within 100m.
     expect(() => assertWithinGeofence(40.0003, -73.0, 10, false, venue)).not.toThrow();
+  });
+});
+
+describe('assertFixNotReplayed', () => {
+  it('allows a punch when there is no prior fix to compare against', () => {
+    expect(() => assertFixNotReplayed(40.0, -73.0, null)).not.toThrow();
+  });
+
+  it('allows a punch when the prior entry stored no coordinates', () => {
+    expect(() => assertFixNotReplayed(40.0, -73.0, { lat: null, lng: null })).not.toThrow();
+  });
+
+  it('rejects coordinates identical to an earlier day\'s fix', () => {
+    expect(() => assertFixNotReplayed(40.0, -73.0, { lat: 40.0, lng: -73.0 })).toThrow(BadRequestException);
+  });
+
+  it('allows a real fix that jitters in the low bits', () => {
+    // Two independent GNSS fixes never match exactly; metre-level jitter is enough.
+    expect(() => assertFixNotReplayed(40.00000012, -73.00000004, { lat: 40.0, lng: -73.0 })).not.toThrow();
+  });
+
+  it('does not treat a matching latitude alone as a replay', () => {
+    expect(() => assertFixNotReplayed(40.0, -73.5, { lat: 40.0, lng: -73.0 })).not.toThrow();
   });
 });

@@ -43,6 +43,9 @@ async function bootstrap() {
   if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative integer');
   }
+  if (process.env.NODE_ENV === 'production' && !config.get<string>('TRUST_PROXY_HOPS')) {
+    console.warn('[Bootstrap] WARNING: TRUST_PROXY_HOPS is not explicitly configured in environment; defaulting to 1 for Cloud Run load balancer');
+  }
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   // Only accept fully-qualified http(s) origins. In production, further
   // restrict to venuewrangler.com hosts so a mis-set CORS_ORIGINS cannot
@@ -53,30 +56,48 @@ async function bootstrap() {
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin && isAllowedOrigin(origin, isProduction));
-  const allowedOrigins = Array.from(
-    new Set([
-      ...DEFAULT_CORS_ORIGINS,
-      ...(isProduction ? [] : origins),
-      ...(isProduction ? origins.filter((o) => isAllowedOrigin(o, true)) : origins),
-    ]),
-  );
+  // `origins` is already filtered by isAllowedOrigin with this same
+  // isProduction flag above, so no further per-environment filtering is needed
+  // here — in production that filter has already dropped non-venuewrangler.com
+  // hosts.
+  const allowedOrigins = Array.from(new Set([...DEFAULT_CORS_ORIGINS, ...origins]));
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      hsts: {
+        maxAge: 31536000, // 1 year
+        includeSubDomains: true,
+        preload: true,
+      },
+      frameguard: {
+        action: 'deny',
+      },
+      noSniff: true,
+      hidePoweredBy: true,
+      referrerPolicy: {
+        policy: 'strict-origin-when-cross-origin',
+      },
+    }),
+  );
   const STRIPE_WEBHOOK_PATH = '/api/v1/billing/stripe/webhook';
+  const verifyRawBody = (req: Request & { rawBody?: Buffer }, _res: Response, buf: Buffer) => {
+    const urlInner = req.originalUrl ?? req.url ?? '';
+    const pathInner = urlInner.split('?')[0].replace(/\/+$/, '');
+    if (pathInner === STRIPE_WEBHOOK_PATH) {
+      req.rawBody = buf;
+    }
+  };
+  // jsonBodyLimitForPath only ever returns one of these two limits, and both
+  // are fixed for the process lifetime — build each json() parser once at
+  // bootstrap instead of constructing a new middleware instance on every
+  // request.
+  const defaultJsonParser = json({ limit: '1mb', verify: verifyRawBody });
+  const largeJsonParser = json({ limit: config.get<string>('JSON_BODY_LIMIT', '16mb'), verify: verifyRawBody });
   app.use((req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl ?? req.url ?? '';
     const path = url.split('?')[0].replace(/\/+$/, '');
-    const limit = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '16mb'));
-    json({
-      limit,
-      verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
-        const urlInner = req.originalUrl ?? req.url ?? '';
-        const pathInner = urlInner.split('?')[0].replace(/\/+$/, '');
-        if (pathInner === STRIPE_WEBHOOK_PATH) {
-          req.rawBody = buf;
-        }
-      },
-    })(req, res, next);
+    const isLarge = jsonBodyLimitForPath(path, config.get<string>('JSON_BODY_LIMIT', '16mb')) !== '1mb';
+    (isLarge ? largeJsonParser : defaultJsonParser)(req, res, next);
   });
   app.use(urlencoded({ extended: true, limit: config.get<string>('URLENCODED_BODY_LIMIT', '1mb') }));
   // Fail closed: only origins explicitly listed (and production-filtered) are

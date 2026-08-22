@@ -106,6 +106,14 @@ export class BillingController {
     await assertWithinSharedRateLimit(this.prisma, `revenuecat:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
 
     const event = body.event;
+    // app_user_id is whatever the client passed to Purchases.configure/logIn
+    // (see configurePurchases(venueId) in app/_layout.tsx) — trusted here only
+    // because the HMAC signature above proves RevenueCat itself sent this
+    // event for a purchase it actually processed under that identity. This
+    // does NOT prove the purchaser held membership at that venue: RevenueCat's
+    // project-level "Transfer behavior" setting must be "Do not transfer" so a
+    // purchase cannot be re-attributed to a different app_user_id after the
+    // fact. Verify that setting in the RevenueCat dashboard.
     const venueId = event?.app_user_id;
     if (!event?.type || !venueId) {
       return { ok: true, ignored: true };
@@ -475,7 +483,14 @@ export class BillingController {
         return { status: input.status };
       });
     } catch (error: any) {
-      if (error?.code === 'P2002') {
+      // Only swallow the specific replay-dedupe constraint (SubscriptionEvent's
+      // [source, externalEventId] unique index) — a concurrent delivery of the
+      // same webhook event. Any other unique violation (e.g. Subscription's
+      // venueId/externalSubscriptionId uniqueness) indicates a real conflict —
+      // such as a subscription id already bound to a different venue — and
+      // must propagate so the caller (Stripe/RevenueCat) retries the delivery
+      // instead of getting a silent 200 while the venue's status stays stale.
+      if (error?.code === 'P2002' && (error.meta?.target as string[] | undefined)?.includes('externalEventId')) {
         return { ok: true, duplicate: true };
       }
       throw error;

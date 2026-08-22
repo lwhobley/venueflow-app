@@ -29,6 +29,7 @@ import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { MediaAccessService } from './media-access.service';
 import { S3ImageService } from './s3-image.service';
+import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 
 // Chat photo uploads. Kept small — images are picker-compressed (quality 0.5)
 // before they reach us; reject anything larger so the DB store stays lean.
@@ -37,6 +38,8 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 type Scope = VenueScopedRequest['venueScope'];
 
 const GENERAL_GROUP_NAME = 'All Staff';
+/** Keys per deletion job — keeps each `IN (...)` and objectKeys array well under Postgres's bind-parameter ceiling. */
+const MEDIA_DELETION_BATCH_SIZE = 500;
 const ACTIVE_MEMBERSHIP: Array<{ membershipStatus: null | 'active' }> = [
   { membershipStatus: null },
   { membershipStatus: 'active' },
@@ -108,6 +111,7 @@ export class ChatController {
     private readonly prisma: PrismaService,
     private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
+    private readonly mediaCleanup: MediaCleanupService,
   ) {}
 
   private async ensureContextualConversationsThrottled(venueId: string) {
@@ -239,6 +243,10 @@ export class ChatController {
     const all = await this.prisma.conversation.findMany({
       where: { venueId: scope.venueId },
       orderBy: { lastMessageAt: 'desc' },
+      // Bounded by roster size in practice (DMs are per staff pair, groups
+      // per role/shift), but capped defensively — this list has no pagination
+      // on the client.
+      take: 500,
     });
 
     const staff = await this.prisma.profile.findMany({
@@ -446,17 +454,49 @@ export class ChatController {
       throw new ForbiddenException('Only custom group chats can be deleted');
     }
 
-    await this.prisma.$transaction([
-      this.prisma.message.deleteMany({ where: { conversationId: id } }),
-      this.prisma.conversation.delete({ where: { id: conv.id } }),
-    ]);
+    // Page inside the transaction. A long-lived group chat can hold thousands
+    // of images; loading every key before deleting it is both unbounded and
+    // can exceed Postgres's bind-parameter ceiling.
+    const jobIds = await this.prisma.$transaction(async (tx) => {
+      const created: string[] = [];
+      for (;;) {
+        const batch = await tx.chatImage.findMany({
+          where: { message: { conversationId: id } },
+          orderBy: { id: 'asc' },
+          take: MEDIA_DELETION_BATCH_SIZE,
+          select: { id: true, s3Key: true },
+        });
+        if (batch.length === 0) break;
+        const job = await tx.objectDeletionJob.create({
+          data: { objectKeys: batch.map((image) => image.s3Key) },
+          select: { id: true },
+        });
+        created.push(job.id);
+        await tx.chatImage.deleteMany({ where: { id: { in: batch.map((image) => image.id) } } });
+      }
+      await tx.message.deleteMany({ where: { conversationId: id } });
+      await tx.conversation.delete({ where: { id: conv.id } });
+      return created;
+    });
+    // Fire-and-forget a small bounded number. Awaiting serial S3 deletion
+    // timed out the gateway for large conversations, while starting every job
+    // at once can overload the shared bucket credential. The hourly cron is
+    // the durable backstop for the remainder.
+    for (const jobId of jobIds.slice(0, 5)) void this.mediaCleanup.processJob(jobId).catch(() => undefined);
 
     return { ok: true };
   }
 
   @RequireSubscription('active')
   @Get('conversations/:id/messages')
-  async getMessages(@VenueScope() scope: Scope, @Param('id') id: string) {
+  async getMessages(
+    @VenueScope() scope: Scope,
+    @Param('id') id: string,
+    // Pass the oldest message id already loaded to page further back in
+    // history. Without this, history was hard-capped at the most recent 50
+    // messages with no way to reach anything older through the API.
+    @Query('before') before?: string,
+  ) {
     if (!scope) throw new ForbiddenException('No venue profile found');
 
     const conv = await this.prisma.conversation.findFirst({
@@ -474,53 +514,67 @@ export class ChatController {
     });
     const nameById = new Map(staff.map((s) => [s.id, s.fullName]));
 
-    let title = conv.name ?? 'Chat';
-    if (conv.type === 'dm') {
-      const otherId = conv.memberIds.find((mid) => mid !== scope.profileId);
-      title = (otherId && nameById.get(otherId)) || 'Direct message';
-    }
+    // Paging further back into history isn't "opening" the conversation, so
+    // skip re-marking it read and skip recomputing title/read-receipts —
+    // the client already has those from the initial load.
+    let title: string | undefined;
+    let readReceipts: { name: string; readAt: number }[] | undefined;
+    if (!before) {
+      title = conv.name ?? 'Chat';
+      if (conv.type === 'dm') {
+        const otherId = conv.memberIds.find((mid) => mid !== scope.profileId);
+        title = (otherId && nameById.get(otherId)) || 'Direct message';
+      }
 
-    // Upsert read receipt for current user
-    await this.prisma.conversationRead.upsert({
-      where: {
-        conversationId_profileId: {
+      // Upsert read receipt for current user
+      await this.prisma.conversationRead.upsert({
+        where: {
+          conversationId_profileId: {
+            conversationId: id,
+            profileId: scope.profileId,
+          }
+        },
+        create: {
           conversationId: id,
           profileId: scope.profileId,
+          venueId: scope.venueId,
+          readAt: new Date(),
+        },
+        update: {
+          readAt: new Date(),
         }
-      },
-      create: {
-        conversationId: id,
-        profileId: scope.profileId,
-        venueId: scope.venueId,
-        readAt: new Date(),
-      },
-      update: {
-        readAt: new Date(),
-      }
-    });
+      });
 
-    const reads = await this.prisma.conversationRead.findMany({
-      where: { conversationId: id },
-      select: { profileId: true, readAt: true },
-    });
+      const reads = await this.prisma.conversationRead.findMany({
+        where: { conversationId: id },
+        select: { profileId: true, readAt: true },
+      });
 
-    const readReceipts = reads
-      .filter((r) => r.profileId !== scope.profileId)
-      .map((r) => ({
-        name: nameById.get(r.profileId) || 'Teammate',
-        readAt: r.readAt.getTime(),
-      }));
+      readReceipts = reads
+        .filter((r) => r.profileId !== scope.profileId)
+        .map((r) => ({
+          name: nameById.get(r.profileId) || 'Teammate',
+          readAt: r.readAt.getTime(),
+        }));
+    }
 
+    const PAGE_SIZE = 50;
     const recent = await this.prisma.message.findMany({
       where: { conversationId: id },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 50,
+      // cursor + skip:1 walks strictly older than `before` in the same
+      // (createdAt, id) order the initial page ended on — id is unique, so
+      // this is stable even when multiple messages share a createdAt.
+      ...(before ? { cursor: { id: before }, skip: 1 } : {}),
+      take: PAGE_SIZE + 1,
     });
-    const messages = recent.slice().reverse();
+    const hasMore = recent.length > PAGE_SIZE;
+    const messages = recent.slice(0, PAGE_SIZE).reverse();
 
     return {
-      title,
-      readReceipts,
+      ...(title !== undefined ? { title } : {}),
+      ...(readReceipts !== undefined ? { readReceipts } : {}),
+      hasMore,
       messages: await Promise.all(messages.map(async (m) => {
         const imageId = m.imageUrl?.match(/^\/v1\/chat\/images\/([a-zA-Z0-9_-]+)$/)?.[1];
         return {
@@ -576,14 +630,15 @@ export class ChatController {
     const text = body.text.trim();
 
     let imageUrl: string | null = null;
+    let imageId: string | null = null;
     if (body.imageUrl) {
       const match = body.imageUrl.match(/\/v1\/chat\/images\/([a-zA-Z0-9_-]+)/);
       if (!match) {
         throw new BadRequestException('Invalid image URL format');
       }
-      const imageId = match[1];
+      imageId = match[1];
       const image = await this.prisma.chatImage.findUnique({ where: { id: imageId } });
-      if (!image || image.venueId !== scope.venueId) {
+      if (!image || image.venueId !== scope.venueId || image.messageId || image.purgeStartedAt) {
         throw new BadRequestException('Image not found or does not belong to this venue');
       }
       imageUrl = `/v1/chat/images/${image.id}`;
@@ -609,6 +664,15 @@ export class ChatController {
           createdAt: now,
         },
       });
+      if (imageId) {
+        const attached = await transaction.chatImage.updateMany({
+          where: { id: imageId, venueId: scope.venueId, messageId: null, purgeStartedAt: null },
+          data: { messageId: created.id },
+        });
+        if (attached.count !== 1) {
+          throw new ConflictException('This image is no longer available. Upload it again.');
+        }
+      }
       await transaction.conversation.update({
         where: { id: conv.id },
         data: {
@@ -744,6 +808,7 @@ export class ChatController {
     if (!image) throw new NotFoundException('Image not found');
     await this.mediaAccess.assertToken(token, 'chat-image', id, image.venueId);
     const url = await this.s3ImageService.getPresignedUrl(image.s3Key);
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     return res.redirect(302, url);
   }

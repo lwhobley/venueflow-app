@@ -27,6 +27,7 @@ import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, Re
 import { canManageVenue } from '../../auth/roles';
 import { ACTIVE_MEMBERSHIP } from '../../common/membership';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { htmlEscape } from '../../common/html-escape';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -315,15 +316,6 @@ class RenderTemplateDto {
   beoId?: string;
 }
 
-
-function htmlEscape(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 function formatEventDate(date: Date | null): string {
   return date
@@ -879,41 +871,41 @@ export class CrmController {
   @Get('forecast')
   async getPipelineForecast(@VenueScope() scope: Scope) {
     requireManager(scope);
-    const leads = await this.prisma.crmLead.findMany({
+    // Aggregated in the database rather than loading every lead into memory —
+    // probability weighting only depends on `status`, so a per-status
+    // count+sum is sufficient to compute every value below. This scales with
+    // the number of distinct statuses, not the number of leads.
+    const grouped = await this.prisma.crmLead.groupBy({
+      by: ['status'],
       where: { venueId: scope.venueId, deletedAt: null },
-      select: { status: true, estimatedValueCents: true },
+      _count: { _all: true },
+      _sum: { estimatedValueCents: true },
     });
 
-    const byStage = new Map<string, { count: number; rawValueCents: number; weightedValueCents: number }>();
     let totalWeighted = 0;
     let totalRaw = 0;
+    let totalLeadCount = 0;
     let wonCount = 0;
     let wonValueCents = 0;
-    for (const lead of leads) {
-      const status = lead.status as string;
-      const value = lead.estimatedValueCents ?? 0;
+    const byStage = grouped.map((row) => {
+      const status = row.status as string;
+      const rawValueCents = row._sum.estimatedValueCents ?? 0;
       const probability = STAGE_PROBABILITY[status] ?? 0;
-      const weighted = Math.round(value * probability);
-      const row = byStage.get(status) ?? { count: 0, rawValueCents: 0, weightedValueCents: 0 };
-      row.count += 1;
-      row.rawValueCents += value;
-      row.weightedValueCents += weighted;
-      byStage.set(status, row);
-      totalRaw += value;
-      totalWeighted += weighted;
+      const weightedValueCents = Math.round(rawValueCents * probability);
+      totalRaw += rawValueCents;
+      totalWeighted += weightedValueCents;
+      totalLeadCount += row._count._all;
       if (status === 'won') {
-        wonCount += 1;
-        wonValueCents += value;
+        wonCount = row._count._all;
+        wonValueCents = rawValueCents;
       }
-    }
+      return { stage: status, probability, count: row._count._all, rawValueCents, weightedValueCents };
+    });
+
     return {
-      byStage: Array.from(byStage.entries()).map(([stage, row]) => ({
-        stage,
-        probability: STAGE_PROBABILITY[stage] ?? 0,
-        ...row,
-      })),
+      byStage,
       totals: {
-        leadCount: leads.length,
+        leadCount: totalLeadCount,
         rawValueCents: totalRaw,
         weightedValueCents: totalWeighted,
         wonCount,

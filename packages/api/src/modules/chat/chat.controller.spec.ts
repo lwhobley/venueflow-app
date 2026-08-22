@@ -38,8 +38,12 @@ function makeController() {
     },
     chatImage: {
       findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue({ id: 'img-created' }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    objectDeletionJob: { create: vi.fn().mockResolvedValue({ id: 'delete-job-1' }) },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $queryRaw: vi.fn().mockResolvedValue([{ key: 'lease:chat-context:venue-1' }]),
   };
@@ -58,8 +62,10 @@ function makeController() {
     getPresignedUrl: vi.fn().mockResolvedValue('https://signed.example/image.webp'),
   } as any;
 
-  const controller = new ChatController(prisma, mediaAccess, s3ImageService);
-  return { controller, prisma, mediaAccess, s3ImageService };
+  const mediaCleanup = { processJob: vi.fn().mockResolvedValue(true) } as any;
+
+  const controller = new ChatController(prisma, mediaAccess, s3ImageService, mediaCleanup);
+  return { controller, prisma, mediaAccess, s3ImageService, mediaCleanup };
 }
 
 const managerScope = {
@@ -523,6 +529,55 @@ describe('ChatController', () => {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     }));
     expect(mediaAccess.createPath).toHaveBeenCalledWith('chat-image', 'img-1', 'venue-1', '/v1/chat/images/img-1');
+    expect(result.hasMore).toBe(false);
+  });
+
+  it('reports hasMore when a page is full, and pages further back with `before`', async () => {
+    const { controller, prisma } = makeController();
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: 'conv-1',
+      venueId: 'venue-1',
+      type: 'dm',
+      name: null,
+      memberIds: ['staff-1', 'staff-2'],
+    });
+    // 51 rows (PAGE_SIZE + 1) signals there is at least one more page.
+    prisma.message.findMany.mockResolvedValue(
+      Array.from({ length: 51 }, (_, i) => ({
+        id: `msg-${50 - i}`,
+        text: `#${50 - i}`,
+        senderId: null,
+        createdAt: new Date(2026, 0, 1, 0, 50 - i),
+        shiftId: null,
+        swapId: null,
+        imageUrl: null,
+        reactions: null,
+      })),
+    );
+
+    const firstPage = await controller.getMessages(staffScope, 'conv-1');
+    expect(firstPage.hasMore).toBe(true);
+    expect(firstPage.messages).toHaveLength(50);
+    // Oldest of the 50 returned is msg-1 (msg-0 held back as the "is there more" probe).
+    expect(firstPage.messages[0]).toMatchObject({ id: 'msg-1' });
+
+    prisma.message.findMany.mockClear();
+    prisma.conversationRead.upsert.mockClear();
+    prisma.message.findMany.mockResolvedValue([
+      { id: 'msg-0', text: '#0', senderId: null, createdAt: new Date(2026, 0, 1, 0, 0), shiftId: null, swapId: null, imageUrl: null, reactions: null },
+    ]);
+
+    const secondPage = await controller.getMessages(staffScope, 'conv-1', 'msg-1');
+    expect(prisma.message.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      cursor: { id: 'msg-1' },
+      skip: 1,
+    }));
+    expect(secondPage.hasMore).toBe(false);
+    expect(secondPage.messages).toEqual([expect.objectContaining({ id: 'msg-0' })]);
+    // Paging further back is not "opening" the conversation.
+    expect(prisma.conversationRead.upsert).not.toHaveBeenCalled();
+    expect(secondPage.title).toBeUndefined();
+    expect(secondPage.readReceipts).toBeUndefined();
   });
 
   it('rejects non-participants from reacting to messages', async () => {
@@ -638,7 +693,7 @@ describe('ChatController', () => {
       name: 'Closing Crew',
       memberIds: ['staff-1'],
     });
-    prisma.chatImage.findUnique.mockResolvedValue({ id: 'img-1', venueId: 'venue-1' });
+    prisma.chatImage.findUnique.mockResolvedValue({ id: 'img-1', venueId: 'venue-1', messageId: null, purgeStartedAt: null });
     prisma.message.create.mockResolvedValue({ id: 'msg-1' });
 
     await expect(controller.sendMessage(staffScope, 'conv-1', {
@@ -661,6 +716,10 @@ describe('ChatController', () => {
         lastMessageText: expect.stringContaining('Image'),
       }),
     }));
+    expect(prisma.chatImage.updateMany).toHaveBeenCalledWith({
+      where: { id: 'img-1', venueId: 'venue-1', messageId: null, purgeStartedAt: null },
+      data: { messageId: 'msg-1' },
+    });
     expect(prisma.$executeRaw).toHaveBeenCalledOnce();
     expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
@@ -758,6 +817,7 @@ describe('ChatController', () => {
 
     await expect(controller.getImage('img-1', 'token-1', res)).resolves.toBe('redirected');
     expect(mediaAccess.assertToken).toHaveBeenCalledWith('token-1', 'chat-image', 'img-1', 'venue-1');
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
     expect(res.redirect).toHaveBeenCalledWith(302, 'https://signed.example/img-1.png');
   });
 });

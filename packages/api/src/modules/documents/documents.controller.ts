@@ -22,6 +22,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { S3DocumentService } from './s3-document.service';
 
 const DOCUMENT_CATEGORIES = ['sop', 'manual', 'recipe', 'menu', 'training', 'form', 'other'] as const;
@@ -64,17 +65,26 @@ export class DocumentsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: S3DocumentService,
+    private readonly mediaCleanup: MediaCleanupService,
   ) {}
 
   @RequireSubscription('active')
   @Get()
   async list(@VenueScope() scope: Scope) {
     requireScope(scope);
+    // Safety cap, not organic pagination: the document library is expected to
+    // stay well under this for any real venue. Without a bound this query
+    // grows without limit over a venue's lifetime.
+    const LIST_CAP = 1000;
     const documents = await this.prisma.venueDocument.findMany({
       where: { venueId: scope.venueId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { uploadedBy: { select: { fullName: true } } },
+      take: LIST_CAP,
     });
+    if (documents.length === LIST_CAP) {
+      this.logger.warn(`Document list for venue ${scope.venueId} hit the ${LIST_CAP}-row cap; older documents are not shown.`);
+    }
     return documents.map((document) => ({
       id: document.id,
       _id: document.id,
@@ -158,8 +168,20 @@ export class DocumentsController {
       where: { id, venueId: scope.venueId },
     });
     if (!document) throw new NotFoundException('Document not found');
-    await this.storage.delete(document.s3Key);
-    await this.prisma.venueDocument.delete({ where: { id: document.id } });
+    // Queue the S3 delete in the same transaction as the row delete rather
+    // than deleting from S3 first. Previously a DB failure after a successful
+    // S3 delete left a row pointing at a missing object (download 404s), and a
+    // failed S3 delete threw before the row was removed. The outbox makes the
+    // pair atomic and retries the S3 side until it succeeds.
+    const jobId = await this.prisma.$transaction(async (tx) => {
+      const job = await tx.objectDeletionJob.create({
+        data: { objectKeys: [document.s3Key] },
+        select: { id: true },
+      });
+      await tx.venueDocument.delete({ where: { id: document.id } });
+      return job.id;
+    });
+    void this.mediaCleanup.processJob(jobId).catch(() => undefined);
     return { ok: true };
   }
 }

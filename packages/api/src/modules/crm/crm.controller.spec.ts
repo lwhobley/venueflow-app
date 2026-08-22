@@ -15,6 +15,7 @@ function makeController() {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockImplementation(async ({ data }: any) => ({ id: 'lead-new', ...data })),
       update: vi.fn().mockResolvedValue({}),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
     crmNote: {
       create: vi.fn().mockResolvedValue({ id: 'note-1' }),
@@ -590,15 +591,16 @@ describe('CrmController', () => {
   describe('getPipelineForecast', () => {
     it('weights pipeline value by stage probability and totals won revenue separately', async () => {
       const { controller, prisma } = makeController();
-      prisma.crmLead.findMany.mockResolvedValue([
-        { status: 'qualified', estimatedValueCents: 10000 },
-        { status: 'won', estimatedValueCents: 5000 },
-        { status: 'lost', estimatedValueCents: 2000 },
+      prisma.crmLead.groupBy.mockResolvedValue([
+        { status: 'qualified', _count: { _all: 1 }, _sum: { estimatedValueCents: 10000 } },
+        { status: 'won', _count: { _all: 1 }, _sum: { estimatedValueCents: 5000 } },
+        { status: 'lost', _count: { _all: 1 }, _sum: { estimatedValueCents: 2000 } },
       ]);
 
       const result = await controller.getPipelineForecast(managerScope);
 
-      expect(prisma.crmLead.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      expect(prisma.crmLead.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+        by: ['status'],
         where: { venueId: 'venue-1', deletedAt: null },
       }));
       expect(result.byStage).toEqual(expect.arrayContaining([

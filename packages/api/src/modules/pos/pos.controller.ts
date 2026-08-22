@@ -120,6 +120,7 @@ class IngestCheckDto {
 
   @IsArray()
   @IsOptional()
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => IngestMenuItemDto)
   menuItems?: IngestMenuItemDto[];
