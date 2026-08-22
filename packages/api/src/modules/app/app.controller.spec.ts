@@ -229,7 +229,7 @@ describe('AppController multi-venue invariants', () => {
       },
       subscription: { create: vi.fn().mockResolvedValue({}) },
       staffOnboardingTask: { createMany: vi.fn().mockResolvedValue({ count: 0 }) },
-      team: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}), update: vi.fn().mockResolvedValue({}) },
+      team: { upsert: vi.fn().mockResolvedValue({}) },
     };
     prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
     const profiles = {
@@ -270,7 +270,7 @@ describe('AppController multi-venue invariants', () => {
         findFirst: vi.fn().mockResolvedValue({ id: 'sub-multi' }),
       },
       staffOnboardingTask: { createMany: vi.fn().mockResolvedValue({ count: 0 }) },
-      team: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}), update: vi.fn().mockResolvedValue({}) },
+      team: { upsert: vi.fn().mockResolvedValue({}) },
     };
     prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
     const profiles = {

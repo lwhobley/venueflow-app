@@ -46,6 +46,15 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   }
 
   if (config.NODE_ENV === 'production') {
+    const jwtSecret = String(config.JWT_SECRET ?? '').trim();
+    if (jwtSecret.length < 32) {
+      throw new Error('JWT_SECRET must be at least 32 characters in production.');
+    }
+    if (config.ATTESTATION_ENFORCED !== 'true') {
+      logger.warn(
+        'ATTESTATION_ENFORCED is not true. Clock punches will be accepted without Apple App Attest. Set ATTESTATION_ENFORCED=true once the iOS install base has updated.',
+      );
+    }
     if (config.BILLING_ENABLED === 'true') {
       const missingBilling = [
         !String(config.REVENUECAT_WEBHOOK_SECRET ?? '').trim() ? 'REVENUECAT_WEBHOOK_SECRET' : null,

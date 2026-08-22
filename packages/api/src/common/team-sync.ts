@@ -5,21 +5,13 @@ export async function syncTeamMemberCount(tx: Prisma.TransactionClient, venueId:
   const count = await tx.profile.count({
     where: { venueId, OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
   });
-  const existingTeam = await tx.team.findFirst({
+  await tx.team.upsert({
     where: { venueId },
+    create: {
+      venueId,
+      name: 'Default Team',
+      memberCount: count,
+    },
+    update: { memberCount: count },
   });
-  if (existingTeam) {
-    await tx.team.update({
-      where: { id: existingTeam.id },
-      data: { memberCount: count },
-    });
-  } else {
-    await tx.team.create({
-      data: {
-        venueId,
-        name: 'Default Team',
-        memberCount: count,
-      },
-    });
-  }
 }

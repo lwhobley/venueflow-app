@@ -48,7 +48,7 @@ jobs:
       - name: Install Prowler
         run: |
           python -m pip install --upgrade pip
-          pip install prowler
+          pip install prowler==5.39.1
 
       - name: Create output directory
         run: mkdir -p prowler_output
@@ -96,7 +96,7 @@ jobs:
           prowler gcp $COMPLIANCE_FLAG $PROJECT_ARG \
             --output-directory prowler_output/gcp \
             --output-modes html csv json-ocsf \
-            --output-filename prowler-gcp-report || true
+            --output-filename prowler-gcp-report
 
       # =========================================================================
       # AWS SCAN
@@ -119,14 +119,14 @@ jobs:
           prowler aws $COMPLIANCE_FLAG \
             --output-directory prowler_output/aws \
             --output-modes html csv json-ocsf \
-            --output-filename prowler-aws-report || true
+            --output-filename prowler-aws-report
 
       - name: Verify scan outputs generated
         shell: bash
         run: |
           if [ ! -d "prowler_output/gcp" ] && [ ! -d "prowler_output/aws" ]; then
-            echo "::warning ::Neither GCP nor AWS credentials were provided or generated reports. Configure GitHub secrets to enable automated compliance evidence generation."
-            echo "Sample scan status: No reports generated." > prowler_output/README.txt
+            echo "::warning ::Neither GCP nor AWS credentials were provided. Skipping compliance scan rather than failing closed on missing secrets."
+            echo "Sample scan status: No reports generated — credentials not configured." > prowler_output/README.txt
           fi
 
       - name: Upload Compliance Assessment Reports (Evidence Artifacts)

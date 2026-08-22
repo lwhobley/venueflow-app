@@ -170,7 +170,7 @@ export const PurchaseOrderCard = memo(function PurchaseOrderCard({
             <Button compact mode="outlined" textColor={colors.primary} onPress={onToggleCsv}>
               {showCsv ? 'Hide CSV' : 'Export CSV'}
             </Button>
-            <Button compact mode="contained" buttonColor={colors.primary} icon="email-send-outline" loading={busy} onPress={onEmail}>
+            <Button compact mode="contained" buttonColor={colors.primary} icon="email-send-outline" loading={busy} disabled={busy} onPress={onEmail}>
               Email PO
             </Button>
           </View>

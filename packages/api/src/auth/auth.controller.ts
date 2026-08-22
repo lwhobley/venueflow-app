@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Logger, Optional, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 import type { Request } from 'express';
@@ -132,6 +133,7 @@ export class AuthController {
   ) {}
 
   @Public()
+  @Throttle({ auth: { ttl: 60_000, limit: 20 } })
   @Post('password')
   async password(@Req() request: Request, @Body() body: PasswordAuthDto) {
     const email = body.email.trim().toLowerCase();
@@ -498,6 +500,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ auth: { ttl: 60_000, limit: 20 } })
   @Post('forgot-password')
   async forgotPassword(@Req() request: Request, @Body() body: ForgotPasswordDto) {
     const email = body.email.trim().toLowerCase();
@@ -541,6 +544,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ auth: { ttl: 60_000, limit: 20 } })
   @Post('reset-password')
   async resetPassword(@Req() request: Request, @Body() body: ResetPasswordDto) {
     const email = body.email.trim().toLowerCase();

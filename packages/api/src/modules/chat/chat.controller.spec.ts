@@ -817,6 +817,7 @@ describe('ChatController', () => {
 
     await expect(controller.getImage('img-1', 'token-1', res)).resolves.toBe('redirected');
     expect(mediaAccess.assertToken).toHaveBeenCalledWith('token-1', 'chat-image', 'img-1', 'venue-1');
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
     expect(res.redirect).toHaveBeenCalledWith(302, 'https://signed.example/img-1.png');
   });
 });

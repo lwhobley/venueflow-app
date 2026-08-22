@@ -1031,6 +1031,7 @@ export class OperationsController {
     if (!completion?.photoKey) throw new NotFoundException('Photo not found');
     await this.mediaAccess.assertToken(token, 'checklist-photo', completionId, completion.venueId);
     const url = await this.s3ImageService.getPresignedUrl(completion.photoKey);
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     return res.redirect(302, url);
   }

@@ -808,6 +808,7 @@ export class ChatController {
     if (!image) throw new NotFoundException('Image not found');
     await this.mediaAccess.assertToken(token, 'chat-image', id, image.venueId);
     const url = await this.s3ImageService.getPresignedUrl(image.s3Key);
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     return res.redirect(302, url);
   }

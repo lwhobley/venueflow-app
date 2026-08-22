@@ -155,11 +155,11 @@ export default function ChecklistScreen() {
 
               {item.status !== 'done' ? (
                 item.requiresPhoto ? (
-                  <Button mode="contained" buttonColor={colors.primary} icon="camera" loading={busyItemId === item._id} onPress={() => void onCompleteWithPhoto(item)} style={{ marginTop: spacing.sm }}>
+                  <Button mode="contained" buttonColor={colors.primary} icon="camera" loading={busyItemId === item._id} disabled={busyItemId === item._id} onPress={() => void onCompleteWithPhoto(item)} style={{ marginTop: spacing.sm }}>
                     {t('checklist.takePhotoAndComplete')}
                   </Button>
                 ) : (
-                  <Button mode="contained" buttonColor={colors.primary} loading={busyItemId === item._id} onPress={() => void onCompletePlain(item)} style={{ marginTop: spacing.sm }}>
+                  <Button mode="contained" buttonColor={colors.primary} loading={busyItemId === item._id} disabled={busyItemId === item._id} onPress={() => void onCompletePlain(item)} style={{ marginTop: spacing.sm }}>
                     {t('checklist.markDone')}
                   </Button>
                 )

@@ -230,7 +230,7 @@ function AiScheduleBuilder() {
                 <Button mode="text" textColor={colors.muted} compact onPress={() => removeProposed(index)}>Remove</Button>
               </View>
             ))}
-            <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void onCommit()}>
+            <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void onCommit()}>
               Create {proposal.length} shift{proposal.length === 1 ? '' : 's'}
             </Button>
           </View>

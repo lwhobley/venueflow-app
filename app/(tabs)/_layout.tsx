@@ -1,7 +1,7 @@
 import { Redirect, Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ColorValue } from 'react-native';
-import { useQuery } from '../../lib/railway-hooks';
+import { useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { useDesignTheme } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -23,7 +23,7 @@ export default function TabsLayout() {
   // Server-authoritative role so a stale/incorrect persisted role can never
   // expose manager-only tabs. While loading, hide gated tabs.
   const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const { data: me } = useQueryState(api.app.getMe, isReady ? {} : 'skip');
   const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
   // Render-gate the whole tab tree: an unauthenticated deep link must not

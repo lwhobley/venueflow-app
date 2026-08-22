@@ -402,6 +402,7 @@ model Venue {
   managerGoals                  ManagerGoal[]
   venueEvents                   VenueEvent[]
   scheduleMemoryNotes           ScheduleMemoryNote[]
+  floorChairs                   FloorChair[]
   reservationSetting            ReservationSetting?
   tableStateHistory             TableStateHistory[]
   invites                       Invite[]
@@ -577,6 +578,8 @@ model StaffRequest {
   @@index([venueId])
   @@index([profileId])
   @@index([status])
+  @@index([requestedShiftId])
+  @@index([reviewerId])
 }
 
 model Conversation {
@@ -1004,6 +1007,7 @@ model FloorChair {
   rotation    Float
   label       String?
   floorPlan   FloorPlan @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
+  venue       Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([floorPlanId])
   @@index([venueId])
@@ -1384,7 +1388,7 @@ model Team {
   memberCount Int
   venue       Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
-  @@index([venueId])
+  @@unique([venueId])
 }
 
 model ScheduleEmailEvent {

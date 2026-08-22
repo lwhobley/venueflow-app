@@ -9,7 +9,6 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { assertWithinGeofence } from '../../common/geofence';
 import { unpaidBreakMs } from '../../common/break-duration';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
@@ -17,11 +16,11 @@ import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
-import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
+import { zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { runWithoutTenant } from '../../prisma/tenant-context';
-import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs, minutesToTime } from './app-mappers';
+import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappers';
 import { ProfileService } from './profile.service';
 import { syncTeamMemberCount } from '../../common/team-sync';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
@@ -119,25 +118,6 @@ class UpdateVenueDto {
   @Min(25)
   @IsOptional()
   geofenceRadiusM?: number;
-}
-
-class ClockDto {
-  @IsNumber()
-  @Min(-90)
-  @Max(90)
-  lat!: number;
-
-  @IsNumber()
-  @Min(-180)
-  @Max(180)
-  lng!: number;
-
-  @IsNumber()
-  @Min(0)
-  accuracy!: number;
-
-  @IsBoolean()
-  mocked!: boolean;
 }
 
 class BreakStartDto {
@@ -693,95 +673,6 @@ export class AppController {
       totalHours: rounded,
       punches,
     };
-  }
-
-  @UseGuards(AuthGuard)
-  @RequireSubscription()
-  @Post('clock-in')
-  async clockIn(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
-    const profile = await this.requireVenueProfile(user);
-    const venue = profile.venue;
-    if (!venue) throw new ForbiddenException('Assigned venue not found');
-    assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
-    const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
-    if (existing) throw new BadRequestException('Already clocked in');
-
-    if (!canManageVenue(profile.role, profile.allAccess)) {
-      const nowMs = Date.now();
-      const today = zonedDayOfWeek(venue.timezone, nowMs);
-      const weekStart = weekStartFor(todayInZone(venue.timezone));
-      const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
-      const shift = await this.prisma.scheduleShift.findFirst({
-        where: {
-          venueId: venue.id,
-          profileId: profile.id,
-          weekStart,
-          dayIndex: today,
-          status: { in: ['scheduled', 'covered'] },
-        },
-        orderBy: { startMinutes: 'asc' },
-      });
-      if (shift) {
-        const earlyWindow = venue.earlyClockInWindowMin ?? 10;
-        if (minutesNow < shift.startMinutes - earlyWindow) {
-          const formattedStart = minutesToTime(shift.startMinutes);
-          throw new BadRequestException(
-            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
-          );
-        }
-      }
-    }
-
-    try {
-      const entry = await this.prisma.timeEntry.create({
-        data: {
-          profileId: profile.id,
-          venueId: venue.id,
-          clockInAt: new Date(),
-          clockInLat: body.lat,
-          clockInLng: body.lng,
-          clockInAccuracyM: body.accuracy,
-          clockInMocked: body.mocked,
-          isOpen: true,
-        },
-        include: { profile: true, venue: true },
-      });
-      return mapClockEntry(entry, entry.profile, entry.venue);
-    } catch (error: any) {
-      // Partial unique index (one open entry per profile): a concurrent
-      // double-tap loses the race here instead of creating a second open entry.
-      if (error?.code === 'P2002') throw new BadRequestException('Already clocked in');
-      throw error;
-    }
-  }
-
-  @UseGuards(AuthGuard)
-  @RequireSubscription()
-  @Post('clock-out')
-  async clockOut(@CurrentUser() user: AuthUser, @Body() body: ClockDto) {
-    const profile = await this.requireVenueProfile(user);
-    const venue = profile.venue;
-    if (!venue) throw new ForbiddenException('Assigned venue not found');
-    assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
-    const existing = await this.prisma.timeEntry.findFirst({ where: { profileId: profile.id, isOpen: true } });
-    if (!existing) throw new BadRequestException('No active clock-in found');
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: existing.id, isOpen: true, updatedAt: existing.updatedAt },
-      data: {
-        clockOutAt: new Date(),
-        clockOutLat: body.lat,
-        clockOutLng: body.lng,
-        clockOutAccuracyM: body.accuracy,
-        clockOutMocked: body.mocked,
-        isOpen: false,
-      },
-    });
-    if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');
-    const entry = await this.prisma.timeEntry.findUniqueOrThrow({
-      where: { id: existing.id },
-      include: { profile: true, venue: true },
-    });
-    return mapClockEntry(entry, entry.profile, entry.venue);
   }
 
   @UseGuards(AuthGuard)

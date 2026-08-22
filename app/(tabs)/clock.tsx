@@ -9,7 +9,9 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { formatTime, errorMessage } from '../../lib/format';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
-import { ApiError, appApi, useApiMutation, useApiQuery, type ApiClockBreak } from '../../lib/api-client';
+import { ApiError, appApi, useApiMutation, type ApiClockBreak } from '../../lib/api-client';
+import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
 import { attestPayload, resetAttestationKey } from '../../lib/attestation';
 import { useI18n } from '../../lib/i18n';
 
@@ -59,15 +61,14 @@ export default function ClockScreen() {
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState(false);
 
-  const { data: clockBoard } = useApiQuery<any | null>(['time-clock', 'board'], '/v1/time-clock/board', isReady);
-  const { data: dashboard } = useApiQuery<any | null>(['app', 'dashboard'], '/v1/app/dashboard', isReady);
-  const { data: timeClock } = useApiQuery<any | null>(['time-clock', 'me'], '/v1/time-clock/me', isReady);
+  const clockBoard = useQuery(api.app.getClockBoard, isReady ? {} : 'skip') as any;
+  const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip') as any;
+  const timeClock = useQuery(api.app.getMyTimeClock, isReady ? {} : 'skip') as any;
 
-  const clockInvalidations = [['time-clock', 'board'], ['time-clock', 'me'], ['app', 'dashboard']];
-  const clockIn = useApiMutation(appApi.clockIn, clockInvalidations);
-  const clockOut = useApiMutation(appApi.clockOut, clockInvalidations);
-  const breakStart = useApiMutation(appApi.breakStart, clockInvalidations);
-  const breakEnd = useApiMutation(appApi.breakEnd, clockInvalidations);
+  const clockIn = useMutation(api.app.clockIn);
+  const clockOut = useMutation(api.app.clockOut);
+  const breakStart = useMutation(api.app.breakStart);
+  const breakEnd = useMutation(api.app.breakEnd);
   const createCorrectionRequest = useApiMutation(appApi.createStaffRequest, [['app', 'listStaffRequests']]);
 
   const [showCorrection, setShowCorrection] = useState(false);
@@ -120,18 +121,27 @@ export default function ClockScreen() {
   const canClock = Boolean(activeVenue && location && isWithinGeofence(location, activeVenue));
 
   const onPunch = async () => {
-    if (!location || !canClock || busy) return;
+    if (!activeVenue || busy) return;
     setBusy(true);
     try {
-      const punch = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
+      const fresh = await getPreciseLocation();
+      setLocation(fresh);
+      if (!isWithinGeofence(fresh, activeVenue)) {
+        Alert.alert(
+          t('clock.punchFailedTitle'),
+          t('clock.mustBeWithin', { radius: activeVenue.geofenceRadiusM ?? 120, venue: activeVenue.name ?? t('common.yourVenue') }),
+        );
+        return;
+      }
+      const punch = { lat: fresh.latitude, lng: fresh.longitude, accuracy: fresh.accuracy, mocked: fresh.mocked };
       const submit = async () => {
         // Prove this punch came from a genuine build on real hardware. Returns
         // null on devices that cannot attest; the server still accepts those
         // until ATTESTATION_ENFORCED is turned on.
         const attestation = await attestPayload(punch);
         const args = { ...punch, ...(attestation ? { attestation } : {}) };
-        if (isClockedIn) await clockOut.mutateAsync(args);
-        else await clockIn.mutateAsync(args);
+        if (isClockedIn) await clockOut(args);
+        else await clockIn(args);
       };
       try {
         await submit();
@@ -154,7 +164,7 @@ export default function ClockScreen() {
     if (busy) return;
     setBusy(true);
     try {
-      await breakStart.mutateAsync({ type });
+      await breakStart({ type });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert(t('clock.breakFailedTitle'), errorMessage(error, t('clock.breakFailedDefault')));
@@ -167,7 +177,7 @@ export default function ClockScreen() {
     if (busy) return;
     setBusy(true);
     try {
-      await breakEnd.mutateAsync({});
+      await breakEnd({});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert(t('clock.endBreakFailedTitle'), errorMessage(error, t('clock.endBreakFailedDefault')));

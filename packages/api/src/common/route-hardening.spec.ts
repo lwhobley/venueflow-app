@@ -15,9 +15,16 @@ describe('route hardening regressions', () => {
     expect(source).not.toContain('@Public()');
   });
 
+  it('does not expose unattested POST clock-in / clock-out aliases on AppController', () => {
+    const source = read('src/modules/app/app.controller.ts');
+    expect(source).not.toMatch(/@Post\('clock-in'\)/);
+    expect(source).not.toMatch(/@Post\('clock-out'\)/);
+  });
+
   it('documents API-mediated tenant isolation until database RLS exists', () => {
     const source = read('../../docs/tenant-isolation.md');
     expect(source).toContain('server-mediated');
     expect(source).toContain('Row Level Security');
   });
 });
+
