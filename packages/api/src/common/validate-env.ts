@@ -55,9 +55,7 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
       throw new Error('JWT_SECRET must be at least 32 characters in production.');
     }
     if (config.ATTESTATION_ENFORCED !== 'true') {
-      logger.warn(
-        'ATTESTATION_ENFORCED is not true. Clock punches will be accepted without Apple App Attest. Set ATTESTATION_ENFORCED=true once the iOS install base has updated.',
-      );
+      throw new Error('Production requires ATTESTATION_ENFORCED=true');
     }
     if (config.BILLING_ENABLED === 'true') {
       const missingBilling = [

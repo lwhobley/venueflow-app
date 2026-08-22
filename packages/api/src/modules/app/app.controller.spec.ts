@@ -443,15 +443,15 @@ describe('AppController multi-venue invariants', () => {
     expect(prisma.retainedTimeEntry.createMany).toHaveBeenCalledTimes(1);
     const retained = prisma.retainedTimeEntry.createMany.mock.calls[0][0].data;
     expect(retained).toHaveLength(2);
-    // Live profile name wins; the row snapshot is the fallback.
+    // De-identified according to published privacy policy
     expect(retained[0]).toMatchObject({
       originVenueId: 'venue-single',
       originVenueName: 'Single Venue',
-      profileFullName: 'Bartender Bailey',
-      profileEmail: 'bailey@example.com',
+      profileFullName: 'Staff Member',
+      profileEmail: null,
       isOpen: false,
     });
-    expect(retained[1]).toMatchObject({ profileFullName: 'Snapshot Only', profileEmail: null, isOpen: true });
+    expect(retained[1]).toMatchObject({ profileFullName: 'Staff Member', profileEmail: null, isOpen: true });
     // And the archive must happen before the cascade, not after.
     const archiveOrder = prisma.retainedTimeEntry.createMany.mock.invocationCallOrder[0];
     const cascadeOrder = prisma.venue.deleteMany.mock.invocationCallOrder[0];

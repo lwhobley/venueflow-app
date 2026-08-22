@@ -1061,10 +1061,10 @@ export class AppController {
             data: batch.map((entry) => ({
               originVenueId: entry.venueId,
               originVenueName: venueNameById.get(entry.venueId) ?? null,
-              // Prefer the live profile name; fall back to the snapshot already
-              // on the row for staff whose profile was removed earlier.
-              profileFullName: entry.profile?.fullName ?? entry.profileFullName,
-              profileEmail: entry.profile?.email ?? null,
+              // De-identify personal info in accordance with published privacy policy
+              // while preserving aggregate wage/hours records for FLSA compliance.
+              profileFullName: 'Staff Member',
+              profileEmail: null,
               clockInAt: entry.clockInAt,
               clockOutAt: entry.clockOutAt,
               isOpen: entry.isOpen,

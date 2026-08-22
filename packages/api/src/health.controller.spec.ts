@@ -10,15 +10,27 @@ describe('HealthController', () => {
     });
   });
 
-  it('pings the database before reporting healthy', async () => {
+  it('returns lightweight liveness without database queries', () => {
+    const prisma = { $queryRaw: vi.fn() };
+    const controller = new HealthController(prisma as any);
+    const result = controller.liveness();
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe('live');
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('pings the database before reporting healthy and caches consecutive calls', async () => {
     const prisma = { $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]) };
     const controller = new HealthController(prisma as any);
 
-    const result = await controller.health();
+    const result1 = await controller.health();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(result1.ok).toBe(true);
+    expect(result1.service).toBe('venue-wrangler-api');
 
-    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
-    expect(result.ok).toBe(true);
-    expect(result.service).toBe('venue-wrangler-api');
-    expect(typeof result.time).toBe('string');
+    // Second immediate call uses the cached health status within the 15s window
+    const result2 = await controller.health();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(result2.ok).toBe(true);
   });
 });

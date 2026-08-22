@@ -84,4 +84,24 @@ describe('AuditService', () => {
       ).resolves.toBeUndefined();
     });
   });
+
+  describe('cleanup jobs', () => {
+    it('deletes audit logs older than 365 days', async () => {
+      mockPrisma.auditLog.deleteMany = vi.fn().mockResolvedValue({ count: 42 });
+      const count = await service.cleanupOldAuditLogs();
+      expect(count).toBe(42);
+      expect(mockPrisma.auditLog.deleteMany).toHaveBeenCalledWith({
+        where: { createdAt: { lt: expect.any(Date) } },
+      });
+    });
+
+    it('deletes retained time entries older than 3 years', async () => {
+      mockPrisma.retainedTimeEntry = { deleteMany: vi.fn().mockResolvedValue({ count: 15 }) };
+      const count = await service.cleanupExpiredRetainedTimeEntries();
+      expect(count).toBe(15);
+      expect(mockPrisma.retainedTimeEntry.deleteMany).toHaveBeenCalledWith({
+        where: { originCreatedAt: { lt: expect.any(Date) } },
+      });
+    });
+  });
 });

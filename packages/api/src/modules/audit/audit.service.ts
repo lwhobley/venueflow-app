@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -119,4 +120,35 @@ export class AuditService {
       );
     }
   }
+
+  /**
+   * Nightly cron: purge audit logs older than 365 days in accordance with SOC 2 retention policy.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupOldAuditLogs(): Promise<number> {
+    const cutoff = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+    const result = await this.prisma.auditLog.deleteMany({
+      where: { createdAt: { lt: cutoff } },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Purged ${result.count} audit logs older than 365 days.`);
+    }
+    return result.count;
+  }
+
+  /**
+   * Nightly cron: purge retained wage records older than 3 years (FLSA mandatory retention boundary).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupExpiredRetainedTimeEntries(): Promise<number> {
+    const cutoff = new Date(Date.now() - 3 * 365.25 * 24 * 60 * 60 * 1000);
+    const result = await this.prisma.retainedTimeEntry.deleteMany({
+      where: { originCreatedAt: { lt: cutoff } },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Purged ${result.count} expired retained time entries older than 3 years.`);
+    }
+    return result.count;
+  }
 }
+

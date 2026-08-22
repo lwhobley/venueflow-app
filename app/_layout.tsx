@@ -19,6 +19,16 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { configurePurchases, logoutPurchases } from '../lib/purchases';
 import { queryClient } from '../lib/query-client';
+import { setFatalErrorReporter } from '../lib/report-error';
+
+// Wire fatal error reporter for mobile/web crash observability
+setFatalErrorReporter((error, componentStack) => {
+  if (typeof (globalThis as any).__SENTRY__ !== 'undefined') {
+    (globalThis as any).__SENTRY__?.captureException?.(error, {
+      extra: { componentStack: componentStack ?? 'none' },
+    });
+  }
+});
 
 const shouldIgnoreWebError = (message: string) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||

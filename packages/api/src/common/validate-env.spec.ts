@@ -22,21 +22,40 @@ describe('validateEnv', () => {
   });
 
   it('does not require the migration-only direct URL in a serving process', () => {
-    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).not.toThrow();
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        ATTESTATION_ENFORCED: 'true',
+        APP_ATTEST_TEAM_ID: 'TEAM123',
+      }),
+    ).not.toThrow();
   });
 
   it('throws when a required var is present but blank', () => {
     expect(() => validateEnv({ ...REQUIRED, JWT_SECRET: '   ' })).toThrow(/JWT_SECRET/);
   });
 
+  it('throws in production when ATTESTATION_ENFORCED is not true', () => {
+    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).toThrow(
+      'Production requires ATTESTATION_ENFORCED=true',
+    );
+  });
+
   it('does not throw in production when optional integrations are unset, but warns', () => {
     const warnSpy = vi.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation(() => {});
-    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).not.toThrow();
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        ATTESTATION_ENFORCED: 'true',
+        APP_ATTEST_TEAM_ID: 'TEAM123',
+      }),
+    ).not.toThrow();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('STRIPE_WEBHOOK_SECRET'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('REVENUECAT_WEBHOOK_SECRET'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('REVENUECAT_API_KEY or REVENUECAT_SECRET_API_KEY'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('RESEND_API_KEY or EMAIL_API_KEY'));
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ATTESTATION_ENFORCED is not true'));
     warnSpy.mockRestore();
   });
 
@@ -66,22 +85,38 @@ describe('validateEnv', () => {
 
   it('rejects a short JWT_SECRET in production only', () => {
     expect(() => validateEnv({ ...REQUIRED, JWT_SECRET: 'short-secret', NODE_ENV: 'development' })).not.toThrow();
-    expect(() => validateEnv({ ...REQUIRED, JWT_SECRET: 'short-secret', NODE_ENV: 'production' })).toThrow(
-      /JWT_SECRET must be at least 32 characters/,
-    );
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        JWT_SECRET: 'short-secret',
+        NODE_ENV: 'production',
+        ATTESTATION_ENFORCED: 'true',
+        APP_ATTEST_TEAM_ID: 'TEAM123',
+      }),
+    ).toThrow(/JWT_SECRET must be at least 32 characters/);
   });
 
   it('fails fast when production billing is enabled without verification credentials', () => {
-    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production', BILLING_ENABLED: 'true' })).toThrow(
-      /REVENUECAT_WEBHOOK_SECRET, REVENUECAT_API_KEY/,
-    );
-    expect(() => validateEnv({
-      ...REQUIRED,
-      NODE_ENV: 'production',
-      BILLING_ENABLED: 'true',
-      REVENUECAT_WEBHOOK_SECRET: 'webhook',
-      REVENUECAT_API_KEY: 'secret',
-    })).not.toThrow();
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        BILLING_ENABLED: 'true',
+        ATTESTATION_ENFORCED: 'true',
+        APP_ATTEST_TEAM_ID: 'TEAM123',
+      }),
+    ).toThrow(/REVENUECAT_WEBHOOK_SECRET, REVENUECAT_API_KEY/);
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        BILLING_ENABLED: 'true',
+        REVENUECAT_WEBHOOK_SECRET: 'webhook',
+        REVENUECAT_API_KEY: 'secret',
+        ATTESTATION_ENFORCED: 'true',
+        APP_ATTEST_TEAM_ID: 'TEAM123',
+      }),
+    ).not.toThrow();
   });
 
   it('throws if ATTESTATION_ENFORCED is true but APP_ATTEST_TEAM_ID is missing', () => {

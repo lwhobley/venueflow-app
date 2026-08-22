@@ -1,8 +1,8 @@
 import { ForbiddenException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { firstValueFrom, of } from 'rxjs';
+import { defer, firstValueFrom, of } from 'rxjs';
 import { VenueScopeInterceptor } from './venue-scope.interceptor';
-import { getTenantVenueId, runWithoutTenant } from '../prisma/tenant-context';
+import { getTenantVenueId, runWithoutTenant, runWithTenant } from '../prisma/tenant-context';
 
 function contextFor(request: any) {
   return {
@@ -71,6 +71,25 @@ describe('VenueScopeInterceptor', () => {
       const observable = await interceptor.intercept(contextFor(request), next);
       await expect(firstValueFrom(observable)).resolves.toBe('venue-1');
       expect(getTenantVenueId()).toBeUndefined();
+    });
+  });
+
+  it('unsets tenant context during deferred execution when @SkipVenueScope is active', async () => {
+    const prisma = {} as any;
+    const reflector = { getAllAndOverride: vi.fn().mockReturnValue(true) } as any;
+    const interceptor = new VenueScopeInterceptor(prisma, reflector);
+    const request: any = {
+      user: { sub: 'user-1' },
+      headers: {},
+    };
+    const next = {
+      handle: vi.fn(() => defer(() => of(getTenantVenueId()))),
+    };
+
+    await runWithTenant('venue-1', async () => {
+      const observable = await interceptor.intercept(contextFor(request), next);
+      await expect(firstValueFrom(observable)).resolves.toBeUndefined();
+      expect(getTenantVenueId()).toBe('venue-1');
     });
   });
 });

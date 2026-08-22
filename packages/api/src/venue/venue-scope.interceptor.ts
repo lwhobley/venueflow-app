@@ -34,7 +34,9 @@ export class VenueScopeInterceptor implements NestInterceptor {
       // @SkipVenueScope() still had every query narrowed to one venue. That
       // silently truncated the cross-venue reads these routes exist to perform
       // (e.g. a manager of two venues seeing join requests for only one).
-      return runWithoutTenant(() => next.handle());
+      return new Observable<unknown>((subscriber) =>
+        runWithoutTenant(() => next.handle().subscribe(subscriber)),
+      );
     }
 
     const request = context.switchToHttp().getRequest<VenueScopedRequest>();
