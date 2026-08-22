@@ -97,7 +97,7 @@ const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidt
 
 export default function BarStockScreen() {
   const { t } = useI18n();
-  const { venue, isReady, canManage, profileLoading } = useVenueAuth();
+  const { venue, isReady, canManage, profileLoading, profileError, refetchProfile } = useVenueAuth();
   // Inventory (stock levels) is visible to every venue member; edits below stay
   // manager-only. The velocity/prep-board/report queries remain manager-gated.
   const stock = useQuery(api.barInventory.getBarStock, isReady && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
@@ -196,7 +196,7 @@ export default function BarStockScreen() {
   }, [items]);
 
   const saveManualItem = async () => {
-    if (!venue?.id) return;
+    if (busy || !venue?.id) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -214,7 +214,7 @@ export default function BarStockScreen() {
   };
 
   const parseWithAi = async (image?: { base64: string; mimeType?: string }) => {
-    if (!venue?.id) return;
+    if (busy || !venue?.id) return;
     setBusy(true); setMessage(null);
     try {
       const result = await parseInput({ venueId: venue.id, text: parseText.trim() || undefined, imageBase64: image?.base64, imageMimeType: image?.mimeType });
@@ -226,6 +226,7 @@ export default function BarStockScreen() {
   };
 
   const pickCsv = async () => {
+    if (busy) return;
     setBusy(true); setMessage(null);
     try {
       const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
@@ -238,6 +239,7 @@ export default function BarStockScreen() {
   };
 
   const pickPhoto = async () => {
+    if (busy) return;
     setBusy(true); setMessage(null);
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -250,7 +252,7 @@ export default function BarStockScreen() {
   };
 
   const importItems = async () => {
-    if (!venue?.id || parsedItems.length === 0) return;
+    if (busy || !venue?.id || parsedItems.length === 0) return;
     setBusy(true);
     try {
       const result = await importParsed({ venueId: venue.id, items: parsedItems });
@@ -506,7 +508,7 @@ export default function BarStockScreen() {
   }
 
   return (
-    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('barStock.header.title')}>
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature={t('barStock.header.title')}>
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
@@ -756,7 +758,7 @@ export default function BarStockScreen() {
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('barStock.import.title')}</Text>
           <TextInput label={t('barStock.import.pasteLabel')} value={parseText} onChangeText={setParseText} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void parseWithAi()}>{t('barStock.import.parseText')}</Button>
+            <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void parseWithAi()}>{t('barStock.import.parseText')}</Button>
             <Button mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void pickCsv()}>{t('barStock.import.uploadCsv')}</Button>
             <Button mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void pickPhoto()}>{t('barStock.import.photoInvoice')}</Button>
           </View>
@@ -770,7 +772,7 @@ export default function BarStockScreen() {
                   <Text style={{ color: colors.muted }}>{t('barStock.import.parsedLine', { category: item.category, onHand: item.onHand ?? 0, unit: item.unit, parLevel: item.parLevel ?? 0 })}</Text>
                 </View>
               ))}
-              <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void importItems()}>{t('barStock.import.importParsedItems')}</Button>
+              <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void importItems()}>{t('barStock.import.importParsedItems')}</Button>
             </View>
           ) : null}
           <InlineMessage message={message} />
@@ -800,7 +802,7 @@ export default function BarStockScreen() {
           </View>
           <TextInput label={t('barStock.form.supplierLabel')} value={supplier} onChangeText={setSupplier} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <TextInput label={t('barStock.form.notesLabel')} value={notes} onChangeText={setNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void saveManualItem()}>{t('barStock.form.saveItem')}</Button>
+          <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void saveManualItem()}>{t('barStock.form.saveItem')}</Button>
         </Card.Content>
       </Card>
 

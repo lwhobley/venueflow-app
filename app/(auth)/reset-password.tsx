@@ -16,6 +16,7 @@ export default function ResetPasswordScreen() {
   const [resetting, setResetting] = useState(false);
 
   const requestCode = async () => {
+    if (requesting) return;
     if (!email.trim().includes('@')) {
       Alert.alert(t('resetPassword.emailRequiredTitle'), t('resetPassword.emailRequiredMessage'));
       return;
@@ -32,6 +33,7 @@ export default function ResetPasswordScreen() {
   };
 
   const reset = async () => {
+    if (resetting) return;
     if (!email.trim().includes('@') || !code.trim() || newPassword.length < 8) {
       Alert.alert(t('resetPassword.resetRequiredTitle'), t('resetPassword.resetRequiredMessage'));
       return;
@@ -76,7 +78,7 @@ export default function ResetPasswordScreen() {
               keyboardType="email-address"
               mode="outlined"
             />
-            <Button mode="outlined" textColor={colors.primary} loading={requesting} onPress={() => void requestCode()}>
+            <Button mode="outlined" textColor={colors.primary} loading={requesting} disabled={requesting} onPress={() => void requestCode()}>
               {t('resetPassword.sendCodeButton')}
             </Button>
             <TextInput
@@ -98,7 +100,7 @@ export default function ResetPasswordScreen() {
               returnKeyType="go"
               onSubmitEditing={() => void reset()}
             />
-            <Button mode="contained" buttonColor={colors.primary} textColor={colors.buttonText} loading={resetting} onPress={() => void reset()}>
+            <Button mode="contained" buttonColor={colors.primary} textColor={colors.buttonText} loading={resetting} disabled={resetting} onPress={() => void reset()}>
               {t('resetPassword.resetButton')}
             </Button>
           </Card.Content>

@@ -21,7 +21,12 @@ const logger = new Logger('Bootstrap');
  * operator sees the gap immediately instead of discovering it when a webhook
  * starts bouncing.
  */
-const REQUIRED_ALWAYS = ['DATABASE_URL', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'] as const;
+// DATABASE_DIRECT_URL is required because schema.prisma's datasource declares
+// `directUrl = env("DATABASE_DIRECT_URL")`. Prisma resolves every env() in that
+// block for essentially all CLI operations, so a missing value surfaces as an
+// opaque `P1012: Environment variable not found` from Prisma rather than the
+// clear boot-time message this function exists to produce.
+const REQUIRED_ALWAYS = ['DATABASE_URL', 'DATABASE_DIRECT_URL', 'JWT_SECRET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET'] as const;
 
 // Each entry is a group of env var names where at least one must be set —
 // mirrors the fallback pairs the services themselves already accept.

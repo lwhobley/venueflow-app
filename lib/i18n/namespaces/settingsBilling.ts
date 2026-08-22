@@ -72,6 +72,7 @@ export const en = {
     upgrade: 'Upgrade',
     subscribe: 'Subscribe',
     manageSubscription: 'Manage subscription',
+    manageSubscriptionFailed: 'Could not open your subscription. Check your connection and try again.',
     backToProfile: 'Back to profile',
   },
   venueSettings: {
@@ -214,6 +215,7 @@ export const es: SettingsBillingDictionary = {
     upgrade: 'Actualizar',
     subscribe: 'Suscribirse',
     manageSubscription: 'Gestionar suscripción',
+    manageSubscriptionFailed: 'No se pudo abrir tu suscripción. Comprueba tu conexión e inténtalo de nuevo.',
     backToProfile: 'Volver al perfil',
   },
   venueSettings: {
@@ -354,6 +356,7 @@ export const fr: SettingsBillingDictionary = {
     upgrade: 'Passer au forfait supérieur',
     subscribe: "S'abonner",
     manageSubscription: "Gérer l'abonnement",
+    manageSubscriptionFailed: "Impossible d'ouvrir votre abonnement. Vérifiez votre connexion et réessayez.",
     backToProfile: 'Retour au profil',
   },
   venueSettings: {

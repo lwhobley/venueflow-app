@@ -7,17 +7,20 @@
  */
 import type { ReactNode } from 'react';
 import { ScrollView } from 'react-native';
-import { Card, Text } from 'react-native-paper';
+import { Button, Text } from 'react-native-paper';
 import { colors, spacing } from '../lib/theme';
 
 type ManagerGateProps = {
   canManage: boolean;
   profileLoading: boolean;
+  /** Set when the profile fetch failed after retries — distinct from still loading. */
+  profileError?: unknown;
+  onRetry?: () => void;
   feature: string;
   children: ReactNode;
 };
 
-export function ManagerGate({ canManage, profileLoading, feature, children }: ManagerGateProps) {
+export function ManagerGate({ canManage, profileLoading, profileError, onRetry, feature, children }: ManagerGateProps) {
   if (profileLoading) {
     return (
       <ScrollView
@@ -25,6 +28,24 @@ export function ManagerGate({ canManage, profileLoading, feature, children }: Ma
         contentContainerStyle={{ padding: spacing.lg }}
       >
         <Text style={{ color: colors.muted }}>Loading…</Text>
+      </ScrollView>
+    );
+  }
+
+  if (profileError) {
+    return (
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
+      >
+        <Text style={{ color: colors.muted }}>
+          Couldn't load your profile. Check your connection and try again.
+        </Text>
+        {onRetry ? (
+          <Button mode="outlined" onPress={onRetry}>
+            Retry
+          </Button>
+        ) : null}
       </ScrollView>
     );
   }

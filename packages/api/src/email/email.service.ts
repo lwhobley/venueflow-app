@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizeForEmail } from '../common/sanitize-email-text';
 
 type EmailArgs = {
   to: string | string[];
@@ -50,6 +51,12 @@ export class EmailService {
       throw new Error('RESEND_API_KEY is not configured');
     }
 
+    // Every caller builds subjects from some mix of static copy and
+    // user-controlled fields (venue name, guest name, etc.) — sanitize here
+    // once rather than relying on each call site to remember to. Body text
+    // keeps its newlines since paragraph breaks are meaningful there.
+    const subject = sanitizeForEmail(args.subject);
+
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -60,7 +67,7 @@ export class EmailService {
         from: this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>',
         to,
         ...(bcc.length ? { bcc } : {}),
-        subject: args.subject,
+        subject,
         text: args.text,
         html: args.html ?? this.textToHtml(args.text),
         ...(args.replyTo ? { reply_to: args.replyTo } : {}),

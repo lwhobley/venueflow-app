@@ -21,6 +21,7 @@ export default function VerifyEmailScreen() {
   const [resending, setResending] = useState(false);
 
   const verify = async () => {
+    if (submitting) return;
     if (!code.trim()) {
       Alert.alert(t('verifyEmail.codeRequiredTitle'), t('verifyEmail.codeRequiredMessage'));
       return;
@@ -82,6 +83,7 @@ export default function VerifyEmailScreen() {
   };
 
   const resend = async () => {
+    if (resending) return;
     setResending(true);
     try {
       await appApi.resendVerification();
@@ -121,10 +123,10 @@ export default function VerifyEmailScreen() {
               onSubmitEditing={() => void verify()}
             />
 
-            <Button mode="contained" buttonColor={colors.primary} textColor={colors.buttonText} loading={submitting} onPress={() => void verify()}>
+            <Button mode="contained" buttonColor={colors.primary} textColor={colors.buttonText} loading={submitting} disabled={submitting} onPress={() => void verify()}>
               {t('verifyEmail.verifyButton')}
             </Button>
-            <Button mode="text" textColor={colors.primary} loading={resending} onPress={() => void resend()}>
+            <Button mode="text" textColor={colors.primary} loading={resending} disabled={resending} onPress={() => void resend()}>
               {t('verifyEmail.resendButton')}
             </Button>
           </Card.Content>

@@ -127,6 +127,7 @@ export default function SignInScreen() {
   };
 
   const submit = async () => {
+    if (submitting) return;
     const trimmed = email.trim();
     const minPasswordLength = flow === 'signUp' ? 8 : 6;
     if (!trimmed.includes('@') || password.trim().length < minPasswordLength) {
@@ -214,7 +215,7 @@ export default function SignInScreen() {
               </Button>
             ) : null}
 
-            <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
+            <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} disabled={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
                 ? (inviteToken && invitePreview && !invitePreview.expired ? t('signIn.joinVenueButton', { venueName: invitePreview.venueName ?? '' }) : t('signIn.createAccountButton'))
                 : t('signIn.signInButton')}

@@ -243,17 +243,34 @@ export class AppController {
           },
           include: { venue: true },
         })
-      : await this.prisma.profile.create({
-          data: {
-            userId: user.sub,
-            email,
-            fullName,
-            role: 'staff',
-            jobTitle: body.jobTitle ?? 'Staff',
-            trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
-          },
-          include: { venue: true },
-        });
+      : await this.prisma.profile
+          .create({
+            data: {
+              userId: user.sub,
+              email,
+              fullName,
+              role: 'staff',
+              jobTitle: body.jobTitle ?? 'Staff',
+              trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS),
+            },
+            include: { venue: true },
+          })
+          .catch(async (err) => {
+            // findFirst-then-create has no transaction or lock around it, so a
+            // double-tap or client retry can race here. Profile_userId_venueless_key
+            // (a partial unique index on userId WHERE venueId IS NULL) turns the
+            // loser's insert into a P2002 instead of a second venueless row —
+            // fetch the row the winner just created instead of failing the request.
+            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+              const raced = await this.prisma.profile.findFirst({
+                where: { userId: user.sub, venueId: null },
+                orderBy: { createdAt: 'asc' },
+                include: { venue: true },
+              });
+              if (raced) return raced;
+            }
+            throw err;
+          });
 
     const venueName = profile.venue?.name ?? 'your venue';
     void this.email.send({

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Linking, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { router } from 'expo-router';
@@ -30,14 +31,25 @@ export default function BillingScreen() {
   const trialDaysLeft = inTrial ? Math.max(0, Math.ceil((trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
   const upgradeLabel = inTrial ? t('settingsBilling.upgrade') : t('settingsBilling.subscribe');
   const canEditBilling = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
+  const [managingSubscription, setManagingSubscription] = useState(false);
+  const [manageError, setManageError] = useState<string | null>(null);
 
   const manageSubscription = async () => {
-    if (billing?.platform === 'stripe') {
-      const { url } = await appApi.createStripePortal();
-      await Linking.openURL(url);
-      return;
+    if (managingSubscription) return;
+    setManagingSubscription(true);
+    setManageError(null);
+    try {
+      if (billing?.platform === 'stripe') {
+        const { url } = await appApi.createStripePortal();
+        await Linking.openURL(url);
+        return;
+      }
+      await Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
+    } catch (e) {
+      setManageError(e instanceof Error ? e.message : t('settingsBilling.manageSubscriptionFailed'));
+    } finally {
+      setManagingSubscription(false);
     }
-    await Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
   };
 
   if (me === undefined) {
@@ -73,7 +85,14 @@ export default function BillingScreen() {
               {upgradeLabel}
             </Button>
           ) : null}
-          <Button mode="outlined" textColor={colors.primary} onPress={() => void manageSubscription()}>
+          {manageError ? <Text style={{ color: colors.danger }}>{manageError}</Text> : null}
+          <Button
+            mode="outlined"
+            textColor={colors.primary}
+            loading={managingSubscription}
+            disabled={managingSubscription}
+            onPress={() => void manageSubscription()}
+          >
             {t('settingsBilling.manageSubscription')}
           </Button>
           <Button mode="text" textColor={colors.primary} onPress={() => router.push('/(tabs)/profile')}>

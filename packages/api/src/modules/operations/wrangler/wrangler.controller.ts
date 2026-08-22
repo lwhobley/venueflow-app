@@ -76,7 +76,20 @@ export class WranglerController {
       if (!body.priorityId) throw new BadRequestException('priorityId is required');
       const snapshot = await this.wrangler.getSnapshot(scope.venueId, venue.timezone); const priority = snapshot.priorities.find((item) => item.id === body.priorityId); if (!priority || priority.kind === 'steady') throw new BadRequestException('Wrangler priority is no longer active');
       const targetDate = zonedIsoDate(venue.timezone, Date.now()); const title = `Wrangler: ${priority.title}`; const existing = await this.prisma.managerGoal.findFirst({ where: { venueId: scope.venueId, title, targetDate, status: 'open' }, select: { id: true, title: true } }); if (existing) return { ok: true, type: body.type, followUpId: existing.id, title: existing.title, existing: true };
-      const created = await this.prisma.managerGoal.create({ data: { venueId: scope.venueId, title, details: `${priority.reason} Recommended move: ${priority.cta}.`, period: 'day', targetDate, status: 'open', createdBy: scope.profileId }, select: { id: true, title: true } });
+      let created: { id: string; title: string };
+      try {
+        created = await this.prisma.managerGoal.create({ data: { venueId: scope.venueId, title, details: `${priority.reason} Recommended move: ${priority.cta}.`, period: 'day', targetDate, status: 'open', createdBy: scope.profileId }, select: { id: true, title: true } });
+      } catch (err) {
+        // The findFirst above is not in a transaction, so two concurrent calls
+        // can both miss and both insert. ManagerGoal_venue_title_date_open_key
+        // turns the loser into a P2002 — return the winner's follow-up rather
+        // than failing the request, and skip the audit entry since this call
+        // created nothing.
+        if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') throw err;
+        const raced = await this.prisma.managerGoal.findFirst({ where: { venueId: scope.venueId, title, targetDate, status: 'open' }, select: { id: true, title: true } });
+        if (!raced) throw err;
+        return { ok: true, type: body.type, followUpId: raced.id, title: raced.title, existing: true };
+      }
       await this.prisma.auditLog.create({ data: { venueId: scope.venueId, actorProfileId: scope.profileId, actorName: scope.fullName, actorRole: scope.role, entityType: 'manager_goal', entityId: created.id, action: 'wrangler_follow_up_created', summary: `Created follow-up from Wrangler priority: ${priority.title}` } });
       return { ok: true, type: body.type, followUpId: created.id, title: created.title, existing: false };
     }

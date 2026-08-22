@@ -131,6 +131,8 @@ jobs:
             WorkplaceJoinRequest_one_pending_per_user_venue_idx
             Invite_phone_idx
             Profile_unclaimed_venue_email_key
+            Profile_userId_venueless_key
+            ManagerGoal_venue_title_date_open_key
           )
           for index in "${required_indexes[@]}"; do
             found="$(psql -h localhost -U postgres -d venuetest -Atc \

@@ -46,7 +46,7 @@ type Insight = {
 
 export default function ReportsScreen() {
   const { t } = useI18n();
-  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
+  const { venue, isReady, profileLoading, profileError, refetchProfile, canManage } = useVenueAuth();
   const [showTimeCsv, setShowTimeCsv] = useState(false);
   const [showPayrollCsv, setShowPayrollCsv] = useState(false);
   const [payrollProvider, setPayrollProvider] = useState<PayrollProvider>('gusto');
@@ -78,7 +78,7 @@ export default function ReportsScreen() {
     : null;
 
   return (
-    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('reports.header.title')}>
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature={t('reports.header.title')}>
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}

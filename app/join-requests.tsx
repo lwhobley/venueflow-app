@@ -7,6 +7,7 @@ import { appApi } from '../lib/api-client';
 import { spacing, type, useDesignTheme } from '../lib/theme';
 import { AppCard } from '../components/AppCard';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
+import { useVenueAuth } from '../lib/useVenueAuth';
 import { useI18n } from '../lib/i18n';
 
 type JoinRequest = {
@@ -25,11 +26,16 @@ export default function JoinRequestsScreen() {
   const token = useAuthStore((s: AuthState) => s.token);
   const queryClient = useQueryClient();
   const palette = useDesignTheme();
+  // This screen is only linked to from staff.tsx when canManage is true, but
+  // Expo Router routes are directly reachable (deep link, back-navigation) —
+  // gate the fetch and the UI here too rather than relying solely on the
+  // backend's 403.
+  const { profileLoading, canManage } = useVenueAuth();
 
   const { data, isLoading, error, refetch } = useRQQuery({
     queryKey: ['manager-join-requests'],
     queryFn: () => appApi.listManagerJoinRequests(),
-    enabled: Boolean(token),
+    enabled: Boolean(token) && canManage,
   });
 
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -92,13 +98,27 @@ export default function JoinRequestsScreen() {
         </Button>
       </View>
 
-      {isLoading && (
+      {profileLoading && (
         <View style={styles.center}>
           <ActivityIndicator color={palette.primary} />
         </View>
       )}
 
-      {!isLoading && error && (
+      {!profileLoading && !canManage && (
+        <View style={styles.center}>
+          <Text style={{ color: palette.muted }}>
+            {t('joinRequests.title')} is available to managers and admins.
+          </Text>
+        </View>
+      )}
+
+      {!profileLoading && canManage && isLoading && (
+        <View style={styles.center}>
+          <ActivityIndicator color={palette.primary} />
+        </View>
+      )}
+
+      {!profileLoading && canManage && !isLoading && error && (
         <View style={styles.center}>
           <Text style={{ color: palette.danger }}>{t('joinRequests.failedToLoad')}</Text>
           <Button mode="text" textColor={palette.primary} onPress={() => void refetch()}>
@@ -107,7 +127,7 @@ export default function JoinRequestsScreen() {
         </View>
       )}
 
-      {!isLoading && !error && requests.length === 0 && (
+      {!profileLoading && canManage && !isLoading && !error && requests.length === 0 && (
         <View style={styles.center}>
           <Text style={{ ...type.heading, color: palette.charcoal }}>
             {t('joinRequests.noPendingTitle')}
@@ -118,7 +138,7 @@ export default function JoinRequestsScreen() {
         </View>
       )}
 
-      {!isLoading && requests.length > 0 && (
+      {!profileLoading && canManage && !isLoading && requests.length > 0 && (
         <FlatList
           data={requests}
           keyExtractor={(item) => item.id}

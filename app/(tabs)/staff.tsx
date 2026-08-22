@@ -135,7 +135,7 @@ export default function StaffScreenWrapper() {
 }
 
 function StaffScreen() {
-  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
+  const { venue, isReady, profileLoading, profileError, refetchProfile, canManage } = useVenueAuth();
   const { t } = useI18n();
   const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
     { value: 'admin', label: t('staff.roleAdmin') },
@@ -191,7 +191,7 @@ function StaffScreen() {
   const [generatingLink, setGeneratingLink] = useState(false);
 
   const onGenerateInviteLink = async () => {
-    if (!venue?.id) return;
+    if (generatingLink || !venue?.id) return;
     setInviteLinkErr(null);
     setInviteLinkMsg(null);
     setGeneratingLink(true);
@@ -240,7 +240,7 @@ function StaffScreen() {
   };
 
   const onCommitStaffImport = async () => {
-    if (!venue?.id || importRows.length === 0) return;
+    if (importBusy || !venue?.id || importRows.length === 0) return;
     setImportErr(null);
     setImportMsg(null);
     setImportBusy(true);
@@ -379,6 +379,16 @@ function StaffScreen() {
       </View>
     );
   }
+  if (profileError) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center', gap: spacing.sm }}>
+        <Text style={{ color: colors.muted }}>Couldn't load your profile. Check your connection and try again.</Text>
+        <Button mode="outlined" onPress={() => refetchProfile()}>
+          Retry
+        </Button>
+      </View>
+    );
+  }
   if (!canManage) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
@@ -460,7 +470,7 @@ function StaffScreen() {
           />
           {inviteLinkErr ? <Text style={{ color: colors.danger }}>{inviteLinkErr}</Text> : null}
           {inviteLinkMsg ? <Text style={{ color: accents[2].fg }}>{inviteLinkMsg}</Text> : null}
-          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel={t('staff.generateShareLink')}>
+          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} disabled={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel={t('staff.generateShareLink')}>
             {t('staff.generateShareLink')}
           </Button>
         </Card.Content>
@@ -566,7 +576,7 @@ function StaffScreen() {
                   </Button>
                 </View>
               ))}
-              <Button mode="contained" buttonColor={colors.primary} loading={importBusy} onPress={() => void onCommitStaffImport()}>
+              <Button mode="contained" buttonColor={colors.primary} loading={importBusy} disabled={importBusy} onPress={() => void onCommitStaffImport()}>
                 {t('staff.addStaffCount', { count: importRows.length, plural: importRows.length === 1 ? '' : 's' })}
               </Button>
             </View>

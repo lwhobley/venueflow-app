@@ -3,6 +3,7 @@ import { validateEnv } from './validate-env';
 
 const REQUIRED = {
   DATABASE_URL: 'postgres://localhost/test',
+  DATABASE_DIRECT_URL: 'postgres://localhost/test',
   JWT_SECRET: 'secret',
   AWS_ACCESS_KEY_ID: 'key',
   AWS_SECRET_ACCESS_KEY: 'secret',
@@ -17,7 +18,14 @@ describe('validateEnv', () => {
 
   it('throws naming every missing required var', () => {
     expect(() => validateEnv({ NODE_ENV: 'development' })).toThrow(
-      /DATABASE_URL, JWT_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET/,
+      /DATABASE_URL, DATABASE_DIRECT_URL, JWT_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET/,
+    );
+  });
+
+  it('throws when DATABASE_DIRECT_URL is missing', () => {
+    const { DATABASE_DIRECT_URL: _omitted, ...withoutDirectUrl } = REQUIRED;
+    expect(() => validateEnv({ ...withoutDirectUrl, NODE_ENV: 'development' })).toThrow(
+      /DATABASE_DIRECT_URL/,
     );
   });
 

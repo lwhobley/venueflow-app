@@ -48,7 +48,7 @@ export default function IntegrationsScreen() {
 
 function IntegrationsScreenInner() {
   const { t } = useI18n();
-  const { venue, isReady, canManage, profileLoading } = useVenueAuth();
+  const { venue, isReady, canManage, profileLoading, profileError, refetchProfile } = useVenueAuth();
   const overview = useQuery(api.pos.getPosOverview, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const reservationOverview = useQuery(
     api.reservationIntegrations.getReservationIntegrationOverview,
@@ -141,7 +141,7 @@ function IntegrationsScreenInner() {
   };
 
   return (
-    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Integrations">
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature="Integrations">
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}

@@ -201,6 +201,7 @@ function ReservationsScreen() {
   const [estimatedValue, setEstimatedValue] = useState('');
   const [depositDue, setDepositDue] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -298,6 +299,7 @@ function ReservationsScreen() {
   const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? new Date().getDay());
 
   const createReservation = async () => {
+    if (creating) return;
     setError(null);
     const firstName = guestFirstName.trim();
     const lastName = guestLastName.trim();
@@ -311,6 +313,7 @@ function ReservationsScreen() {
       setError(t('reservations.form.errors.invalidDateTime'));
       return;
     }
+    setCreating(true);
     try {
       await saveReservation({
         venueId: venue.id,
@@ -364,6 +367,8 @@ function ReservationsScreen() {
       setShowPrivateEventForm(false);
     } catch (e) {
       setError(errorMessage(e, t('reservations.form.errors.createFailed')));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -721,7 +726,7 @@ function ReservationsScreen() {
                 ) : null}
                 <TextInput label={t('reservations.form.notesLabel')} value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()} accessibilityLabel={t('reservations.form.createButton')}>{t('reservations.form.createButton')}</Button>
+                <Button mode="contained" buttonColor={colors.primary} loading={creating} disabled={creating} onPress={() => void createReservation()} accessibilityLabel={t('reservations.form.createButton')}>{t('reservations.form.createButton')}</Button>
               </View>
             ) : null}
         </AppCard>

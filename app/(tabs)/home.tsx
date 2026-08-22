@@ -40,9 +40,20 @@ export default function HomeScreen() {
 
   const venueName = dashboard?.venue.name ?? venue?.name ?? 'Venue Wrangler';
   const canManage = Boolean(dashboard && canManageVenue(dashboard.profile.role, dashboard.profile.allAccess));
-  const managerDashboard = useQuery(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
-  const dailyBrief = useQuery(api.operations.getDailyBrief, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
-  const commandCenter = useQuery(api.operations.getCommandCenter, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const managerDashboardQuery = useQueryState(api.operations.getManagerDashboard, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip');
+  const dailyBriefQuery = useQueryState(api.operations.getDailyBrief, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip');
+  const commandCenterQuery = useQueryState(api.operations.getCommandCenter, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip');
+  const managerDashboard = managerDashboardQuery.data as any;
+  const dailyBrief = dailyBriefQuery.data as any;
+  const commandCenter = commandCenterQuery.data as any;
+  // These three feed the readiness/flow/pulse cards below with fallbacks like
+  // "Open checks: 0" and "No upcoming events" — indistinguishable from a
+  // genuinely quiet day unless a fetch failure is called out separately.
+  const commandCenterLoadFailed =
+    isReady && canManage && Boolean(venue?.id) &&
+    !managerDashboardQuery.isLoading && !dailyBriefQuery.isLoading && !commandCenterQuery.isLoading &&
+    managerDashboard === undefined && dailyBrief === undefined && commandCenter === undefined &&
+    Boolean(managerDashboardQuery.error || dailyBriefQuery.error || commandCenterQuery.error);
   const notificationsList = (notifications ?? []) as NotificationItem[];
   const unreadCount = notificationsList.filter((item) => !item.read).length;
   const readiness = commandCenter?.readiness;
@@ -111,6 +122,23 @@ export default function HomeScreen() {
             <CommandText palette={palette} variant="body" style={{ color: '#A81C24', fontWeight: '700' }}>Failed to load operations dashboard</CommandText>
             <CommandText palette={palette} variant="caption" style={{ color: '#A81C24' }}>{dashboardError instanceof Error ? dashboardError.message : 'Please check your connection.'}</CommandText>
             <CommandButton palette={palette} onPress={() => void refetchDashboard()} style={{ alignSelf: 'flex-start', marginTop: 4 }}>Retry</CommandButton>
+          </View>
+        ) : null}
+        {commandCenterLoadFailed ? (
+          <View style={{ padding: spacing.md, borderRadius: 8, backgroundColor: '#FDE7E9', borderWidth: 1, borderColor: '#F5A9AC', gap: spacing.xs }}>
+            <CommandText palette={palette} variant="body" style={{ color: '#A81C24', fontWeight: '700' }}>Couldn't load today's readiness, flow, or pulse</CommandText>
+            <CommandText palette={palette} variant="caption" style={{ color: '#A81C24' }}>The numbers below may be stale or blank. Check your connection.</CommandText>
+            <CommandButton
+              palette={palette}
+              onPress={() => {
+                void managerDashboardQuery.refetch();
+                void dailyBriefQuery.refetch();
+                void commandCenterQuery.refetch();
+              }}
+              style={{ alignSelf: 'flex-start', marginTop: 4 }}
+            >
+              Retry
+            </CommandButton>
           </View>
         ) : null}
         {showNotifications ? (

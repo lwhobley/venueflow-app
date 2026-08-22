@@ -36,6 +36,7 @@ export default function InviteCheckScreen() {
   const looksLikeEmail = contact.includes('@');
 
   const check = async () => {
+    if (loading) return;
     const trimmed = contact.trim();
     if (!trimmed) {
       Alert.alert(t('inviteCheck.contactRequiredTitle'), t('inviteCheck.contactRequiredMessage'));
@@ -61,6 +62,9 @@ export default function InviteCheckScreen() {
   };
 
   const continueWithInvite = async (invite: Extract<InviteCheckResult, { status: 'found' }>) => {
+    // redeemMyInvite is a one-shot mutation on the account-join path — a
+    // double-tap must not fire it twice.
+    if (loading) return;
     if (!looksLikeEmail) {
       Alert.alert(
         t('inviteCheck.emailOnlyTitle'),
@@ -173,6 +177,7 @@ export default function InviteCheckScreen() {
                   buttonColor={colors.primary}
                   textColor={colors.buttonText}
                   loading={loading}
+                  disabled={loading}
                   onPress={() => void check()}
                 >
                   {t('inviteCheck.checkButton')}
@@ -208,6 +213,7 @@ export default function InviteCheckScreen() {
                     buttonColor={colors.primary}
                     textColor={colors.buttonText}
                     loading={loading}
+                    disabled={loading}
                     onPress={() => continueWithInvite(stage.invite)}
                     style={{ marginTop: 4 }}
                   >

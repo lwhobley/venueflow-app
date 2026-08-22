@@ -7,6 +7,13 @@ COPY packages/api/package*.json packages/api/
 RUN npm ci --ignore-scripts
 
 COPY packages/api packages/api
+# `npm run build` runs `prisma generate`, which resolves every env() in the
+# datasource block (DATABASE_URL and DATABASE_DIRECT_URL) even though it never
+# opens a connection. .dockerignore keeps .env files out of this stage, so
+# these placeholders exist purely to let generation resolve — the real values
+# come from the runtime environment.
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder" \
+    DATABASE_DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 RUN npm run build -w @venue-wrangler/api
 
 FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS production-dependencies

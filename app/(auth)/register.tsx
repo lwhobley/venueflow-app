@@ -49,6 +49,7 @@ export default function RegisterScreen() {
   };
 
   const submit = async () => {
+    if (submitting) return;
     if (!validate()) return;
     setSubmitting(true);
     try {
@@ -254,6 +255,7 @@ export default function RegisterScreen() {
               buttonColor={colors.primary}
               textColor={colors.buttonText}
               loading={submitting}
+              disabled={submitting}
               onPress={() => void submit()}
               style={{ marginTop: spacing.sm }}
             >

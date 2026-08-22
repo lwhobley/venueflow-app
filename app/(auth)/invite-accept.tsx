@@ -47,6 +47,7 @@ export default function InviteAcceptScreen() {
   };
 
   const submit = async () => {
+    if (submitting) return;
     const err = validate();
     if (err) { setError(err); return; }
     setError(null);
@@ -189,6 +190,7 @@ export default function InviteAcceptScreen() {
               buttonColor={colors.primary}
               textColor={colors.buttonText}
               loading={submitting}
+              disabled={submitting}
               onPress={() => void submit()}
             >
               {t('inviteAccept.acceptButton')}

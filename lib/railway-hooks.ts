@@ -274,13 +274,13 @@ const mutationRoutes: Record<string, Route> = {
     path: '/v1/staff-requests',
     method: 'POST',
     body: stripVenue,
-    invalidate: [['app', 'listStaffRequests'], ['staffRequests', 'list']],
+    invalidate: [['app', 'listStaffRequests']],
   },
   'app.reviewStaffRequest': {
     path: (args) => `/v1/staff-requests/${args.requestId ?? args.id}`,
     method: 'PATCH',
     body: ({ status, responseNotes }) => ({ status, responseNotes }),
-    invalidate: [['app', 'listStaffRequests'], ['staffRequests', 'list']],
+    invalidate: [['app', 'listStaffRequests']],
   },
   'scheduling.addBlackout': {
     path: '/v1/scheduling/blackouts',

@@ -261,6 +261,7 @@ function GuestsScreenInner() {
   const [tags, setTags] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [savingGuest, setSavingGuest] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [leadSource, setLeadSource] = useState('Website');
   const [leadText, setLeadText] = useState('');
@@ -351,11 +352,13 @@ function GuestsScreenInner() {
   }, []);
 
   const saveGuest = async () => {
+    if (savingGuest) return;
     if (!venue?.id || !fullName.trim()) {
       setError(t('guests.form.nameRequired'));
       return;
     }
     setError(null);
+    setSavingGuest(true);
     try {
       const saved = await upsertGuest({
         venueId: venue.id,
@@ -379,6 +382,8 @@ function GuestsScreenInner() {
       resetForm();
     } catch (e) {
       setError(errorMessage(e, t('guests.form.saveError')));
+    } finally {
+      setSavingGuest(false);
     }
   };
 
@@ -563,7 +568,7 @@ function GuestsScreenInner() {
                     <Switch value={marketingOptIn} onValueChange={setMarketingOptIn} color={colors.primary} />
                   </View>
                   {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                  <Button mode="contained" buttonColor={colors.primary} onPress={() => void saveGuest()}>{editingGuestId ? t('guests.form.updateButton') : t('guests.form.saveButton')}</Button>
+                  <Button mode="contained" buttonColor={colors.primary} loading={savingGuest} disabled={savingGuest} onPress={() => void saveGuest()}>{editingGuestId ? t('guests.form.updateButton') : t('guests.form.saveButton')}</Button>
                 </View>
               ) : null}
             </Card.Content>

@@ -7,6 +7,8 @@ import { config } from '../lib/config';
 import { hasAllAccess } from '../lib/permissions';
 import type { SubscriptionRequiredReason } from '../lib/subscription-types';
 import { useApiQuery, type MeResponse } from '../lib/api-client';
+import { useQueryState } from '../lib/railway-hooks';
+import { api } from '../lib/railway-api';
 
 const blockedStatuses = new Set(['past_due', 'cancelled', 'expired', 'paused']);
 const allowedBlockedRoutes = ['/billing/locked', '/settings/billing', '/settings/account', '/venues'];
@@ -34,7 +36,12 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const token = useAuthStore((state: AuthState) => state.token);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
-  const { data: me, isLoading: meLoading } = useApiQuery<MeResponse | null>(['app', 'me'], '/v1/app/me', hydrated && Boolean(user) && Boolean(token));
+  // Shares the ['app','getMe',...] cache key with useVenueAuth instead of a
+  // separate ['app','me',...] entry — see auth-readiness.ts for why.
+  const { data: me, isLoading: meLoading } = useQueryState<MeResponse | null>(
+    api.app.getMe,
+    hydrated && Boolean(user) && Boolean(token) ? {} : 'skip',
+  );
   const { data: billing, isLoading: billingLoading } = useApiQuery<any | null>(['app', 'billing'], '/v1/app/billing', Boolean(me?.venue?._id));
   const route = `/${segments.join('/')}`;
   const navigationReady = Boolean(rootNavigationState?.key);

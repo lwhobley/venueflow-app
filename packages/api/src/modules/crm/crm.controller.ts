@@ -27,6 +27,7 @@ import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, Re
 import { canManageVenue } from '../../auth/roles';
 import { ACTIVE_MEMBERSHIP } from '../../common/membership';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { htmlEscape } from '../../common/html-escape';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -315,15 +316,6 @@ class RenderTemplateDto {
   beoId?: string;
 }
 
-
-function htmlEscape(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 function formatEventDate(date: Date | null): string {
   return date

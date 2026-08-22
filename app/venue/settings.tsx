@@ -44,6 +44,7 @@ export default function VenueSettingsScreen() {
   }, [venue]);
 
   const useMyLocation = async () => {
+    if (locating) return;
     setError(null);
     setLocating(true);
     try {
@@ -58,6 +59,7 @@ export default function VenueSettingsScreen() {
   };
 
   const onSave = async () => {
+    if (saving) return;
     setError(null);
     setSaved(false);
     if (!venue?.id) {
@@ -171,7 +173,7 @@ export default function VenueSettingsScreen() {
           <Text style={{ color: colors.muted }}>
             {t('venueSettings.geofenceNotice')}
           </Text>
-          <Button mode="contained" buttonColor={colors.primary} icon="crosshairs-gps" loading={locating} onPress={() => void useMyLocation()}>
+          <Button mode="contained" buttonColor={colors.primary} icon="crosshairs-gps" loading={locating} disabled={locating} onPress={() => void useMyLocation()}>
             {t('venueSettings.useMyLocation')}
           </Button>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
@@ -189,7 +191,7 @@ export default function VenueSettingsScreen() {
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
       {saved ? <Text style={{ color: colors.success, textAlign: 'center' }}>{t('venueSettings.saved')}</Text> : null}
-      <Button mode="contained" buttonColor={colors.primary} icon="content-save" loading={saving} onPress={() => void onSave()}>
+      <Button mode="contained" buttonColor={colors.primary} icon="content-save" loading={saving} disabled={saving} onPress={() => void onSave()}>
         {t('venueSettings.saveVenueLocation')}
       </Button>
     </ScrollView>

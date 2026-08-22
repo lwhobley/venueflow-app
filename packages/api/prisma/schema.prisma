@@ -4,8 +4,14 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations must run DDL against a direct (non-pooled) connection — a
+  // PgBouncer transaction pooler can misbehave with Prisma Migrate's session
+  // advisory lock. Previously only the Dockerfile's CMD substituted this in;
+  // `prisma migrate deploy` run any other way (npm scripts, a release hook)
+  // silently used the pooled DATABASE_URL instead.
+  directUrl = env("DATABASE_DIRECT_URL")
 }
 
 enum Role {
