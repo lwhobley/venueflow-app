@@ -50,18 +50,71 @@ export function assertDisposableTestDatabase(url: string, env: TestDatabaseSafet
   }
 
   const database = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-  if (!/(^|[_-])(test|integration)($|[_-])/i.test(database)) {
+  // The test marker must be the complete name or the terminal segment. A
+  // production-style name such as `integration_prod` is not disposable merely
+  // because it begins with that word.
+  if (!/(^|[_-])(test|integration)$/i.test(database)) {
     throw new Error(`Refusing integration setup for database without a test marker: ${database || '(empty)'}.`);
   }
 
-  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname.toLowerCase());
-  if (isLocal) return;
-  if (env.ALLOW_REMOTE_TEST_DB_RESET !== 'true') {
-    throw new Error('Remote integration databases require ALLOW_REMOTE_TEST_DB_RESET=true.');
+  // Brackets are part of the parsed hostname for IPv6 (`[::1]`), so compare
+  // against both forms — otherwise a loopback IPv6 target is misclassified as
+  // remote and pushes the operator into setting ALLOW_REMOTE_TEST_DB_RESET,
+  // which weakens the guard everywhere.
+  const hostname = parsed.hostname.toLowerCase();
+  const isLocal = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+  if (!isLocal) {
+    if (env.ALLOW_REMOTE_TEST_DB_RESET !== 'true') {
+      throw new Error('Remote integration databases require ALLOW_REMOTE_TEST_DB_RESET=true.');
+    }
+    if (!env.TEST_DATABASE_FINGERPRINT || env.TEST_DATABASE_FINGERPRINT !== targetIdentity) {
+      throw new Error(`Remote integration database fingerprint must exactly equal ${targetIdentity}.`);
+    }
   }
-  if (!env.TEST_DATABASE_FINGERPRINT || env.TEST_DATABASE_FINGERPRINT !== targetIdentity) {
-    throw new Error(`Remote integration database fingerprint must exactly equal ${targetIdentity}.`);
+}
+
+/**
+ * Data-level confirmation that this database is disposable.
+ *
+ * Every check in assertDisposableTestDatabase reasons about the connection
+ * *string*. That is spoofable by things nobody thinks of as spoofing: a Cloud
+ * SQL Proxy or `kubectl port-forward` puts production on localhost:5432, and a
+ * production database can legitimately be named `integration`. This check asks
+ * the database itself, so an alias, a tunnel, or an unlucky name cannot get
+ * past it.
+ *
+ * A fresh/empty database is allowed through. It is stamped only after the
+ * production migrations succeed: creating the marker first would make Prisma
+ * Migrate see a non-empty schema and refuse to establish its history.
+ */
+export async function assertDisposableTestDatabaseContents(prisma: PrismaClient): Promise<void> {
+  const tables = await prisma.$queryRawUnsafe<Array<{ table_name: string }>>(
+    `SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public'`,
+  );
+  const hasMarker = tables.some((table) => table.table_name === '__disposable_test_db');
+  if (hasMarker) {
+    const [marker] = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+      'SELECT count(*)::bigint AS count FROM "__disposable_test_db"',
+    );
+    if (Number(marker?.count ?? 0) > 0) return;
   }
+
+  const applicationTableCount = tables.filter(
+    (table) => table.table_name !== '__disposable_test_db' && table.table_name !== '_prisma_migrations',
+  ).length;
+  if (applicationTableCount > 0) {
+    throw new Error(
+      'Refusing integration setup: this database already contains application tables but is not ' +
+        'stamped as disposable. If it really is a throwaway database, run: ' +
+        'CREATE TABLE "__disposable_test_db" (stamped_at timestamptz NOT NULL DEFAULT now()); ' +
+        'INSERT INTO "__disposable_test_db" DEFAULT VALUES;',
+    );
+  }
+}
+
+async function stampDisposableTestDatabase(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe('INSERT INTO "__disposable_test_db" DEFAULT VALUES');
 }
 
 /**
@@ -89,14 +142,27 @@ export async function setupTestDb(): Promise<{
   assertDisposableTestDatabase(url);
 
   const prisma = new PrismaClient({ datasources: { db: { url } } });
-  // Use the production migration history, not `db push`: partial indexes,
-  // check constraints, RLS, and privilege changes live only in migration SQL.
-  execSync('npx prisma migrate deploy --schema prisma/schema.prisma', {
-    env: { ...process.env, DATABASE_URL: url, DATABASE_DIRECT_URL: url },
-    cwd: resolve(__dirname, '../..'),
-    stdio: 'pipe',
-  });
-  await prisma.$connect();
+  try {
+    // Check before migrations make an unmarked database look familiar. This
+    // catches a production database reached through a localhost proxy as well
+    // as a misleadingly named remote URL.
+    await assertDisposableTestDatabaseContents(prisma);
+    // Use the production migration history, not `db push`: partial indexes,
+    // check constraints, RLS, and privilege changes live only in migration SQL.
+    execSync('npx prisma migrate deploy --schema prisma/schema.prisma', {
+      env: { ...process.env, DATABASE_URL: url, DATABASE_DIRECT_URL: url },
+      cwd: resolve(__dirname, '../..'),
+      stdio: 'pipe',
+    });
+    await prisma.$executeRawUnsafe('CREATE TABLE IF NOT EXISTS "__disposable_test_db" (stamped_at timestamptz NOT NULL DEFAULT now())');
+    await stampDisposableTestDatabase(prisma);
+    await prisma.$connect();
+  } catch (error) {
+    await prisma.$disconnect().catch(() => undefined);
+    if (containerCleanup) await containerCleanup().catch(() => undefined);
+    containerCleanup = null;
+    throw error;
+  }
 
   return {
     prisma,

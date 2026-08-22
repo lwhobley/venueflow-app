@@ -28,6 +28,13 @@ describe('assertDisposableTestDatabase', () => {
     )).toThrow('without a test marker');
   });
 
+  it('rejects production-style names that merely begin with a test marker', () => {
+    expect(() => assertDisposableTestDatabase(
+      'postgresql://postgres:postgres@localhost:5432/integration_prod',
+      {},
+    )).toThrow('without a test marker');
+  });
+
   it('requires both opt-in and an exact fingerprint for a remote database', () => {
     const target = 'postgresql://user:secret@ep-example.neon.tech:5432/venue_test';
     expect(() => assertDisposableTestDatabase(target, {})).toThrow('ALLOW_REMOTE_TEST_DB_RESET');

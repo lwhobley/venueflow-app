@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { useAuthActions } from '../../lib/railway-hooks';
+import { ApiError } from '../../lib/api-client';
 import { api } from '../../lib/railway-api';
 import { colors, radius, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -26,6 +27,7 @@ export default function ProfileScreen() {
   const deleteAccount = useMutation(api.app.deleteMyAccount);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [ownedVenueBlock, setOwnedVenueBlock] = useState<string | null>(null);
 
   const onLogout = async () => {
     try {
@@ -44,15 +46,25 @@ export default function ProfileScreen() {
     router.push(Platform.OS === 'web' ? '/billing' : '/billing/paywall');
   };
 
-  const onDeleteAccount = async () => {
+  // Two-step by design. Sending deleteOwnedVenues:true up front pre-authorises
+  // destroying every venue where this account is the sole owner — including
+  // ones the user isn't currently looking at. `serverRole` only describes the
+  // ACTIVE venue, so the owner warning above cannot be trusted to have been
+  // shown. Send false first and let the server tell us what is at risk.
+  const onDeleteAccount = async (deleteOwnedVenues: boolean) => {
+    if (deleting) return;
     setDeleting(true);
     try {
-      // The API uses this explicit confirmation only when this account is the
-      // final owner of a venue; otherwise it performs personal deletion only.
-      await deleteAccount({ deleteOwnedVenues: true });
+      await deleteAccount({ deleteOwnedVenues });
       await clearSession();
       router.replace('/(auth)/welcome');
     } catch (e) {
+      // 409 means "you solely own at least one venue" — surface the server's
+      // own explanation and require a second, explicit confirmation.
+      if (!deleteOwnedVenues && e instanceof ApiError && e.status === 409) {
+        setOwnedVenueBlock(e.message);
+        return;
+      }
       Alert.alert(t('profile.deleteError.title'), e instanceof Error ? e.message : t('profile.deleteError.default'));
     } finally {
       setDeleting(false);
@@ -120,15 +132,48 @@ export default function ProfileScreen() {
               <Text style={{ color: colors.danger, fontWeight: '700' }}>
                 {t('profile.accountDeletion.confirmWarning')}
               </Text>
-              {serverRole === 'owner' ? (
-                <Text style={{ color: colors.danger }}>
-                  {t('profile.accountDeletion.ownerWarning')}
-                </Text>
-              ) : null}
-              <Button mode="contained" buttonColor={colors.danger} icon="delete-forever-outline" loading={deleting} disabled={deleting} onPress={() => void onDeleteAccount()}>
-                {t('profile.accountDeletion.confirmButton')}
-              </Button>
-              <Button mode="text" textColor={colors.primary} disabled={deleting} onPress={() => setConfirmDelete(false)}>
+              {ownedVenueBlock ? (
+                <>
+                  {/* Server-supplied: it knows every venue this account solely
+                      owns, which the client's active-venue role cannot tell us. */}
+                  <Text style={{ color: colors.danger, fontWeight: '700' }}>
+                    {ownedVenueBlock}
+                  </Text>
+                  <Text style={{ color: colors.danger }}>
+                    {t('profile.accountDeletion.ownerWarning')}
+                  </Text>
+                  <Button
+                    mode="contained"
+                    buttonColor={colors.danger}
+                    icon="delete-forever-outline"
+                    loading={deleting}
+                    disabled={deleting}
+                    onPress={() => void onDeleteAccount(true)}
+                  >
+                    {t('profile.accountDeletion.confirmVenueButton')}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  mode="contained"
+                  buttonColor={colors.danger}
+                  icon="delete-forever-outline"
+                  loading={deleting}
+                  disabled={deleting}
+                  onPress={() => void onDeleteAccount(false)}
+                >
+                  {t('profile.accountDeletion.confirmButton')}
+                </Button>
+              )}
+              <Button
+                mode="text"
+                textColor={colors.primary}
+                disabled={deleting}
+                onPress={() => {
+                  setConfirmDelete(false);
+                  setOwnedVenueBlock(null);
+                }}
+              >
                 {t('profile.accountDeletion.cancelButton')}
               </Button>
             </View>

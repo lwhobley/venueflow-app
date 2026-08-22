@@ -13,13 +13,19 @@ describe('DocumentsController', () => {
       create: vi.fn(),
       delete: vi.fn(),
     },
+    objectDeletionJob: {
+      create: vi.fn().mockResolvedValue({ id: 'delete-job-1' }),
+    },
+    $transaction: vi.fn(),
   } as any;
   const storage = {
     upload: vi.fn(),
     getPresignedUrl: vi.fn(),
     delete: vi.fn(),
   } as any;
-  const controller = new DocumentsController(prisma, storage);
+  const mediaCleanup = { processJob: vi.fn().mockResolvedValue(true) } as any;
+  prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) => callback(prisma));
+  const controller = new DocumentsController(prisma, storage, mediaCleanup);
 
   beforeEach(() => vi.clearAllMocks());
 
@@ -59,11 +65,14 @@ describe('DocumentsController', () => {
     expect(prisma.venueDocument.findFirst).toHaveBeenCalledWith({ where: { id: 'doc-other', venueId: 'venue-1' } });
   });
 
-  it('lets managers delete a venue document and its object', async () => {
-    prisma.venueDocument.findFirst.mockResolvedValue({ id: 'doc-1', s3Key: 'documents/venue-1/key' });
-    storage.delete.mockResolvedValue(undefined);
+  it('lets managers delete a venue document through the durable cleanup outbox', async () => {
+    prisma.venueDocument.findFirst.mockResolvedValue({ id: 'doc-1', s3Key: 'documents/venue-1/0123456789abcdef0123456789abcdef' });
     await expect(controller.remove(managerScope, 'doc-1')).resolves.toEqual({ ok: true });
-    expect(storage.delete).toHaveBeenCalledWith('documents/venue-1/key');
+    expect(prisma.objectDeletionJob.create).toHaveBeenCalledWith({
+      data: { objectKeys: ['documents/venue-1/0123456789abcdef0123456789abcdef'] },
+      select: { id: true },
+    });
     expect(prisma.venueDocument.delete).toHaveBeenCalledWith({ where: { id: 'doc-1' } });
+    expect(mediaCleanup.processJob).toHaveBeenCalledWith('delete-job-1');
   });
 });

@@ -533,7 +533,13 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
     // Legacy data-only callers cannot represent an error state. Throw into the
     // nearest recoverable screen/root boundary instead of returning undefined
     // forever and rendering an endless loading skeleton.
-    throwOnError: true,
+    //
+    // Scoped to first load only. `throwOnError: true` also fires when a
+    // BACKGROUND refetch fails on a query that already holds good data, which
+    // replaced a perfectly usable screen with the crash boundary on any
+    // transient network blip — and for the getMe call in app/(tabs)/_layout.tsx,
+    // that boundary is the root one, so the whole app went down.
+    throwOnError: (_error, query) => query.state.data === undefined,
   });
   // Only a pending/disabled query leaves data undefined. Errors are handled by
   // ErrorBoundary; new screens should still prefer useQueryState for inline UX.

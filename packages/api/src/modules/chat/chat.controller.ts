@@ -38,6 +38,8 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 type Scope = VenueScopedRequest['venueScope'];
 
 const GENERAL_GROUP_NAME = 'All Staff';
+/** Keys per deletion job — keeps each `IN (...)` and objectKeys array well under Postgres's bind-parameter ceiling. */
+const MEDIA_DELETION_BATCH_SIZE = 500;
 const ACTIVE_MEMBERSHIP: Array<{ membershipStatus: null | 'active' }> = [
   { membershipStatus: null },
   { membershipStatus: 'active' },
@@ -452,23 +454,35 @@ export class ChatController {
       throw new ForbiddenException('Only custom group chats can be deleted');
     }
 
-    const images = await this.prisma.chatImage.findMany({
-      where: { message: { conversationId: id } },
-      select: { id: true, s3Key: true },
-    });
-    const jobId = await this.prisma.$transaction(async (tx) => {
-      const job = images.length
-        ? await tx.objectDeletionJob.create({
-          data: { objectKeys: images.map((image) => image.s3Key) },
+    // Page inside the transaction. A long-lived group chat can hold thousands
+    // of images; loading every key before deleting it is both unbounded and
+    // can exceed Postgres's bind-parameter ceiling.
+    const jobIds = await this.prisma.$transaction(async (tx) => {
+      const created: string[] = [];
+      for (;;) {
+        const batch = await tx.chatImage.findMany({
+          where: { message: { conversationId: id } },
+          orderBy: { id: 'asc' },
+          take: MEDIA_DELETION_BATCH_SIZE,
+          select: { id: true, s3Key: true },
+        });
+        if (batch.length === 0) break;
+        const job = await tx.objectDeletionJob.create({
+          data: { objectKeys: batch.map((image) => image.s3Key) },
           select: { id: true },
-        })
-        : null;
-      if (images.length) await tx.chatImage.deleteMany({ where: { id: { in: images.map((image) => image.id) } } });
+        });
+        created.push(job.id);
+        await tx.chatImage.deleteMany({ where: { id: { in: batch.map((image) => image.id) } } });
+      }
       await tx.message.deleteMany({ where: { conversationId: id } });
       await tx.conversation.delete({ where: { id: conv.id } });
-      return job?.id ?? null;
+      return created;
     });
-    if (jobId) await this.mediaCleanup.processJob(jobId);
+    // Fire-and-forget a small bounded number. Awaiting serial S3 deletion
+    // timed out the gateway for large conversations, while starting every job
+    // at once can overload the shared bucket credential. The hourly cron is
+    // the durable backstop for the remainder.
+    for (const jobId of jobIds.slice(0, 5)) void this.mediaCleanup.processJob(jobId).catch(() => undefined);
 
     return { ok: true };
   }

@@ -734,6 +734,7 @@ export const en = {
       confirmWarning: 'This cannot be undone. You will be signed out after deletion is complete.',
       ownerWarning: 'If you are the final owner of a venue, confirming also permanently deletes that venue, its operational records, and stored media.',
       confirmButton: 'Permanently delete my account',
+      confirmVenueButton: 'Delete my account and the venues above',
       cancelButton: 'Cancel',
     },
     deleteError: {
@@ -1474,6 +1475,7 @@ export const es: GuestOpsDictionary = {
       confirmWarning: 'Esta acción no se puede deshacer. Se cerrará tu sesión cuando finalice la eliminación.',
       ownerWarning: 'Si eres el último propietario de un local, confirmar también elimina permanentemente ese local, sus registros operativos y los archivos almacenados.',
       confirmButton: 'Eliminar mi cuenta permanentemente',
+      confirmVenueButton: 'Eliminar mi cuenta y los locales indicados',
       cancelButton: 'Cancelar',
     },
     deleteError: {
@@ -2212,6 +2214,7 @@ export const fr: GuestOpsDictionary = {
       confirmWarning: 'Cette action est irréversible. Vous serez déconnecté une fois la suppression terminée.',
       ownerWarning: "Si vous êtes le dernier propriétaire d'un lieu, la confirmation supprime également définitivement ce lieu, ses données opérationnelles et ses médias stockés.",
       confirmButton: 'Supprimer définitivement mon compte',
+      confirmVenueButton: 'Supprimer mon compte et les lieux ci-dessus',
       cancelButton: 'Annuler',
     },
     deleteError: {
