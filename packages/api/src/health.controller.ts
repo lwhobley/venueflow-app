@@ -7,6 +7,7 @@ import { PrismaService } from './prisma/prisma.service';
 @Controller()
 export class HealthController {
   private lastDbCheck = 0;
+  private pendingDbCheck: Promise<void> | null = null;
   private readonly dbCacheTtlMs = 15_000;
 
   constructor(private readonly prisma: PrismaService) {}
@@ -35,11 +36,20 @@ export class HealthController {
   @Get('health')
   async health() {
     const now = Date.now();
-    // Cache the database ping for 15 seconds to prevent unbounded public scrape
-    // / health-monitor bursts from overloading the connection pool.
+    // Cache the database ping for 15 seconds and share concurrent in-flight promises
+    // to prevent unthrottled health-check bursts from overwhelming the DB connection pool.
     if (now - this.lastDbCheck >= this.dbCacheTtlMs) {
-      await this.prisma.$queryRaw`SELECT 1`;
-      this.lastDbCheck = now;
+      if (!this.pendingDbCheck) {
+        this.pendingDbCheck = (async () => {
+          try {
+            await this.prisma.$queryRaw`SELECT 1`;
+            this.lastDbCheck = Date.now();
+          } finally {
+            this.pendingDbCheck = null;
+          }
+        })();
+      }
+      await this.pendingDbCheck;
     }
     return {
       ok: true,

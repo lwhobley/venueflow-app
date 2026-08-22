@@ -104,7 +104,7 @@ describe('AttestationService', () => {
         where: {
           OR: [
             { expiresAt: { lt: expect.any(Date) } },
-            { consumedAt: { lt: expect.any(Date) } },
+            { consumedAt: { not: null } },
           ],
         },
       });

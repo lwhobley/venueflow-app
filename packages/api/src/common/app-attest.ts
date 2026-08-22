@@ -15,8 +15,21 @@ import { HttpException, HttpStatus } from '@nestjs/common';
  * verifies any attestation it receives and logs failures — it just does not
  * reject unattested punches. Flip it to true once the install base has updated.
  */
+export type AttestationMode = 'observe' | 'enforce';
+
+/**
+ * Returns current attestation mode: 'observe' (verify if present, don't reject unattested)
+ * or 'enforce' (reject punches lacking valid attestation).
+ */
+export function getAttestationMode(): AttestationMode {
+  const explicit = process.env['DEVICE_ATTESTATION_MODE']?.trim().toLowerCase();
+  if (explicit === 'enforce') return 'enforce';
+  if (explicit === 'observe') return 'observe';
+  return process.env['ATTESTATION_ENFORCED'] === 'true' ? 'enforce' : 'observe';
+}
+
 export function attestationEnforced(): boolean {
-  return process.env['ATTESTATION_ENFORCED'] === 'true';
+  return getAttestationMode() === 'enforce';
 }
 
 /** Apple Team ID, e.g. "V8H6LQ9448". Required whenever attestation is used. */

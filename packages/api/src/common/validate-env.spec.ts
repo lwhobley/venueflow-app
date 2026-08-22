@@ -36,10 +36,34 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...REQUIRED, JWT_SECRET: '   ' })).toThrow(/JWT_SECRET/);
   });
 
-  it('throws in production when ATTESTATION_ENFORCED is not true', () => {
-    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).toThrow(
-      'Production requires ATTESTATION_ENFORCED=true',
-    );
+  it('supports observe mode in production without failing startup', () => {
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        DEVICE_ATTESTATION_MODE: 'observe',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects invalid DEVICE_ATTESTATION_MODE values', () => {
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        DEVICE_ATTESTATION_MODE: 'invalid_mode',
+      }),
+    ).toThrow('DEVICE_ATTESTATION_MODE must be observe or enforce');
+  });
+
+  it('throws when attestation is enforced but APP_ATTEST_TEAM_ID is missing', () => {
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        DEVICE_ATTESTATION_MODE: 'enforce',
+      }),
+    ).toThrow('APP_ATTEST_TEAM_ID must be set when attestation is enforced.');
   });
 
   it('does not throw in production when optional integrations are unset, but warns', () => {
@@ -122,7 +146,7 @@ describe('validateEnv', () => {
   it('throws if ATTESTATION_ENFORCED is true but APP_ATTEST_TEAM_ID is missing', () => {
     expect(() =>
       validateEnv({ ...REQUIRED, ATTESTATION_ENFORCED: 'true' }),
-    ).toThrow('APP_ATTEST_TEAM_ID must be set when ATTESTATION_ENFORCED is enabled.');
+    ).toThrow('APP_ATTEST_TEAM_ID must be set when attestation is enforced.');
   });
 
   it('passes when ATTESTATION_ENFORCED is true and APP_ATTEST_TEAM_ID is provided', () => {

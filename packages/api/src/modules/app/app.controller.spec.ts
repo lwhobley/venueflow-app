@@ -395,13 +395,13 @@ describe('AppController multi-venue invariants', () => {
     // rows disappear when the owner deletes their own account.
     const otherStaffEntries = [
       {
-        id: 'te-1', venueId: 'venue-single', profileFullName: null,
+        id: 'te-1', venueId: 'venue-single', profileId: 'profile-bailey', profileFullName: null,
         clockInAt: new Date('2026-01-02T09:00:00Z'), clockOutAt: new Date('2026-01-02T17:00:00Z'),
         isOpen: false, breaks: null, createdAt: new Date('2026-01-02T09:00:00Z'),
         profile: { fullName: 'Bartender Bailey', email: 'bailey@example.com' },
       },
       {
-        id: 'te-2', venueId: 'venue-single', profileFullName: 'Snapshot Only',
+        id: 'te-2', venueId: 'venue-single', profileId: 'profile-snap', profileFullName: 'Snapshot Only',
         clockInAt: new Date('2026-01-03T09:00:00Z'), clockOutAt: null,
         isOpen: true, breaks: null, createdAt: new Date('2026-01-03T09:00:00Z'),
         profile: null,
@@ -443,15 +443,19 @@ describe('AppController multi-venue invariants', () => {
     expect(prisma.retainedTimeEntry.createMany).toHaveBeenCalledTimes(1);
     const retained = prisma.retainedTimeEntry.createMany.mock.calls[0][0].data;
     expect(retained).toHaveLength(2);
-    // De-identified according to published privacy policy
+    // Pseudonymized with synthetic identifiers to preserve per-employee reconstruction
     expect(retained[0]).toMatchObject({
       originVenueId: 'venue-single',
       originVenueName: 'Single Venue',
-      profileFullName: 'Staff Member',
+      profileFullName: 'deleted_user_profile-bailey',
       profileEmail: null,
       isOpen: false,
     });
-    expect(retained[1]).toMatchObject({ profileFullName: 'Staff Member', profileEmail: null, isOpen: true });
+    expect(retained[1]).toMatchObject({
+      profileFullName: 'deleted_user_profile-snap',
+      profileEmail: null,
+      isOpen: true,
+    });
     // And the archive must happen before the cascade, not after.
     const archiveOrder = prisma.retainedTimeEntry.createMany.mock.invocationCallOrder[0];
     const cascadeOrder = prisma.venue.deleteMany.mock.invocationCallOrder[0];

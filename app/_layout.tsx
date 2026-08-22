@@ -23,10 +23,16 @@ import { setFatalErrorReporter } from '../lib/report-error';
 
 // Wire fatal error reporter for mobile/web crash observability
 setFatalErrorReporter((error, componentStack) => {
-  if (typeof (globalThis as any).__SENTRY__ !== 'undefined') {
-    (globalThis as any).__SENTRY__?.captureException?.(error, {
-      extra: { componentStack: componentStack ?? 'none' },
-    });
+  const errorInfo = {
+    message: error?.message ?? String(error),
+    stack: error?.stack,
+    componentStack: componentStack ?? null,
+    timestamp: new Date().toISOString(),
+  };
+  if (__DEV__) {
+    console.error('[FatalErrorReporter:dev]', errorInfo);
+  } else {
+    console.error('[FatalErrorReporter:release]', JSON.stringify(errorInfo));
   }
 });
 

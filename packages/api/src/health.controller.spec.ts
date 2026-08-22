@@ -33,4 +33,30 @@ describe('HealthController', () => {
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(result2.ok).toBe(true);
   });
+
+  it('shares in-flight database check across simultaneous concurrent requests', async () => {
+    let resolveQuery: (value: any) => void = () => {};
+    const queryPromise = new Promise((resolve) => {
+      resolveQuery = resolve;
+    });
+    const prisma = { $queryRaw: vi.fn().mockImplementation(() => queryPromise) };
+    const controller = new HealthController(prisma as any);
+
+    // Launch multiple concurrent health requests simultaneously while uncached
+    const concurrentRequests = Promise.all([
+      controller.health(),
+      controller.health(),
+      controller.health(),
+      controller.health(),
+    ]);
+
+    resolveQuery([{ '?column?': 1 }]);
+    const results = await concurrentRequests;
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(4);
+    for (const r of results) {
+      expect(r.ok).toBe(true);
+    }
+  });
 });

@@ -1051,7 +1051,7 @@ export class AppController {
             orderBy: { id: 'asc' },
             take: RETAIN_BATCH,
             select: {
-              id: true, venueId: true, profileFullName: true, clockInAt: true,
+              id: true, venueId: true, profileId: true, profileFullName: true, clockInAt: true,
               clockOutAt: true, isOpen: true, breaks: true, createdAt: true,
               profile: { select: { fullName: true, email: true } },
             },
@@ -1061,9 +1061,11 @@ export class AppController {
             data: batch.map((entry) => ({
               originVenueId: entry.venueId,
               originVenueName: venueNameById.get(entry.venueId) ?? null,
-              // De-identify personal info in accordance with published privacy policy
-              // while preserving aggregate wage/hours records for FLSA compliance.
-              profileFullName: 'Staff Member',
+              // Pseudonymize employee identity with a stable synthetic identifier
+              // (deleted_user_<profileId>) so individual staff wage records can be
+              // distinguished and reconstructed for FLSA compliance without storing
+              // raw personal names or email addresses.
+              profileFullName: entry.profileId ? `deleted_user_${entry.profileId}` : `deleted_user_${entry.id}`,
               profileEmail: null,
               clockInAt: entry.clockInAt,
               clockOutAt: entry.clockOutAt,

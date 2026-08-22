@@ -157,12 +157,12 @@ export class AttestationService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async cleanupExpiredChallenges(): Promise<number> {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const now = new Date();
     const result = await this.prisma.attestationChallenge.deleteMany({
       where: {
         OR: [
-          { expiresAt: { lt: cutoff } },
-          { consumedAt: { lt: cutoff } },
+          { expiresAt: { lt: now } },
+          { consumedAt: { not: null } },
         ],
       },
     });

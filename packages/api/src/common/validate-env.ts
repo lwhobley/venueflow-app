@@ -45,8 +45,16 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     throw new Error(`Missing required environment variable(s): ${missing.join(', ')}`);
   }
 
-  if (config.ATTESTATION_ENFORCED === 'true' && !String(config.APP_ATTEST_TEAM_ID ?? '').trim()) {
-    throw new Error('APP_ATTEST_TEAM_ID must be set when ATTESTATION_ENFORCED is enabled.');
+  const rawAttestationMode = String(
+    config.DEVICE_ATTESTATION_MODE ?? (config.ATTESTATION_ENFORCED === 'true' ? 'enforce' : 'observe'),
+  ).trim().toLowerCase();
+
+  if (!['observe', 'enforce'].includes(rawAttestationMode)) {
+    throw new Error('DEVICE_ATTESTATION_MODE must be observe or enforce');
+  }
+
+  if (rawAttestationMode === 'enforce' && !String(config.APP_ATTEST_TEAM_ID ?? '').trim()) {
+    throw new Error('APP_ATTEST_TEAM_ID must be set when attestation is enforced.');
   }
 
   if (config.NODE_ENV === 'production') {
@@ -54,8 +62,10 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     if (jwtSecret.length < 32) {
       throw new Error('JWT_SECRET must be at least 32 characters in production.');
     }
-    if (config.ATTESTATION_ENFORCED !== 'true') {
-      throw new Error('Production requires ATTESTATION_ENFORCED=true');
+    if (rawAttestationMode === 'observe') {
+      logger.log(
+        'Device attestation is in observe mode for staged rollout. Punches with attestation assertions will be verified.',
+      );
     }
     if (config.BILLING_ENABLED === 'true') {
       const missingBilling = [
