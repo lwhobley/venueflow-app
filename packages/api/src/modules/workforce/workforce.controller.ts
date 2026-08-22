@@ -359,7 +359,6 @@ export class WorkforceController {
             id: true,
             email: true,
             profiles: {
-              where: { venueId: null },
               select: { fullName: true },
               orderBy: { createdAt: 'asc' },
               take: 1,
@@ -443,7 +442,6 @@ export class WorkforceController {
             id: true,
             email: true,
             profiles: {
-              where: { venueId: null },
               select: { fullName: true },
               orderBy: { createdAt: 'asc' },
               take: 1,
@@ -505,7 +503,6 @@ export class WorkforceController {
           select: {
             email: true,
             profiles: {
-              where: { venueId: null },
               select: { fullName: true },
               orderBy: { createdAt: 'asc' },
               take: 1,

@@ -20,6 +20,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AttestationService } from '../attestation/attestation.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { endBreakForProfile, startBreakForProfile } from './break-transitions';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -354,24 +355,8 @@ export class TimeClockController {
     if (!scope) throw new BadRequestException('Profile is not initialized');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
-
-    const entry = await this.prisma.timeEntry.findFirst({
-      where: { profileId: scope.profileId, isOpen: true },
-    });
-    if (!entry) throw new BadRequestException('No active clock-in found');
-
-    const breaks = parseTimeBreaks(entry.breaks);
-    const activeBreak = breaks.find((breakRow) => breakRow.endAt === null);
-    if (activeBreak) throw new BadRequestException('Already on a break');
-
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const newBreaks = [...breaks, { startAt: Date.now(), endAt: null, type: body.type }];
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
-      data: { breaks: newBreaks },
-    });
-    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
-    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    const updated = await startBreakForProfile(this.prisma, scope.profileId, body.type);
     return mapClockEntry(updated, profile, venue);
   }
 
@@ -382,28 +367,8 @@ export class TimeClockController {
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) throw new BadRequestException('Assigned venue not found');
 
-    const entry = await this.prisma.timeEntry.findFirst({
-      where: { profileId: scope.profileId, isOpen: true },
-    });
-    if (!entry) throw new BadRequestException('No active clock-in found');
-
-    const breaks = parseTimeBreaks(entry.breaks);
-    const activeBreakIndex = breaks.findIndex((breakRow) => breakRow.endAt === null);
-    if (activeBreakIndex === -1) throw new BadRequestException('Not currently on a break');
-
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-    const newBreaks = [...breaks];
-    newBreaks[activeBreakIndex] = {
-      ...newBreaks[activeBreakIndex],
-      endAt: Date.now(),
-    };
-
-    const count = await this.prisma.timeEntry.updateMany({
-      where: { id: entry.id, isOpen: true, updatedAt: entry.updatedAt },
-      data: { breaks: newBreaks },
-    });
-    if (count.count === 0) throw new BadRequestException('Break state changed. Refresh and try again.');
-    const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    const updated = await endBreakForProfile(this.prisma, scope.profileId);
     return mapClockEntry(updated, profile, venue);
   }
 }

@@ -16,7 +16,7 @@ on:
         required: true
         type: boolean
       billing_secrets_verified:
-        description: RevenueCat/Stripe production secrets and products were verified
+        description: RevenueCat/Stripe production secrets, products, and no-transfer setting were verified
         required: true
         type: boolean
 
@@ -86,6 +86,7 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --image "$IMAGE_URI" \
+            --update-env-vars TRUST_PROXY_HOPS=1 \
             --quiet
 
       - name: Verify the production health endpoint

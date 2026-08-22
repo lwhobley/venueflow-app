@@ -461,13 +461,38 @@ export class AuthController {
     if (!this.authService.oneTimeCodeHashesMatch(account.emailVerificationCodeHash, this.authService.hashOneTimeCode(body.code))) {
       throw new BadRequestException('That verification code is not valid.');
     }
-    await this.prisma.user.update({
-      where: { id: user.sub },
-      data: {
-        emailVerifiedAt: new Date(),
-        emailVerificationCodeHash: null,
-        emailVerificationSentAt: null,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.sub },
+        data: {
+          emailVerifiedAt: new Date(),
+          emailVerificationCodeHash: null,
+          emailVerificationSentAt: null,
+        },
+      });
+      const pendingProfiles = await tx.profile.findMany({
+        where: { userId: user.sub, membershipStatus: 'pending' },
+        select: { id: true },
+      });
+      if (pendingProfiles.length > 0) {
+        const reservedInvites = await tx.invite.findMany({
+          where: { usedBy: { in: pendingProfiles.map((profile) => profile.id) } },
+          select: { usedBy: true },
+        });
+        const invitedProfileIds = reservedInvites
+          .map((invite) => invite.usedBy)
+          .filter((profileId): profileId is string => Boolean(profileId));
+        if (invitedProfileIds.length > 0) {
+          await tx.profile.updateMany({
+            where: {
+              id: { in: invitedProfileIds },
+              userId: user.sub,
+              membershipStatus: 'pending',
+            },
+            data: { membershipStatus: 'active' },
+          });
+        }
+      }
     });
     return { ok: true };
   }

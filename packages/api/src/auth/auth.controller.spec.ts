@@ -341,6 +341,54 @@ describe('AuthController email invite signup', () => {
 });
 
 describe('AuthController recovery and logout safety', () => {
+  it('activates invite-reserved memberships atomically with email verification', async () => {
+    const tx = {
+      user: { update: vi.fn().mockResolvedValue({}) },
+      profile: {
+        findMany: vi.fn().mockResolvedValue([{ id: 'profile-invite' }, { id: 'profile-join-request' }]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      invite: {
+        findMany: vi.fn().mockResolvedValue([{ usedBy: 'profile-invite' }]),
+      },
+    };
+    const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          emailVerificationCodeHash: 'hashed-code',
+          emailVerificationSentAt: new Date(),
+          emailVerifiedAt: null,
+        }),
+      },
+      $transaction: vi.fn((callback: (transaction: typeof tx) => unknown) => callback(tx)),
+    };
+    const authService = {
+      hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
+      oneTimeCodeHashesMatch: vi.fn().mockReturnValue(true),
+    };
+    const controller = new AuthController(prisma as never, {} as never, {} as never, authService as never);
+
+    await expect(controller.verifyEmail(
+      { ip: '127.0.0.1' } as never,
+      { sub: 'user-1' } as never,
+      { code: '12345678' },
+    )).resolves.toEqual({ ok: true });
+
+    expect(tx.user.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'user-1' } }));
+    expect(tx.invite.findMany).toHaveBeenCalledWith({
+      where: { usedBy: { in: ['profile-invite', 'profile-join-request'] } },
+      select: { usedBy: true },
+    });
+    expect(tx.profile.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['profile-invite'] },
+        userId: 'user-1',
+        membershipStatus: 'pending',
+      },
+      data: { membershipStatus: 'active' },
+    });
+  });
+
   it('returns the same success response when reset-email delivery fails', async () => {
     const prisma = {
       user: {

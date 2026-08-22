@@ -108,10 +108,11 @@ export default function SignInScreen() {
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // After signup, route to email verification first.
+    // Any unverified account must return to verification, including a user who
+    // closed the app midway through invited signup and signs in again later.
     // verify-email.tsx calls redeemInvite / redeemMyInvite after code entry
     // to finalize venue membership before taking the user into the app.
-    if (!profile.emailVerified && flow === 'signUp') {
+    if (!profile.emailVerified) {
       if (options?.inviteToken) {
         router.replace({ pathname: '/(auth)/verify-email', params: { invite: options.inviteToken } });
       } else {

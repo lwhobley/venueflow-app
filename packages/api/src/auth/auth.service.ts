@@ -50,10 +50,9 @@ export class AuthService {
       select: { emailVerifiedAt: true },
     });
     const emailVerified = Boolean(account?.emailVerifiedAt);
-    
+
     const inviteValue = inviteToken?.trim();
     const invite = inviteValue
-      ? emailVerified
       ? await this.prisma.invite.findFirst({
           where: {
             OR: [{ tokenHash: hashInviteToken(inviteValue) }, { code: { equals: inviteValue, mode: 'insensitive' } }],
@@ -61,7 +60,6 @@ export class AuthService {
             expiresAt: { gt: new Date() },
           },
         })
-      : null
       : null;
 
     if (invite?.email && invite.email.toLowerCase() !== email) {
@@ -83,7 +81,16 @@ export class AuthService {
       }
 
       const grant = activeInvite
-        ? { venueId: activeInvite.venueId, role: activeInvite.role, jobTitle: activeInvite.jobTitle }
+        ? {
+            venueId: activeInvite.venueId,
+            role: activeInvite.role,
+            jobTitle: activeInvite.jobTitle,
+            // Possession of a shareable manager invite is not proof that the
+            // account owns its email address. Reserve the single-use invite
+            // now, but keep the venue membership inert until verifyEmail
+            // activates it in the same transaction as emailVerifiedAt.
+            membershipStatus: emailVerified ? 'active' as const : 'pending' as const,
+          }
         : null;
 
       const existingProfileForVenue = grant?.venueId
@@ -141,6 +148,7 @@ export class AuthService {
             role: grant.role,
             jobTitle: grant.jobTitle,
             venueId: grant.venueId,
+            membershipStatus: grant.membershipStatus,
             trialEndsAt,
           },
           include: { venue: true },
@@ -183,6 +191,7 @@ export class AuthService {
               role: grant?.role ?? 'staff',
               jobTitle: grant?.jobTitle ?? 'Staff',
               venueId: grant?.venueId ?? undefined,
+              ...(grant ? { membershipStatus: grant.membershipStatus } : {}),
               trialEndsAt,
             },
             include: { venue: true },
