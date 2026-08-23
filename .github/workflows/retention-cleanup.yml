@@ -1,0 +1,37 @@
+name: Run production retention cleanup
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-retention-cleanup
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: venuewrangler
+  GCP_REGION: us-east1
+  CLOUD_RUN_RETENTION_JOB: venue-wrangler-api-retention
+
+jobs:
+  retention:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_RETENTION_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Execute retention job
+        run: |
+          set -Eeuo pipefail
+          gcloud run jobs execute "$CLOUD_RUN_RETENTION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait

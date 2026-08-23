@@ -19,6 +19,21 @@ on:
         description: RevenueCat/Stripe production secrets, products, and no-transfer setting were verified
         required: true
         type: boolean
+      attestation_rollout_verified:
+        description: The selected device-attestation posture and supported iOS install base were verified
+        required: true
+        type: boolean
+      attestation_mode:
+        description: Device-attestation posture for clock punches
+        required: true
+        type: choice
+        options:
+          - observe
+          - enforce
+      app_attest_team_id:
+        description: Apple Developer Team ID used to verify App Attest assertions
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -33,6 +48,7 @@ env:
   GCP_REGION: us-east1
   CLOUD_RUN_SERVICE: venue-wrangler-api
   CLOUD_RUN_MIGRATION_JOB: venue-wrangler-api-migrate
+  CLOUD_RUN_RETENTION_JOB: venue-wrangler-api-retention
 
 jobs:
   migrate-and-deploy:
@@ -42,9 +58,11 @@ jobs:
       - name: Require an immutable image digest
         env:
           IMAGE_URI: ${{ inputs.image_uri }}
+          APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
           BACKUPS_AND_RESTORE_VERIFIED: ${{ inputs.backups_and_restore_verified }}
           SECONDARY_ALERTING_VERIFIED: ${{ inputs.secondary_alerting_verified }}
           BILLING_SECRETS_VERIFIED: ${{ inputs.billing_secrets_verified }}
+          ATTESTATION_ROLLOUT_VERIFIED: ${{ inputs.attestation_rollout_verified }}
         run: |
           set -Eeuo pipefail
           [[ "$IMAGE_URI" == *@sha256:* ]] || {
@@ -54,20 +72,27 @@ jobs:
           [[ "$BACKUPS_AND_RESTORE_VERIFIED" == "true" ]] || { echo "::error::Backups and restore drill must be verified"; exit 1; }
           [[ "$SECONDARY_ALERTING_VERIFIED" == "true" ]] || { echo "::error::Secondary alerting must be verified"; exit 1; }
           [[ "$BILLING_SECRETS_VERIFIED" == "true" ]] || { echo "::error::Billing configuration must be verified"; exit 1; }
+          [[ "$ATTESTATION_ROLLOUT_VERIFIED" == "true" ]] || { echo "::error::Device-attestation rollout must be verified"; exit 1; }
+          [[ "$APP_ATTEST_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::app_attest_team_id must be a 10-character Apple Developer Team ID"; exit 1; }
 
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify required Cloud Run jobs before changing production
+        run: |
+          set -Eeuo pipefail
+          gcloud run jobs describe "$CLOUD_RUN_MIGRATION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null
+          gcloud run jobs describe "$CLOUD_RUN_RETENTION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null
 
       - name: Apply migrations in the single-run release job
         env:
           IMAGE_URI: ${{ inputs.image_uri }}
         run: |
           set -Eeuo pipefail
-          gcloud run jobs describe "$CLOUD_RUN_MIGRATION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null
           gcloud run jobs update "$CLOUD_RUN_MIGRATION_JOB" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
@@ -80,17 +105,65 @@ jobs:
             --region "$GCP_REGION" \
             --wait
 
-      - name: Deploy only after migrations succeed
+      - name: Update the externally scheduled retention job
         env:
           IMAGE_URI: ${{ inputs.image_uri }}
         run: |
           set -Eeuo pipefail
+          gcloud run jobs update "$CLOUD_RUN_RETENTION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$IMAGE_URI" \
+            --command npm \
+            --args run,retention,-w,@venue-wrangler/api \
+            --quiet
+
+      - name: Deploy a no-traffic candidate revision
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+          ATTESTATION_MODE: ${{ inputs.attestation_mode }}
+          APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
+        run: |
+          set -Eeuo pipefail
+          release_tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --image "$IMAGE_URI" \
-            --update-env-vars TRUST_PROXY_HOPS=1 \
+            --update-env-vars "TRUST_PROXY_HOPS=1,DEVICE_ATTESTATION_MODE=${ATTESTATION_MODE},APP_ATTEST_TEAM_ID=${APP_ATTEST_TEAM_ID}" \
+            --no-traffic \
+            --tag "$release_tag" \
             --quiet
 
-      - name: Verify the production health endpoint
+      - name: Verify live attestation configuration
+        env:
+          EXPECTED_ATTESTATION_MODE: ${{ inputs.attestation_mode }}
+          EXPECTED_APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          actual_mode="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "DEVICE_ATTESTATION_MODE") | .value' <<<"$service_json")"
+          actual_team_id="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "APP_ATTEST_TEAM_ID") | .value' <<<"$service_json")"
+          [[ "$actual_mode" == "$EXPECTED_ATTESTATION_MODE" ]] || { echo "::error::Live DEVICE_ATTESTATION_MODE does not match the approved mode"; exit 1; }
+          [[ "$actual_team_id" == "$EXPECTED_APP_ATTEST_TEAM_ID" ]] || { echo "::error::Live APP_ATTEST_TEAM_ID does not match the approved Team ID"; exit 1; }
+
+      - name: Verify the candidate revision health endpoint
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          candidate_url="$(jq -r --arg tag "$RELEASE_TAG" '.status.traffic[] | select(.tag == $tag) | .url' <<<"$service_json")"
+          [[ "$candidate_url" == https://* ]] || { echo "::error::Could not resolve candidate revision URL"; exit 1; }
+          curl --fail --retry 8 --retry-delay 5 --retry-all-errors "$candidate_url/api/health"
+
+      - name: Promote the verified candidate to production traffic
+        run: |
+          set -Eeuo pipefail
+          gcloud run services update-traffic "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-tags "${RELEASE_TAG}=100" \
+            --quiet
+
+      - name: Verify the production health endpoint after promotion
         run: curl --fail --retry 8 --retry-delay 5 --retry-all-errors https://venue-wrangler-api-922889404273.us-east1.run.app/api/health
