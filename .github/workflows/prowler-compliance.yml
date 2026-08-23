@@ -59,7 +59,7 @@ jobs:
       - name: Authenticate to GCP via Workload Identity Federation
         id: gcp-wif-auth
         if: env.GCP_WIF_PROVIDER != '' && env.GCP_SA_EMAIL != ''
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
           service_account: ${{ env.GCP_SA_EMAIL }}
@@ -68,7 +68,7 @@ jobs:
       - name: Authenticate to GCP via Service Account Key (Fallback)
         id: gcp-sa-auth
         if: (env.GCP_WIF_PROVIDER == '' || env.GCP_SA_EMAIL == '') && env.GCP_CREDENTIALS_JSON != ''
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           credentials_json: ${{ env.GCP_CREDENTIALS_JSON }}
           create_credentials_file: true
