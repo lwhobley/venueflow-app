@@ -42,15 +42,18 @@ jobs:
       - name: Require an immutable image digest
         env:
           IMAGE_URI: ${{ inputs.image_uri }}
+          BACKUPS_AND_RESTORE_VERIFIED: ${{ inputs.backups_and_restore_verified }}
+          SECONDARY_ALERTING_VERIFIED: ${{ inputs.secondary_alerting_verified }}
+          BILLING_SECRETS_VERIFIED: ${{ inputs.billing_secrets_verified }}
         run: |
           set -Eeuo pipefail
           [[ "$IMAGE_URI" == *@sha256:* ]] || {
             echo "::error::image_uri must include an immutable @sha256 digest"
             exit 1
           }
-          [[ "${{ inputs.backups_and_restore_verified }}" == "true" ]] || { echo "::error::Backups and restore drill must be verified"; exit 1; }
-          [[ "${{ inputs.secondary_alerting_verified }}" == "true" ]] || { echo "::error::Secondary alerting must be verified"; exit 1; }
-          [[ "${{ inputs.billing_secrets_verified }}" == "true" ]] || { echo "::error::Billing configuration must be verified"; exit 1; }
+          [[ "$BACKUPS_AND_RESTORE_VERIFIED" == "true" ]] || { echo "::error::Backups and restore drill must be verified"; exit 1; }
+          [[ "$SECONDARY_ALERTING_VERIFIED" == "true" ]] || { echo "::error::Secondary alerting must be verified"; exit 1; }
+          [[ "$BILLING_SECRETS_VERIFIED" == "true" ]] || { echo "::error::Billing configuration must be verified"; exit 1; }
 
       - uses: google-github-actions/auth@v2
         with:
