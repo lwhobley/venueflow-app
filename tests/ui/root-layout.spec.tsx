@@ -25,27 +25,27 @@ vi.mock('@expo-google-fonts/fraunces', () => ({
   Fraunces_600SemiBold: 'Fraunces_600SemiBold',
   Fraunces_600SemiBold_Italic: 'Fraunces_600SemiBold_Italic',
 }));
-vi.mock('../lib/a0-purchases-stub', () => ({ A0PurchaseProvider: 'A0PurchaseProvider' }));
+vi.mock('../../lib/a0-purchases-stub', () => ({ A0PurchaseProvider: 'A0PurchaseProvider' }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' }));
-vi.mock('../lib/theme', () => ({
+vi.mock('../../lib/theme', () => ({
   makePaperTheme: () => ({}),
   useAppearanceStore: (selector: (state: { mode: string }) => unknown) => selector({ mode: 'light' }),
   designPalettes: { light: { background: '#fff' } },
 }));
-vi.mock('../components/SubscriptionGate', () => ({ SubscriptionGate: 'SubscriptionGate' }));
-vi.mock('../components/ErrorBoundary', () => ({ ErrorBoundary: 'ErrorBoundary' }));
-vi.mock('../lib/auth-store', () => ({ useAuthStore: (selector: (state: typeof mocks.auth) => unknown) => selector(mocks.auth) }));
-vi.mock('../lib/purchases', () => ({
+vi.mock('../../components/SubscriptionGate', () => ({ SubscriptionGate: 'SubscriptionGate' }));
+vi.mock('../../components/ErrorBoundary', () => ({ ErrorBoundary: 'ErrorBoundary' }));
+vi.mock('../../lib/auth-store', () => ({ useAuthStore: (selector: (state: typeof mocks.auth) => unknown) => selector(mocks.auth) }));
+vi.mock('../../lib/purchases', () => ({
   configurePurchases: mocks.configurePurchases,
   logoutPurchases: mocks.logoutPurchases,
 }));
-vi.mock('../lib/query-client', () => ({ queryClient: { cancelQueries: mocks.cancelQueries, clear: mocks.clear } }));
-vi.mock('../lib/report-error', () => ({ setFatalErrorReporter: vi.fn() }));
+vi.mock('../../lib/query-client', () => ({ queryClient: { cancelQueries: mocks.cancelQueries, clear: mocks.clear } }));
+vi.mock('../../lib/report-error', () => ({ setFatalErrorReporter: vi.fn() }));
 
 vi.stubGlobal('__DEV__', true);
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
-import { RootLayout } from './_layout';
+import { RootLayout } from '../../app/_layout';
 
 describe('RootLayout bootstrap', () => {
   beforeEach(() => {

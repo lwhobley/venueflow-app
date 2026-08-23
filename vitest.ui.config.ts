@@ -8,7 +8,7 @@ export default defineConfig({
     alias: { 'react-native': 'react-native-web' },
   },
   test: {
-    include: ['app/**/*.spec.tsx', 'components/**/*.spec.tsx'],
+    include: ['tests/ui/**/*.spec.tsx', 'components/**/*.spec.tsx'],
     exclude: [...configDefaults.exclude, '.claude/**'],
     coverage: {
       provider: 'v8',
