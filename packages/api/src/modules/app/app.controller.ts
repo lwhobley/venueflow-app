@@ -1014,25 +1014,67 @@ export class AppController {
         }
       }
 
-      let mediaJobId: string | null = null;
+      const mediaJobIds: string[] = [];
       if (venuesToDelete.length > 0) {
-        const [chatImages, documents, checklistPhotos] = await Promise.all([
-          tx.chatImage.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
-          tx.venueDocument.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
-          tx.checklistCompletion.findMany({
-            where: { venueId: { in: venuesToDelete }, photoKey: { not: null } },
-            select: { photoKey: true },
-          }),
-        ]);
-        const objectKeys = Array.from(new Set([
-          ...chatImages.map((row) => row.s3Key),
-          ...documents.map((row) => row.s3Key),
-          ...checklistPhotos.map((row) => row.photoKey).filter((key): key is string => Boolean(key)),
-        ]));
-        if (objectKeys.length > 0) {
-          const job = await tx.objectDeletionJob.create({ data: { objectKeys }, select: { id: true } });
-          mediaJobId = job.id;
+        const MEDIA_BATCH = 500;
+        const pendingKeys = new Set<string>();
+        const flushMediaJob = async () => {
+          if (pendingKeys.size === 0) return;
+          const job = await tx.objectDeletionJob.create({
+            data: { objectKeys: Array.from(pendingKeys) },
+            select: { id: true },
+          });
+          mediaJobIds.push(job.id);
+          pendingKeys.clear();
+        };
+        const addKeys = async (keys: Array<string | null>) => {
+          for (const key of keys) {
+            if (key) pendingKeys.add(key);
+            if (pendingKeys.size >= MEDIA_BATCH) await flushMediaJob();
+          }
+        };
+
+        let afterId: string | undefined;
+        for (;;) {
+          const batch: Array<{ id: string; s3Key: string }> = await tx.chatImage.findMany({
+            where: { venueId: { in: venuesToDelete }, ...(afterId ? { id: { gt: afterId } } : {}) },
+            orderBy: { id: 'asc' },
+            take: MEDIA_BATCH,
+            select: { id: true, s3Key: true },
+          });
+          if (batch.length === 0) break;
+          await addKeys(batch.map(({ s3Key }) => s3Key));
+          afterId = batch.at(-1)!.id;
         }
+        afterId = undefined;
+        for (;;) {
+          const batch: Array<{ id: string; s3Key: string }> = await tx.venueDocument.findMany({
+            where: { venueId: { in: venuesToDelete }, ...(afterId ? { id: { gt: afterId } } : {}) },
+            orderBy: { id: 'asc' },
+            take: MEDIA_BATCH,
+            select: { id: true, s3Key: true },
+          });
+          if (batch.length === 0) break;
+          await addKeys(batch.map(({ s3Key }) => s3Key));
+          afterId = batch.at(-1)!.id;
+        }
+        afterId = undefined;
+        for (;;) {
+          const batch: Array<{ id: string; photoKey: string | null }> = await tx.checklistCompletion.findMany({
+            where: {
+              venueId: { in: venuesToDelete },
+              photoKey: { not: null },
+              ...(afterId ? { id: { gt: afterId } } : {}),
+            },
+            orderBy: { id: 'asc' },
+            take: MEDIA_BATCH,
+            select: { id: true, photoKey: true },
+          });
+          if (batch.length === 0) break;
+          await addKeys(batch.map(({ photoKey }) => photoKey));
+          afterId = batch.at(-1)!.id;
+        }
+        await flushMediaJob();
         // Archive wage records BEFORE anything cascades. TimeEntry.venue is
         // onDelete: Cascade, so deleting the Venue would otherwise destroy every
         // employee's clock-in history — not just the departing account's. FLSA
@@ -1106,7 +1148,7 @@ export class AppController {
       return {
         email: account?.email ?? primary?.email ?? user.email,
         name: primary?.fullName ?? user.name ?? 'there',
-        mediaJobId,
+        mediaJobIds,
         deletedVenueCount: venuesToDelete.length,
       };
     }, {
@@ -1116,10 +1158,12 @@ export class AppController {
       timeout: 120_000,
       maxWait: 10_000,
     }));
-    if (deletion?.mediaJobId && this.mediaCleanup) {
-      void this.mediaCleanup.processJob(deletion.mediaJobId).catch((error) => {
-        this.logger.error(`Initial media purge failed for deletion job ${deletion.mediaJobId}`, error instanceof Error ? error.stack : String(error));
-      });
+    if (deletion?.mediaJobIds.length && this.mediaCleanup) {
+      for (const mediaJobId of deletion.mediaJobIds) {
+        void this.mediaCleanup.processJob(mediaJobId).catch((error) => {
+          this.logger.error(`Initial media purge failed for deletion job ${mediaJobId}`, error instanceof Error ? error.stack : String(error));
+        });
+      }
     }
     if (deletion?.email) {
       void this.email.send({

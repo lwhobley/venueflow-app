@@ -43,21 +43,21 @@ enforcement is on nobody can clock in.
 ## Staged rollout
 
 Server-side attestation is inert until an iOS build ships that produces
-assertions, so enforcement is gated on `ATTESTATION_ENFORCED` (default off):
+assertions, so production uses an explicit `DEVICE_ATTESTATION_MODE`:
 
-| `ATTESTATION_ENFORCED` | punch without attestation | punch with a bad one |
+| `DEVICE_ATTESTATION_MODE` | punch without attestation | punch with a bad one |
 | ---------------------- | ------------------------- | -------------------- |
-| unset / `false`        | allowed                   | **rejected**         |
-| `true`                 | **rejected**              | **rejected**         |
+| `observe`              | allowed                   | **rejected**         |
+| `enforce`              | **rejected**              | **rejected**         |
 
 Order of operations:
 
-1. Deploy the API with `ATTESTATION_ENFORCED` unset and `APP_ATTEST_TEAM_ID` set.
+1. Deploy the API with `DEVICE_ATTESTATION_MODE=observe` and `APP_ATTEST_TEAM_ID` set.
 2. Ship the iOS build (EAS build → App Store). Devices enrol automatically on
    their next punch.
-3. Watch for `App Attest assertion rejected` warnings and for the share of
-   punches arriving with an assertion.
-4. Once uptake is high enough, set `ATTESTATION_ENFORCED=true`.
+3. Measure `attestation_observation status=missing|valid` log counts and investigate
+   assertion-rejection warnings.
+4. Once uptake is high enough, deploy with `DEVICE_ATTESTATION_MODE=enforce`.
 
 Turning it on before step 3 locks older app versions out of the time clock.
 

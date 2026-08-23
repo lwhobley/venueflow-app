@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { APPLE_TEAM_ID_PATTERN } from './app-attest';
 
 const logger = new Logger('Bootstrap');
 
@@ -45,16 +46,20 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     throw new Error(`Missing required environment variable(s): ${missing.join(', ')}`);
   }
 
-  const rawAttestationMode = String(
-    config.DEVICE_ATTESTATION_MODE ?? (config.ATTESTATION_ENFORCED === 'true' ? 'enforce' : 'observe'),
-  ).trim().toLowerCase();
+  const explicitAttestationMode = String(config.DEVICE_ATTESTATION_MODE ?? '').trim().toLowerCase();
+  const legacyEnforcementEnabled = config.ATTESTATION_ENFORCED === 'true';
+  const rawAttestationMode = explicitAttestationMode || (legacyEnforcementEnabled ? 'enforce' : 'observe');
+  const appAttestTeamId = String(config.APP_ATTEST_TEAM_ID ?? '').trim();
 
   if (!['observe', 'enforce'].includes(rawAttestationMode)) {
     throw new Error('DEVICE_ATTESTATION_MODE must be observe or enforce');
   }
 
-  if (rawAttestationMode === 'enforce' && !String(config.APP_ATTEST_TEAM_ID ?? '').trim()) {
+  if (rawAttestationMode === 'enforce' && !appAttestTeamId) {
     throw new Error('APP_ATTEST_TEAM_ID must be set when attestation is enforced.');
+  }
+  if (appAttestTeamId && !APPLE_TEAM_ID_PATTERN.test(appAttestTeamId)) {
+    throw new Error('APP_ATTEST_TEAM_ID must be a 10-character Apple Developer Team ID.');
   }
 
   if (config.NODE_ENV === 'production') {
@@ -62,8 +67,14 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     if (jwtSecret.length < 32) {
       throw new Error('JWT_SECRET must be at least 32 characters in production.');
     }
+    if (!explicitAttestationMode && !legacyEnforcementEnabled) {
+      throw new Error('Production requires an explicit DEVICE_ATTESTATION_MODE=observe|enforce');
+    }
+    if (!appAttestTeamId) {
+      throw new Error('APP_ATTEST_TEAM_ID must be set for production attestation.');
+    }
     if (rawAttestationMode === 'observe') {
-      logger.log(
+      logger.warn(
         'Device attestation is in observe mode for staged rollout. Punches with attestation assertions will be verified.',
       );
     }

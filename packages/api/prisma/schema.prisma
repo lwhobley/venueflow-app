@@ -286,6 +286,7 @@ model AttestationChallenge {
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([consumedAt])
 }
 
 model Session {
@@ -697,6 +698,7 @@ model RetainedTimeEntry {
   retainedAt        DateTime  @default(now())
 
   @@index([originVenueId])
+  @@index([originCreatedAt])
   @@index([retainedAt])
 }
 
@@ -1650,6 +1652,7 @@ model AuditLog {
   @@index([action, createdAt])
   @@index([targetProfileId])
   @@index([actorProfileId, createdAt])
+  @@index([createdAt])
 }
 
 model ManagerGoal {

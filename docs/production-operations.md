@@ -31,6 +31,10 @@ Until an upgrade is possible, `.github/workflows/database-backup.yml` provides a
 
 Never store a database password in this repository. For a restore, pause Cloud Run traffic, restore or clone the Supabase project, update `DATABASE_URL` as a new Cloud Run revision, run Prisma migrations, smoke-test, and then shift traffic back.
 
+## Retention cleanup
+
+`.github/workflows/retention-cleanup.yml` executes the preconfigured `venue-wrangler-api-retention` Cloud Run Job daily. Provision it with the same database secrets and network access as the migration job. GitHub must use a dedicated `GCP_RETENTION_SERVICE_ACCOUNT` identity that can execute only this job; do not reuse the production deployment identity. Deployment preflights the job before migrations, updates it to the same immutable API image, verifies a no-traffic candidate revision, and only then promotes that revision to production. Treat a missed or failed run as an operational alert: audit logs, expired attestation challenges, and statutory wage records are purged only by this external job.
+
 ### Connection budget
 
 Set `DATABASE_POOL_SIZE=5` for each Cloud Run revision unless the Supabase connection budget and Cloud Run maximum instance count have been reviewed together. The current database permits 60 backend connections. Cloud Run service-level autoscaling is capped at 8 instances (40 pooled connections), leaving 20 connections for Supabase administration, migrations, and incident response. Recheck this budget before changing either limit.
@@ -42,7 +46,8 @@ Managers can rotate a compromised or stale POS secret with `POST /api/v1/pos/con
 ## Release checklist
 
 1. Confirm GitHub Mobile CI and API CI are green.
-2. Deploy through `.github/workflows/deploy-api.yml`; its production gate requires verified backups/restore, secondary alerting, billing configuration, and a successful migration job before traffic changes.
+2. Deploy through `.github/workflows/deploy-api.yml`; its production gate requires verified backups/restore, secondary alerting, billing configuration, an approved attestation mode and Team ID, and a successful migration job before traffic changes.
 3. Confirm Stripe live checkout creates a subscription for an authenticated venue.
 4. Confirm the alert notification channel is verified.
 5. Record the current revision ID before every deploy for rollback.
+6. Confirm the retention Cloud Run Job was updated and its most recent scheduled execution succeeded.

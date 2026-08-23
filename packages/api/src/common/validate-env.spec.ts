@@ -27,7 +27,7 @@ describe('validateEnv', () => {
         ...REQUIRED,
         NODE_ENV: 'production',
         ATTESTATION_ENFORCED: 'true',
-        APP_ATTEST_TEAM_ID: 'TEAM123',
+        APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),
     ).not.toThrow();
   });
@@ -42,8 +42,25 @@ describe('validateEnv', () => {
         ...REQUIRED,
         NODE_ENV: 'production',
         DEVICE_ATTESTATION_MODE: 'observe',
+        APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),
     ).not.toThrow();
+  });
+
+  it('requires an explicit attestation posture in production', () => {
+    expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).toThrow(
+      'Production requires an explicit DEVICE_ATTESTATION_MODE=observe|enforce',
+    );
+  });
+
+  it('requires the Apple Team ID in observe mode so submitted proofs can be verified', () => {
+    expect(() =>
+      validateEnv({
+        ...REQUIRED,
+        NODE_ENV: 'production',
+        DEVICE_ATTESTATION_MODE: 'observe',
+      }),
+    ).toThrow('APP_ATTEST_TEAM_ID must be set for production attestation.');
   });
 
   it('rejects invalid DEVICE_ATTESTATION_MODE values', () => {
@@ -73,7 +90,7 @@ describe('validateEnv', () => {
         ...REQUIRED,
         NODE_ENV: 'production',
         ATTESTATION_ENFORCED: 'true',
-        APP_ATTEST_TEAM_ID: 'TEAM123',
+        APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),
     ).not.toThrow();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('STRIPE_WEBHOOK_SECRET'));
@@ -101,7 +118,7 @@ describe('validateEnv', () => {
       EMAIL_API_KEY: 'x',
       SENTRY_DSN: 'https://example.invalid/1',
       ATTESTATION_ENFORCED: 'true',
-      APP_ATTEST_TEAM_ID: 'TEAM123',
+      APP_ATTEST_TEAM_ID: 'TEAM123456',
     });
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
@@ -115,7 +132,7 @@ describe('validateEnv', () => {
         JWT_SECRET: 'short-secret',
         NODE_ENV: 'production',
         ATTESTATION_ENFORCED: 'true',
-        APP_ATTEST_TEAM_ID: 'TEAM123',
+        APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),
     ).toThrow(/JWT_SECRET must be at least 32 characters/);
   });
@@ -127,7 +144,7 @@ describe('validateEnv', () => {
         NODE_ENV: 'production',
         BILLING_ENABLED: 'true',
         ATTESTATION_ENFORCED: 'true',
-        APP_ATTEST_TEAM_ID: 'TEAM123',
+        APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),
     ).toThrow(/REVENUECAT_WEBHOOK_SECRET, REVENUECAT_API_KEY/);
     expect(() =>
@@ -138,7 +155,7 @@ describe('validateEnv', () => {
         REVENUECAT_WEBHOOK_SECRET: 'webhook',
         REVENUECAT_API_KEY: 'secret',
         ATTESTATION_ENFORCED: 'true',
-        APP_ATTEST_TEAM_ID: 'TEAM123',
+        APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),
     ).not.toThrow();
   });
@@ -151,7 +168,16 @@ describe('validateEnv', () => {
 
   it('passes when ATTESTATION_ENFORCED is true and APP_ATTEST_TEAM_ID is provided', () => {
     expect(() =>
-      validateEnv({ ...REQUIRED, ATTESTATION_ENFORCED: 'true', APP_ATTEST_TEAM_ID: 'TEAM123' }),
+      validateEnv({ ...REQUIRED, ATTESTATION_ENFORCED: 'true', APP_ATTEST_TEAM_ID: 'TEAM123456' }),
     ).not.toThrow();
   });
+
+  it.each(['TEAM123', 'team123456', 'TEAM1234567', 'TEAM 12345']) (
+    'rejects malformed Apple Team ID %s',
+    (teamId) => {
+      expect(() => validateEnv({ ...REQUIRED, APP_ATTEST_TEAM_ID: teamId })).toThrow(
+        'APP_ATTEST_TEAM_ID must be a 10-character Apple Developer Team ID.',
+      );
+    },
+  );
 });

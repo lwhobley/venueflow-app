@@ -75,7 +75,7 @@ This document maps AICPA Trust Services Criteria to specific technical and organ
 | Criterion | Control Activity | Implementation / Evidence |
 |-----------|------------------|---------------------------|
 | **A1.1** | Capacity management | Cloud Run auto-scaling (up to 8 instances), managed PostgreSQL connection pooling budget (5 connections per container, 40 total, 20 reserved for admin). |
-| **A1.2** | Data backup and restoration | Supabase Pro automated Point-in-Time Recovery (PITR); secondary nightly encrypted logical backups to AWS S3 (`.github/workflows/database-backup.yml`) with 30-day lifecycle retention. |
+| **A1.2** | Data backup and restoration | Nightly encrypted logical backups to AWS S3 (`.github/workflows/database-backup.yml`) with automated restore verification and 30-day lifecycle retention. Supabase PITR is not a current control and must be enabled before claiming a sub-hour RPO. |
 | **A1.3** | Disaster recovery testing | Semi-annual restore drills from backup artifacts to isolated staging environment. |
 
 ---

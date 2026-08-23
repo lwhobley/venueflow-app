@@ -12,14 +12,14 @@ Venue Wrangler is engineered to ensure continuous business operations and rapid 
 
 ### Service Recovery Targets
 * **Recovery Time Objective (RTO)**: **< 4 hours** (Maximum acceptable duration to restore service following a total region/database failure).
-* **Recovery Point Objective (RPO)**: **< 1 hour** (Maximum acceptable data loss window; typically < 5 minutes via WAL streaming / PITR).
+* **Current Recovery Point Objective (RPO)**: **< 24 hours**, based on the nightly verified logical backup. The target becomes **< 1 hour** only after Supabase PITR is enabled and tested.
 
 ---
 
 ## 2. Infrastructure Architecture & Redundancy
 
 * **API Compute Layer**: Google Cloud Run (`venue-wrangler-api` in `us-east1`) with automated multi-zone container replication, autoscaling (up to 8 instances), and instant zero-downtime revision rollbacks.
-* **Database Layer**: Managed PostgreSQL on Supabase Pro with multi-AZ failover and continuous Write-Ahead Log (WAL) archiving for Point-In-Time Recovery (PITR).
+* **Database Layer**: Managed PostgreSQL on the Supabase Free plan. Scheduled provider backups and PITR are not currently available; the nightly off-site logical backup is the recovery source.
 * **Media & File Storage**: Amazon Web Services (AWS S3) in `us-east-1` with cross-zone durability (99.999999999% durability SLA) and SSE-S3 encryption.
 * **DNS & Web Routing**: Cloudflare Anycast edge network with automated SSL and DDoS mitigation.
 
@@ -28,11 +28,11 @@ Venue Wrangler is engineered to ensure continuous business operations and rapid 
 ## 3. Database Backup & Recovery Strategy
 
 ### 3.1 Point-in-Time Recovery (PITR)
-* Continuous WAL archiving allows restoration of the database to any specific second within the last 7 days.
+* PITR is a launch prerequisite, not a current control. Upgrade Supabase, enable PITR, and record a restore drill before changing the stated RPO.
 
 ### 3.2 Nightly Logical S3 Backups
 * Automated GitHub Action (`.github/workflows/database-backup.yml`) runs nightly logical dumps (`pg_dump`) to an isolated, encrypted AWS S3 bucket.
-* Lifecycle policy strictly enforces a **30-day retention** window with object immutability.
+* The workflow verifies a **30-day lifecycle expiration**, SSE-S3 encryption, archive readability, and an isolated restore. Object Lock is not claimed unless separately enabled and evidenced in AWS.
 
 ### 3.3 Backup Restoration Drill Protocol
 * **Cadence**: Conducted semi-annually (every 6 months).
@@ -59,7 +59,7 @@ Venue Wrangler is engineered to ensure continuous business operations and rapid 
 
 ### Scenario B: Primary Database Outage or Data Corruption
 1. Pause API traffic or enable maintenance mode.
-2. In Supabase Dashboard, trigger Point-in-Time Recovery (PITR) to a timestamp immediately prior to the incident, or restore the latest S3 logical backup into a replica instance.
+2. Restore the latest S3 logical backup into an isolated replacement database. Once PITR is enabled and tested, a point-in-time restore may be used instead.
 3. Update `DATABASE_URL` in GCP Secret Manager.
 4. Deploy a new Cloud Run revision pointing to the restored database.
 5. Run Prisma migrations: `npm run prisma:migrate:deploy`.

@@ -378,6 +378,9 @@ describe('AppController multi-venue invariants', () => {
     )).resolves.toEqual({ ok: true });
 
     expect(prisma.profile.deleteMany).toHaveBeenCalledWith({ where: { venueId: { in: ['venue-single'] } } });
+    expect(prisma.chatImage.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
+    expect(prisma.venueDocument.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
+    expect(prisma.checklistCompletion.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
     expect(prisma.venue.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['venue-single'] } } });
     expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
       where: { profileId: 'profile-sole' },

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AttestationService, canonicalPayload } from './attestation.service';
 
@@ -11,6 +12,11 @@ function makePrisma(overrides?: {
     attestationChallenge: {
       create: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: overrides?.challengeUpdateCount ?? 1 }),
+      findMany: vi.fn()
+        .mockResolvedValueOnce(
+          Array.from({ length: overrides?.challengeDeleteCount ?? 5 }, (_, index) => ({ id: `challenge-${index}` })),
+        )
+        .mockResolvedValueOnce([]),
       deleteMany: vi.fn().mockResolvedValue({ count: overrides?.challengeDeleteCount ?? 5 }),
     },
     deviceAttestation: {
@@ -30,16 +36,20 @@ const assertion = { keyId: 'key-1', assertion: 'YXNzZXJ0aW9u', challenge: 'chal-
 describe('AttestationService', () => {
   beforeEach(() => {
     delete process.env.ATTESTATION_ENFORCED;
+    delete process.env.DEVICE_ATTESTATION_MODE;
     process.env.APP_ATTEST_TEAM_ID = 'TEAM123456';
   });
 
   describe('when attestation is not enforced', () => {
     it('allows a punch that carries no attestation, so existing builds keep working', async () => {
+      const logSpy = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
       const prisma = makePrisma();
       await expect(
         new AttestationService(prisma).verifyRequest('user-1', { lat: 1 }, undefined),
       ).resolves.toBeUndefined();
       expect(prisma.deviceAttestation.findUnique).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith('attestation_observation status=missing');
+      logSpy.mockRestore();
     });
   });
 
@@ -58,7 +68,7 @@ describe('AttestationService', () => {
       delete process.env.APP_ATTEST_TEAM_ID;
       await expect(
         new AttestationService(makePrisma()).verifyRequest('user-1', { lat: 1 }, assertion),
-      ).rejects.toThrow('APP_ATTEST_TEAM_ID is not configured');
+      ).rejects.toThrow('APP_ATTEST_TEAM_ID to be a 10-character Apple Developer Team ID');
     });
   });
 
@@ -79,10 +89,13 @@ describe('AttestationService', () => {
   });
 
   it('rejects an unknown key', async () => {
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
     const prisma = makePrisma({ device: null });
     await expect(
       new AttestationService(prisma).verifyRequest('user-1', { lat: 1 }, assertion),
     ).rejects.toThrow('not registered for attestation');
+    expect(warning).toHaveBeenCalledWith('attestation_observation status=invalid reason=device');
+    warning.mockRestore();
   });
 
   it('rejects a malformed assertion rather than trusting it', async () => {
@@ -101,12 +114,7 @@ describe('AttestationService', () => {
       const count = await new AttestationService(prisma).cleanupExpiredChallenges();
       expect(count).toBe(12);
       expect(prisma.attestationChallenge.deleteMany).toHaveBeenCalledWith({
-        where: {
-          OR: [
-            { expiresAt: { lt: expect.any(Date) } },
-            { consumedAt: { not: null } },
-          ],
-        },
+        where: { id: { in: Array.from({ length: 12 }, (_, index) => `challenge-${index}`) } },
       });
     });
   });

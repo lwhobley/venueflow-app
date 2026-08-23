@@ -1,9 +1,8 @@
 import { Controller, Get } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Public } from './auth/public.decorator';
 import { PrismaService } from './prisma/prisma.service';
 
-@SkipThrottle()
 @Controller()
 export class HealthController {
   private lastDbCheck = 0;
@@ -13,6 +12,7 @@ export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Public()
+  @SkipThrottle()
   @Get()
   root() {
     return {
@@ -22,6 +22,7 @@ export class HealthController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get('healthz')
   liveness() {
     return {
@@ -33,6 +34,7 @@ export class HealthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get('health')
   async health() {
     const now = Date.now();

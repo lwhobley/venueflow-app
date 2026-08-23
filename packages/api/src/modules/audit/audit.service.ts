@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -38,6 +37,7 @@ const REDACTED_KEYS = new Set([
   'apikey',
   'api_key',
 ]);
+const RETENTION_BATCH_SIZE = 1_000;
 
 /**
  * Recursively redacts sensitive keys (passwords, tokens, secrets, PAN/CVV)
@@ -122,33 +122,48 @@ export class AuditService {
   }
 
   /**
-   * Nightly cron: purge audit logs older than 365 days in accordance with SOC 2 retention policy.
+   * Scheduled retention job: purge audit logs older than 365 days in accordance with the retention policy.
    */
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async cleanupOldAuditLogs(): Promise<number> {
     const cutoff = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
-    const result = await this.prisma.auditLog.deleteMany({
-      where: { createdAt: { lt: cutoff } },
-    });
-    if (result.count > 0) {
-      this.logger.log(`Purged ${result.count} audit logs older than 365 days.`);
+    let total = 0;
+    for (;;) {
+      const batch = await this.prisma.auditLog.findMany({
+        where: { createdAt: { lt: cutoff } },
+        orderBy: { id: 'asc' },
+        take: RETENTION_BATCH_SIZE,
+        select: { id: true },
+      });
+      if (batch.length === 0) break;
+      const result = await this.prisma.auditLog.deleteMany({
+        where: { id: { in: batch.map(({ id }) => id) } },
+      });
+      total += result.count;
     }
-    return result.count;
+    if (total > 0) this.logger.log(`Purged ${total} audit logs older than 365 days.`);
+    return total;
   }
 
   /**
-   * Nightly cron: purge retained wage records older than 3 years (FLSA mandatory retention boundary).
+   * Scheduled retention job: purge retained wage records older than 3 years (FLSA mandatory retention boundary).
    */
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async cleanupExpiredRetainedTimeEntries(): Promise<number> {
     const cutoff = new Date(Date.now() - 3 * 365.25 * 24 * 60 * 60 * 1000);
-    const result = await this.prisma.retainedTimeEntry.deleteMany({
-      where: { originCreatedAt: { lt: cutoff } },
-    });
-    if (result.count > 0) {
-      this.logger.log(`Purged ${result.count} expired retained time entries older than 3 years.`);
+    let total = 0;
+    for (;;) {
+      const batch = await this.prisma.retainedTimeEntry.findMany({
+        where: { originCreatedAt: { lt: cutoff } },
+        orderBy: { id: 'asc' },
+        take: RETENTION_BATCH_SIZE,
+        select: { id: true },
+      });
+      if (batch.length === 0) break;
+      const result = await this.prisma.retainedTimeEntry.deleteMany({
+        where: { id: { in: batch.map(({ id }) => id) } },
+      });
+      total += result.count;
     }
-    return result.count;
+    if (total > 0) this.logger.log(`Purged ${total} expired retained time entries older than 3 years.`);
+    return total;
   }
 }
-
