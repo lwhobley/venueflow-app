@@ -20,10 +20,10 @@ export default defineConfig({
       // untested screens. It starts at the measured repository-wide baseline;
       // new tests should raise it without narrowing the include set.
       thresholds: {
-        statements: 0.38,
-        branches: 0.25,
-        functions: 0.42,
-        lines: 0.4,
+        statements: 1.85,
+        branches: 1.3,
+        functions: 1.65,
+        lines: 2,
       },
     } as any,
   },

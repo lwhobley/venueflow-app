@@ -1,8 +1,9 @@
 const path = require('path');
-require('./scripts/harden-metro-image-parsers');
-const { getDefaultConfig } = require('expo/metro-config');
+const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 
-const config = getDefaultConfig(__dirname);
+// Keep Sentry's debug-ID/source-map serializer while layering the project's
+// API blocklist and targeted zustand resolver below.
+const config = getSentryExpoConfig(__dirname, { includeWebReplay: false });
 
 const apiPath = path.join(__dirname, 'packages/api').replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 

@@ -6,11 +6,9 @@
  * release build produced no signal at all. This gives that path one place to
  * live and one place to wire a real reporter into.
  *
- * Deliberately dependency-free. `console.error` in a release build still
- * reaches the platform log (Xcode/logcat) and any crash reporter that installs
- * a console hook, which is strictly better than the previous silence. Point
- * `setFatalErrorReporter` at Sentry/Bugsnag from app/_layout.tsx when one is
- * configured.
+ * Deliberately dependency-free so the error boundary remains testable without
+ * a native SDK. app/_layout.tsx installs the Sentry transport when
+ * EXPO_PUBLIC_SENTRY_DSN is configured.
  */
 type FatalErrorReporter = (error: Error, componentStack: string | null) => void;
 

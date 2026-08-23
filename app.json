@@ -79,7 +79,8 @@
         }
       ],
       "expo-notifications",
-      "expo-font"
+      "expo-font",
+      "@sentry/react-native"
     ],
     "runtimeVersion": {
       "policy": "appVersion"
