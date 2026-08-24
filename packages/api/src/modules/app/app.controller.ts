@@ -22,6 +22,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { runWithoutTenant } from '../../prisma/tenant-context';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappers';
 import { ProfileService } from './profile.service';
+import { isActiveMembership } from '../../common/membership';
 import { syncTeamMemberCount } from '../../common/team-sync';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { endBreakForProfile, startBreakForProfile } from '../time-clock/break-transitions';
@@ -185,13 +186,21 @@ export class AppController {
   @Get('me')
   async getMe(@CurrentUser() user: AuthUser, @Req() req: Request) {
     const requestedVenueId = (req.headers['x-venue-id'] as string | undefined) || user.venueId || undefined;
-    const profile = await this.getProfile(user, requestedVenueId);
+    let profile = await this.getProfile(user, requestedVenueId);
+    if (!profile) {
+      profile = await this.prisma.profile.findFirst({
+        where: { userId: user.sub },
+        include: { venue: true },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
     if (!profile) return null;
     const emailVerified = await this.isEmailVerified(user.sub);
     const venues = await this.profiles.listUserVenues(user.sub);
+    const venueReady = emailVerified && isActiveMembership(profile.membershipStatus);
     return {
       profile: mapProfile(profile, emailVerified),
-      venue: profile.venue ? mapVenue(profile.venue) : null,
+      venue: venueReady && profile.venue ? mapVenue(profile.venue) : null,
       venues,
     };
   }
@@ -742,6 +751,9 @@ export class AppController {
     const canElevate = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess;
     const inviteRole = body.role === 'manager' && canElevate ? 'manager' : 'staff';
     const email = body.email?.trim().toLowerCase() || null;
+    if (inviteRole === 'manager' && !email) {
+      throw new BadRequestException('Manager invites require an email address.');
+    }
     // The plaintext token is only ever needed for the instant it's embedded
     // in the deep-link/response/email below — only its hash is persisted
     // (Invite.tokenHash), so a DB dump/backup leak can't yield a usable
@@ -923,6 +935,7 @@ export class AppController {
           where: { id: unclaimedProfile.id },
           data: {
             userId: user.sub,
+            role: 'staff',
           },
           include: { venue: true },
         });

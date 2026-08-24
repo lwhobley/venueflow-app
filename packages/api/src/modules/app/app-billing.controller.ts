@@ -95,8 +95,8 @@ export class AppBillingController {
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/checkout/sessions', {
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${base}/app/billing?status=success`,
-      cancel_url: `${base}/app/billing?status=cancelled`,
+      success_url: `${base}/billing?status=success`,
+      cancel_url: `${base}/billing?status=cancelled`,
       client_reference_id: profile.venueId,
       ...(existing?.externalCustomerId ? { customer: existing.externalCustomerId } : {}),
       allow_promotion_codes: true,
@@ -128,7 +128,7 @@ export class AppBillingController {
     const base = this.webBaseUrl();
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/billing_portal/sessions', {
       customer: subscription.externalCustomerId,
-      return_url: `${base}/app/billing`,
+      return_url: `${base}/billing`,
     });
     if (!session.url) {
       throw new ServiceUnavailableException('Stripe did not return a portal URL.');

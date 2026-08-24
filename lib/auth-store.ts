@@ -166,7 +166,7 @@ const createAuthStore = (set: any): AuthState => ({
         authEpoch: state.authEpoch + 1,
       };
     }),
-  setVenue: (venue: Venue) => set({ venue }),
+  setVenue: (venue: Venue) => set((state: AuthState) => ({ venue, authEpoch: state.authEpoch + 1 })),
   setVenues: (venues: VenueSummary[]) => set({ venues }),
   switchVenue: (venue: Venue) =>
     set((state: AuthState) => ({
@@ -198,7 +198,8 @@ export const useAuthStore = create<AuthState>()(
       token: state.token,
     }),
     onRehydrateStorage: () => (state: AuthState | undefined) => {
-      state?.setHydrated(true);
+      if (state) state.setHydrated(true);
+      else useAuthStore.getState().setHydrated(true);
     },
   }),
 );

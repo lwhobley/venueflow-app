@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { colors, spacing, radius } from '../lib/theme';
 import { queryClient } from '../lib/query-client';
 import { reportFatalError } from '../lib/report-error';
+import { useAuthStore } from '../lib/auth-store';
 
 type Props = { children: ReactNode };
 type State = { error: Error | null; componentStack: string | null };
@@ -46,6 +47,16 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   };
 
+  private signOut = () => {
+    void useAuthStore.getState().clearSession();
+    this.setState({ error: null, componentStack: null });
+    try {
+      router.replace('/(auth)/welcome');
+    } catch {
+      // ignore navigation errors
+    }
+  };
+
   render() {
     const { error } = this.state;
     if (!error) return this.props.children;
@@ -73,11 +84,14 @@ export class ErrorBoundary extends Component<Props, State> {
               ) : null}
             </View>
           ) : null}
-          <Button mode="contained" buttonColor={colors.primary} onPress={() => this.reset(true)}>
+          <Button mode="contained" buttonColor={colors.primary} accessibilityLabel="Back to Home" onPress={() => this.reset(true)}>
             Back to Home
           </Button>
-          <Button mode="text" textColor={colors.primary} onPress={() => this.reset(false)}>
+          <Button mode="text" textColor={colors.primary} accessibilityLabel="Try again" onPress={() => this.reset(false)}>
             Try again
+          </Button>
+          <Button mode="text" textColor={colors.muted} accessibilityLabel="Sign out" onPress={this.signOut}>
+            Sign out
           </Button>
         </View>
       </ScrollView>

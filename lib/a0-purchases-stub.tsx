@@ -98,8 +98,8 @@ export function A0PurchaseProvider({ children, config }: A0PurchaseProviderProps
   }, []);
 
   const restore = useCallback(async () => {
-    const active = await restorePurchases();
-    setIsPremium(active);
+    const restored = await restorePurchases();
+    setIsPremium(restored.active);
   }, []);
 
   const value = useMemo(

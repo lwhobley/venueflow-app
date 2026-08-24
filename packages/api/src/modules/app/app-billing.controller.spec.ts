@@ -285,7 +285,7 @@ describe('AppBillingController', () => {
       const call = vi.mocked(stripeRequest).mock.calls[0];
       expect(call[2]).toBe('/billing_portal/sessions');
       expect((call[3] as any).customer).toBe('cus_1');
-      expect((call[3] as any).return_url).toBe('https://venuewrangler.com/app/billing');
+      expect((call[3] as any).return_url).toBe('https://venuewrangler.com/billing');
     });
 
     it('throws ServiceUnavailableException when Stripe does not return a portal url', async () => {

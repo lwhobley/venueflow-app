@@ -12,10 +12,10 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertFixNotReplayed, assertWithinGeofence, type PriorFix } from '../../common/geofence';
-import { parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
+import { closeOpenBreaks, parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
-import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
+import { zonedDateBounds, zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AttestationService } from '../attestation/attestation.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -128,9 +128,10 @@ export class TimeClockController {
       });
       for (const shift of shifts) {
         if (shift.dayIndex !== today || !shift.profileId || shift.status === 'open') continue;
+        const shiftEnd = shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes;
         if (
           minutesNow >= shift.startMinutes + 15 &&
-          minutesNow <= shift.endMinutes &&
+          minutesNow <= shiftEnd &&
           !openByProfile.has(shift.profileId) &&
           shift.profile
         ) {
@@ -151,7 +152,7 @@ export class TimeClockController {
             severity: 'danger',
             profileId: entry.profile.id,
             memberName: entry.profile.fullName,
-            detail: `Clocked in since ${entry.clockInAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`,
+            detail: `Clocked in since ${entry.clockInAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz || 'UTC' })}.`,
           });
         }
       }
@@ -206,15 +207,16 @@ export class TimeClockController {
     }
     punches.sort((a, b) => a.at - b.at);
 
-    const weekMs = 1000 * 60 * 60 * 24 * 7;
-    const regularHours = closed.reduce((sum, entry) => {
-      const outAt = entry.clockOutAt?.getTime();
-      if (!outAt || now - outAt > weekMs) return sum;
-      let durationMs = outAt - entry.clockInAt.getTime();
+    const weekStartMs = zonedDateBounds(tz, weekStartFor(todayInZone(tz))).start;
+    const regularHours = all.reduce((sum, entry) => {
+      const outAt = entry.clockOutAt?.getTime() ?? (entry.isOpen ? now : null);
+      if (!outAt || outAt < weekStartMs) return sum;
+      const startAt = Math.max(entry.clockInAt.getTime(), weekStartMs);
+      let durationMs = outAt - startAt;
       const breaks = parseTimeBreaks(entry.breaks);
       for (const b of breaks) {
         if (b.type === 'unpaid' && b.startAt && b.endAt) {
-          durationMs -= unpaidBreakMs(b.startAt, b.endAt);
+          durationMs -= unpaidBreakMs(Math.max(b.startAt, weekStartMs), b.endAt);
         }
       }
       return sum + Math.max(0, durationMs) / 3600000;
@@ -274,7 +276,7 @@ export class TimeClockController {
       const today = zonedDayOfWeek(venue.timezone, nowMs);
       const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
       const weekStart = weekStartFor(todayInZone(venue.timezone));
-      const shift = await this.prisma.scheduleShift.findFirst({
+      const shifts = await this.prisma.scheduleShift.findMany({
         where: {
           venueId: venue.id,
           profileId: profile.id,
@@ -284,12 +286,18 @@ export class TimeClockController {
         },
         orderBy: { startMinutes: 'asc' },
       });
-      if (shift) {
+      if (shifts.length > 0) {
         const earlyWindow = venue.earlyClockInWindowMin ?? 10;
-        if (minutesNow < shift.startMinutes - earlyWindow) {
-          const formattedStart = minutesToTime(shift.startMinutes);
+        const windows = shifts.map((shift) => {
+          const shiftEnd = shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes;
+          return { start: shift.startMinutes - earlyWindow, end: shiftEnd, shift };
+        });
+        const inWindow = windows.some((window) => minutesNow >= window.start && minutesNow <= window.end);
+        const allEnded = windows.every((window) => minutesNow > window.end);
+        if (!inWindow && !allEnded) {
+          const next = windows.find((window) => minutesNow < window.start)?.shift ?? shifts[0];
           throw new BadRequestException(
-            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
+            `Too early to clock in. Your shift starts at ${minutesToTime(next.startMinutes)}. You can clock in starting ${earlyWindow} minutes prior.`
           );
         }
       }
@@ -333,15 +341,17 @@ export class TimeClockController {
     if (!active) throw new BadRequestException('No active clock-in found');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+    const clockOutAt = new Date();
     const count = await this.prisma.timeEntry.updateMany({
       where: { id: active.id, isOpen: true, updatedAt: active.updatedAt },
       data: {
-        clockOutAt: new Date(),
+        clockOutAt,
         clockOutLat: body.lat,
         clockOutLng: body.lng,
         clockOutAccuracyM: body.accuracy,
         clockOutMocked: body.mocked,
         isOpen: false,
+        breaks: closeOpenBreaks(active.breaks, clockOutAt.getTime()),
       },
     });
     if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');

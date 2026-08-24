@@ -264,7 +264,7 @@ describe('AuthService.issueSession branch coverage', () => {
     expect(tx.profile.delete).toHaveBeenCalledWith({ where: { id: 'existing-1' } });
     expect(tx.profile.update).toHaveBeenCalledWith({
       where: { id: 'placeholder-1' },
-      data: { userId: 'user-1' },
+      data: { userId: 'user-1', role: 'staff' },
       include: { venue: true },
     });
     expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({

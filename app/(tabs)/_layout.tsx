@@ -34,6 +34,10 @@ export default function TabsLayout() {
     return <Redirect href="/(auth)/welcome" />;
   }
 
+  if (hydrated && localUser && !localUser.email_verified) {
+    return <Redirect href="/(auth)/verify-email" />;
+  }
+
   // Enforce venue membership: a signed-in user without a venue can't use the
   // app and is sent to choose or join a team.
   if (hydrated && localUser && !venue) {

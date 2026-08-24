@@ -47,7 +47,7 @@ export function useWranglerOperatorPlan() { return useApiMutation<{ command: str
 export function useWranglerOperatorExecute() {
   return useApiMutation<{ plan: WranglerOperatorPlan }, { ok: true; tool: string; risk: WranglerOperatorRisk; result: unknown }>(
     (body) => apiRequest('/v1/operations/wrangler/operator/execute', { method: 'POST', body }),
-    [['operations', 'wrangler'], ['operations', 'managerDashboard'], ['reservations', 'getReservationsPage'], ['scheduling', 'manager'], ['time-clock', 'board'], ['app', 'staff']],
+    [['operations', 'wrangler'], ['operations', 'managerDashboard'], ['reservations', 'getReservationsPage'], ['scheduling', 'getManagerSchedule'], ['app', 'getClockBoard'], ['app', 'listVenueStaff']],
   );
 }
 export function useExecuteWranglerAction() {

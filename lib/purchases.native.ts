@@ -68,11 +68,23 @@ export async function logoutPurchases(): Promise<void> {
   }
 }
 
+function hasPaidEntitlement(info: { entitlements: { active: Record<string, { productIdentifier?: string } | undefined> } }): { active: boolean; productId?: string; entitlementId?: string } {
+  const active = info.entitlements.active;
+  const match = active.pro
+    ? { entitlementId: 'pro', productId: active.pro.productIdentifier }
+    : active.multi_venue
+      ? { entitlementId: 'multi_venue', productId: active.multi_venue.productIdentifier }
+      : active[ENTITLEMENT]
+        ? { entitlementId: ENTITLEMENT, productId: active[ENTITLEMENT]?.productIdentifier }
+        : null;
+  return match ? { active: true, productId: match.productId, entitlementId: match.entitlementId } : { active: false };
+}
+
 export async function isPremiumActive(): Promise<boolean> {
   if (!configured) return false;
   try {
     const info = await Purchases.getCustomerInfo();
-    return Boolean(info.entitlements.active[ENTITLEMENT]);
+    return hasPaidEntitlement(info).active;
   } catch (e) {
     console.warn('[purchases] isPremiumActive check failed:', e instanceof Error ? e.message : String(e));
     return false;
@@ -119,7 +131,7 @@ export async function purchasePackageById(id: string, productId?: string): Promi
   );
   if (pkg) {
     const { customerInfo } = await Purchases.purchasePackage(pkg);
-    return Boolean(customerInfo.entitlements.active[ENTITLEMENT]);
+    return hasPaidEntitlement(customerInfo).active;
   }
 
   const targetProductId = productId || id;
@@ -127,11 +139,11 @@ export async function purchasePackageById(id: string, productId?: string): Promi
   const product = products.find((candidate) => candidate.identifier === targetProductId);
   if (!product) throw new Error('That plan is not available right now.');
   const { customerInfo } = await Purchases.purchaseStoreProduct(product);
-  return Boolean(customerInfo.entitlements.active[ENTITLEMENT]);
+  return hasPaidEntitlement(customerInfo).active;
 }
 
-export async function restorePurchases(): Promise<boolean> {
-  if (!configured) return false;
+export async function restorePurchases(): Promise<{ active: boolean; productId?: string; entitlementId?: string }> {
+  if (!configured) return { active: false };
   const info = await Purchases.restorePurchases();
-  return Boolean(info.entitlements.active[ENTITLEMENT]);
+  return hasPaidEntitlement(info);
 }

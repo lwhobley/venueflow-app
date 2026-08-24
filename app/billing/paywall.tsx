@@ -115,9 +115,12 @@ export default function PaywallScreen() {
     setBusy('restore');
     setError(null);
     try {
-      const active = await restorePurchases();
-      if (active) {
-        await appApi.syncAppleSubscription({ productId: 'com.venuewrangler.monthly', entitlementId: 'pro' });
+      const restored = await restorePurchases();
+      if (restored.active) {
+        await appApi.syncAppleSubscription({
+          productId: restored.productId || 'com.venuewrangler.monthly',
+          entitlementId: restored.entitlementId || 'pro',
+        });
         router.replace('/(tabs)/home');
       }
       else setError(t('paywall.restoreNoneFound'));

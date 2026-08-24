@@ -14,6 +14,7 @@ import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { canManageVenue } from '../lib/permissions';
 import { formatTime, formatShortDate, formatWeekdayDate, pad2, dollarsToCents, splitTags, errorMessage } from '../lib/format';
 import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
+import { overnightAwareRange, zonedDateTimeMs } from '../lib/zoned-datetime';
 
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
@@ -252,8 +253,10 @@ function ReservationsScreen() {
     }
     holdRef.current = true;
     try {
-      const startsAt = new Date(`${holdDate}T${holdStart}:00`).toISOString();
-      const endsAt = new Date(`${holdDate}T${holdEnd}:00`).toISOString();
+      const tz = me?.venue?.timezone ?? venue?.timezone;
+      const { start, end } = overnightAwareRange(holdDate, holdStart, holdEnd, tz);
+      const startsAt = new Date(start).toISOString();
+      const endsAt = new Date(end).toISOString();
       await createHold({ venueId: venue.id, startsAt, endsAt, reason: holdReason.trim() });
       setHoldReason('');
       setHoldError(null);
@@ -321,7 +324,7 @@ function ReservationsScreen() {
       setError(t('reservations.form.errors.nameRequired'));
       return;
     }
-    const ts = new Date(`${date}T${time}:00`).getTime();
+    const ts = zonedDateTimeMs(date, time, me?.venue?.timezone ?? venue?.timezone);
     if (Number.isNaN(ts)) {
       setError(t('reservations.form.errors.invalidDateTime'));
       return;

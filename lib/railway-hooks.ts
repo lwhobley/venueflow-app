@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useMutation as useReactMutation, useQuery as useReactQuery, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from './api-client';
+import { ApiError, apiRequest } from './api-client';
 import { useAuthStore } from './auth-store';
 import { locationBody } from './clock-body';
 import { getLastRegisteredPushToken, setLastRegisteredPushToken } from './push-token-registry';
@@ -540,7 +540,7 @@ export function useQuery<T = any>(ref: RailwayFunctionRef, args?: QueryArgs): T 
     // replaced a perfectly usable screen with the crash boundary on any
     // transient network blip — and for the getMe call in app/(tabs)/_layout.tsx,
     // that boundary is the root one, so the whole app went down.
-    throwOnError: (_error, query) => query.state.data === undefined,
+    throwOnError: (error, query) => query.state.data === undefined && !(error instanceof ApiError && error.status === 402),
   });
   // Only a pending/disabled query leaves data undefined. Errors are handled by
   // ErrorBoundary; new screens should still prefer useQueryState for inline UX.

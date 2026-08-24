@@ -8,6 +8,7 @@ export type Venue = {
   latitude: number;
   longitude: number;
   geofence_radius_m: number;
+  timezone?: string | null;
 };
 
 export type VenueSummary = {

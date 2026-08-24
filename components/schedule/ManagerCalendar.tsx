@@ -336,7 +336,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const savePanel = async () => {
     const startMinutes = parseTime(start);
     const endMinutes = parseTime(end);
-    if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+    if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) {
       flash('Enter a valid start and end time.');
       return;
     }

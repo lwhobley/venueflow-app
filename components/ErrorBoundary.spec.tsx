@@ -6,6 +6,9 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { queryClient } from '../lib/query-client';
 
 vi.mock('expo-router', () => ({ router: { replace: vi.fn() } }));
+vi.mock('../lib/auth-store', () => ({
+  useAuthStore: { getState: () => ({ clearSession: vi.fn() }) },
+}));
 vi.mock('react-native', () => ({
   ScrollView: 'ScrollView',
   View: 'View',

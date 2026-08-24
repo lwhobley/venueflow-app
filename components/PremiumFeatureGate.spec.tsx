@@ -38,6 +38,10 @@ vi.mock('../lib/theme', () => ({
   spacing: { lg: 24, sm: 8 },
 }));
 vi.mock('../lib/trial', () => ({ getTrialState: () => ({ active: false }) }));
+vi.mock('../lib/railway-hooks', () => ({
+  useQueryState: () => ({ data: null, isLoading: false }),
+}));
+vi.mock('../lib/railway-api', () => ({ api: { app: { getMyVenueBilling: 'app.getMyVenueBilling' } } }));
 
 describe('PremiumFeatureGate', () => {
   beforeEach(() => {

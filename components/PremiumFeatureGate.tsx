@@ -6,23 +6,30 @@ import { getTrialState } from '../lib/trial';
 import { colors, spacing } from '../lib/theme';
 import { config } from '../lib/config';
 import { useAuthenticatedSession } from '../lib/auth-readiness';
+import { useQueryState } from '../lib/railway-hooks';
+import { api } from '../lib/railway-api';
 import { hasAllAccess } from '../lib/permissions';
 
 // Wraps premium-only features (Integrations, CRM). Intro access unlocks these
 // features until it expires; after that the user must upgrade. When billing is
 // disabled (local/dev builds) the feature is always unlocked.
 export function PremiumFeatureGate({ feature, children }: { feature: string; children: React.ReactNode }) {
-  const { me, isAuthLoading } = useAuthenticatedSession();
+  const { me, isAuthLoading, isReady } = useAuthenticatedSession();
   const { isPremium, isLoading } = useA0Purchases();
+  const { data: billing, isLoading: billingLoading } = useQueryState<{ status?: string } | null>(
+    api.app.getMyVenueBilling,
+    isReady ? {} : 'skip',
+  );
   const allAccess = hasAllAccess(me?.profile.allAccess);
+  const venueActive = billing?.status === 'active' || billing?.status === 'trialing';
 
   // Avoid flashing the upsell while entitlement or profile is still resolving.
-  if (isLoading || isAuthLoading || me === undefined) {
+  if (isLoading || isAuthLoading || billingLoading || me === undefined) {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   }
 
   const trial = getTrialState(me?.profile.trialEndsAt ?? null);
-  if (!config.billingEnabled || allAccess || isPremium || trial.active) {
+  if (!config.billingEnabled || allAccess || isPremium || trial.active || venueActive) {
     return <>{children}</>;
   }
 

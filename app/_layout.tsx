@@ -31,6 +31,11 @@ if (sentryDsn) {
     enabled: !__DEV__,
     sendDefaultPii: false,
     tracesSampleRate: 0,
+    beforeSend(event) {
+      const strip = (value?: string) => value?.replace(/([?&])token=[^&]*/g, '$1token=redacted');
+      if (event.request?.url) event.request.url = strip(event.request.url);
+      return event;
+    },
   });
   setFatalErrorReporter((error, componentStack) => {
     Sentry.captureException(error, {

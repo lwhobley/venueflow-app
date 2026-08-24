@@ -11,7 +11,7 @@ export function toMs(date: Date | null | undefined) {
 }
 
 export function minutesToTime(total: number) {
-  const hours = Math.floor(total / 60);
+  const hours = Math.floor(total / 60) % 24;
   const minutes = total % 60;
   const suffix = hours >= 12 ? 'PM' : 'AM';
   const displayHour = hours % 12 || 12;
@@ -22,7 +22,7 @@ export function dayLabel(dayIndex: number) {
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayIndex] ?? 'Day';
 }
 
-export function mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number }) {
+export function mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number; timezone?: string | null }) {
   return {
     _id: venue.id,
     id: venue.id,
@@ -31,11 +31,12 @@ export function mapVenue(venue: { id: string; name: string; latitude: number; lo
     longitude: venue.longitude,
     geofenceRadiusM: venue.geofenceRadiusM,
     geofence_radius_m: venue.geofenceRadiusM,
+    timezone: venue.timezone ?? null,
   };
 }
 
 export function mapProfile(
-  profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; trialEndsAt?: Date | null; phone?: string | null; altPhone?: string | null; address?: string | null; dateOfBirth?: Date | null; certifications?: string[]; sickHoursAccrued?: number; ptoHoursAccrued?: number },
+  profile: { id: string; email: string; fullName: string; role: Role; jobTitle: string; venueId: string | null; allAccess: boolean; membershipStatus?: string | null; trialEndsAt?: Date | null; phone?: string | null; altPhone?: string | null; address?: string | null; dateOfBirth?: Date | null; certifications?: string[]; sickHoursAccrued?: number; ptoHoursAccrued?: number },
   emailVerified = false,
 ) {
   return {
@@ -51,6 +52,7 @@ export function mapProfile(
     job_title: profile.jobTitle,
     venueId: profile.venueId,
     venue_id: profile.venueId,
+    membershipStatus: profile.membershipStatus ?? null,
     allAccess: profile.allAccess,
     all_access: profile.allAccess,
     trialEndsAt: profile.trialEndsAt?.getTime() ?? null,

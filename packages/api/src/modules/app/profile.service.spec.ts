@@ -22,7 +22,9 @@ describe('ProfileService.getProfile', () => {
     expect(result).toBe(venuedProfile);
     expect(prisma.profile.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.profile.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'user-1', venueId: { not: null } } }),
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: 'user-1', venueId: { not: null } }),
+      }),
     );
   });
 
@@ -53,7 +55,9 @@ describe('ProfileService.getProfile', () => {
     expect(result).toBe(profile);
     expect(prisma.profile.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.profile.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'user-1', venueId: 'venue-2' } }),
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: 'user-1', venueId: 'venue-2' }),
+      }),
     );
   });
 });

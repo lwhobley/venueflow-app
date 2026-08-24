@@ -51,7 +51,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: ' Staff@Example.com ' }))
-      .resolves.toEqual({ status: 'found', emailSent: false });
+      .resolves.toEqual({ status: 'found', emailSent: false, venueName: 'Test Venue', jobTitle: 'Server' });
     expect(txCreateInvite).not.toHaveBeenCalled();
     expect(sendOrThrow).not.toHaveBeenCalled();
   });
@@ -74,7 +74,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
-      .resolves.toEqual({ status: 'found', emailSent: true });
+      .resolves.toEqual({ status: 'found', emailSent: true, venueName: 'Legacy Venue', jobTitle: 'Bartender' });
     expect(txCreateInvite).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         venueId: 'venue-1',
@@ -101,7 +101,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
-      .resolves.toEqual({ status: 'found', emailSent: false });
+      .resolves.toEqual({ status: 'found', emailSent: false, venueName: 'Legacy Venue', jobTitle: 'Bartender' });
     expect(txCreateInvite).not.toHaveBeenCalled();
     expect(sendOrThrow).not.toHaveBeenCalled();
   });
@@ -127,18 +127,18 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
-      .resolves.toEqual({ status: 'found', emailSent: true });
+      .resolves.toEqual({ status: 'found', emailSent: true, venueName: 'Legacy Venue', jobTitle: 'Bartender' });
     expect(txCreateInvite).toHaveBeenCalledOnce();
   });
 
-  it('reports "used" when a used invite exists and there is no roster fallback', async () => {
+  it('reports "not_found" when a used invite exists and there is no roster fallback', async () => {
     txFindInvite.mockResolvedValue(null); // redeemable-only tx lookup: none
     txFindProfile.mockResolvedValue(null); // no unclaimed roster row to fall back to
     outerFindInvite.mockResolvedValue({ usedBy: 'user-1', expiresAt: new Date(Date.now() + 60_000) }); // stale-status lookup
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'gone@example.com' }))
-      .resolves.toEqual({ status: 'used' });
+      .resolves.toEqual({ status: 'not_found' });
     expect(txCreateInvite).not.toHaveBeenCalled();
     expect(sendOrThrow).not.toHaveBeenCalled();
   });
@@ -150,7 +150,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'stale@example.com' }))
-      .resolves.toEqual({ status: 'expired' });
+      .resolves.toEqual({ status: 'not_found' });
   });
 
   it('reports "not_found" when there is no invite history and no roster fallback', async () => {
@@ -175,7 +175,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { phone: '555-0100' }))
-      .resolves.toEqual({ status: 'found', emailSent: false });
+      .resolves.toEqual({ status: 'found', emailSent: false, venueName: 'Test Venue', jobTitle: 'Bartender', role: 'staff' });
     expect(txCreateInvite).not.toHaveBeenCalled();
     expect(sendOrThrow).not.toHaveBeenCalled();
   });

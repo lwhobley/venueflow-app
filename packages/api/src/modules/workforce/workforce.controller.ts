@@ -103,14 +103,31 @@ export class WorkforceController {
     if (!email) {
       const invite = await this.prisma.invite.findFirst({
         where: { phone, usedBy: null, expiresAt: { gt: new Date() } },
+        include: { venue: { select: { name: true } } },
       });
-      if (invite) return { status: 'found', emailSent: false };
+      if (invite) {
+        return {
+          status: 'found',
+          emailSent: false,
+          venueName: invite.venue?.name,
+          jobTitle: invite.jobTitle,
+          role: invite.role,
+        };
+      }
       const unclaimedProfile = await this.prisma.profile.findFirst({
         where: { userId: null, venueId: { not: null }, phone: phone ? { equals: phone } : undefined },
         include: { venue: { select: { name: true } } },
       });
-      if (unclaimedProfile?.venue) return { status: 'found', emailSent: false };
-      return this.reportStaleInviteStatus(undefined, phone);
+      if (unclaimedProfile?.venue) {
+        return {
+          status: 'found',
+          emailSent: false,
+          venueName: unclaimedProfile.venue.name,
+          jobTitle: unclaimedProfile.jobTitle,
+          role: unclaimedProfile.role,
+        };
+      }
+      return { status: 'not_found' };
     }
 
     // The plaintext token is only needed when minting a new invite. Existing
@@ -190,27 +207,20 @@ export class WorkforceController {
           this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
         });
     }
-    return { status: 'found', emailSent: outcome.emailSent };
+    return {
+      status: 'found',
+      emailSent: outcome.emailSent,
+      venueName: outcome.venueName,
+      jobTitle: outcome.jobTitle,
+    };
   }
 
-  // No redeemable invite and no roster row to fall back to — report the most
-  // specific status we can from invite history (used/expired), so e.g.
-  // someone reusing an old link still gets a helpful message instead of a
-  // generic "not found".
-  private async reportStaleInviteStatus(email: string | undefined, phone: string | undefined) {
-    const staleInvite = await this.prisma.invite.findFirst({
-      where: email ? { email: { equals: email, mode: 'insensitive' } } : { phone },
-      orderBy: { createdAt: 'desc' },
-      select: { usedBy: true, expiresAt: true },
-    });
-    if (staleInvite?.usedBy) return { status: 'used' };
-    if (staleInvite && staleInvite.expiresAt.getTime() < Date.now()) return { status: 'expired' };
-    return { status: 'not_found' };
+  private async reportStaleInviteStatus(_email: string | undefined, _phone: string | undefined) {
+    return { status: 'not_found' as const };
   }
 
   // ─── Public: venue search ──────────────────────────────────────────────────
 
-  @Public()
   @Get('venues/search')
   async searchVenues(@Req() req: Request, @Query('q') q: unknown) {
     await assertWithinSharedRateLimit(this.prisma, `venue-search:ip:${getClientIp(req)}`, INVITE_CHECK_LIMIT_MAX, INVITE_CHECK_LIMIT_WINDOW_MS);

@@ -17,6 +17,7 @@ import { assertWithinSharedRateLimit } from '../common/rate-limit';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { runWithoutTenant } from '../prisma/tenant-context';
+import { isActiveMembership } from '../common/membership';
 import { AuthService } from './auth.service';
 import { AuditService } from '../modules/audit/audit.service';
 
@@ -724,7 +725,7 @@ export class AuthController {
     return {
       token,
       profile: mapProfile(profile, emailVerified),
-      venue: profile.venue ? mapVenue(profile.venue) : null,
+      venue: emailVerified && isActiveMembership(profile.membershipStatus) && profile.venue ? mapVenue(profile.venue) : null,
       venues,
     };
   }
@@ -796,6 +797,7 @@ function mapProfile(profile: {
   jobTitle: string;
   venueId: string | null;
   allAccess: boolean;
+  membershipStatus?: string | null;
   trialEndsAt?: Date | null;
   phone?: string | null;
   altPhone?: string | null;
@@ -814,6 +816,7 @@ function mapProfile(profile: {
     job_title: profile.jobTitle,
     venueId: profile.venueId,
     venue_id: profile.venueId,
+    membershipStatus: profile.membershipStatus ?? null,
     allAccess: profile.allAccess,
     all_access: profile.allAccess,
     emailVerified,

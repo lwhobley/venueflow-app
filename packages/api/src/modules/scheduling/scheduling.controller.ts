@@ -96,7 +96,7 @@ class ShiftDto {
 
   @IsInt()
   @Min(0)
-  @Max(1440)
+  @Max(2880)
   endMinutes!: number;
 
   @IsString()
@@ -149,7 +149,7 @@ class TemplateShiftDto {
 
   @IsInt()
   @Min(0)
-  @Max(1440)
+  @Max(2880)
   endMinutes!: number;
 
   @IsString()
@@ -246,7 +246,7 @@ class AiProposedShiftDto {
 
   @IsInt()
   @Min(0)
-  @Max(1440)
+  @Max(2880)
   endMinutes!: number;
 
   @IsString()
@@ -304,9 +304,14 @@ function ensureValidShiftWindow(dayIndex: number, startMinutes: number, endMinut
   if (!Number.isInteger(startMinutes) || startMinutes < 0 || startMinutes > 1440) {
     throw new BadRequestException('Invalid start time');
   }
-  if (!Number.isInteger(endMinutes) || endMinutes < 0 || endMinutes > 1440 || endMinutes <= startMinutes) {
+  if (!Number.isInteger(endMinutes) || endMinutes < 0 || endMinutes > 2880) {
     throw new BadRequestException('End time must be after start time');
   }
+  const normalized = endMinutes < startMinutes && endMinutes <= 1440 ? endMinutes + 1440 : endMinutes;
+  if (normalized <= startMinutes || normalized - startMinutes > 1440) {
+    throw new BadRequestException('End time must be after start time');
+  }
+  return normalized;
 }
 
 function schedulePublishState(venue: {
@@ -584,7 +589,7 @@ export class SchedulingController {
   @Post('shifts')
   async createShift(@VenueScope() scope: Scope, @Body() body: ShiftDto) {
     this.requireManager(scope);
-    ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
+    const endMinutes = ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
     const weekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart);
     const shift = await this.assignments.createShift({
       venueId: scope!.venueId,
@@ -592,7 +597,7 @@ export class SchedulingController {
       profileId: body.profileId,
       dayIndex: body.dayIndex,
       startMinutes: body.startMinutes,
-      endMinutes: body.endMinutes,
+      endMinutes,
       jobTitle: body.jobTitle,
       station: body.station,
       notes: body.notes,
@@ -603,12 +608,12 @@ export class SchedulingController {
         profileId: body.profileId,
         kind: 'shift_assigned',
         title: 'New shift assigned',
-        body: `${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(body.endMinutes)} - ${body.jobTitle}`,
+        body: `${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(endMinutes)} - ${body.jobTitle}`,
       });
       void this.sendScheduleUpdateEmail(body.profileId, 'Added', undefined, {
         dayIndex: body.dayIndex,
         startMinutes: body.startMinutes,
-        endMinutes: body.endMinutes,
+        endMinutes,
         station: body.station,
       });
     }
@@ -619,13 +624,13 @@ export class SchedulingController {
   @Patch('shifts/:id')
   async updateShift(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: ShiftDto) {
     this.requireManager(scope);
-    ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
+    const endMinutes = ensureValidShiftWindow(body.dayIndex, body.startMinutes, body.endMinutes);
     const shift = await this.assignments.updateShift({
       venueId: scope!.venueId,
       shiftId: id,
       dayIndex: body.dayIndex,
       startMinutes: body.startMinutes,
-      endMinutes: body.endMinutes,
+      endMinutes,
       jobTitle: body.jobTitle,
       station: body.station,
       notes: body.notes,
@@ -639,7 +644,7 @@ export class SchedulingController {
       }, {
         dayIndex: body.dayIndex,
         startMinutes: body.startMinutes,
-        endMinutes: body.endMinutes,
+        endMinutes,
         station: body.station,
       });
     }
@@ -1024,13 +1029,14 @@ export class SchedulingController {
   @Post('restore-shifts')
   async restoreShifts(@VenueScope() scope: Scope, @Body() body: RestoreShiftsDto) {
     this.requireManager(scope);
-    for (const shift of body.shifts) {
-      ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
-    }
+    const shifts = body.shifts.map((shift) => ({
+      ...shift,
+      endMinutes: ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes),
+    }));
     return this.assignments.restoreShifts({
       venueId: scope!.venueId,
       weekStart: await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStart),
-      shifts: body.shifts,
+      shifts,
     });
   }
 
@@ -1233,8 +1239,8 @@ export class SchedulingController {
     const failed: Array<{ shift: string; error: string }> = [];
     for (const shift of body.shifts) {
       try {
-        ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
-        const profileId = shift.profileId && availabilityCovers(availabilityByProfile.get(shift.profileId), shift)
+        const endMinutes = ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
+        const profileId = shift.profileId && availabilityCovers(availabilityByProfile.get(shift.profileId), { ...shift, endMinutes })
           ? shift.profileId
           : undefined;
         await this.assignments.createShift({
@@ -1243,7 +1249,7 @@ export class SchedulingController {
           profileId,
           dayIndex: shift.dayIndex,
           startMinutes: shift.startMinutes,
-          endMinutes: shift.endMinutes,
+          endMinutes,
           jobTitle: shift.jobTitle,
           station: shift.station,
           notes: 'Created by AI schedule builder',
@@ -1455,7 +1461,7 @@ export class SchedulingController {
       if (errors.length > 0) {
         throw new BadRequestException('Template contains an invalid shift.');
       }
-      ensureValidShiftWindow(parsed.dayIndex, parsed.startMinutes, parsed.endMinutes);
+      parsed.endMinutes = ensureValidShiftWindow(parsed.dayIndex, parsed.startMinutes, parsed.endMinutes);
       return parsed as TemplateShiftSlot;
     });
   }

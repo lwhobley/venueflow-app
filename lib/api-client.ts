@@ -14,11 +14,11 @@ export class ApiError extends Error {
     public status: number,
   ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = status === 402 ? 'SubscriptionRequiredError' : 'ApiError';
   }
 }
 
-type ApiProfile = {
+export type ApiProfile = {
   _id: string;
   email: string;
   fullName: string;
@@ -27,15 +27,17 @@ type ApiProfile = {
   jobTitle: string;
   venueId: string | null;
   allAccess: boolean;
+  membershipStatus?: string | null;
   trialEndsAt?: number | null;
 };
 
-type ApiVenue = {
+export type ApiVenue = {
   _id: string;
   name: string;
   latitude: number;
   longitude: number;
   geofenceRadiusM: number;
+  timezone?: string | null;
 };
 
 export type AuthSessionResponse = {

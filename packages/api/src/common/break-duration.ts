@@ -19,6 +19,11 @@ export function parseTimeBreaks(value: unknown): TimeBreak[] {
   });
 }
 
+/** Close any still-open break so clock-out deducts unpaid time. */
+export function closeOpenBreaks(value: unknown, endedAt = Date.now()): TimeBreak[] {
+  return parseTimeBreaks(value).map((row) => (row.endAt == null ? { ...row, endAt: endedAt } : row));
+}
+
 /** Safe unpaid-break duration in ms. Non-numeric or inverted ranges yield 0. */
 export function unpaidBreakMs(startAt: unknown, endAt: unknown): number {
   const start = typeof startAt === 'number' ? startAt : Number(startAt);

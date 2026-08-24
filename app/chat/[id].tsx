@@ -332,8 +332,9 @@ export default function ConversationScreen() {
       base64: true,
     });
     const asset = result.canceled ? null : result.assets[0];
-    if (!asset?.base64 || !conversationId) return;
+    if (!asset?.base64 || !conversationId || sendingRef.current) return;
 
+    sendingRef.current = true;
     setError(null);
     setSending(true);
     try {
@@ -345,6 +346,7 @@ export default function ConversationScreen() {
     } catch (e) {
       setError(errorMessage(e, t('chatThread.errorUpload')));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };

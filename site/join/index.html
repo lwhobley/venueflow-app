@@ -96,13 +96,11 @@
         // token already exist server-side at this point, so if the invite
         // redemption failed, the user still needs to be signed in to retry —
         // re-registering with the same email would just fail as "in use".
-        window.localStorage.setItem("venuewrangler_token", session.token);
-        window.localStorage.setItem("venuewrangler_workspace", JSON.stringify(session.venue || null));
-        if (!session.profile?.venueId) throw new Error("Your account was created, but the invitation could not be redeemed. Ask your manager for a new link.");
+        if (!session.profile) throw new Error("Your account was created, but the invitation could not be redeemed. Ask your manager for a new link.");
         status.className = "status success";
-        status.textContent = `Your account is ready and you joined ${session.venue?.name || "the team"}. Opening Venue Wrangler...`;
+        status.textContent = "Your account is ready. Open the Venue Wrangler app and sign in with this email.";
         form.reset();
-        window.location.assign("../app/");
+        window.location.assign("./success/");
       } catch (error) {
         status.className = "status error";
         status.textContent = error.message || "Could not create your account.";

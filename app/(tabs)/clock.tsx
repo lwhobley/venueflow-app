@@ -13,6 +13,7 @@ import { ApiError, appApi, useApiMutation, type ApiClockBreak } from '../../lib/
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { attestPayload, resetAttestationKey } from '../../lib/attestation';
+import { overnightAwareRange } from '../../lib/zoned-datetime';
 import { useI18n } from '../../lib/i18n';
 
 type ActiveClockEntry = {
@@ -213,8 +214,12 @@ export default function ClockScreen() {
     busyRef.current = true;
     setBusy(true);
     try {
-      const clockInAt = new Date(`${correctionDate}T${correctionInTime}:00`).getTime();
-      const clockOutAt = new Date(`${correctionDate}T${correctionOutTime}:00`).getTime();
+      const { start: clockInAt, end: clockOutAt } = overnightAwareRange(
+        correctionDate,
+        correctionInTime,
+        correctionOutTime,
+        venue?.timezone,
+      );
       if (isNaN(clockInAt) || isNaN(clockOutAt)) {
         Alert.alert(t('clock.errorTitle'), t('clock.invalidDateTime'));
         return;

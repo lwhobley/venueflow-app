@@ -121,7 +121,7 @@ describe('AppController redeem-my-invite', () => {
     expect(result).toMatchObject({ venue: { id: 'venue-b' } });
     expect(prisma.profile.delete).toHaveBeenCalledWith({ where: { id: 'profile-temp' } });
     expect(prisma.profile.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'profile-roster' }, data: { userId: 'user-new' } }),
+      expect.objectContaining({ where: { id: 'profile-roster' }, data: { userId: 'user-new', role: 'staff' } }),
     );
   });
 });

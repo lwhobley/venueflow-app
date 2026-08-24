@@ -8,6 +8,7 @@ import { useI18n } from '../../lib/i18n';
 
 export default function TeamChoiceScreen() {
   const { t } = useI18n();
+  const user = useAuthStore((s: AuthState) => s.user);
   const venue = useAuthStore((s: AuthState) => s.venue);
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
 
@@ -16,6 +17,7 @@ export default function TeamChoiceScreen() {
     router.replace('/(auth)/welcome');
   };
 
+  if (user && !user.email_verified) return <Redirect href="/(auth)/verify-email" />;
   if (venue) return <Redirect href="/(tabs)/home" />;
 
   return (
@@ -55,6 +57,9 @@ export default function TeamChoiceScreen() {
               onPress={() => router.push('/(auth)/invite-check')}
             >
               {t('teamChoice.findInviteButton')}
+            </Button>
+            <Button mode="outlined" textColor={colors.primary} onPress={() => router.push('/(auth)/workplace-search')}>
+              Search for a workplace
             </Button>
           </Card.Content>
         </Card>

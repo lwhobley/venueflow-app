@@ -34,10 +34,9 @@ value temporarily for diagnosis.
   predicate, so a hostile `where: { venueId: other }` matches nothing instead of
   escaping scope.
 - **Creates force venueId.** A `create`/`createMany` can never write into another tenant.
-- **Unique-keyed ops are pass-through.** `findUnique`/`update`/`delete`/`upsert`
-  require a unique `where`; injecting a non-unique `venueId` is invalid for them,
-  so they are intentionally **not** auto-scoped and still rely on the existing
-  call-site `venueId` checks. This is the main residual gap.
+- **Unique-keyed ops are scoped.** `findUnique`/`update`/`delete`/`upsert`
+  merge `venueId` into unique filters so a hostile id from another tenant
+  matches nothing.
 - **Inert by default.** No tenant context ⇒ no-op. Auth flows, webhooks, and
   system/background tasks (which legitimately cross venues) are unaffected.
 

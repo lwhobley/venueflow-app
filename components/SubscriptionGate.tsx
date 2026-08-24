@@ -6,7 +6,7 @@ import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { config } from '../lib/config';
 import { hasAllAccess } from '../lib/permissions';
 import type { SubscriptionRequiredReason } from '../lib/subscription-types';
-import { useApiQuery, type MeResponse } from '../lib/api-client';
+import { ApiError, type MeResponse } from '../lib/api-client';
 import { useQueryState } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 
@@ -25,7 +25,11 @@ function isAllowedRoute(route: string) {
 }
 
 function isSubscriptionRequiredError(error: unknown): error is Error & { reason?: SubscriptionRequiredReason } {
-  return error instanceof Error && (error.name === 'SubscriptionRequiredError' || error.message.includes('Subscription required'));
+  if (error instanceof ApiError && error.status === 402) return true;
+  return error instanceof Error && (
+    error.name === 'SubscriptionRequiredError'
+    || /subscription/i.test(error.message)
+  );
 }
 
 export function SubscriptionGate({ children }: { children?: unknown }) {
@@ -42,7 +46,10 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
     api.app.getMe,
     hydrated && Boolean(user) && Boolean(token) ? {} : 'skip',
   );
-  const { data: billing, isLoading: billingLoading } = useApiQuery<any | null>(['app', 'billing'], '/v1/app/billing', Boolean(me?.venue?._id));
+  const { data: billing, isLoading: billingLoading } = useQueryState<any | null>(
+    api.app.getMyVenueBilling,
+    Boolean(me?.venue?._id) ? {} : 'skip',
+  );
   const route = `/${segments.join('/')}`;
   const navigationReady = Boolean(rootNavigationState?.key);
   const authRoute = route.startsWith('/(auth)/');

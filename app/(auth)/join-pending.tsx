@@ -120,7 +120,7 @@ export default function JoinPendingScreen() {
           <Button
             mode="outlined"
             textColor={colors.primary}
-            onPress={() => router.replace('/(auth)/workplace-search')}
+            onPress={() => router.replace('/(auth)/invite-check')}
           >
             {t('joinPending.pending.differentWorkplaceButton')}
           </Button>
@@ -170,7 +170,7 @@ export default function JoinPendingScreen() {
             mode="contained"
             buttonColor={colors.primary}
             textColor={colors.buttonText}
-            onPress={() => router.replace('/(auth)/workplace-search')}
+            onPress={() => router.replace('/(auth)/invite-check')}
           >
             {t('joinPending.rejected.searchAgainButton')}
           </Button>
@@ -191,7 +191,7 @@ export default function JoinPendingScreen() {
             mode="contained"
             buttonColor={colors.primary}
             textColor={colors.buttonText}
-            onPress={() => router.replace('/(auth)/workplace-search')}
+            onPress={() => router.replace('/(auth)/invite-check')}
           >
             {t('joinPending.none.findWorkplaceButton')}
           </Button>

@@ -31,6 +31,6 @@ export async function purchasePackageById(_id: string, _productId?: string): Pro
   throw new Error('In-app purchases are only available in the mobile app.');
 }
 
-export async function restorePurchases(): Promise<boolean> {
-  return false;
+export async function restorePurchases(): Promise<{ active: boolean; productId?: string; entitlementId?: string }> {
+  return { active: false };
 }
