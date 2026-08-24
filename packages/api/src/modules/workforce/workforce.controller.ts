@@ -283,6 +283,19 @@ export class WorkforceController {
     await assertWithinSharedRateLimit(this.prisma, `join-request:user:${user.sub}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `join-request:ip:${getClientIp(req)}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
 
+    // Every other membership-granting path (registerVenue, joinByCode, invite
+    // redemption) requires a verified email first. Without this, someone could
+    // register an address they don't control, never verify it, and be approved
+    // into a venue — and the approving manager sees only the raw email, with
+    // nothing indicating it was never proven.
+    const account = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { emailVerifiedAt: true },
+    });
+    if (!account?.emailVerifiedAt) {
+      throw new ForbiddenException('Verify your email address before requesting to join a workplace.');
+    }
+
     const venue = await this.prisma.venue.findUnique({
       where: { id: body.venueId },
       select: { id: true, name: true, code: true },
@@ -399,6 +412,10 @@ export class WorkforceController {
       if (msg.includes('request_not_found')) throw new NotFoundException('Join request not found.');
       if (msg.includes('request_not_pending')) throw new BadRequestException('Request is no longer pending.');
       if (msg.includes('not_authorized')) throw new ForbiddenException('You are not authorized to approve requests for this workplace.');
+      if (msg.includes('email_not_verified')) {
+        throw new BadRequestException('This person has not verified their email address yet, so they cannot be added to the workplace.');
+      }
+      if (msg.includes('already_member')) throw new BadRequestException('This person already belongs to a workplace.');
       throw err;
     }
     void this.emailJoinRequestDecision(id, 'approved');

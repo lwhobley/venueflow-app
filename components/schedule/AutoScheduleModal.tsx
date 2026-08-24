@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Divider, Menu, Modal, Portal, Text } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { colors, spacing } from '../../lib/theme';
+import { errorMessage } from '../../lib/format';
 
 type StaffOption = { _id: Id<'profiles'>; fullName: string; jobTitle: string; role: string; weeklyHours: number };
 
@@ -63,6 +64,7 @@ export function AutoScheduleModal({
 
   const nameById = useMemo(() => new Map(staff.map((s) => [s._id as string, s.fullName])), [staff]);
   const chosenCount = Object.values(choice).filter(Boolean).length;
+  const applyingRef = useRef(false);
 
   const apply = async () => {
     const assignments = Object.entries(choice)
@@ -73,12 +75,23 @@ export function AutoScheduleModal({
       onClose();
       return;
     }
+    // Guard is a ref, not the busy state: two taps in one tick both passed the
+    // state check and assigned every shift twice.
+    if (applyingRef.current) return;
+    applyingRef.current = true;
     setBusy(true);
     try {
       const r = await applyAutoSchedule({ venueId, weekStartDate: preview?.weekStart ?? weekStartDate, assignments });
       onApplied(`Auto-scheduled ${r.assigned} shift${r.assigned === 1 ? '' : 's'}${r.skipped ? `, skipped ${r.skipped}` : ''}.`);
       onClose();
+    } catch (e) {
+      // Previously there was no catch at all: onPress does `void apply()`, so a
+      // failure was swallowed entirely — the spinner stopped, the modal stayed
+      // open, and nothing told the user the assignment had not happened.
+      onApplied(errorMessage(e, 'Could not apply the auto-schedule.'));
+      onClose();
     } finally {
+      applyingRef.current = false;
       setBusy(false);
     }
   };

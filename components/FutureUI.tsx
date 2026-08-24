@@ -76,6 +76,7 @@ export function CommandButton({
   onPress,
   style,
   accessibilityLabel,
+  disabled,
 }: {
   palette: DesignPalette;
   children: ReactNode;
@@ -84,12 +85,14 @@ export function CommandButton({
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={selected ? { selected: true } : undefined}
+      accessibilityState={{ ...(selected ? { selected: true } : {}), ...(disabled ? { disabled: true } : {}) }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         {
@@ -104,7 +107,7 @@ export function CommandButton({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
-          opacity: pressed ? 0.7 : 1,
+          opacity: disabled ? 0.5 : pressed ? 0.7 : 1,
         },
         style,
       ]}

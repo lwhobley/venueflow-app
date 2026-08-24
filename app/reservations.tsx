@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../components/ErrorBoundary';
@@ -112,7 +112,8 @@ function ReservationsScreen() {
   const waitlist = useMemo(() => (waitlistData ?? []) as Array<{ id: string; guestName: string; partySize: number; requestedAt: number; readyAt: number | null; notes: string | null }>, [waitlistData]);
 
   const addWalkIn = async () => {
-    if (!venue?.id || !wlName.trim()) return;
+    if (walkInRef.current || !venue?.id || !wlName.trim()) return;
+    walkInRef.current = true;
     setWaitlistError(null);
     try {
       await addToWaitlist({
@@ -128,6 +129,8 @@ function ReservationsScreen() {
       setWlParty(2);
     } catch (e) {
       setWaitlistError(errorMessage(e, t('reservations.waitlist.errors.addFailed')));
+    } finally {
+      walkInRef.current = false;
     }
   };
 
@@ -202,6 +205,13 @@ function ReservationsScreen() {
   const [depositDue, setDepositDue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Synchronous guards. These create money-bearing records (reservations carry
+  // estimatedValueCents/depositDueCents for private events), so a double-tap
+  // duplicating one is a real booking problem, not just a UI blemish.
+  const creatingRef = useRef(false);
+  const walkInRef = useRef(false);
+  const holdRef = useRef(false);
+  const deletingResRef = useRef(false);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -236,10 +246,11 @@ function ReservationsScreen() {
   const [holdError, setHoldError] = useState<string | null>(null);
 
   const submitHold = async () => {
-    if (!venue?.id || !holdDate || !holdReason.trim()) {
-      setHoldError(t('reservations.holds.errors.required'));
+    if (holdRef.current || !venue?.id || !holdDate || !holdReason.trim()) {
+      if (!holdRef.current) setHoldError(t('reservations.holds.errors.required'));
       return;
     }
+    holdRef.current = true;
     try {
       const startsAt = new Date(`${holdDate}T${holdStart}:00`).toISOString();
       const endsAt = new Date(`${holdDate}T${holdEnd}:00`).toISOString();
@@ -248,6 +259,8 @@ function ReservationsScreen() {
       setHoldError(null);
     } catch (err) {
       setHoldError(errorMessage(err, t('reservations.holds.errors.createFailed')));
+    } finally {
+      holdRef.current = false;
     }
   };
 
@@ -299,7 +312,7 @@ function ReservationsScreen() {
   const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? new Date().getDay());
 
   const createReservation = async () => {
-    if (creating) return;
+    if (creatingRef.current) return;
     setError(null);
     const firstName = guestFirstName.trim();
     const lastName = guestLastName.trim();
@@ -313,6 +326,7 @@ function ReservationsScreen() {
       setError(t('reservations.form.errors.invalidDateTime'));
       return;
     }
+    creatingRef.current = true;
     setCreating(true);
     try {
       await saveReservation({
@@ -368,6 +382,7 @@ function ReservationsScreen() {
     } catch (e) {
       setError(errorMessage(e, t('reservations.form.errors.createFailed')));
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   };
@@ -393,12 +408,15 @@ function ReservationsScreen() {
   };
 
   const deleteReservation = async (res: ReservationRow) => {
-    if (!venue?.id) return;
+    if (deletingResRef.current || !venue?.id) return;
+    deletingResRef.current = true;
     setDeleteError(null);
     try {
       await removeReservation({ venueId: venue.id, reservationId: res.id as Id<'reservations'> });
     } catch (e) {
       setDeleteError(errorMessage(e, t('reservations.list.deleteFailed')));
+    } finally {
+      deletingResRef.current = false;
     }
   };
 

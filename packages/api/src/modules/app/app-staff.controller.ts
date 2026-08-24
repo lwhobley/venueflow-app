@@ -428,8 +428,17 @@ export class AppStaffController {
       // Advisory-lock the venue so two concurrent demotions/removals can't both
       // read the same pre-write count and both pass the guard.
       await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`venue-admin-count:${viewer.venueId}`}))`;
+        // Revoked profiles keep their venueId (deactivateVenueStaff only flips
+        // membershipStatus), so counting them inflated this guard and let the
+        // last ACTIVE owner be removed — leaving the venue with nobody who can
+        // manage it and no API path to recover. Matches app.controller.ts's
+        // account-deletion guard.
       const ownerAdminCount = await db.profile.count({
-        where: { venueId: viewer.venueId, role: { in: ['owner', 'admin'] } },
+        where: {
+          venueId: viewer.venueId,
+          role: { in: ['owner', 'admin'] },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
       });
       if (ownerAdminCount <= 1) {
         throw new ForbiddenException('You cannot remove the last owner or admin from the venue');

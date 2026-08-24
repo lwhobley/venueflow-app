@@ -16,6 +16,7 @@ import { getClientIp } from '../common/http';
 import { assertWithinSharedRateLimit } from '../common/rate-limit';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { runWithoutTenant } from '../prisma/tenant-context';
 import { AuthService } from './auth.service';
 import { AuditService } from '../modules/audit/audit.service';
 
@@ -463,7 +464,14 @@ export class AuthController {
     if (!this.authService.oneTimeCodeHashesMatch(account.emailVerificationCodeHash, this.authService.hashOneTimeCode(body.code))) {
       throw new BadRequestException('That verification code is not valid.');
     }
-    await this.prisma.$transaction(async (tx) => {
+    // Unscoped on purpose. This route is authenticated, so AuthGuard has bound
+    // the caller's CURRENT venue — and both Profile and Invite are venue-scoped,
+    // so a pending membership at a DIFFERENT venue was invisible here. The user
+    // row still got emailVerifiedAt, and because verifyEmail short-circuits on
+    // `alreadyVerified` there was no second chance: the invited membership could
+    // never be activated, locking the user out of that venue permanently.
+    // Every query below is already constrained by userId.
+    await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: user.sub },
         data: {
@@ -495,7 +503,7 @@ export class AuthController {
           });
         }
       }
-    });
+    }));
     return { ok: true };
   }
 

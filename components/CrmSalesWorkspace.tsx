@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Divider, IconButton, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../lib/railway-hooks';
@@ -167,11 +167,18 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
     };
   }, [beos, contracts, leads, openLeads]);
 
+  // Every mutation in this workspace creates a durable, often money-bearing
+  // record (contracts carry fbMinimumCents and a deposit schedule) or sends
+  // outbound client email. None were guarded against a double-tap.
+  const crmBusyRef = useRef(false);
+
   const saveNewLead = async () => {
+    if (crmBusyRef.current) return;
     if (!venueId || !leadName.trim()) {
       setMessage('Lead name is required.');
       return;
     }
+    crmBusyRef.current = true;
     try {
       const leadId = await saveLead({
         venueId,
@@ -196,26 +203,33 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setMessage('Lead created.');
     } catch (err) {
       setMessage(`Failed to create lead: ${errorMessage(err)}`);
+    } finally {
+      crmBusyRef.current = false;
     }
   };
 
   const updateLeadStatus = async (leadId: Id<'crmLeads'>, status: LeadStatus) => {
-    if (!venueId) return;
+    if (crmBusyRef.current || !venueId) return;
     const target = leads?.find((l) => l._id === leadId) ?? (detail?.lead?._id === leadId ? detail.lead : null);
     if (!target) return;
+    crmBusyRef.current = true;
     try {
       await saveLead({ venueId, leadId, fullName: target.fullName, status });
       setMessage(`Moved to ${status.replace('_', ' ')}.`);
     } catch (err) {
       setMessage(`Failed to update lead: ${errorMessage(err)}`);
+    } finally {
+      crmBusyRef.current = false;
     }
   };
 
   const createEventDoc = async () => {
+    if (crmBusyRef.current) return;
     if (!venueId || !eventName.trim()) {
       setMessage('Event name is required.');
       return;
     }
+    crmBusyRef.current = true;
     try {
       const beoId = await saveBeo({
         venueId,
@@ -254,12 +268,15 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       return beoId;
     } catch (err) {
       setMessage(`Failed to create BEO: ${errorMessage(err)}`);
+    } finally {
+      crmBusyRef.current = false;
     }
   };
 
   const createContractFromLead = async () => {
-    if (!venueId || !selectedLead) return;
+    if (crmBusyRef.current || !venueId || !selectedLead) return;
     const depositCents = dollarsToCents(eventDeposit);
+    crmBusyRef.current = true;
     try {
       await saveContract({
         venueId,
@@ -284,17 +301,22 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       setMessage('Contract draft created.');
     } catch (err) {
       setMessage(`Failed to create contract: ${errorMessage(err)}`);
+    } finally {
+      crmBusyRef.current = false;
     }
   };
 
   const saveNote = async () => {
-    if (!venueId || !selectedLead || !noteText.trim()) return;
+    if (crmBusyRef.current || !venueId || !selectedLead || !noteText.trim()) return;
+    crmBusyRef.current = true;
     try {
       await addNote({ venueId, leadId: selectedLead._id, text: noteText.trim() });
       setNoteText('');
       setMessage('Note added.');
     } catch (err) {
       setMessage(`Failed to save note: ${errorMessage(err)}`);
+    } finally {
+      crmBusyRef.current = false;
     }
   };
 
@@ -654,6 +676,8 @@ function LeadDetailPanel({
   onMove: (status: LeadStatus) => void;
 }) {
   const [emailingBeoId, setEmailingBeoId] = useState<string | null>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const emailBusyRef = useRef(false);
   const [emailTo, setEmailTo] = useState('');
   const [emailMsg, setEmailMsg] = useState('');
   if (!lead) return <EmptyLine text="Select a deal to open the CRM record." />;
@@ -711,11 +735,21 @@ function LeadDetailPanel({
                       <TextInput dense label="Recipient email" value={emailTo} onChangeText={setEmailTo} mode="outlined" autoCapitalize="none" style={{ backgroundColor: colors.surface }} />
                       <TextInput dense label="Optional message" value={emailMsg} onChangeText={setEmailMsg} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                       <View style={{ flexDirection: 'row', gap: 6 }}>
-                        <Button compact mode="contained" buttonColor={colors.primary} disabled={!emailTo.trim()} onPress={async () => {
-                          await onEmailBeo(beo._id, emailTo.trim(), emailMsg.trim() || undefined);
-                          setEmailingBeoId(null);
-                          setEmailTo('');
-                          setEmailMsg('');
+                        <Button compact mode="contained" buttonColor={colors.primary} loading={sendingEmail} disabled={sendingEmail || !emailTo.trim()} onPress={async () => {
+                          // Outbound client email: with no busy state at all,
+                          // a double-tap sent the customer two identical BEOs.
+                          if (emailBusyRef.current) return;
+                          emailBusyRef.current = true;
+                          setSendingEmail(true);
+                          try {
+                            await onEmailBeo(beo._id, emailTo.trim(), emailMsg.trim() || undefined);
+                            setEmailingBeoId(null);
+                            setEmailTo('');
+                            setEmailMsg('');
+                          } finally {
+                            emailBusyRef.current = false;
+                            setSendingEmail(false);
+                          }
                         }}>Send</Button>
                         <Button compact mode="text" onPress={() => setEmailingBeoId(null)}>Cancel</Button>
                       </View>
