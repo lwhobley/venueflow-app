@@ -28,6 +28,7 @@ import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapStaffRequest } from '../../common/mappers';
 import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
+import { addDays, weekStartFor } from '../../common/pay-period';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -327,8 +328,20 @@ export class StaffRequestsController {
           const unavailableStart = request.requestedRangeStart || request.requestedForDate;
           const unavailableEnd = request.requestedRangeEnd || request.requestedForDate || unavailableStart;
           if (unavailableStart && unavailableEnd) {
+            // Previously fetched every shift ever assigned to this profile at
+            // this venue, unfiltered by date, then filtered in JS — on
+            // Prisma's 5s transaction default, while this transaction still
+            // holds a FOR UPDATE lock on the StaffRequest row. dayIndex 0-6
+            // means a shift's actual date can fall up to 6 days after its
+            // weekStart, so widen the lower bound by 6 days to stay correct;
+            // this is the exact range the composite
+            // [venueId, profileId, weekStart, dayIndex] index was built for.
             const assignedShifts = await tx.scheduleShift.findMany({
-              where: { venueId: request.venueId, profileId: request.profileId },
+              where: {
+                venueId: request.venueId,
+                profileId: request.profileId,
+                weekStart: { gte: addDays(weekStartFor(unavailableStart), -6), lte: unavailableEnd },
+              },
               select: { id: true, weekStart: true, dayIndex: true },
             });
             const affectedIds = assignedShifts

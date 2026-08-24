@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
@@ -22,10 +22,12 @@ export function ScheduleMemoryPanel({ venueId }: { venueId: Id<'venues'> }) {
   const [title, setTitle] = useState('');
   const [detail, setDetail] = useState('');
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const saveNote = async () => {
-    if (!title.trim() || !detail.trim()) return;
+    if (busyRef.current || !title.trim() || !detail.trim()) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -35,6 +37,7 @@ export function ScheduleMemoryPanel({ venueId }: { venueId: Id<'venues'> }) {
     } catch (e) {
       setError(errorMessage(e, 'Could not save schedule memory.'));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };

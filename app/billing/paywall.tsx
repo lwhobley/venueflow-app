@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
@@ -79,7 +79,15 @@ export default function PaywallScreen() {
     };
   }, []);
 
+  // useState alone doesn't guard re-entry: setBusy(id) doesn't apply until the
+  // next render, so two taps in the same tick both pass before `disabled`
+  // flips. These call real purchase APIs (StoreKit / Stripe checkout), so a
+  // race here can open two purchase sheets or two checkout sessions.
+  const busyRef = useRef(false);
+
   const buy = async (id: string, productId?: string) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(id);
     setError(null);
     try {
@@ -96,11 +104,14 @@ export default function PaywallScreen() {
       // Swallow the user-cancelled case quietly.
       if (!/cancel/i.test(msg)) setError(msg);
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };
 
   const restore = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy('restore');
     setError(null);
     try {
@@ -113,11 +124,14 @@ export default function PaywallScreen() {
     } catch (e) {
       setError(e instanceof Error ? e.message : t('paywall.restoreFailed'));
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };
 
   const buyWithStripe = async (plan: 'single' | 'multi_venue' = 'single') => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy('stripe_' + plan);
     setError(null);
     try {
@@ -126,6 +140,7 @@ export default function PaywallScreen() {
     } catch (e) {
       setError(e instanceof Error ? e.message : t('paywall.purchaseFailed'));
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };

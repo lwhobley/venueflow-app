@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Chip, IconButton, Text, TextInput as PaperTextInput } from 'react-native-paper';
@@ -46,9 +46,11 @@ export default function LogbookScreen() {
   const [pinned, setPinned] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busyRef = useRef(false);
 
   const onPost = async () => {
-    if (!body.trim()) return;
+    if (busyRef.current || !body.trim()) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -58,6 +60,7 @@ export default function LogbookScreen() {
     } catch (e) {
       setError(errorMessage(e, t('logbook.errorPost')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };

@@ -1,5 +1,5 @@
 import { Alert, Platform, ScrollView, View } from 'react-native';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
@@ -28,6 +28,10 @@ export default function ProfileScreen() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [ownedVenueBlock, setOwnedVenueBlock] = useState<string | null>(null);
+  // Irreversible action: promote the guard from a useState check (which
+  // doesn't apply until the next render, so two taps in one tick both pass)
+  // to a ref that blocks re-entry synchronously.
+  const deletingRef = useRef(false);
 
   const onLogout = async () => {
     try {
@@ -52,7 +56,8 @@ export default function ProfileScreen() {
   // ACTIVE venue, so the owner warning above cannot be trusted to have been
   // shown. Send false first and let the server tell us what is at risk.
   const onDeleteAccount = async (deleteOwnedVenues: boolean) => {
-    if (deleting) return;
+    if (deletingRef.current) return;
+    deletingRef.current = true;
     setDeleting(true);
     try {
       await deleteAccount({ deleteOwnedVenues });
@@ -67,6 +72,7 @@ export default function ProfileScreen() {
       }
       Alert.alert(t('profile.deleteError.title'), e instanceof Error ? e.message : t('profile.deleteError.default'));
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
     }
   };

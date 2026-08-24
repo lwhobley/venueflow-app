@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, View, Linking, TextInput } from 'react-native';
 import { Card, Text } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
@@ -60,6 +60,7 @@ export default function ClockScreen() {
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   const clockBoard = useQuery(api.app.getClockBoard, isReady ? {} : 'skip') as any;
   const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip') as any;
@@ -121,7 +122,8 @@ export default function ClockScreen() {
   const canClock = Boolean(activeVenue && location && isWithinGeofence(location, activeVenue));
 
   const onPunch = async () => {
-    if (!activeVenue || busy) return;
+    if (!activeVenue || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const fresh = await getPreciseLocation();
@@ -156,12 +158,14 @@ export default function ClockScreen() {
     } catch (error) {
       Alert.alert(t('clock.punchFailedTitle'), errorMessage(error, t('clock.punchFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   const onStartBreak = async (type: 'paid' | 'unpaid') => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       await breakStart({ type });
@@ -169,12 +173,14 @@ export default function ClockScreen() {
     } catch (error) {
       Alert.alert(t('clock.breakFailedTitle'), errorMessage(error, t('clock.breakFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   const onEndBreak = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       await breakEnd({});
@@ -182,6 +188,7 @@ export default function ClockScreen() {
     } catch (error) {
       Alert.alert(t('clock.endBreakFailedTitle'), errorMessage(error, t('clock.endBreakFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };

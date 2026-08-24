@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Image, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -43,8 +43,16 @@ export default function ChecklistScreen() {
   const removeItem = useMutation(api.operations.removeChecklistItem);
   const completeItem = useMutation(api.operations.completeChecklistItem);
 
+  // No busy state existed at all here: nothing blocked a second tap before
+  // the mutation resolved, so a double-tap on "Add task" created two
+  // identical items before setNewTitle('') cleared the input.
+  const addingRef = useRef(false);
+  const [adding, setAdding] = useState(false);
+
   const onAddItem = async () => {
-    if (!newTitle.trim()) return;
+    if (addingRef.current || !newTitle.trim()) return;
+    addingRef.current = true;
+    setAdding(true);
     setError(null);
     try {
       await addItem({ kind, title: newTitle.trim(), requiresPhoto: newRequiresPhoto });
@@ -52,6 +60,9 @@ export default function ChecklistScreen() {
       setNewRequiresPhoto(false);
     } catch (e) {
       setError(errorMessage(e, t('checklist.errorAdd')));
+    } finally {
+      addingRef.current = false;
+      setAdding(false);
     }
   };
 
@@ -176,7 +187,7 @@ export default function ChecklistScreen() {
             <Chip selected={newRequiresPhoto} onPress={() => setNewRequiresPhoto((v) => !v)} icon="camera">
               {t('checklist.requirePhotoProof')}
             </Chip>
-            <Button mode="outlined" textColor={colors.primary} disabled={!newTitle.trim()} onPress={() => void onAddItem()}>
+            <Button mode="outlined" textColor={colors.primary} loading={adding} disabled={adding || !newTitle.trim()} onPress={() => void onAddItem()}>
               {t('checklist.addTask')}
             </Button>
             </View>

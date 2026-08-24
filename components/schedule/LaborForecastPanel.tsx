@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -173,10 +173,13 @@ function AiScheduleBuilder() {
   const commitAiSchedule = useMutation(api.scheduling.commitAiSchedule);
   const [proposal, setProposal] = useState<ProposedShift[]>([]);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const onGenerate = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -188,13 +191,15 @@ function AiScheduleBuilder() {
     } catch (e) {
       setError(errorMessage(e, 'Could not generate an AI schedule.'));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   const onCommit = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
     if (proposal.length === 0) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -204,6 +209,7 @@ function AiScheduleBuilder() {
     } catch (e) {
       setError(errorMessage(e, 'Could not create the proposed shifts.'));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };

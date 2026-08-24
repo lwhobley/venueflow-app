@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -189,9 +189,11 @@ function StaffScreen() {
   const [inviteLinkMsg, setInviteLinkMsg] = useState<string | null>(null);
   const [inviteLinkErr, setInviteLinkErr] = useState<string | null>(null);
   const [generatingLink, setGeneratingLink] = useState(false);
+  const generatingLinkRef = useRef(false);
 
   const onGenerateInviteLink = async () => {
-    if (generatingLink || !venue?.id) return;
+    if (generatingLinkRef.current || !venue?.id) return;
+    generatingLinkRef.current = true;
     setInviteLinkErr(null);
     setInviteLinkMsg(null);
     setGeneratingLink(true);
@@ -206,6 +208,7 @@ function StaffScreen() {
     } catch (e) {
       setInviteLinkErr(errorMessage(e, t('staff.inviteLinkError')));
     } finally {
+      generatingLinkRef.current = false;
       setGeneratingLink(false);
     }
   };
@@ -217,6 +220,7 @@ function StaffScreen() {
   const [importText, setImportText] = useState('');
   const [importRows, setImportRows] = useState<ParsedStaffImportRow[]>([]);
   const [importBusy, setImportBusy] = useState(false);
+  const importBusyRef = useRef(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [importErr, setImportErr] = useState<string | null>(null);
 
@@ -240,7 +244,8 @@ function StaffScreen() {
   };
 
   const onCommitStaffImport = async () => {
-    if (importBusy || !venue?.id || importRows.length === 0) return;
+    if (importBusyRef.current || !venue?.id || importRows.length === 0) return;
+    importBusyRef.current = true;
     setImportErr(null);
     setImportMsg(null);
     setImportBusy(true);
@@ -256,6 +261,7 @@ function StaffScreen() {
     } catch (e) {
       setImportErr(errorMessage(e, t('staff.importCommitFailed')));
     } finally {
+      importBusyRef.current = false;
       setImportBusy(false);
     }
   };

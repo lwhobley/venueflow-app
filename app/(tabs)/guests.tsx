@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, SegmentedButtons, Switch, Text, TextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
@@ -262,10 +262,12 @@ function GuestsScreenInner() {
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [savingGuest, setSavingGuest] = useState(false);
+  const savingGuestRef = useRef(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [leadSource, setLeadSource] = useState('Website');
   const [leadText, setLeadText] = useState('');
   const [leadBusy, setLeadBusy] = useState(false);
+  const leadBusyRef = useRef(false);
   const [leadMessage, setLeadMessage] = useState<string | null>(null);
   const [leadMessageIsError, setLeadMessageIsError] = useState(false);
 
@@ -352,11 +354,12 @@ function GuestsScreenInner() {
   }, []);
 
   const saveGuest = async () => {
-    if (savingGuest) return;
+    if (savingGuestRef.current) return;
     if (!venue?.id || !fullName.trim()) {
       setError(t('guests.form.nameRequired'));
       return;
     }
+    savingGuestRef.current = true;
     setError(null);
     setSavingGuest(true);
     try {
@@ -383,6 +386,7 @@ function GuestsScreenInner() {
     } catch (e) {
       setError(errorMessage(e, t('guests.form.saveError')));
     } finally {
+      savingGuestRef.current = false;
       setSavingGuest(false);
     }
   };
@@ -399,13 +403,14 @@ function GuestsScreenInner() {
   };
 
   const importLeads = async () => {
-    if (!venue?.id) return;
+    if (leadBusyRef.current || !venue?.id) return;
     const leads = parseLeadLines(leadText, leadSource);
     if (leads.length === 0) {
       setLeadMessage(t('guests.leadImport.pasteAtLeastOne'));
       setLeadMessageIsError(true);
       return;
     }
+    leadBusyRef.current = true;
     setLeadBusy(true);
     setLeadMessage(null);
     setLeadMessageIsError(false);
@@ -427,6 +432,7 @@ function GuestsScreenInner() {
       setLeadMessage(errorMessage(e, t('guests.leadImport.couldNotImport')));
       setLeadMessageIsError(true);
     } finally {
+      leadBusyRef.current = false;
       setLeadBusy(false);
     }
   };

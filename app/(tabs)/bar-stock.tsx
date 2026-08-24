@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -127,6 +127,7 @@ export default function BarStockScreen() {
   const [parsedItems, setParsedItems] = useState<ParsedItem[]>([]);
   const [parseNotes, setParseNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'beverage' | 'food'>('beverage');
   const [historyItemId, setHistoryItemId] = useState<string | null>(null);
@@ -141,6 +142,7 @@ export default function BarStockScreen() {
   const [showScanner, setShowScanner] = useState(false);
   const [scannedItem, setScannedItem] = useState<BarItem | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
+  const scanBusyRef = useRef(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [costHistoryItemId, setCostHistoryItemId] = useState<string | null>(null);
   const [editCostItemId, setEditCostItemId] = useState<string | null>(null);
@@ -196,7 +198,8 @@ export default function BarStockScreen() {
   }, [items]);
 
   const saveManualItem = async () => {
-    if (busy || !venue?.id) return;
+    if (busyRef.current || !venue?.id) return;
+    busyRef.current = true;
     setBusy(true);
     setMessage(null);
     try {
@@ -210,11 +213,13 @@ export default function BarStockScreen() {
       setMessage(t('barStock.messages.itemSaved'));
     } catch (e) {
       setMessage(errorMessage(e, t('barStock.messages.errorSaveItem')));
-    } finally { setBusy(false); }
+    } finally { busyRef.current = false; setBusy(false); }
   };
 
-  const parseWithAi = async (image?: { base64: string; mimeType?: string }) => {
-    if (busy || !venue?.id) return;
+  // Unguarded core so pickPhoto (which already holds busyRef) can chain into
+  // this without the guard below rejecting its own in-flight call.
+  const runParseWithAi = async (image?: { base64: string; mimeType?: string }) => {
+    if (!venue?.id) return;
     setBusy(true); setMessage(null);
     try {
       const result = await parseInput({ venueId: venue.id, text: parseText.trim() || undefined, imageBase64: image?.base64, imageMimeType: image?.mimeType });
@@ -225,8 +230,19 @@ export default function BarStockScreen() {
     finally { setBusy(false); }
   };
 
+  const parseWithAi = async (image?: { base64: string; mimeType?: string }) => {
+    if (busyRef.current || !venue?.id) return;
+    busyRef.current = true;
+    try {
+      await runParseWithAi(image);
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
   const pickCsv = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setMessage(null);
     try {
       const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
@@ -235,31 +251,33 @@ export default function BarStockScreen() {
       setParseText(text);
       setMessage(t('barStock.messages.loadedForParsing', { name: doc.assets[0].name ?? t('barStock.messages.uploadFallback') }));
     } catch (e) { setMessage(errorMessage(e, t('barStock.messages.errorLoadCsv'))); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
 
   const pickPhoto = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setMessage(null);
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (permission.status !== 'granted') { setMessage(t('barStock.messages.photoPermissionRequired')); return; }
       const image = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, base64: true, quality: 0.8 });
       if (image.canceled || !image.assets[0]?.base64) return;
-      await parseWithAi({ base64: image.assets[0].base64, mimeType: image.assets[0].mimeType });
+      await runParseWithAi({ base64: image.assets[0].base64, mimeType: image.assets[0].mimeType });
     } catch (e) { setMessage(errorMessage(e, t('barStock.messages.errorLoadPhoto'))); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
 
   const importItems = async () => {
-    if (busy || !venue?.id || parsedItems.length === 0) return;
+    if (busyRef.current || !venue?.id || parsedItems.length === 0) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const result = await importParsed({ venueId: venue.id, items: parsedItems });
       setParsedItems([]); setParseText('');
       setMessage(t('barStock.messages.importedItems', { count: result.imported }));
     } catch (e) { setMessage(errorMessage(e, t('barStock.messages.errorImportItems'))); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
 
   const recordInventoryMovement = async (itemId: Id<'barInventoryItems'>, movementType: MovementType, quantity: number) => {
@@ -298,7 +316,8 @@ export default function BarStockScreen() {
   };
 
   const onBarcodeScanned = useCallback(async ({ data }: { data: string }) => {
-    if (scanBusy || !data) return;
+    if (scanBusyRef.current || !data) return;
+    scanBusyRef.current = true;
     setScanBusy(true); setScanMsg(null);
     try {
       const item = await lookupSku({ sku: data });
@@ -307,8 +326,8 @@ export default function BarStockScreen() {
     } catch {
       setScanMsg(t('barStock.messages.barcodeNotFound', { code: data }));
       setShowScanner(false);
-    } finally { setScanBusy(false); }
-  }, [scanBusy, lookupSku, t]);
+    } finally { scanBusyRef.current = false; setScanBusy(false); }
+  }, [lookupSku, t]);
 
   const saveCostUpdate = async (itemId: string) => {
     const cents = Math.round(Number(editCostValue) * 100);

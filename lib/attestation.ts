@@ -68,7 +68,7 @@ function isKeyRejection(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
   // 4xx that names the key; never 408 (timeout) or 5xx.
   if (error.status === 408 || error.status >= 500) return false;
-  return /not registered for attestation|invalid key|unknown key/i.test(error.message);
+  return /not registered for attestation/i.test(error.message);
 }
 
 export async function attestPayload(payload: unknown): Promise<PunchAttestation | null> {

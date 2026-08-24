@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Button, Card, Chip, Dialog, Portal, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
@@ -20,6 +20,11 @@ export function VenueSwitcher() {
   const registerVenueMutation = useMutation(api.app.registerVenue);
 
   const [switchingId, setSwitchingId] = useState<string | null>(null);
+  // State-based checks (switchingId !== null, registering) don't apply until
+  // the next render, so two taps in one tick both pass. handleSwitch races two
+  // venue-switch requests against each other; handleRegisterNewVenue creates a
+  // billed venue registration — both promoted to a synchronous ref guard.
+  const busyRef = useRef(false);
   const [registerVisible, setRegisterVisible] = useState(false);
   const [businessName, setBusinessName] = useState('');
   const [ownerName, setOwnerName] = useState(user?.full_name ?? '');
@@ -28,7 +33,8 @@ export function VenueSwitcher() {
   const [error, setError] = useState<string | null>(null);
 
   const handleSwitch = async (v: VenueSummary) => {
-    if (v.id === activeVenue?.id) return;
+    if (busyRef.current || v.id === activeVenue?.id) return;
+    busyRef.current = true;
     setSwitchingId(v.id);
     setError(null);
     try {
@@ -48,15 +54,18 @@ export function VenueSwitcher() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not switch venue.');
     } finally {
+      busyRef.current = false;
       setSwitchingId(null);
     }
   };
 
   const handleRegisterNewVenue = async () => {
+    if (busyRef.current) return;
     if (!businessName.trim()) {
       setError('Business name is required.');
       return;
     }
+    busyRef.current = true;
     setRegistering(true);
     setError(null);
     try {
@@ -88,6 +97,7 @@ export function VenueSwitcher() {
         setError(msg || 'Failed to register new venue.');
       }
     } finally {
+      busyRef.current = false;
       setRegistering(false);
     }
   };

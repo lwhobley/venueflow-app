@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, IconButton, Text, TextInput } from 'react-native-paper';
@@ -31,6 +31,7 @@ export default function VenueSettingsScreen() {
   const [radius, setRadius] = useState(venue?.geofence_radius_m ?? 120);
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [rotatingCode, setRotatingCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -59,7 +60,7 @@ export default function VenueSettingsScreen() {
   };
 
   const onSave = async () => {
-    if (saving) return;
+    if (savingRef.current) return;
     setError(null);
     setSaved(false);
     if (!venue?.id) {
@@ -72,6 +73,7 @@ export default function VenueSettingsScreen() {
       setError(t('venueSettings.invalidCoordinates'));
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       const updated = await updateVenue({ venueId: venue.id, name: name.trim() || undefined, latitude, longitude, geofenceRadiusM: radius });
@@ -87,6 +89,7 @@ export default function VenueSettingsScreen() {
     } catch (e) {
       setError(e instanceof Error ? e.message : t('venueSettings.couldNotSaveVenue'));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
