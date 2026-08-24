@@ -348,6 +348,7 @@ describe('AppController multi-venue invariants', () => {
     ];
     const prisma: any = {
       $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $queryRaw: vi.fn().mockResolvedValue([]),
       user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
       profile: {
         findMany: vi.fn().mockResolvedValue(profiles),
@@ -378,9 +379,7 @@ describe('AppController multi-venue invariants', () => {
     )).resolves.toEqual({ ok: true });
 
     expect(prisma.profile.deleteMany).toHaveBeenCalledWith({ where: { venueId: { in: ['venue-single'] } } });
-    expect(prisma.chatImage.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
-    expect(prisma.venueDocument.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
-    expect(prisma.checklistCompletion.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
     expect(prisma.venue.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['venue-single'] } } });
     expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
       where: { profileId: 'profile-sole' },
@@ -389,27 +388,27 @@ describe('AppController multi-venue invariants', () => {
     expect(prisma.user.deleteMany).toHaveBeenCalledWith({ where: { id: 'user-1' } });
   });
 
-  it('rejects deletion of a venue whose history exceeds the automatic-deletion row limit', async () => {
+  it('uses set-based archival without an arbitrary row-count refusal', async () => {
     const profiles = [
       { id: 'profile-sole', email: 'owner@example.com', fullName: 'Sole Owner', role: 'owner', venueId: 'venue-single', membershipStatus: 'active' },
     ];
     const prisma: any = {
       $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $queryRaw: vi.fn().mockResolvedValue([]),
       user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
       profile: {
         findMany: vi.fn().mockResolvedValue(profiles),
         count: vi.fn().mockResolvedValue(1),
         deleteMany: vi.fn(),
       },
-      venue: { deleteMany: vi.fn(), findMany: vi.fn() },
+      venue: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
       chatImage: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
       venueDocument: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
       checklistCompletion: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
       objectDeletionJob: { create: vi.fn() },
       retainedTimeEntry: { createMany: vi.fn() },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      // Alone, past the 250k combined-row limit.
-      timeEntry: { updateMany: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), count: vi.fn().mockResolvedValue(250_001) },
+      timeEntry: { updateMany: vi.fn() },
       scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
     };
@@ -419,11 +418,12 @@ describe('AppController multi-venue invariants', () => {
     await expect(controller.deleteMyAccount(
       { sub: 'user-1' } as any,
       { deleteOwnedVenues: true },
-    )).rejects.toThrow('Contact support@venuewrangler.com for assisted account deletion');
+    )).resolves.toEqual({ ok: true });
 
-    expect(prisma.chatImage.findMany).not.toHaveBeenCalled();
-    expect(prisma.venue.deleteMany).not.toHaveBeenCalled();
-    expect(prisma.user.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.chatImage.count).not.toHaveBeenCalled();
+    expect(prisma.venue.deleteMany).toHaveBeenCalled();
+    expect(prisma.user.deleteMany).toHaveBeenCalled();
+    expect(prisma.$transaction.mock.calls[0][1]).toMatchObject({ timeout: 30_000 });
   });
 
   it('archives every employee wage record before the venue cascade destroys them', async () => {
@@ -450,6 +450,7 @@ describe('AppController multi-venue invariants', () => {
     let timeEntryPage = 0;
     const prisma: any = {
       $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $queryRaw: vi.fn().mockResolvedValue([]),
       user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
       profile: {
         findMany: vi.fn().mockResolvedValue(profiles),
@@ -481,24 +482,11 @@ describe('AppController multi-venue invariants', () => {
 
     await controller.deleteMyAccount({ sub: 'user-1' } as any, { deleteOwnedVenues: true });
 
-    expect(prisma.retainedTimeEntry.createMany).toHaveBeenCalledTimes(1);
-    const retained = prisma.retainedTimeEntry.createMany.mock.calls[0][0].data;
-    expect(retained).toHaveLength(2);
-    // Pseudonymized with synthetic identifiers to preserve per-employee reconstruction
-    expect(retained[0]).toMatchObject({
-      originVenueId: 'venue-single',
-      originVenueName: 'Single Venue',
-      profileFullName: 'deleted_user_profile-bailey',
-      profileEmail: null,
-      isOpen: false,
-    });
-    expect(retained[1]).toMatchObject({
-      profileFullName: 'deleted_user_profile-snap',
-      profileEmail: null,
-      isOpen: true,
-    });
+    const archiveSql = prisma.$executeRaw.mock.calls.at(-1)[0];
+    expect(archiveSql.strings.join('')).toContain('INSERT INTO "RetainedTimeEntry"');
+    expect(archiveSql.strings.join('')).toContain("'deleted_user_' || COALESCE");
     // And the archive must happen before the cascade, not after.
-    const archiveOrder = prisma.retainedTimeEntry.createMany.mock.invocationCallOrder[0];
+    const archiveOrder = prisma.$executeRaw.mock.invocationCallOrder.at(-1);
     const cascadeOrder = prisma.venue.deleteMany.mock.invocationCallOrder[0];
     expect(archiveOrder).toBeLessThan(cascadeOrder);
   });

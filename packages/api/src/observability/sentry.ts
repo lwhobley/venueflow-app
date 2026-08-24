@@ -24,3 +24,9 @@ export function captureException(error: unknown, context?: Record<string, unknow
   if (!enabled) return;
   Sentry.captureException(error, context ? { extra: context } : undefined);
 }
+
+/** Drain queued events for short-lived workers before their process exits. */
+export async function flushSentry(timeoutMs = 2_000): Promise<boolean> {
+  if (!enabled) return true;
+  return Sentry.flush(timeoutMs);
+}
