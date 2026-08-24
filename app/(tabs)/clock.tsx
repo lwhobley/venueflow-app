@@ -206,6 +206,11 @@ export default function ClockScreen() {
       Alert.alert(t('clock.errorTitle'), t('clock.timeFormatError'));
       return;
     }
+    // Shares busyRef with the punch/break handlers on purpose: without it a
+    // correction could be submitted twice (double-crediting hours once a
+    // manager approves both), and a punch could run concurrently with it.
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const clockInAt = new Date(`${correctionDate}T${correctionInTime}:00`).getTime();
@@ -238,6 +243,7 @@ export default function ClockScreen() {
     } catch (error) {
       Alert.alert(t('clock.submissionFailedTitle'), errorMessage(error, t('clock.submissionFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };

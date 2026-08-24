@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -66,6 +66,7 @@ export default function SignInScreen() {
   const [password, setPassword] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const showError = (title: string, message: string) => {
@@ -128,7 +129,7 @@ export default function SignInScreen() {
   };
 
   const submit = async () => {
-    if (submitting) return;
+    if (submittingRef.current) return;
     const trimmed = email.trim();
     const minPasswordLength = flow === 'signUp' ? 8 : 6;
     if (!trimmed.includes('@') || password.trim().length < minPasswordLength) {
@@ -143,6 +144,7 @@ export default function SignInScreen() {
       Alert.alert(t('signIn.invalidDetailsTitle'), t('register.errors.termsRequired'));
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -154,6 +156,7 @@ export default function SignInScreen() {
         e instanceof Error ? e.message : t('signIn.tryAgain'),
       );
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };

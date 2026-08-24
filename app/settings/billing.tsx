@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Linking, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { router } from 'expo-router';
@@ -33,9 +33,13 @@ export default function BillingScreen() {
   const canEditBilling = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
   const [managingSubscription, setManagingSubscription] = useState(false);
   const [manageError, setManageError] = useState<string | null>(null);
+  // Synchronous guard: a useState check doesn't apply until the next render,
+  // so a double-tap opened two Stripe portal sessions and two browser tabs.
+  const managingRef = useRef(false);
 
   const manageSubscription = async () => {
-    if (managingSubscription) return;
+    if (managingRef.current) return;
+    managingRef.current = true;
     setManagingSubscription(true);
     setManageError(null);
     try {
@@ -48,6 +52,7 @@ export default function BillingScreen() {
     } catch (e) {
       setManageError(e instanceof Error ? e.message : t('settingsBilling.manageSubscriptionFailed'));
     } finally {
+      managingRef.current = false;
       setManagingSubscription(false);
     }
   };

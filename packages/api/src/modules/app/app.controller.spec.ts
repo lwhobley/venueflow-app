@@ -483,11 +483,68 @@ describe('AppController multi-venue invariants', () => {
     await controller.deleteMyAccount({ sub: 'user-1' } as any, { deleteOwnedVenues: true });
 
     const archiveSql = prisma.$executeRaw.mock.calls.at(-1)[0];
-    expect(archiveSql.strings.join('')).toContain('INSERT INTO "RetainedTimeEntry"');
-    expect(archiveSql.strings.join('')).toContain("'deleted_user_' || COALESCE");
+    const archiveText = archiveSql.strings.join('');
+    expect(archiveText).toContain('INSERT INTO "RetainedTimeEntry"');
+    // Pseudonymize the departing account's own rows only. Co-workers keep their
+    // real name/email — an anonymized wage record cannot satisfy FLSA §516.2,
+    // so blanket-anonymizing the venue would retain the rows and still lose the
+    // compliance value they exist for.
+    expect(archiveText).toContain("'deleted_user_' || t.\"profileId\"");
+    expect(archiveText).toContain('CASE WHEN t."profileId" IS NOT NULL');
+    expect(archiveText).toContain('ELSE t."profileFullName" END');
+    expect(archiveText).toContain('ELSE p."email" END');
     // And the archive must happen before the cascade, not after.
     const archiveOrder = prisma.$executeRaw.mock.invocationCallOrder.at(-1);
     const cascadeOrder = prisma.venue.deleteMany.mock.invocationCallOrder[0];
     expect(archiveOrder).toBeLessThan(cascadeOrder);
+  });
+
+  it('closes a still-running punch with a real clock-out so the final shift stays payable', async () => {
+    const profiles = [
+      { id: 'profile-leaver', email: 'leaver@example.com', fullName: 'Lee Leaver', role: 'staff', venueId: 'venue-other', membershipStatus: 'active' },
+    ];
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'leaver@example.com' }), deleteMany: vi.fn() },
+      profile: {
+        findMany: vi.fn().mockResolvedValue(profiles),
+        // Not the last owner/admin anywhere, so no venue is deleted: the time
+        // entries survive at a venue this user merely worked at.
+        count: vi.fn().mockResolvedValue(3),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      venue: { deleteMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
+      objectDeletionJob: { create: vi.fn() },
+      retainedTimeEntry: { createMany: vi.fn() },
+      pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      scheduleShift: { updateMany: vi.fn() },
+      session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
+      // The surviving venue gets its member count resynced after the profile goes.
+      team: { upsert: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const controller = new AppController(prisma, { send: vi.fn() } as any, {} as any);
+
+    await controller.deleteMyAccount({ sub: 'user-1' } as any);
+
+    // Flipping isOpen to false while leaving clockOutAt null makes the row
+    // invisible to payroll (which filters clockOutAt: { not: null }) and
+    // unreachable by a correction request once profileId is nulled — the
+    // employee's last partial shift would silently never be paid.
+    const closeCall = prisma.timeEntry.updateMany.mock.calls.find(
+      ([args]: any[]) => args?.where?.clockOutAt === null,
+    );
+    expect(closeCall).toBeDefined();
+    expect(closeCall[0].where.profileId).toEqual({ in: ['profile-leaver'] });
+    expect(closeCall[0].data.clockOutAt).toBeInstanceOf(Date);
+    expect(closeCall[0].data.isOpen).toBe(false);
+    // It must run before the de-identification pass, which only sets isOpen.
+    const closeOrder = prisma.timeEntry.updateMany.mock.invocationCallOrder[0];
+    const renameCall = prisma.timeEntry.updateMany.mock.calls.findIndex(
+      ([args]: any[]) => typeof args?.data?.profileFullName === 'string',
+    );
+    expect(closeOrder).toBeLessThan(prisma.timeEntry.updateMany.mock.invocationCallOrder[renameCall]);
   });
 });

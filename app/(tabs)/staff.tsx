@@ -221,6 +221,8 @@ function StaffScreen() {
   const [importRows, setImportRows] = useState<ParsedStaffImportRow[]>([]);
   const [importBusy, setImportBusy] = useState(false);
   const importBusyRef = useRef(false);
+  const submitRef = useRef(false);
+  const deactivateRef = useRef(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [importErr, setImportErr] = useState<string | null>(null);
 
@@ -334,7 +336,10 @@ function StaffScreen() {
   };
 
   const onSubmit = async () => {
-    if (!venue?.id || !canManage) return;
+    // Without a synchronous guard a double-tap created two profiles with the
+    // same name and email (staffId is undefined on the create path).
+    if (submitRef.current || !venue?.id || !canManage) return;
+    submitRef.current = true;
     try {
       await upsertStaff({
         venueId: venue.id,
@@ -352,6 +357,8 @@ function StaffScreen() {
       clearForm();
     } catch (e) {
       Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.saveFailed')));
+    } finally {
+      submitRef.current = false;
     }
   };
 
@@ -360,11 +367,15 @@ function StaffScreen() {
     Alert.alert(t('staff.deactivateConfirmTitle'), t('staff.deactivateConfirmMessage', { name: member.fullName }), [
       { text: t('staff.cancel'), style: 'cancel' },
       { text: t('staff.deactivate'), style: 'destructive', onPress: async () => {
+        if (deactivateRef.current) return;
+        deactivateRef.current = true;
         try {
           await deactivateStaff({ staffId: member._id as Id<'profiles'> });
           if (selectedStaffId === member._id) clearForm();
         } catch (e) {
           Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.actionFailed')));
+        } finally {
+          deactivateRef.current = false;
         }
       }}
     ]);

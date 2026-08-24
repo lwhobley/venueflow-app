@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
@@ -14,13 +14,19 @@ export default function ResetPasswordScreen() {
   const [newPassword, setNewPassword] = useState('');
   const [requesting, setRequesting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // Synchronous guards. A double-tap on "Send code" issued two codes, and
+  // because the second invalidates the first, the user typing the code from
+  // the email that arrived first would fail to reset.
+  const requestingRef = useRef(false);
+  const resettingRef = useRef(false);
 
   const requestCode = async () => {
-    if (requesting) return;
+    if (requestingRef.current) return;
     if (!email.trim().includes('@')) {
       Alert.alert(t('resetPassword.emailRequiredTitle'), t('resetPassword.emailRequiredMessage'));
       return;
     }
+    requestingRef.current = true;
     setRequesting(true);
     try {
       await appApi.forgotPassword({ email: email.trim() });
@@ -28,16 +34,18 @@ export default function ResetPasswordScreen() {
     } catch (error) {
       Alert.alert(t('resetPassword.sendFailedTitle'), error instanceof Error ? error.message : t('resetPassword.tryAgain'));
     } finally {
+      requestingRef.current = false;
       setRequesting(false);
     }
   };
 
   const reset = async () => {
-    if (resetting) return;
+    if (resettingRef.current) return;
     if (!email.trim().includes('@') || !code.trim() || newPassword.length < 8) {
       Alert.alert(t('resetPassword.resetRequiredTitle'), t('resetPassword.resetRequiredMessage'));
       return;
     }
+    resettingRef.current = true;
     setResetting(true);
     try {
       await appApi.resetPassword({
@@ -50,6 +58,7 @@ export default function ResetPasswordScreen() {
     } catch (error) {
       Alert.alert(t('resetPassword.resetFailedTitle'), error instanceof Error ? error.message : t('resetPassword.tryAgain'));
     } finally {
+      resettingRef.current = false;
       setResetting(false);
     }
   };

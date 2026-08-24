@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
@@ -19,13 +19,17 @@ export default function VerifyEmailScreen() {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  // Synchronous guards; "Resend" in particular sent two verification emails.
+  const submittingRef = useRef(false);
+  const resendingRef = useRef(false);
 
   const verify = async () => {
-    if (submitting) return;
+    if (submittingRef.current) return;
     if (!code.trim()) {
       Alert.alert(t('verifyEmail.codeRequiredTitle'), t('verifyEmail.codeRequiredMessage'));
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       await appApi.verifyEmail({ code: code.trim() });
@@ -78,12 +82,14 @@ export default function VerifyEmailScreen() {
     } catch (error) {
       Alert.alert(t('verifyEmail.verifyFailedTitle'), error instanceof Error ? error.message : t('verifyEmail.tryAgain'));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   const resend = async () => {
-    if (resending) return;
+    if (resendingRef.current) return;
+    resendingRef.current = true;
     setResending(true);
     try {
       await appApi.resendVerification();
@@ -91,6 +97,7 @@ export default function VerifyEmailScreen() {
     } catch (error) {
       Alert.alert(t('verifyEmail.resendFailedTitle'), error instanceof Error ? error.message : t('verifyEmail.tryAgain'));
     } finally {
+      resendingRef.current = false;
       setResending(false);
     }
   };

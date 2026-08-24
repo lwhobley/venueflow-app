@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Alert, FlatList, SafeAreaView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { ActivityIndicator, Button, Text } from 'react-native-paper';
@@ -39,8 +39,15 @@ export default function JoinRequestsScreen() {
   });
 
   const [processingId, setProcessingId] = useState<string | null>(null);
+  // The buttons are hidden via {!isProcessing && ...}, which only takes effect
+  // on the next render — so without this a double-tap fired two approvals and
+  // the second surfaced a spurious "Approve failed" for a request that in fact
+  // succeeded. Approving grants venue access, so it must fire exactly once.
+  const processingRef = useRef(false);
 
   const handleApprove = useCallback(async (req: JoinRequest) => {
+    if (processingRef.current) return;
+    processingRef.current = true;
     setProcessingId(req.id);
     try {
       await appApi.approveJoinRequest(req.id);
@@ -48,6 +55,7 @@ export default function JoinRequestsScreen() {
     } catch (e) {
       Alert.alert(t('joinRequests.approveError'), e instanceof Error ? e.message : t('joinRequests.tryAgain'));
     } finally {
+      processingRef.current = false;
       setProcessingId(null);
     }
   }, [queryClient, t]);
@@ -62,6 +70,8 @@ export default function JoinRequestsScreen() {
           text: t('joinRequests.decline'),
           style: 'destructive',
           onPress: async () => {
+            if (processingRef.current) return;
+            processingRef.current = true;
             setProcessingId(req.id);
             try {
               await appApi.rejectJoinRequest(req.id);
@@ -69,6 +79,7 @@ export default function JoinRequestsScreen() {
             } catch (e) {
               Alert.alert(t('joinRequests.declineError'), e instanceof Error ? e.message : t('joinRequests.tryAgain'));
             } finally {
+              processingRef.current = false;
               setProcessingId(null);
             }
           },

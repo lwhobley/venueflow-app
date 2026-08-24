@@ -1056,6 +1056,12 @@ export class AppController {
         // requires three-year retention, and those other employees are not the
         // data subject here. RetainedTimeEntry carries no Venue FK so it
         // survives the cascade (see its schema comment).
+        // Pseudonymize ONLY the departing account's own rows. Blanket-anonymizing
+        // every employee at the venue defeated the point of this table: FLSA
+        // §516.2 requires the employee's name, so a retained-but-unattributable
+        // row carries the storage and privacy cost of retention with none of its
+        // compliance value. Co-workers are not the data subject of this erasure.
+        const departingProfileIds = profiles.map((profile) => profile.id);
         await tx.$executeRaw(Prisma.sql`
           INSERT INTO "RetainedTimeEntry" (
             "id", "originVenueId", "originVenueName", "profileFullName", "profileEmail",
@@ -1063,10 +1069,16 @@ export class AppController {
           )
           SELECT
             ${`retained-${deletionRunId}-`} || t."id", t."venueId", v."name",
-            'deleted_user_' || COALESCE(t."profileId", t."id"), NULL,
+            CASE WHEN t."profileId" IS NOT NULL AND t."profileId" IN (${Prisma.join(departingProfileIds)})
+                 THEN 'deleted_user_' || t."profileId"
+                 ELSE t."profileFullName" END,
+            CASE WHEN t."profileId" IS NOT NULL AND t."profileId" IN (${Prisma.join(departingProfileIds)})
+                 THEN NULL
+                 ELSE p."email" END,
             t."clockInAt", t."clockOutAt", t."isOpen", t."breaks", t."createdAt", NOW()
           FROM "TimeEntry" t
           JOIN "Venue" v ON v."id" = t."venueId"
+          LEFT JOIN "Profile" p ON p."id" = t."profileId"
           WHERE t."venueId" IN (${venueList})
         `);
 
@@ -1081,6 +1093,17 @@ export class AppController {
       if (profileIds.length) {
         await tx.pushToken.deleteMany({ where: { profileId: { in: profileIds } } });
         await tx.availability.deleteMany({ where: { profileId: { in: profileIds } } });
+        // Close any still-running punch with a real clock-out BEFORE the
+        // de-identification pass below. Flipping isOpen to false while leaving
+        // clockOutAt null produces a row every consumer discards — payroll
+        // filters on `clockOutAt: { not: null }`, the clock board only lists
+        // isOpen entries, and once profileId is SET NULL no correction request
+        // can reach it — so the employee's final partial shift silently became
+        // unpayable at exactly the moment they left.
+        await tx.timeEntry.updateMany({
+          where: { profileId: { in: profileIds }, clockOutAt: null },
+          data: { clockOutAt: new Date(), isOpen: false },
+        });
         for (const profile of profiles) {
           await tx.timeEntry.updateMany({
             where: { profileId: profile.id },

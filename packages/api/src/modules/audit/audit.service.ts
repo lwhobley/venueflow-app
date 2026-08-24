@@ -140,6 +140,10 @@ export class AuditService {
       const result = await this.prisma.auditLog.deleteMany({
         where: { id: { in: batch.map(({ id }) => id) } },
       });
+      // Progress guard: if a selected page deletes nothing, the next iteration
+      // would re-select the same page forever. Not reachable today, but the
+      // loop's only other exit is an empty select.
+      if (result.count === 0) break;
       total += result.count;
     }
     if (total > 0) this.logger.log(`Purged ${total} audit logs older than 365 days.`);
@@ -165,6 +169,7 @@ export class AuditService {
       const result = await this.prisma.retainedTimeEntry.deleteMany({
         where: { id: { in: batch.map(({ id }) => id) } },
       });
+      if (result.count === 0) break;
       total += result.count;
     }
     if (total > 0) this.logger.log(`Purged ${total} expired retained time entries older than 3 years.`);
