@@ -24,10 +24,11 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, RequestStatus } from '@prisma/client';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { mapStaffRequest } from '../../common/mappers';
 import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
+import { addDays, weekStartFor } from '../../common/pay-period';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -95,16 +96,11 @@ class AvailabilityBlockDto {
   available!: boolean;
 }
 
-// Time-correction payload for the clock screen. Distinct from AvailabilityBlock:
-// corrections are a single object (not an array of weekly blocks), so they need
-// their own validated shape — sending this under `availability` fails @IsArray
-// and every submission would 400.
 class TimeCorrectionDto {
   @IsOptional()
   @IsString()
   timeEntryId?: string | null;
 
-  // Epoch milliseconds, as produced by the client's Date(...).getTime().
   @IsNumber()
   @Min(0)
   clockInAt!: number;
@@ -187,7 +183,7 @@ export class StaffRequestsController {
     const requests = await this.prisma.staffRequest.findMany({
       where: {
         venueId: scope.venueId,
-        ...(isAdminRole(scope.role) ? {} : { profileId: scope.profileId }),
+        ...(canManageVenue(scope.role, scope.allAccess) ? {} : { profileId: scope.profileId }),
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -222,9 +218,6 @@ export class StaffRequestsController {
       }
     }
 
-    // Time corrections carry a single correction object (stored in the same
-    // `availability` JSON column the reviewer reads). Validate it here so an
-    // approval later can't act on a nonsensical range.
     if (body.kind === 'time_correction') {
       if (!body.timeCorrection) {
         throw new BadRequestException('Time correction details are required.');
@@ -298,191 +291,190 @@ export class StaffRequestsController {
     @Param('id') id: string,
     @Body() body: ReviewStaffRequestDto,
   ) {
-    if (!scope || !isAdminRole(scope.role)) {
+    if (!scope || !canManageVenue(scope.role, scope.allAccess)) {
       throw new ForbiddenException('Not authorized');
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT 1 FROM "StaffRequest" WHERE "id" = ${id} FOR UPDATE`;
-    const request = await tx.staffRequest.findUnique({ where: { id } });
-    if (!request) throw new NotFoundException('Request not found');
-    if (request.venueId !== scope.venueId) {
-      throw new ForbiddenException('Request does not belong to this venue');
-    }
-    if (request.status !== 'pending') {
-      throw new BadRequestException('Only pending requests can be reviewed');
-    }
-
-    const reviewer = await tx.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
-
-    // Handle approval side-effects
-    if (body.status === 'approved') {
-      if (request.kind === 'sick_leave') {
-        const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
-        // Atomic decrement clamped at zero so two concurrent approvals can't
-        // both read the same balance and under-deduct (lost update).
-        await tx.$executeRaw`
-          UPDATE "Profile"
-          SET "sickHoursAccrued" = GREATEST(0, "sickHoursAccrued" - ${hours})
-          WHERE id = ${request.profileId}`;
-      } else if (request.kind === 'time_off') {
-        const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
-        await tx.$executeRaw`
-          UPDATE "Profile"
-          SET "ptoHoursAccrued" = GREATEST(0, "ptoHoursAccrued" - ${hours})
-          WHERE id = ${request.profileId}`;
+      await tx.$executeRaw`SELECT 1 FROM "StaffRequest" WHERE "id" = ${id} FOR UPDATE`;
+      const request = await tx.staffRequest.findUnique({ where: { id } });
+      if (!request) throw new NotFoundException('Request not found');
+      if (request.venueId !== scope.venueId) {
+        throw new ForbiddenException('Request does not belong to this venue');
       }
-      
-      // Approved unavailable days are the only availability source. Release any
-      // concrete dated shifts in the approved range so the open-shift board and
-      // staffing totals update immediately.
-      if ((request.kind === 'time_off' || request.kind === 'sick_leave') && tx.scheduleShift?.findMany) {
-        const unavailableStart = request.requestedRangeStart || request.requestedForDate;
-        const unavailableEnd = request.requestedRangeEnd || request.requestedForDate || unavailableStart;
-        if (unavailableStart && unavailableEnd) {
-          const assignedShifts = await tx.scheduleShift.findMany({
-            where: { venueId: request.venueId, profileId: request.profileId },
-            select: { id: true, weekStart: true, dayIndex: true },
-          });
-          const affectedIds = assignedShifts
-            .filter((shift) => {
-              if (!shift.weekStart) return false;
-              const date = new Date(`${shift.weekStart}T00:00:00.000Z`);
-              date.setUTCDate(date.getUTCDate() + shift.dayIndex);
-              const iso = date.toISOString().slice(0, 10);
-              return iso >= unavailableStart && iso <= unavailableEnd;
-            })
-            .map((shift) => shift.id);
-          if (affectedIds.length > 0) {
-            await tx.scheduleShift.updateMany({
-              where: { id: { in: affectedIds } },
-              data: { profileId: null, status: 'open' },
-            });
-          }
-        }
+      if (request.status !== 'pending') {
+        throw new BadRequestException('Only pending requests can be reviewed');
       }
 
-      if (request.kind === 'time_correction') {
-        const correction = (request.availability as any) || {};
-        const venue = await tx.venue.findUnique({
-          where: { id: request.venueId },
-          select: { timezone: true },
-        });
-        const correctedClockIn = new Date(correction.clockInAt);
-        if (isNaN(correctedClockIn.getTime())) {
-          throw new BadRequestException('Invalid correction clock-in time');
-        }
-        const correctedClockOut = correction.clockOutAt ? new Date(correction.clockOutAt) : null;
-        if (correction.clockOutAt && (!correctedClockOut || isNaN(correctedClockOut.getTime()))) {
-          throw new BadRequestException('Invalid correction clock-out time');
-        }
-        const willBeOpen = !correctedClockOut;
+      const reviewer = await tx.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
 
-        const applyCorrection = async (targetId: string) => {
-          if (willBeOpen) {
-            const otherOpen = await tx.timeEntry.findFirst({
+      // Handle approval side-effects
+      if (body.status === 'approved') {
+        if (request.kind === 'sick_leave') {
+          const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
+          await tx.$executeRaw`
+            UPDATE "Profile"
+            SET "sickHoursAccrued" = GREATEST(0, "sickHoursAccrued" - ${hours})
+            WHERE id = ${request.profileId}`;
+        } else if (request.kind === 'time_off') {
+          const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
+          await tx.$executeRaw`
+            UPDATE "Profile"
+            SET "ptoHoursAccrued" = GREATEST(0, "ptoHoursAccrued" - ${hours})
+            WHERE id = ${request.profileId}`;
+        }
+        
+        if ((request.kind === 'time_off' || request.kind === 'sick_leave') && tx.scheduleShift?.findMany) {
+          const unavailableStart = request.requestedRangeStart || request.requestedForDate;
+          const unavailableEnd = request.requestedRangeEnd || request.requestedForDate || unavailableStart;
+          if (unavailableStart && unavailableEnd) {
+            // Previously fetched every shift ever assigned to this profile at
+            // this venue, unfiltered by date, then filtered in JS — on
+            // Prisma's 5s transaction default, while this transaction still
+            // holds a FOR UPDATE lock on the StaffRequest row. dayIndex 0-6
+            // means a shift's actual date can fall up to 6 days after its
+            // weekStart, so widen the lower bound by 6 days to stay correct;
+            // this is the exact range the composite
+            // [venueId, profileId, weekStart, dayIndex] index was built for.
+            const assignedShifts = await tx.scheduleShift.findMany({
               where: {
-                profileId: request.profileId,
                 venueId: request.venueId,
-                isOpen: true,
-                id: { not: targetId },
+                profileId: request.profileId,
+                weekStart: { gte: addDays(weekStartFor(unavailableStart), -6), lte: unavailableEnd },
               },
-              select: { id: true },
+              select: { id: true, weekStart: true, dayIndex: true },
             });
-            if (otherOpen) {
-              throw new BadRequestException(
-                'Cannot leave this correction open — staff already has an open clock-in.',
-              );
+            const affectedIds = assignedShifts
+              .filter((shift) => {
+                if (!shift.weekStart) return false;
+                const date = new Date(`${shift.weekStart}T00:00:00.000Z`);
+                date.setUTCDate(date.getUTCDate() + shift.dayIndex);
+                const iso = date.toISOString().slice(0, 10);
+                return iso >= unavailableStart && iso <= unavailableEnd;
+              })
+              .map((shift) => shift.id);
+            if (affectedIds.length > 0) {
+              await tx.scheduleShift.updateMany({
+                where: { id: { in: affectedIds } },
+                data: { profileId: null, status: 'open' },
+              });
             }
           }
-          await tx.timeEntry.update({
-            where: { id: targetId },
-            data: {
-              clockInAt: correctedClockIn,
-              clockOutAt: correctedClockOut,
-              isOpen: willBeOpen,
-            },
-          });
-        };
+        }
 
-        if (correction.timeEntryId) {
-          // Only correct a time entry that belongs to this venue AND the same
-          // staff member who filed the request — never a foreign entry id
-          // smuggled in via the client-supplied availability blob.
-          const target = await tx.timeEntry.findFirst({
-            where: { id: correction.timeEntryId, venueId: request.venueId, profileId: request.profileId },
+        if (request.kind === 'time_correction') {
+          const correction = (request.availability as any) || {};
+          const venue = await tx.venue.findUnique({
+            where: { id: request.venueId },
+            select: { timezone: true },
           });
-          if (!target) throw new BadRequestException('Time entry not found for this request');
-          await applyCorrection(target.id);
-        } else {
-          // No specific entry ID — find an existing entry for this profile on the
-          // same venue-local calendar day and correct it. Only create a new entry
-          // if none exists (the employee genuinely forgot to clock in).
-          const dayIso = zonedIsoDate(venue?.timezone ?? null, correctedClockIn.getTime());
-          const { start: dayStartMs, end: dayEndMs } = zonedDateBounds(
-            venue?.timezone ?? null,
-            dayIso,
-          );
-          const existing = await tx.timeEntry.findFirst({
-            where: {
-              profileId: request.profileId,
-              venueId: request.venueId,
-              clockInAt: { gte: new Date(dayStartMs), lt: new Date(dayEndMs) },
-            },
-          });
-          if (existing) {
-            await applyCorrection(existing.id);
-          } else {
+          const correctedClockIn = new Date(correction.clockInAt);
+          if (isNaN(correctedClockIn.getTime())) {
+            throw new BadRequestException('Invalid correction clock-in time');
+          }
+          const correctedClockOut = correction.clockOutAt ? new Date(correction.clockOutAt) : null;
+          if (correction.clockOutAt && (!correctedClockOut || isNaN(correctedClockOut.getTime()))) {
+            throw new BadRequestException('Invalid correction clock-out time');
+          }
+          const willBeOpen = !correctedClockOut;
+
+          const applyCorrection = async (targetId: string) => {
             if (willBeOpen) {
               const otherOpen = await tx.timeEntry.findFirst({
                 where: {
                   profileId: request.profileId,
                   venueId: request.venueId,
                   isOpen: true,
+                  id: { not: targetId },
                 },
                 select: { id: true },
               });
               if (otherOpen) {
                 throw new BadRequestException(
-                  'Cannot create an open correction — staff already has an open clock-in.',
+                  'Cannot leave this correction open — staff already has an open clock-in.',
                 );
               }
             }
-            await tx.timeEntry.create({
+            await tx.timeEntry.update({
+              where: { id: targetId },
               data: {
-                profileId: request.profileId,
-                venueId: request.venueId,
                 clockInAt: correctedClockIn,
-                clockOutAt: correctedClockOut
-                  ?? new Date(correctedClockIn.getTime() + 8 * 60 * 60 * 1000),
-                clockInLat: 0,
-                clockInLng: 0,
-                clockInAccuracyM: 0,
-                clockInMocked: false,
-                clockOutLat: 0,
-                clockOutLng: 0,
-                clockOutAccuracyM: 0,
-                clockOutMocked: false,
-                // New corrections without an explicit out time default to a closed
-                // 8h entry so we never collide with the one-open-punch unique index.
-                isOpen: false,
+                clockOutAt: correctedClockOut,
+                isOpen: willBeOpen,
               },
             });
+          };
+
+          if (correction.timeEntryId) {
+            const target = await tx.timeEntry.findFirst({
+              where: { id: correction.timeEntryId, venueId: request.venueId, profileId: request.profileId },
+            });
+            if (!target) throw new BadRequestException('Time entry not found for this request');
+            await applyCorrection(target.id);
+          } else {
+            const dayIso = zonedIsoDate(venue?.timezone ?? null, correctedClockIn.getTime());
+            const { start: dayStartMs, end: dayEndMs } = zonedDateBounds(
+              venue?.timezone ?? null,
+              dayIso,
+            );
+            const existing = await tx.timeEntry.findFirst({
+              where: {
+                profileId: request.profileId,
+                venueId: request.venueId,
+                clockInAt: { gte: new Date(dayStartMs), lt: new Date(dayEndMs) },
+              },
+            });
+            if (existing) {
+              await applyCorrection(existing.id);
+            } else {
+              if (willBeOpen) {
+                const otherOpen = await tx.timeEntry.findFirst({
+                  where: {
+                    profileId: request.profileId,
+                    venueId: request.venueId,
+                    isOpen: true,
+                  },
+                  select: { id: true },
+                });
+                if (otherOpen) {
+                  throw new BadRequestException(
+                    'Cannot create an open correction — staff already has an open clock-in.',
+                  );
+                }
+              }
+              await tx.timeEntry.create({
+                data: {
+                  profileId: request.profileId,
+                  venueId: request.venueId,
+                  clockInAt: correctedClockIn,
+                  clockOutAt: correctedClockOut
+                    ?? new Date(correctedClockIn.getTime() + 8 * 60 * 60 * 1000),
+                  clockInLat: 0,
+                  clockInLng: 0,
+                  clockInAccuracyM: 0,
+                  clockInMocked: false,
+                  clockOutLat: 0,
+                  clockOutLng: 0,
+                  clockOutAccuracyM: 0,
+                  clockOutMocked: false,
+                  isOpen: false,
+                },
+              });
+            }
           }
         }
       }
-    }
 
-    const updated = await tx.staffRequest.update({
-      where: { id: request.id },
-      data: {
-        status: body.status as RequestStatus,
-        reviewerId: scope.profileId,
-        reviewedAt: new Date(),
-        responseNotes: body.responseNotes,
-      },
-    });
-    return { request, reviewer, updated };
+      const updated = await tx.staffRequest.update({
+        where: { id: request.id },
+        data: {
+          status: body.status as RequestStatus,
+          reviewerId: scope.profileId,
+          reviewedAt: new Date(),
+          responseNotes: body.responseNotes,
+        },
+      });
+      return { request, reviewer, updated };
     });
     const { request, reviewer, updated } = result;
 

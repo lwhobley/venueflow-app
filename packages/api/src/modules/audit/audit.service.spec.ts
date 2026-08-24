@@ -84,4 +84,86 @@ describe('AuditService', () => {
       ).resolves.toBeUndefined();
     });
   });
+
+  describe('cleanup jobs', () => {
+    it('deletes audit logs older than 365 days', async () => {
+      mockPrisma.auditLog.findMany = vi.fn()
+        .mockResolvedValueOnce([{ id: 'audit-1' }, { id: 'audit-2' }])
+        .mockResolvedValueOnce([]);
+      mockPrisma.auditLog.deleteMany = vi.fn().mockResolvedValue({ count: 42 });
+      const count = await service.cleanupOldAuditLogs();
+      expect(count).toBe(42);
+      expect(mockPrisma.auditLog.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['audit-1', 'audit-2'] } },
+      });
+    });
+
+    it('deletes retained time entries older than 3 years', async () => {
+      mockPrisma.retainedTimeEntry = {
+        findMany: vi.fn()
+          .mockResolvedValueOnce([{ id: 'wage-1' }])
+          .mockResolvedValueOnce([]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 15 }),
+      };
+      const count = await service.cleanupExpiredRetainedTimeEntries();
+      expect(count).toBe(15);
+      expect(mockPrisma.retainedTimeEntry.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['wage-1'] } },
+      });
+    });
+
+    it('pages through multiple batches of audit logs until one comes back empty', async () => {
+      mockPrisma.auditLog.findMany = vi.fn()
+        .mockResolvedValueOnce([{ id: 'audit-1' }, { id: 'audit-2' }])
+        .mockResolvedValueOnce([{ id: 'audit-3' }])
+        .mockResolvedValueOnce([]);
+      mockPrisma.auditLog.deleteMany = vi.fn()
+        .mockResolvedValueOnce({ count: 2 })
+        .mockResolvedValueOnce({ count: 1 });
+
+      const count = await service.cleanupOldAuditLogs();
+
+      expect(count).toBe(3);
+      expect(mockPrisma.auditLog.findMany).toHaveBeenCalledTimes(3);
+      expect(mockPrisma.auditLog.deleteMany).toHaveBeenNthCalledWith(1, { where: { id: { in: ['audit-1', 'audit-2'] } } });
+      expect(mockPrisma.auditLog.deleteMany).toHaveBeenNthCalledWith(2, { where: { id: { in: ['audit-3'] } } });
+    });
+
+    it('propagates a thrown error from cleanupOldAuditLogs without swallowing it', async () => {
+      mockPrisma.auditLog.findMany = vi.fn().mockRejectedValue(new Error('db unreachable'));
+      mockPrisma.auditLog.deleteMany = vi.fn();
+
+      await expect(service.cleanupOldAuditLogs()).rejects.toThrow('db unreachable');
+      expect(mockPrisma.auditLog.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('pages through multiple batches of retained time entries until one comes back empty', async () => {
+      mockPrisma.retainedTimeEntry = {
+        findMany: vi.fn()
+          .mockResolvedValueOnce([{ id: 'wage-1' }, { id: 'wage-2' }])
+          .mockResolvedValueOnce([{ id: 'wage-3' }])
+          .mockResolvedValueOnce([]),
+        deleteMany: vi.fn()
+          .mockResolvedValueOnce({ count: 2 })
+          .mockResolvedValueOnce({ count: 1 }),
+      };
+
+      const count = await service.cleanupExpiredRetainedTimeEntries();
+
+      expect(count).toBe(3);
+      expect(mockPrisma.retainedTimeEntry.findMany).toHaveBeenCalledTimes(3);
+      expect(mockPrisma.retainedTimeEntry.deleteMany).toHaveBeenNthCalledWith(1, { where: { id: { in: ['wage-1', 'wage-2'] } } });
+      expect(mockPrisma.retainedTimeEntry.deleteMany).toHaveBeenNthCalledWith(2, { where: { id: { in: ['wage-3'] } } });
+    });
+
+    it('propagates a thrown error from cleanupExpiredRetainedTimeEntries without swallowing it', async () => {
+      mockPrisma.retainedTimeEntry = {
+        findMany: vi.fn().mockRejectedValue(new Error('db unreachable')),
+        deleteMany: vi.fn(),
+      };
+
+      await expect(service.cleanupExpiredRetainedTimeEntries()).rejects.toThrow('db unreachable');
+      expect(mockPrisma.retainedTimeEntry.deleteMany).not.toHaveBeenCalled();
+    });
+  });
 });

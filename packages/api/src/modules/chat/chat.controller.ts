@@ -477,6 +477,11 @@ export class ChatController {
       await tx.message.deleteMany({ where: { conversationId: id } });
       await tx.conversation.delete({ where: { id: conv.id } });
       return created;
+    }, {
+      // A long-lived group chat pages through thousands of images here; the 5s
+      // interactive default would abort mid-delete and roll the whole thing back.
+      timeout: 120_000,
+      maxWait: 10_000,
     });
     // Fire-and-forget a small bounded number. Awaiting serial S3 deletion
     // timed out the gateway for large conversations, while starting every job

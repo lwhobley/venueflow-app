@@ -354,13 +354,18 @@ describe('AppController multi-venue invariants', () => {
         count: vi.fn().mockResolvedValue(1),
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      venue: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      chatImage: { findMany: vi.fn().mockResolvedValue([]) },
-      venueDocument: { findMany: vi.fn().mockResolvedValue([]) },
-      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]) },
+      venue: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([{ id: 'venue-single', name: 'Single Venue' }]),
+      },
+      chatImage: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      venueDocument: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
       objectDeletionJob: { create: vi.fn() },
+      retainedTimeEntry: { createMany: vi.fn() },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      timeEntry: { updateMany: vi.fn() }, scheduleShift: { updateMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
     };
     prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
@@ -373,11 +378,128 @@ describe('AppController multi-venue invariants', () => {
     )).resolves.toEqual({ ok: true });
 
     expect(prisma.profile.deleteMany).toHaveBeenCalledWith({ where: { venueId: { in: ['venue-single'] } } });
+    expect(prisma.chatImage.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
+    expect(prisma.venueDocument.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
+    expect(prisma.checklistCompletion.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500, orderBy: { id: 'asc' } }));
     expect(prisma.venue.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['venue-single'] } } });
     expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
       where: { profileId: 'profile-sole' },
       data: { profileFullName: 'deleted_user_profile-sole', isOpen: false },
     });
     expect(prisma.user.deleteMany).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+  });
+
+  it('rejects deletion of a venue whose history exceeds the automatic-deletion row limit', async () => {
+    const profiles = [
+      { id: 'profile-sole', email: 'owner@example.com', fullName: 'Sole Owner', role: 'owner', venueId: 'venue-single', membershipStatus: 'active' },
+    ];
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
+      profile: {
+        findMany: vi.fn().mockResolvedValue(profiles),
+        count: vi.fn().mockResolvedValue(1),
+        deleteMany: vi.fn(),
+      },
+      venue: { deleteMany: vi.fn(), findMany: vi.fn() },
+      chatImage: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      venueDocument: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      checklistCompletion: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      objectDeletionJob: { create: vi.fn() },
+      retainedTimeEntry: { createMany: vi.fn() },
+      pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
+      // Alone, past the 250k combined-row limit.
+      timeEntry: { updateMany: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), count: vi.fn().mockResolvedValue(250_001) },
+      scheduleShift: { updateMany: vi.fn() },
+      session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const controller = new AppController(prisma, { send: vi.fn() } as any, {} as any);
+
+    await expect(controller.deleteMyAccount(
+      { sub: 'user-1' } as any,
+      { deleteOwnedVenues: true },
+    )).rejects.toThrow('Contact support@venuewrangler.com for assisted account deletion');
+
+    expect(prisma.chatImage.findMany).not.toHaveBeenCalled();
+    expect(prisma.venue.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.user.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('archives every employee wage record before the venue cascade destroys them', async () => {
+    const profiles = [
+      { id: 'profile-sole', email: 'owner@example.com', fullName: 'Sole Owner', role: 'owner', venueId: 'venue-single', membershipStatus: 'active' },
+    ];
+    // Two entries belonging to a DIFFERENT employee — the case that matters.
+    // TimeEntry.venue is onDelete: Cascade, so without the archive step these
+    // rows disappear when the owner deletes their own account.
+    const otherStaffEntries = [
+      {
+        id: 'te-1', venueId: 'venue-single', profileId: 'profile-bailey', profileFullName: null,
+        clockInAt: new Date('2026-01-02T09:00:00Z'), clockOutAt: new Date('2026-01-02T17:00:00Z'),
+        isOpen: false, breaks: null, createdAt: new Date('2026-01-02T09:00:00Z'),
+        profile: { fullName: 'Bartender Bailey', email: 'bailey@example.com' },
+      },
+      {
+        id: 'te-2', venueId: 'venue-single', profileId: 'profile-snap', profileFullName: 'Snapshot Only',
+        clockInAt: new Date('2026-01-03T09:00:00Z'), clockOutAt: null,
+        isOpen: true, breaks: null, createdAt: new Date('2026-01-03T09:00:00Z'),
+        profile: null,
+      },
+    ];
+    let timeEntryPage = 0;
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
+      profile: {
+        findMany: vi.fn().mockResolvedValue(profiles),
+        count: vi.fn().mockResolvedValue(1),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      venue: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([{ id: 'venue-single', name: 'Single Venue' }]),
+      },
+      chatImage: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      venueDocument: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      objectDeletionJob: { create: vi.fn() },
+      retainedTimeEntry: { createMany: vi.fn() },
+      pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
+      // First call returns the page, second returns empty to end the loop.
+      timeEntry: {
+        updateMany: vi.fn(),
+        deleteMany: vi.fn(),
+        findMany: vi.fn(async () => (timeEntryPage++ === 0 ? otherStaffEntries : [])),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      scheduleShift: { updateMany: vi.fn() },
+      session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const controller = new AppController(prisma, { send: vi.fn() } as any, {} as any);
+
+    await controller.deleteMyAccount({ sub: 'user-1' } as any, { deleteOwnedVenues: true });
+
+    expect(prisma.retainedTimeEntry.createMany).toHaveBeenCalledTimes(1);
+    const retained = prisma.retainedTimeEntry.createMany.mock.calls[0][0].data;
+    expect(retained).toHaveLength(2);
+    // Pseudonymized with synthetic identifiers to preserve per-employee reconstruction
+    expect(retained[0]).toMatchObject({
+      originVenueId: 'venue-single',
+      originVenueName: 'Single Venue',
+      profileFullName: 'deleted_user_profile-bailey',
+      profileEmail: null,
+      isOpen: false,
+    });
+    expect(retained[1]).toMatchObject({
+      profileFullName: 'deleted_user_profile-snap',
+      profileEmail: null,
+      isOpen: true,
+    });
+    // And the archive must happen before the cascade, not after.
+    const archiveOrder = prisma.retainedTimeEntry.createMany.mock.invocationCallOrder[0];
+    const cascadeOrder = prisma.venue.deleteMany.mock.invocationCallOrder[0];
+    expect(archiveOrder).toBeLessThan(cascadeOrder);
   });
 });

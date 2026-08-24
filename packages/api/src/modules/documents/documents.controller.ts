@@ -12,7 +12,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { IsIn, IsString, MaxLength } from 'class-validator';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import {
   assertAllowedDocumentBytes,
@@ -56,7 +56,7 @@ function requireScope(scope: Scope): asserts scope is NonNullable<Scope> {
 
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
   requireScope(scope);
-  if (!isAdminRole(scope.role) && !scope.allAccess) throw new ForbiddenException('Only managers can manage documents');
+  if (!canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Only managers can manage documents');
 }
 
 @Controller('v1/documents')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canManageRole, isAdminRole, isOwnerOrAdminRole } from './roles';
+import { canManageRole, canManageVenue, isAdminRole, isOwnerOrAdminRole } from './roles';
 
 describe('isAdminRole', () => {
   it('includes admin, owner, manager', () => {
@@ -12,6 +12,27 @@ describe('isAdminRole', () => {
     expect(isAdminRole('staff')).toBe(false);
     expect(isAdminRole(null)).toBe(false);
     expect(isAdminRole(undefined)).toBe(false);
+  });
+});
+
+describe('canManageVenue', () => {
+  it('allows admin, owner, and manager without allAccess', () => {
+    expect(canManageVenue('admin', false)).toBe(true);
+    expect(canManageVenue('owner', false)).toBe(true);
+    expect(canManageVenue('manager', false)).toBe(true);
+  });
+
+  it('blocks staff and server without allAccess', () => {
+    expect(canManageVenue('staff', false)).toBe(false);
+    expect(canManageVenue('server', false)).toBe(false);
+    expect(canManageVenue(null, false)).toBe(false);
+  });
+
+  it('allows any role or null role when allAccess is true', () => {
+    expect(canManageVenue('staff', true)).toBe(true);
+    expect(canManageVenue('server', true)).toBe(true);
+    expect(canManageVenue(null, true)).toBe(true);
+    expect(canManageVenue(undefined, true)).toBe(true);
   });
 });
 

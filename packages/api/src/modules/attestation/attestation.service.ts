@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash, randomBytes } from 'node:crypto';
 import { verifyAssertion, verifyAttestation } from 'appattest-checker-node';
 import {
@@ -12,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 /** Challenges are short-lived; the client round-trips one immediately. */
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const RETENTION_BATCH_SIZE = 1_000;
 
 export type AssertionInput = {
   keyId: string;
@@ -30,6 +30,10 @@ export class AttestationService {
   private readonly logger = new Logger(AttestationService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  private observeInvalid(reason: string): void {
+    this.logger.warn(`attestation_observation status=invalid reason=${reason}`);
+  }
 
   /**
    * Issue a single-use nonce. The client signs it alongside the request body,
@@ -53,6 +57,7 @@ export class AttestationService {
       data: { consumedAt: new Date() },
     });
     if (count !== 1) {
+      this.observeInvalid('challenge');
       throw new AttestationError('Attestation challenge is invalid, expired, or already used.');
     }
   }
@@ -73,6 +78,7 @@ export class AttestationService {
     );
 
     if (failure(result)) {
+      this.observeInvalid('registration');
       this.logger.warn(
         `App Attest attestation rejected for user ${userId}: ${result.verifyError} ${result.errorMessage ?? ''}`.trim(),
       );
@@ -101,8 +107,10 @@ export class AttestationService {
   async verifyRequest(userId: string, payload: unknown, input: AssertionInput | undefined): Promise<void> {
     if (!input) {
       if (attestationEnforced()) {
+        this.observeInvalid('missing');
         throw new AttestationError('This app version cannot verify device integrity. Please update Venue Wrangler.');
       }
+      this.logger.log('attestation_observation status=missing');
       return;
     }
 
@@ -111,11 +119,13 @@ export class AttestationService {
 
     const device = await this.prisma.deviceAttestation.findUnique({ where: { keyId: input.keyId } });
     if (!device || device.userId !== userId) {
+      this.observeInvalid('device');
       throw new AttestationError('This device is not registered for attestation.');
     }
     // A key attested in Apple's development environment must never authorise a
     // production punch, even if the row somehow exists.
     if (device.environment !== (developmentEnv ? 'development' : 'production')) {
+      this.observeInvalid('environment');
       throw new AttestationError('This device is not registered for attestation.');
     }
 
@@ -132,6 +142,7 @@ export class AttestationService {
     );
 
     if (failure(result)) {
+      this.observeInvalid('assertion');
       this.logger.warn(
         `App Attest assertion rejected for user ${userId}: ${result.verifyError} ${result.errorMessage ?? ''}`.trim(),
       );
@@ -147,29 +158,40 @@ export class AttestationService {
       data: { signCount: result.signCount, lastUsedAt: new Date() },
     });
     if (count !== 1) {
+      this.observeInvalid('replay');
       this.logger.warn(`App Attest replay rejected for user ${userId}: signCount did not advance.`);
       throw new AttestationError('Device integrity check failed for this request.');
     }
+    this.logger.log('attestation_observation status=valid');
   }
 
   /**
-   * Nightly cron: purge expired or consumed challenges to prevent unbounded table growth.
+   * Scheduled retention job: purge expired or consumed challenges to prevent unbounded table growth.
    */
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async cleanupExpiredChallenges(): Promise<number> {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const result = await this.prisma.attestationChallenge.deleteMany({
-      where: {
-        OR: [
-          { expiresAt: { lt: cutoff } },
-          { consumedAt: { lt: cutoff } },
-        ],
-      },
-    });
-    if (result.count > 0) {
-      this.logger.log(`Cleaned up ${result.count} expired/consumed attestation challenges.`);
+    const now = new Date();
+    const where = {
+      OR: [
+        { expiresAt: { lt: now } },
+        { consumedAt: { not: null } },
+      ],
+    };
+    let total = 0;
+    for (;;) {
+      const batch = await this.prisma.attestationChallenge.findMany({
+        where,
+        orderBy: { id: 'asc' },
+        take: RETENTION_BATCH_SIZE,
+        select: { id: true },
+      });
+      if (batch.length === 0) break;
+      const result = await this.prisma.attestationChallenge.deleteMany({
+        where: { id: { in: batch.map(({ id }) => id) } },
+      });
+      total += result.count;
     }
-    return result.count;
+    if (total > 0) this.logger.log(`Cleaned up ${total} expired/consumed attestation challenges.`);
+    return total;
   }
 }
 

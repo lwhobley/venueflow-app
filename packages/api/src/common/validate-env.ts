@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { APPLE_TEAM_ID_PATTERN } from './app-attest';
 
 const logger = new Logger('Bootstrap');
 
@@ -33,6 +34,10 @@ const RECOMMENDED_IN_PRODUCTION: ReadonlyArray<readonly string[]> = [
   ['REVENUECAT_WEBHOOK_SECRET'],
   ['REVENUECAT_API_KEY', 'REVENUECAT_SECRET_API_KEY'],
   ['RESEND_API_KEY', 'EMAIL_API_KEY'],
+  // Without this every captureException() in the codebase is a silent no-op,
+  // including the ones guarding background deletion/erasure jobs that never
+  // pass through AllExceptionsFilter.
+  ['SENTRY_DSN'],
 ];
 
 export function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
@@ -41,8 +46,20 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     throw new Error(`Missing required environment variable(s): ${missing.join(', ')}`);
   }
 
-  if (config.ATTESTATION_ENFORCED === 'true' && !String(config.APP_ATTEST_TEAM_ID ?? '').trim()) {
-    throw new Error('APP_ATTEST_TEAM_ID must be set when ATTESTATION_ENFORCED is enabled.');
+  const explicitAttestationMode = String(config.DEVICE_ATTESTATION_MODE ?? '').trim().toLowerCase();
+  const legacyEnforcementEnabled = config.ATTESTATION_ENFORCED === 'true';
+  const rawAttestationMode = explicitAttestationMode || (legacyEnforcementEnabled ? 'enforce' : 'observe');
+  const appAttestTeamId = String(config.APP_ATTEST_TEAM_ID ?? '').trim();
+
+  if (!['observe', 'enforce'].includes(rawAttestationMode)) {
+    throw new Error('DEVICE_ATTESTATION_MODE must be observe or enforce');
+  }
+
+  if (rawAttestationMode === 'enforce' && !appAttestTeamId) {
+    throw new Error('APP_ATTEST_TEAM_ID must be set when attestation is enforced.');
+  }
+  if (appAttestTeamId && !APPLE_TEAM_ID_PATTERN.test(appAttestTeamId)) {
+    throw new Error('APP_ATTEST_TEAM_ID must be a 10-character Apple Developer Team ID.');
   }
 
   if (config.NODE_ENV === 'production') {
@@ -50,9 +67,15 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     if (jwtSecret.length < 32) {
       throw new Error('JWT_SECRET must be at least 32 characters in production.');
     }
-    if (config.ATTESTATION_ENFORCED !== 'true') {
+    if (!explicitAttestationMode && !legacyEnforcementEnabled) {
+      throw new Error('Production requires an explicit DEVICE_ATTESTATION_MODE=observe|enforce');
+    }
+    if (!appAttestTeamId) {
+      throw new Error('APP_ATTEST_TEAM_ID must be set for production attestation.');
+    }
+    if (rawAttestationMode === 'observe') {
       logger.warn(
-        'ATTESTATION_ENFORCED is not true. Clock punches will be accepted without Apple App Attest. Set ATTESTATION_ENFORCED=true once the iOS install base has updated.',
+        'Device attestation is in observe mode for staged rollout. Punches with attestation assertions will be verified.',
       );
     }
     if (config.BILLING_ENABLED === 'true') {

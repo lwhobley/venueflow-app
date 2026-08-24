@@ -9,14 +9,27 @@ import { HttpException, HttpStatus } from '@nestjs/common';
  * device attestation any holder of a valid token can post the venue's
  * coordinates from anywhere (see common/geofence.ts).
  *
- * Enforcement is staged on purpose. `ATTESTATION_ENFORCED` defaults to false so
- * that shipping the server ahead of the iOS release does not lock every
- * already-installed app out of clocking in. While it is false the server still
- * verifies any attestation it receives and logs failures — it just does not
- * reject unattested punches. Flip it to true once the install base has updated.
+ * Enforcement is staged on purpose. Production selects an explicit
+ * DEVICE_ATTESTATION_MODE; the legacy ATTESTATION_ENFORCED flag remains only for
+ * migration compatibility. Observe mode verifies submitted attestations while
+ * allowing older builds and emitting rollout metrics.
  */
+export type AttestationMode = 'observe' | 'enforce';
+export const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/;
+
+/**
+ * Returns current attestation mode: 'observe' (verify if present, don't reject unattested)
+ * or 'enforce' (reject punches lacking valid attestation).
+ */
+export function getAttestationMode(): AttestationMode {
+  const explicit = process.env['DEVICE_ATTESTATION_MODE']?.trim().toLowerCase();
+  if (explicit === 'enforce') return 'enforce';
+  if (explicit === 'observe') return 'observe';
+  return process.env['ATTESTATION_ENFORCED'] === 'true' ? 'enforce' : 'observe';
+}
+
 export function attestationEnforced(): boolean {
-  return process.env['ATTESTATION_ENFORCED'] === 'true';
+  return getAttestationMode() === 'enforce';
 }
 
 /** Apple Team ID, e.g. "V8H6LQ9448". Required whenever attestation is used. */
@@ -54,9 +67,9 @@ export class AttestationError extends HttpException {
  */
 export function requireAttestationConfig(): { appId: string; developmentEnv: boolean } {
   const teamIdentifier = appAttestTeamId();
-  if (!teamIdentifier) {
+  if (!teamIdentifier || !APPLE_TEAM_ID_PATTERN.test(teamIdentifier)) {
     throw new HttpException(
-      'Device attestation is enabled but APP_ATTEST_TEAM_ID is not configured.',
+      'Device attestation requires APP_ATTEST_TEAM_ID to be a 10-character Apple Developer Team ID.',
       HttpStatus.SERVICE_UNAVAILABLE,
     );
   }

@@ -1014,25 +1014,134 @@ export class AppController {
         }
       }
 
-      let mediaJobId: string | null = null;
       if (venuesToDelete.length > 0) {
-        const [chatImages, documents, checklistPhotos] = await Promise.all([
-          tx.chatImage.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
-          tx.venueDocument.findMany({ where: { venueId: { in: venuesToDelete } }, select: { s3Key: true } }),
-          tx.checklistCompletion.findMany({
-            where: { venueId: { in: venuesToDelete }, photoKey: { not: null } },
-            select: { photoKey: true },
-          }),
+        // The batch walks below share this one transaction's 120s budget. A
+        // venue with a pathological amount of media/wage history could still
+        // exhaust it and roll back after minutes of work with no partial
+        // progress kept. Rather than let that happen silently, reject up
+        // front with an actionable message — cheap indexed counts, not the
+        // expensive walk itself. 250k combined rows is a generous multiple of
+        // any venue seen in practice; revisit if real usage approaches it.
+        const DELETION_ROW_LIMIT = 250_000;
+        const [chatImageCount, venueDocumentCount, checklistPhotoCount, timeEntryCount] = await Promise.all([
+          tx.chatImage.count({ where: { venueId: { in: venuesToDelete } } }),
+          tx.venueDocument.count({ where: { venueId: { in: venuesToDelete } } }),
+          tx.checklistCompletion.count({ where: { venueId: { in: venuesToDelete }, photoKey: { not: null } } }),
+          tx.timeEntry.count({ where: { venueId: { in: venuesToDelete } } }),
         ]);
-        const objectKeys = Array.from(new Set([
-          ...chatImages.map((row) => row.s3Key),
-          ...documents.map((row) => row.s3Key),
-          ...checklistPhotos.map((row) => row.photoKey).filter((key): key is string => Boolean(key)),
-        ]));
-        if (objectKeys.length > 0) {
-          const job = await tx.objectDeletionJob.create({ data: { objectKeys }, select: { id: true } });
-          mediaJobId = job.id;
+        const totalRows = chatImageCount + venueDocumentCount + checklistPhotoCount + timeEntryCount;
+        if (totalRows > DELETION_ROW_LIMIT) {
+          throw new ConflictException(
+            `This venue has too much history (${totalRows.toLocaleString()} records) to delete automatically. Contact support@venuewrangler.com for assisted account deletion.`,
+          );
         }
+      }
+
+      const mediaJobIds: string[] = [];
+      if (venuesToDelete.length > 0) {
+        const MEDIA_BATCH = 500;
+        const pendingKeys = new Set<string>();
+        const flushMediaJob = async () => {
+          if (pendingKeys.size === 0) return;
+          const job = await tx.objectDeletionJob.create({
+            data: { objectKeys: Array.from(pendingKeys) },
+            select: { id: true },
+          });
+          mediaJobIds.push(job.id);
+          pendingKeys.clear();
+        };
+        const addKeys = async (keys: Array<string | null>) => {
+          for (const key of keys) {
+            if (key) pendingKeys.add(key);
+            if (pendingKeys.size >= MEDIA_BATCH) await flushMediaJob();
+          }
+        };
+
+        let afterId: string | undefined;
+        for (;;) {
+          const batch: Array<{ id: string; s3Key: string }> = await tx.chatImage.findMany({
+            where: { venueId: { in: venuesToDelete }, ...(afterId ? { id: { gt: afterId } } : {}) },
+            orderBy: { id: 'asc' },
+            take: MEDIA_BATCH,
+            select: { id: true, s3Key: true },
+          });
+          if (batch.length === 0) break;
+          await addKeys(batch.map(({ s3Key }) => s3Key));
+          afterId = batch.at(-1)!.id;
+        }
+        afterId = undefined;
+        for (;;) {
+          const batch: Array<{ id: string; s3Key: string }> = await tx.venueDocument.findMany({
+            where: { venueId: { in: venuesToDelete }, ...(afterId ? { id: { gt: afterId } } : {}) },
+            orderBy: { id: 'asc' },
+            take: MEDIA_BATCH,
+            select: { id: true, s3Key: true },
+          });
+          if (batch.length === 0) break;
+          await addKeys(batch.map(({ s3Key }) => s3Key));
+          afterId = batch.at(-1)!.id;
+        }
+        afterId = undefined;
+        for (;;) {
+          const batch: Array<{ id: string; photoKey: string | null }> = await tx.checklistCompletion.findMany({
+            where: {
+              venueId: { in: venuesToDelete },
+              photoKey: { not: null },
+              ...(afterId ? { id: { gt: afterId } } : {}),
+            },
+            orderBy: { id: 'asc' },
+            take: MEDIA_BATCH,
+            select: { id: true, photoKey: true },
+          });
+          if (batch.length === 0) break;
+          await addKeys(batch.map(({ photoKey }) => photoKey));
+          afterId = batch.at(-1)!.id;
+        }
+        await flushMediaJob();
+        // Archive wage records BEFORE anything cascades. TimeEntry.venue is
+        // onDelete: Cascade, so deleting the Venue would otherwise destroy every
+        // employee's clock-in history — not just the departing account's. FLSA
+        // requires three-year retention, and those other employees are not the
+        // data subject here. RetainedTimeEntry carries no Venue FK so it
+        // survives the cascade (see its schema comment).
+        const venuesBeingDeleted = await tx.venue.findMany({
+          where: { id: { in: venuesToDelete } },
+          select: { id: true, name: true },
+        });
+        const venueNameById = new Map(venuesBeingDeleted.map((venue) => [venue.id, venue.name]));
+        const RETAIN_BATCH = 500;
+        for (;;) {
+          const batch = await tx.timeEntry.findMany({
+            where: { venueId: { in: venuesToDelete } },
+            orderBy: { id: 'asc' },
+            take: RETAIN_BATCH,
+            select: {
+              id: true, venueId: true, profileId: true, profileFullName: true, clockInAt: true,
+              clockOutAt: true, isOpen: true, breaks: true, createdAt: true,
+              profile: { select: { fullName: true, email: true } },
+            },
+          });
+          if (batch.length === 0) break;
+          await tx.retainedTimeEntry.createMany({
+            data: batch.map((entry) => ({
+              originVenueId: entry.venueId,
+              originVenueName: venueNameById.get(entry.venueId) ?? null,
+              // Pseudonymize employee identity with a stable synthetic identifier
+              // (deleted_user_<profileId>) so individual staff wage records can be
+              // distinguished and reconstructed for FLSA compliance without storing
+              // raw personal names or email addresses.
+              profileFullName: entry.profileId ? `deleted_user_${entry.profileId}` : `deleted_user_${entry.id}`,
+              profileEmail: null,
+              clockInAt: entry.clockInAt,
+              clockOutAt: entry.clockOutAt,
+              isOpen: entry.isOpen,
+              breaks: entry.breaks ?? Prisma.DbNull,
+              originCreatedAt: entry.createdAt,
+            })),
+          });
+          await tx.timeEntry.deleteMany({ where: { id: { in: batch.map((entry) => entry.id) } } });
+        }
+
         // Profile.venue uses SetNull because profiles can temporarily be
         // venueless during onboarding. Tenant offboarding is different: remove
         // every venue profile explicitly before the Venue cascade.
@@ -1062,14 +1171,38 @@ export class AppController {
       return {
         email: account?.email ?? primary?.email ?? user.email,
         name: primary?.fullName ?? user.name ?? 'there',
-        mediaJobId,
+        mediaJobIds,
         deletedVenueCount: venuesToDelete.length,
       };
+    }, {
+      // Tenant offboarding walks every venue-owned table plus a batched wage-record
+      // archive. Prisma's 5s interactive default aborts that on any venue with real
+      // history, leaving the account permanently undeletable — itself a GDPR problem.
+      timeout: 120_000,
+      maxWait: 10_000,
     }));
-    if (deletion?.mediaJobId && this.mediaCleanup) {
-      void this.mediaCleanup.processJob(deletion.mediaJobId).catch((error) => {
-        this.logger.error(`Initial media purge failed for deletion job ${deletion.mediaJobId}`, error instanceof Error ? error.stack : String(error));
-      });
+    if (deletion?.mediaJobIds.length && this.mediaCleanup) {
+      const mediaCleanup = this.mediaCleanup;
+      const jobIds = deletion.mediaJobIds;
+      // Bounded and fire-and-forget: a large tenant can shard into hundreds of
+      // jobs, and starting them all concurrently from one API instance would
+      // spike DB/S3 connections for the whole process. Anything not finished
+      // here is still picked up by the hourly retry sweep in
+      // media-cleanup.service.ts, so this is a best-effort head start, not the
+      // only path to completion.
+      const IMMEDIATE_MEDIA_DELETE_CONCURRENCY = 5;
+      void (async () => {
+        let next = 0;
+        const worker = async () => {
+          while (next < jobIds.length) {
+            const jobId = jobIds[next++];
+            await mediaCleanup.processJob(jobId).catch((error) => {
+              this.logger.error(`Initial media purge failed for deletion job ${jobId}`, error instanceof Error ? error.stack : String(error));
+            });
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(IMMEDIATE_MEDIA_DELETE_CONCURRENCY, jobIds.length) }, worker));
+      })();
     }
     if (deletion?.email) {
       void this.email.send({

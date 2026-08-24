@@ -19,7 +19,7 @@ import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
@@ -861,7 +861,7 @@ export class OperationsController {
         category,
         body: text,
         // Only managers/admins can pin an entry to the top of the feed.
-        pinned: Boolean(body.pinned) && isAdminRole(profile.role),
+        pinned: Boolean(body.pinned) && canManageVenue(profile.role, profile.allAccess),
       },
     });
     return mapLogbookEntry(created);
@@ -873,7 +873,7 @@ export class OperationsController {
     const profile = await this.requireVenueProfile(user);
     const entry = await this.prisma.logbookEntry.findFirst({ where: { id, venueId: profile.venueId! } });
     if (!entry) throw new NotFoundException('Entry not found');
-    if (entry.authorProfileId !== profile.id && !isAdminRole(profile.role)) {
+    if (entry.authorProfileId !== profile.id && !canManageVenue(profile.role, profile.allAccess)) {
       throw new ForbiddenException('You can only remove your own entries');
     }
     await this.prisma.logbookEntry.delete({ where: { id: entry.id } });
@@ -1091,7 +1091,7 @@ export class OperationsController {
 
   private async requireManagerProfile(user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
-    if (!isAdminRole(profile.role)) throw new ForbiddenException('Not authorized');
+    if (!canManageVenue(profile.role, profile.allAccess)) throw new ForbiddenException('Not authorized');
     return profile;
   }
 

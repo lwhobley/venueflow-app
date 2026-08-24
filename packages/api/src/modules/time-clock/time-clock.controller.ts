@@ -9,7 +9,7 @@ import { IsBoolean, IsNumber, IsOptional, IsString, IsIn, Max, MaxLength, Min, M
 import { Type } from 'class-transformer';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
-import { isAdminRole } from '../../auth/roles';
+import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertFixNotReplayed, assertWithinGeofence, type PriorFix } from '../../common/geofence';
 import { parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
@@ -86,7 +86,7 @@ export class TimeClockController {
   @Get('board')
   async getClockBoard(@VenueScope() scope: Scope) {
     if (!scope) return null;
-    const managerView = isAdminRole(scope.role);
+    const managerView = canManageVenue(scope.role, scope.allAccess);
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId } });
     if (!venue) return null;
 
@@ -113,7 +113,7 @@ export class TimeClockController {
       detail: string;
     }> = [];
 
-    if (isAdminRole(scope.role)) {
+    if (canManageVenue(scope.role, scope.allAccess)) {
       const now = Date.now();
       const tz = venue.timezone ?? null;
       const today = zonedDayOfWeek(tz, now);
@@ -269,7 +269,7 @@ export class TimeClockController {
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
 
-    if (!isAdminRole(scope.role)) {
+    if (!canManageVenue(scope.role, scope.allAccess)) {
       const nowMs = Date.now();
       const today = zonedDayOfWeek(venue.timezone, nowMs);
       const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);

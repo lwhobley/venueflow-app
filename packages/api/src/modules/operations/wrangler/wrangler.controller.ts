@@ -34,7 +34,7 @@ export class WranglerController {
   @RequireSubscription('active') @Get('ai-usage')
   async getAiUsage(@VenueScope() scope: Scope) {
     if (!scope) return null;
-    if (!isAdminRole(scope.role)) throw new ForbiddenException('Manager access required to view AI usage');
+    if (!canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Manager access required to view AI usage');
     const rows = await this.prisma.$queryRaw<Array<{ feature: string; model: string; requests: bigint; promptTokens: bigint; completionTokens: bigint; cachedTokens: bigint; totalTokens: bigint; estimatedCostMicros: bigint }>>(
       Prisma.sql`SELECT "feature", "model", COUNT(*)::bigint AS requests, COALESCE(SUM("promptTokens"),0)::bigint AS "promptTokens", COALESCE(SUM("completionTokens"),0)::bigint AS "completionTokens", COALESCE(SUM("cachedTokens"),0)::bigint AS "cachedTokens", COALESCE(SUM("totalTokens"),0)::bigint AS "totalTokens", COALESCE(SUM("estimatedCostMicros"),0)::bigint AS "estimatedCostMicros" FROM "AiUsageEvent" WHERE "venueId" = ${scope.venueId} AND "createdAt" >= date_trunc('month', NOW()) GROUP BY "feature", "model" ORDER BY "estimatedCostMicros" DESC`,
     );
@@ -68,7 +68,7 @@ export class WranglerController {
   @RequireSubscription('active') @Post('actions')
   async executeAction(@VenueScope() scope: Scope, @Body() body: ExecuteWranglerActionDto) {
     if (!scope) return null;
-    if (!isAdminRole(scope.role)) throw new ForbiddenException('Manager access required to execute Wrangler actions');
+    if (!canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Manager access required to execute Wrangler actions');
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } });
     if (!venue) throw new BadRequestException('Venue not found');
     if (body.type === 'NOTIFY_STAFF') { const snapshot = await this.wrangler.getSnapshot(scope.venueId, venue.timezone); if (snapshot.summary.openShifts <= 0) throw new BadRequestException('No open shifts currently need coverage'); const count = snapshot.summary.openShifts; await this.notifications.notifyStaff({ venueId: scope.venueId, kind: 'wrangler_coverage', title: 'Open shifts need coverage', body: `${count} open shift${count === 1 ? '' : 's'} still need coverage. Check Venue Wrangler for available shifts.` }); return { ok: true, type: body.type, notified: 'staff', openShifts: count }; }
