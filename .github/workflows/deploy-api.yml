@@ -54,6 +54,10 @@ jobs:
   migrate-and-deploy:
     environment: production
     runs-on: ubuntu-latest
+    # Without this a hung curl (no --max-time previously) could hold the
+    # non-cancellable production-api-deploy concurrency group for the 6-hour
+    # runner default — blocking the very deploy that would fix the outage.
+    timeout-minutes: 30
     steps:
       - name: Require an immutable image digest
         env:
@@ -160,10 +164,30 @@ jobs:
         run: |
           set -Eeuo pipefail
           service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
-          previous_revision="$(jq -r '.status.traffic[] | select(.percent == 100) | .revisionName' <<<"$service_json")"
-          # Fresh service / first-ever deploy has no prior 100% revision to fall
-          # back to — proceed without a rollback target rather than fail here.
-          echo "PREVIOUS_REVISION=${previous_revision:-}" >> "$GITHUB_ENV"
+          # .status.traffic is an array and `percent` is optional per entry, so
+          # this filter is a stream that can emit zero, one, or many lines.
+          # Multi-line would corrupt $GITHUB_ENV (a second line with no '='),
+          # failing the step AFTER migrations have already applied. Collect and
+          # assert cardinality instead of assuming one match.
+          mapfile -t revs < <(jq -r '[.status.traffic[] | select(.percent == 100) | .revisionName] | unique | .[]' <<<"$service_json")
+          if (( ${#revs[@]} > 1 )); then
+            echo "::error::Ambiguous serving revision (${revs[*]}) — refusing to promote without an unambiguous rollback target."
+            exit 1
+          fi
+          previous_revision="${revs[0]:-}"
+          if [[ -z "$previous_revision" ]]; then
+            # Either a first-ever deploy (fine) or a split/in-progress rollout
+            # (not fine — promoting would leave no rollback target). Distinguish
+            # them: a service with any existing traffic assignment is the
+            # latter, and should not be steamrolled by an automated deploy.
+            existing_targets="$(jq -r '[.status.traffic[]? | select((.percent // 0) > 0)] | length' <<<"$service_json")"
+            if [[ "$existing_targets" != "0" ]]; then
+              echo "::error::Traffic is split across revisions with none at 100%. Resolve the rollout manually before deploying."
+              exit 1
+            fi
+            echo "::warning::No previously-serving revision found (first deploy) — automatic rollback will be unavailable."
+          fi
+          echo "PREVIOUS_REVISION=${previous_revision}" >> "$GITHUB_ENV"
 
       - name: Promote the verified candidate to production traffic
         run: |
@@ -177,12 +201,19 @@ jobs:
       - name: Verify the production health endpoint after promotion, rolling back on failure
         run: |
           set -Eeuo pipefail
-          if curl --fail --retry 8 --retry-delay 5 --retry-all-errors https://venue-wrangler-api-922889404273.us-east1.run.app/api/health; then
+          # Derive the URL rather than hardcoding one: the shipped app points at
+          # a different hostname form, so a hardcoded URL can validate an
+          # endpoint no client actually hits.
+          service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
+          [[ "$service_url" == https://* ]] || { echo "::error::Could not resolve the service URL"; exit 1; }
+          probe() { curl --fail --silent --show-error -o /dev/null --connect-timeout 10 --max-time 30 --retry 8 --retry-delay 5 --retry-all-errors "$1/api/health"; }
+
+          if probe "$service_url"; then
             exit 0
           fi
           echo "::error::Production health check failed after promoting ${RELEASE_TAG}."
           if [[ -z "${PREVIOUS_REVISION:-}" ]]; then
-            echo "::error::No previous revision captured — nothing to automatically roll back to. Manual intervention required."
+            echo "::error::No previous revision captured - nothing to automatically roll back to. Manual intervention required."
             exit 1
           fi
           echo "::error::Rolling traffic back to ${PREVIOUS_REVISION}."
@@ -191,5 +222,17 @@ jobs:
             --region "$GCP_REGION" \
             --to-revisions "${PREVIOUS_REVISION}=100" \
             --quiet
-          echo "::error::Rolled back to ${PREVIOUS_REVISION}. Failing this deploy for investigation."
+
+          # update-traffic returning 0 only means the API accepted the change,
+          # not that the old revision is actually serving healthy traffic.
+          serving="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq -r '[.status.traffic[] | select(.percent == 100) | .revisionName] | first // ""')"
+          if [[ "$serving" != "$PREVIOUS_REVISION" ]]; then
+            echo "::error::Rollback did not take effect (serving='${serving:-none}', expected '${PREVIOUS_REVISION}'). PRODUCTION IS DEGRADED - page on-call."
+            exit 1
+          fi
+          if ! probe "$service_url"; then
+            echo "::error::Rolled back to ${PREVIOUS_REVISION} but health is STILL failing. PRODUCTION IS DEGRADED - page on-call."
+            exit 1
+          fi
+          echo "::error::Rolled back to ${PREVIOUS_REVISION} and confirmed healthy. Failing this deploy for investigation."
           exit 1

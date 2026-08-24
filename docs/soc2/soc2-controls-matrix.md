@@ -45,7 +45,7 @@ This document maps AICPA Trust Services Criteria to specific technical and organ
 | **CC6.2** | User registration and credential management | Single-use email verification tokens, secure password reset one-time codes, session revocation on password change. |
 | **CC6.3** | Role-Based Access Control (RBAC) | Explicit role hierarchy (`admin`, `owner`, `manager`, `server`, `staff`) enforced by `RolesGuard` and `VenueScopeInterceptor`. |
 | **CC6.4** | Physical access restrictions | Physical hosting delegated to Google Cloud Platform and Supabase (AWS us-east-1) SOC 2 Type II certified data centers. |
-| **CC6.5** | Data transmission and endpoint protection | TLS 1.3 in transit with HSTS; PII redaction filter (`sanitizeAuditMetadata`) preventing secret leakage in audit logs. |
+| **CC6.5** | Data transmission and endpoint protection | TLS 1.3 in transit with HSTS; secret redaction filter (`sanitizeAuditMetadata`) preventing secret leakage in audit logs. Note this redacts secret-bearing keys (password/token/secret/authorization/PAN/CVV/SSN), not PII — actor and target names are deliberately retained for the audit trail. |
 | **CC6.6** | Multi-tenant isolation | Tenant isolation Prisma extension (`packages/api/src/prisma/tenant-scope.ts`) enforcing `where: { venueId }` on all tenant queries with Postgres RLS fail-closed backstop. |
 | **CC6.7** | Threat detection and prevention | Rate limiting per IP and venue; automatic account lockout after 8 consecutive failed sign-in attempts. |
 

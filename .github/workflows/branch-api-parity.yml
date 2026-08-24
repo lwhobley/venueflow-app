@@ -32,10 +32,12 @@ jobs:
           if ! git diff --quiet origin/main origin/desktop-web -- packages/api/; then
             echo "## ❌ packages/api has diverged between main and desktop-web" >> "$GITHUB_STEP_SUMMARY"
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
-            git diff --name-status origin/main origin/desktop-web -- packages/api/ | head -200 >> "$GITHUB_STEP_SUMMARY"
+            # `| head` makes git exit 141 on SIGPIPE; under pipefail that aborts
+            # the step mid-summary, leaving the fenced block unclosed.
+            { git diff --name-status origin/main origin/desktop-web -- packages/api/ || true; } | head -200 >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
             echo "packages/api differs between main and desktop-web. Reconcile the branches before treating parity as healthy."
-            git diff --name-status origin/main origin/desktop-web -- packages/api/ | head -200
+            { git diff --name-status origin/main origin/desktop-web -- packages/api/ || true; } | head -200
             exit 1
           fi
           echo "packages/api is in sync between main and desktop-web." >> "$GITHUB_STEP_SUMMARY"

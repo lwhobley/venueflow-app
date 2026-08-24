@@ -109,6 +109,13 @@ jobs:
             skip=0
             for ex in "${EXEMPT[@]}"; do [[ "$name" == "$ex"* ]] && skip=1; done
             [[ $skip -eq 1 ]] && continue
+            # A missing/unreadable file makes the grep below evaluate false inside
+            # an `if`, which is exempt from errexit — so the migration would pass
+            # the RLS gate without ever being inspected.
+            if [[ ! -r "$dir/migration.sql" ]]; then
+              echo "::error::Migration $name has no readable migration.sql"
+              exit 1
+            fi
             if grep -qi 'CREATE TABLE' "$dir/migration.sql" && ! grep -qi 'ROW LEVEL SECURITY' "$dir/migration.sql"; then
               echo "::error::Migration $name creates a table without ENABLE ROW LEVEL SECURITY"
               exit 1

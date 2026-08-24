@@ -19,7 +19,15 @@ Venue Wrangler uses account and operational data to:
 
 Venue Wrangler does not:
 - Sell personal data
-- Share personal or location data with third parties except service providers required to operate the app
+- Share personal or location data with third parties except the service providers required to operate the app
+
+Service providers (subprocessors):
+- Google Cloud and Supabase - application hosting and database
+- Apple In-App Purchase and Stripe - subscription payments
+- Amazon Web Services (S3) - photo and document storage
+- Resend - transactional email
+- Sentry - error diagnostics
+- Google Gemini - AI features, including parsing an uploaded staff roster, which can include names, email addresses, phone numbers and job titles
 
 Data retention:
 - Time entries and location proofs are retained for operational and compliance purposes

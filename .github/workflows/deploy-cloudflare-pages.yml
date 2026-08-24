@@ -17,7 +17,16 @@ on:
 
 jobs:
   deploy:
+    # workflow_dispatch carries no branch filter, so without this guard a manual
+    # run from ANY branch would publish that branch's site/ to production under
+    # the hardcoded --branch desktop-web label — exactly what the push filter
+    # above exists to prevent.
+    if: github.ref == 'refs/heads/desktop-web'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: cloudflare-pages-production
+      cancel-in-progress: false
     permissions:
       contents: read
       deployments: write

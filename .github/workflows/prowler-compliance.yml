@@ -33,6 +33,10 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.PROWLER_AWS_ACCESS_KEY_ID || secrets.BACKUP_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.PROWLER_AWS_SECRET_ACCESS_KEY || secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.PROWLER_AWS_REGION || secrets.BACKUP_AWS_REGION || 'us-east-1' }}
+      # Passed via env rather than interpolated straight into a run: block.
+      # The input is a validated `choice`, so this is defence-in-depth, not a
+      # live injection — but this workflow holds cloud credentials.
+      PROWLER_FRAMEWORK: ${{ github.event.inputs.framework || 'soc2' }}
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
 
     steps:
@@ -80,7 +84,7 @@ jobs:
           set -e
           echo "Starting Prowler GCP compliance scan..."
           
-          FRAMEWORK="${{ github.event.inputs.framework || 'soc2' }}"
+          FRAMEWORK="$PROWLER_FRAMEWORK"
           COMPLIANCE_FLAG=""
           if [ "$FRAMEWORK" = "soc2" ]; then
             COMPLIANCE_FLAG="--compliance soc2_gcp"
@@ -108,7 +112,7 @@ jobs:
           set -e
           echo "Starting Prowler AWS compliance scan..."
           
-          FRAMEWORK="${{ github.event.inputs.framework || 'soc2' }}"
+          FRAMEWORK="$PROWLER_FRAMEWORK"
           COMPLIANCE_FLAG=""
           if [ "$FRAMEWORK" = "soc2" ]; then
             COMPLIANCE_FLAG="--compliance soc2_aws"
