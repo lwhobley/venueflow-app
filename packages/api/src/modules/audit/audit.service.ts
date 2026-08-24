@@ -130,7 +130,9 @@ export class AuditService {
     for (;;) {
       const batch = await this.prisma.auditLog.findMany({
         where: { createdAt: { lt: cutoff } },
-        orderBy: { id: 'asc' },
+        // Matches the (createdAt, id) composite index below so this is one
+        // index scan, not a filter followed by a separate sort on id.
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         take: RETENTION_BATCH_SIZE,
         select: { id: true },
       });
@@ -153,7 +155,9 @@ export class AuditService {
     for (;;) {
       const batch = await this.prisma.retainedTimeEntry.findMany({
         where: { originCreatedAt: { lt: cutoff } },
-        orderBy: { id: 'asc' },
+        // Matches the (originCreatedAt, id) composite index below so this is
+        // one index scan, not a filter followed by a separate sort on id.
+        orderBy: [{ originCreatedAt: 'asc' }, { id: 'asc' }],
         take: RETENTION_BATCH_SIZE,
         select: { id: true },
       });

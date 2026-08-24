@@ -358,13 +358,13 @@ describe('AppController multi-venue invariants', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         findMany: vi.fn().mockResolvedValue([{ id: 'venue-single', name: 'Single Venue' }]),
       },
-      chatImage: { findMany: vi.fn().mockResolvedValue([]) },
-      venueDocument: { findMany: vi.fn().mockResolvedValue([]) },
-      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]) },
+      chatImage: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      venueDocument: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
       objectDeletionJob: { create: vi.fn() },
       retainedTimeEntry: { createMany: vi.fn() },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      timeEntry: { updateMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
       scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
     };
@@ -387,6 +387,43 @@ describe('AppController multi-venue invariants', () => {
       data: { profileFullName: 'deleted_user_profile-sole', isOpen: false },
     });
     expect(prisma.user.deleteMany).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+  });
+
+  it('rejects deletion of a venue whose history exceeds the automatic-deletion row limit', async () => {
+    const profiles = [
+      { id: 'profile-sole', email: 'owner@example.com', fullName: 'Sole Owner', role: 'owner', venueId: 'venue-single', membershipStatus: 'active' },
+    ];
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'owner@example.com' }), deleteMany: vi.fn() },
+      profile: {
+        findMany: vi.fn().mockResolvedValue(profiles),
+        count: vi.fn().mockResolvedValue(1),
+        deleteMany: vi.fn(),
+      },
+      venue: { deleteMany: vi.fn(), findMany: vi.fn() },
+      chatImage: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      venueDocument: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      checklistCompletion: { findMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      objectDeletionJob: { create: vi.fn() },
+      retainedTimeEntry: { createMany: vi.fn() },
+      pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
+      // Alone, past the 250k combined-row limit.
+      timeEntry: { updateMany: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), count: vi.fn().mockResolvedValue(250_001) },
+      scheduleShift: { updateMany: vi.fn() },
+      session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const controller = new AppController(prisma, { send: vi.fn() } as any, {} as any);
+
+    await expect(controller.deleteMyAccount(
+      { sub: 'user-1' } as any,
+      { deleteOwnedVenues: true },
+    )).rejects.toThrow('Contact support@venuewrangler.com for assisted account deletion');
+
+    expect(prisma.chatImage.findMany).not.toHaveBeenCalled();
+    expect(prisma.venue.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.user.deleteMany).not.toHaveBeenCalled();
   });
 
   it('archives every employee wage record before the venue cascade destroys them', async () => {
@@ -423,9 +460,9 @@ describe('AppController multi-venue invariants', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         findMany: vi.fn().mockResolvedValue([{ id: 'venue-single', name: 'Single Venue' }]),
       },
-      chatImage: { findMany: vi.fn().mockResolvedValue([]) },
-      venueDocument: { findMany: vi.fn().mockResolvedValue([]) },
-      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]) },
+      chatImage: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      venueDocument: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      checklistCompletion: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
       objectDeletionJob: { create: vi.fn() },
       retainedTimeEntry: { createMany: vi.fn() },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
@@ -434,6 +471,7 @@ describe('AppController multi-venue invariants', () => {
         updateMany: vi.fn(),
         deleteMany: vi.fn(),
         findMany: vi.fn(async () => (timeEntryPage++ === 0 ? otherStaffEntries : [])),
+        count: vi.fn().mockResolvedValue(0),
       },
       scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },

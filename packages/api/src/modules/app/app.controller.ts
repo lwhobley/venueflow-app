@@ -1014,6 +1014,29 @@ export class AppController {
         }
       }
 
+      if (venuesToDelete.length > 0) {
+        // The batch walks below share this one transaction's 120s budget. A
+        // venue with a pathological amount of media/wage history could still
+        // exhaust it and roll back after minutes of work with no partial
+        // progress kept. Rather than let that happen silently, reject up
+        // front with an actionable message — cheap indexed counts, not the
+        // expensive walk itself. 250k combined rows is a generous multiple of
+        // any venue seen in practice; revisit if real usage approaches it.
+        const DELETION_ROW_LIMIT = 250_000;
+        const [chatImageCount, venueDocumentCount, checklistPhotoCount, timeEntryCount] = await Promise.all([
+          tx.chatImage.count({ where: { venueId: { in: venuesToDelete } } }),
+          tx.venueDocument.count({ where: { venueId: { in: venuesToDelete } } }),
+          tx.checklistCompletion.count({ where: { venueId: { in: venuesToDelete }, photoKey: { not: null } } }),
+          tx.timeEntry.count({ where: { venueId: { in: venuesToDelete } } }),
+        ]);
+        const totalRows = chatImageCount + venueDocumentCount + checklistPhotoCount + timeEntryCount;
+        if (totalRows > DELETION_ROW_LIMIT) {
+          throw new ConflictException(
+            `This venue has too much history (${totalRows.toLocaleString()} records) to delete automatically. Contact support@venuewrangler.com for assisted account deletion.`,
+          );
+        }
+      }
+
       const mediaJobIds: string[] = [];
       if (venuesToDelete.length > 0) {
         const MEDIA_BATCH = 500;
@@ -1159,11 +1182,27 @@ export class AppController {
       maxWait: 10_000,
     }));
     if (deletion?.mediaJobIds.length && this.mediaCleanup) {
-      for (const mediaJobId of deletion.mediaJobIds) {
-        void this.mediaCleanup.processJob(mediaJobId).catch((error) => {
-          this.logger.error(`Initial media purge failed for deletion job ${mediaJobId}`, error instanceof Error ? error.stack : String(error));
-        });
-      }
+      const mediaCleanup = this.mediaCleanup;
+      const jobIds = deletion.mediaJobIds;
+      // Bounded and fire-and-forget: a large tenant can shard into hundreds of
+      // jobs, and starting them all concurrently from one API instance would
+      // spike DB/S3 connections for the whole process. Anything not finished
+      // here is still picked up by the hourly retry sweep in
+      // media-cleanup.service.ts, so this is a best-effort head start, not the
+      // only path to completion.
+      const IMMEDIATE_MEDIA_DELETE_CONCURRENCY = 5;
+      void (async () => {
+        let next = 0;
+        const worker = async () => {
+          while (next < jobIds.length) {
+            const jobId = jobIds[next++];
+            await mediaCleanup.processJob(jobId).catch((error) => {
+              this.logger.error(`Initial media purge failed for deletion job ${jobId}`, error instanceof Error ? error.stack : String(error));
+            });
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(IMMEDIATE_MEDIA_DELETE_CONCURRENCY, jobIds.length) }, worker));
+      })();
     }
     if (deletion?.email) {
       void this.email.send({

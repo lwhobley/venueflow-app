@@ -156,6 +156,15 @@ jobs:
           [[ "$candidate_url" == https://* ]] || { echo "::error::Could not resolve candidate revision URL"; exit 1; }
           curl --fail --retry 8 --retry-delay 5 --retry-all-errors "$candidate_url/api/health"
 
+      - name: Capture the revision currently serving traffic before promoting
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          previous_revision="$(jq -r '.status.traffic[] | select(.percent == 100) | .revisionName' <<<"$service_json")"
+          # Fresh service / first-ever deploy has no prior 100% revision to fall
+          # back to — proceed without a rollback target rather than fail here.
+          echo "PREVIOUS_REVISION=${previous_revision:-}" >> "$GITHUB_ENV"
+
       - name: Promote the verified candidate to production traffic
         run: |
           set -Eeuo pipefail
@@ -165,5 +174,22 @@ jobs:
             --to-tags "${RELEASE_TAG}=100" \
             --quiet
 
-      - name: Verify the production health endpoint after promotion
-        run: curl --fail --retry 8 --retry-delay 5 --retry-all-errors https://venue-wrangler-api-922889404273.us-east1.run.app/api/health
+      - name: Verify the production health endpoint after promotion, rolling back on failure
+        run: |
+          set -Eeuo pipefail
+          if curl --fail --retry 8 --retry-delay 5 --retry-all-errors https://venue-wrangler-api-922889404273.us-east1.run.app/api/health; then
+            exit 0
+          fi
+          echo "::error::Production health check failed after promoting ${RELEASE_TAG}."
+          if [[ -z "${PREVIOUS_REVISION:-}" ]]; then
+            echo "::error::No previous revision captured — nothing to automatically roll back to. Manual intervention required."
+            exit 1
+          fi
+          echo "::error::Rolling traffic back to ${PREVIOUS_REVISION}."
+          gcloud run services update-traffic "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-revisions "${PREVIOUS_REVISION}=100" \
+            --quiet
+          echo "::error::Rolled back to ${PREVIOUS_REVISION}. Failing this deploy for investigation."
+          exit 1

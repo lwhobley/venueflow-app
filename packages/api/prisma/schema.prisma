@@ -698,7 +698,9 @@ model RetainedTimeEntry {
   retainedAt        DateTime  @default(now())
 
   @@index([originVenueId])
-  @@index([originCreatedAt])
+  // Composite so the retention job's cutoff filter and its id tiebreak for
+  // deterministic paging are both served by one index, not a filter-then-sort.
+  @@index([originCreatedAt, id])
   @@index([retainedAt])
 }
 
@@ -1652,7 +1654,9 @@ model AuditLog {
   @@index([action, createdAt])
   @@index([targetProfileId])
   @@index([actorProfileId, createdAt])
-  @@index([createdAt])
+  // Composite so the retention job's cutoff filter and its id tiebreak for
+  // deterministic paging are both served by one index, not a filter-then-sort.
+  @@index([createdAt, id])
 }
 
 model ManagerGoal {
