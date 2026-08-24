@@ -420,6 +420,10 @@ export const en = {
     errorOpenDm: 'Could not open direct message.',
     errorCreateGroup: 'Could not create group.',
     errorDeleteChat: 'Could not delete chat.',
+    deleteChatTitle: 'Delete conversation?',
+    deleteChatMessage: 'This permanently deletes the conversation and its messages for everyone. This cannot be undone.',
+    deleteChatConfirm: 'Delete',
+    cancel: 'Cancel',
   },
   barStock: {
     header: {
@@ -1161,6 +1165,10 @@ export const es: GuestOpsDictionary = {
     errorOpenDm: 'No se pudo abrir el mensaje directo.',
     errorCreateGroup: 'No se pudo crear el grupo.',
     errorDeleteChat: 'No se pudo eliminar el chat.',
+    deleteChatTitle: '¿Eliminar la conversación?',
+    deleteChatMessage: 'Esto elimina permanentemente la conversación y sus mensajes para todos. No se puede deshacer.',
+    deleteChatConfirm: 'Eliminar',
+    cancel: 'Cancelar',
   },
   barStock: {
     header: {
@@ -1900,6 +1908,10 @@ export const fr: GuestOpsDictionary = {
     errorOpenDm: "Impossible d'ouvrir le message direct.",
     errorCreateGroup: 'Impossible de créer le groupe.',
     errorDeleteChat: 'Impossible de supprimer le chat.',
+    deleteChatTitle: 'Supprimer la conversation ?',
+    deleteChatMessage: 'Cela supprime définitivement la conversation et ses messages pour tout le monde. Cette action est irréversible.',
+    deleteChatConfirm: 'Supprimer',
+    cancel: 'Annuler',
   },
   barStock: {
     header: {

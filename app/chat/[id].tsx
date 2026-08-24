@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Dialog, HelperText, IconButton, Portal, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -197,6 +197,10 @@ export default function ConversationScreen() {
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Synchronous guards — a useState check doesn't apply until the next render,
+  // so two taps in the same tick both pass it.
+  const sendingRef = useRef(false);
+  const deletingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [reactMsgId, setReactMsgId] = useState<string | null>(null);
@@ -268,7 +272,8 @@ export default function ConversationScreen() {
 
   const onSend = async () => {
     const trimmed = text.trim();
-    if (!trimmed || !conversationId || sending) return;
+    if (sendingRef.current || !trimmed || !conversationId) return;
+    sendingRef.current = true;
     setText('');
     setSending(true);
     setError(null);
@@ -278,6 +283,7 @@ export default function ConversationScreen() {
       setText(trimmed);
       setError(errorMessage(e, t('chatThread.errorSend')));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -355,15 +361,30 @@ export default function ConversationScreen() {
     }
   };
 
-  const onDeleteChat = async () => {
+  // Irreversible: the header trash icon deleted the conversation for everyone
+  // on a single tap, with no prompt and no re-entrancy guard.
+  const onDeleteChat = () => {
     if (!conversationId) return;
-    setError(null);
-    try {
-      await deleteConversation({ conversationId });
-      router.back();
-    } catch (e) {
-      setError(errorMessage(e, t('chatThread.errorDelete')));
-    }
+    Alert.alert(t('chatThread.deleteTitle'), t('chatThread.deleteMessage'), [
+      { text: t('chatThread.deleteCancel'), style: 'cancel' },
+      {
+        text: t('chatThread.deleteConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          if (deletingRef.current) return;
+          deletingRef.current = true;
+          setError(null);
+          try {
+            await deleteConversation({ conversationId });
+            router.back();
+          } catch (e) {
+            setError(errorMessage(e, t('chatThread.errorDelete')));
+          } finally {
+            deletingRef.current = false;
+          }
+        },
+      },
+    ]);
   };
 
   const renderChecklist = (messageId: string, msgText: string, mine: boolean) => {

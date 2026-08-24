@@ -7,6 +7,7 @@ import { config } from '../../lib/config';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { canManageBilling } from '../../lib/permissions';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
+import { useAuthActions } from '../../lib/railway-hooks';
 import { useI18n } from '../../lib/i18n';
 
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
@@ -17,7 +18,21 @@ export default function BillingLockedScreen() {
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { me } = useAuthenticatedSession();
+  const clearSession = useAuthStore((state: AuthState) => state.clearSession);
+  const { signOut } = useAuthActions();
   const reason = Array.isArray(params.reason) ? params.reason[0] : params.reason ?? 'never_subscribed';
+
+  // Navigating to /welcome without clearing the store left the persisted token
+  // and user in place: relaunching the app sent index.tsx straight back into
+  // the tabs, so "Sign out" here only looked like it worked. Mirrors profile.tsx.
+  const onSignOut = async () => {
+    try {
+      await signOut();
+    } finally {
+      await clearSession();
+      router.replace('/(auth)/welcome');
+    }
+  };
   const canPay = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
   const headlineByReason: Record<string, string> = {
     trial_expired: t('billingLocked.headlineTrialExpired'),
@@ -62,7 +77,7 @@ export default function BillingLockedScreen() {
             <Text style={{ color: colors.muted }}>{t('billingLocked.inactiveNotice')}</Text>
           )}
 
-          <Button mode="text" textColor={colors.primary} onPress={() => router.replace('/(auth)/welcome')}>
+          <Button mode="text" textColor={colors.primary} onPress={() => void onSignOut()}>
             {t('billingLocked.signOut')}
           </Button>
           <Button mode="text" textColor={colors.primary} onPress={() => Linking.openURL('mailto:support@venuewrangler.com')}>
