@@ -38,6 +38,7 @@ import {
   todayInZone,
   weekStartFor,
 } from '../../common/pay-period';
+import { occupiedSlots, shiftsOverlap } from '../../common/shift-overlap';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { zonedDateBounds } from '../../common/venue-time';
@@ -351,15 +352,21 @@ type TemplateShiftSlot = {
 
 type AvailabilityWindow = { dayIndex: number; startMinutes: number; endMinutes: number; available: boolean };
 
-function availabilityCovers(rows: AvailabilityWindow[] | undefined, shift: { dayIndex: number; startMinutes: number; endMinutes: number }) {
-  const dayRows = (rows ?? []).filter((row) => row.dayIndex === shift.dayIndex);
+function availabilityCovers(
+  rows: AvailabilityWindow[] | undefined,
+  shift: { dayIndex: number; startMinutes: number; endMinutes: number; weekStart?: string | null },
+) {
   // Availability is request-driven: no approved unavailable-day request means
   // the employee can be scheduled. Legacy positive rows are ignored.
-  const blocked = dayRows.some((row) =>
-    !row.available &&
-    row.startMinutes < shift.endMinutes &&
-    row.endMinutes > shift.startMinutes,
-  );
+  const blocked = occupiedSlots(shift).some((slot) => {
+    if (shift.weekStart && slot.weekStart && slot.weekStart !== shift.weekStart) return false;
+    return (rows ?? []).some((row) =>
+      !row.available &&
+      row.dayIndex === slot.dayIndex &&
+      row.startMinutes < slot.end &&
+      row.endMinutes > slot.start,
+    );
+  });
   return !blocked;
 }
 
@@ -749,11 +756,7 @@ export class SchedulingController {
           endMinutes: shift.endMinutes,
           startTime: minutesToTime(shift.startMinutes),
           endTime: minutesToTime(shift.endMinutes),
-          withMe: mine.some((myShift) =>
-            myShift.dayIndex === shift.dayIndex &&
-            myShift.startMinutes < shift.endMinutes &&
-            myShift.endMinutes > shift.startMinutes,
-          ),
+          withMe: mine.some((myShift) => shiftsOverlap(myShift, shift)),
         })),
     }));
     return {
@@ -1060,6 +1063,7 @@ export class SchedulingController {
     const availabilityByProfile = this.unavailableByProfile(requests, availabilityWeekStart);
     const openShifts = shifts.filter((shift) => shift.status === 'open' && !shift.profileId);
     const assignments = new Map<string, number>();
+    const assignedWindows: Array<{ profileId: string; weekStart: string | null; dayIndex: number; startMinutes: number; endMinutes: number }> = [];
     const proposals = openShifts.map((shift) => {
       let sawRoleMatch = false;
       let sawAvailable = false;
@@ -1073,20 +1077,31 @@ export class SchedulingController {
           member.role === 'server';
         if (!roleMatch) return false;
         sawRoleMatch = true;
-        const hasAvailability = availabilityCovers(availabilityByProfile.get(member.id), shift);
+        const shiftWindow = { ...shift, weekStart: shift.weekStart ?? availabilityWeekStart };
+        const hasAvailability = availabilityCovers(availabilityByProfile.get(member.id), shiftWindow);
         if (!hasAvailability) return false;
         sawAvailable = true;
-        const overlaps = shifts.some((other) =>
+        const overlapsExisting = shifts.some((other) =>
           other.profileId === member.id &&
-          other.dayIndex === shift.dayIndex &&
-          other.startMinutes < shift.endMinutes &&
-          other.endMinutes > shift.startMinutes,
+          shiftsOverlap(shiftWindow, { ...other, weekStart: other.weekStart ?? availabilityWeekStart }),
         );
-        if (overlaps) return false;
+        const overlapsProposed = assignedWindows.some((other) =>
+          other.profileId === member.id && shiftsOverlap(shiftWindow, other),
+        );
+        if (overlapsExisting || overlapsProposed) return false;
         sawFree = true;
         return assignedMinutes < 40 * 60;
       });
-      if (candidate) assignments.set(candidate.id, (assignments.get(candidate.id) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes));
+      if (candidate) {
+        assignments.set(candidate.id, (assignments.get(candidate.id) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes));
+        assignedWindows.push({
+          profileId: candidate.id,
+          weekStart: shift.weekStart ?? availabilityWeekStart,
+          dayIndex: shift.dayIndex,
+          startMinutes: shift.startMinutes,
+          endMinutes: shift.endMinutes,
+        });
+      }
       return {
         shiftId: shift.id,
         dayLabel: dayLabel(shift.dayIndex),
@@ -1240,7 +1255,7 @@ export class SchedulingController {
     for (const shift of body.shifts) {
       try {
         const endMinutes = ensureValidShiftWindow(shift.dayIndex, shift.startMinutes, shift.endMinutes);
-        const profileId = shift.profileId && availabilityCovers(availabilityByProfile.get(shift.profileId), { ...shift, endMinutes })
+        const profileId = shift.profileId && availabilityCovers(availabilityByProfile.get(shift.profileId), { ...shift, endMinutes, weekStart: availabilityWeekStart })
           ? shift.profileId
           : undefined;
         await this.assignments.createShift({
