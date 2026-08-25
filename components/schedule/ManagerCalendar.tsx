@@ -140,7 +140,10 @@ function availabilityLabel(rows: AvailabilityRow[] | undefined, dayIndex: number
 }
 
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
-  return aStart < bEnd && bStart < aEnd;
+  const normEnd = aEnd <= aStart ? aEnd + 1440 : aEnd;
+  if (aStart < bEnd && bStart < normEnd) return true;
+  if (normEnd > 1440 && 0 < bEnd && bStart < normEnd - 1440) return true;
+  return false;
 }
 
 export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {

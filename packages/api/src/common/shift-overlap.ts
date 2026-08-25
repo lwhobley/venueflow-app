@@ -40,7 +40,20 @@ export function occupiedSlots(shift: ShiftWindow): OccupiedSlot[] {
 
 function sameCalendarDay(a: OccupiedSlot, b: OccupiedSlot): boolean {
   if (a.weekStart && b.weekStart) return a.weekStart === b.weekStart && a.dayIndex === b.dayIndex;
-  return a.dayIndex === b.dayIndex;
+  if (!a.weekStart && !b.weekStart) return a.dayIndex === b.dayIndex;
+  return false;
+}
+
+export function adjacentWeekStarts(weekStart: string): string[] {
+  return [addDays(weekStart, -7), weekStart, addDays(weekStart, 7)];
+}
+
+export function previousOvernightFilter(weekStart: string, dayIndex: number): {
+  weekStart: string;
+  dayIndex: number;
+} {
+  if (dayIndex === 0) return { weekStart: addDays(weekStart, -7), dayIndex: 6 };
+  return { weekStart, dayIndex: dayIndex - 1 };
 }
 
 export function shiftsOverlap(a: ShiftWindow, b: ShiftWindow): boolean {

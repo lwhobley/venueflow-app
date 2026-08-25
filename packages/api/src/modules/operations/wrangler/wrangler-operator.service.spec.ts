@@ -286,7 +286,13 @@ describe('WranglerOperatorService executeRead', () => {
 
       expect(prisma.profile.findMany).toHaveBeenCalled();
       expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: expect.objectContaining({ venueId: 'venue-1', weekStart: '2026-08-02', dayIndex: 1, profileId: { in: ['prof-1'] } }),
+        where: expect.objectContaining({
+          venueId: 'venue-1',
+          profileId: { in: ['prof-1'] },
+          OR: expect.arrayContaining([
+            { weekStart: '2026-08-02', dayIndex: 1 },
+          ]),
+        }),
       }));
       expect(result).toEqual([
         { id: 'shift-1', date: '2026-08-03', startMinutes: 900, endMinutes: 1080, jobTitle: 'Server', station: 'Floor', status: 'scheduled', profileId: 'prof-1', staffName: 'Jose Santos' },
@@ -305,7 +311,12 @@ describe('WranglerOperatorService executeRead', () => {
       const result = await callRead(prisma, 'LIST_SCHEDULE', { date: '2026-08-03' });
 
       expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { venueId: 'venue-1', weekStart: '2026-08-02', dayIndex: 1 },
+        where: expect.objectContaining({
+          venueId: 'venue-1',
+          OR: expect.arrayContaining([
+            { weekStart: '2026-08-02', dayIndex: 1 },
+          ]),
+        }),
       }));
       expect(result[0]).toEqual(expect.objectContaining({ staffName: null, profileId: null }));
     });
@@ -350,5 +361,28 @@ describe('WranglerOperatorService executeRead', () => {
   it('rejects a tool that is not part of the read-path', async () => {
     const prisma = {};
     await expect(callRead(prisma, 'CLEAR_TABLE', {})).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('WranglerOperatorService assertNoShiftOverlap', () => {
+  it('loads adjacent weeks so Sunday overnight collides with Monday morning', async () => {
+    const prisma = {
+      scheduleShift: {
+        findMany: vi.fn().mockResolvedValue([
+          { weekStart: '2026-08-23', dayIndex: 0, startMinutes: 1320, endMinutes: 1560 },
+        ]),
+      },
+    };
+    const service = new WranglerOperatorService(prisma as never);
+
+    await expect(
+      (service as any).assertNoShiftOverlap('venue-1', 'profile-1', '2026-08-23', 1, 60, 180),
+    ).rejects.toThrow('That staff member already has an overlapping shift');
+
+    expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        weekStart: { in: ['2026-08-16', '2026-08-23', '2026-08-30'] },
+      }),
+    }));
   });
 });

@@ -42,7 +42,7 @@ describe('SchedulingAssignmentService', () => {
     const prisma = {
       scheduleShift: {
         findMany: vi.fn().mockResolvedValue([
-          { weekStart: '2026-08-23', dayIndex: 0, startMinutes: 1320, endMinutes: 1560 },
+          { weekStart: null, dayIndex: 0, startMinutes: 1320, endMinutes: 1560 },
         ]),
       },
     };
