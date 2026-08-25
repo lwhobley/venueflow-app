@@ -14,6 +14,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { attestPayload, resetAttestationKey } from '../../lib/attestation';
 import { overnightAwareRange } from '../../lib/zoned-datetime';
+import { venueFromApi } from '../../lib/session-from-auth';
 import { useI18n } from '../../lib/i18n';
 
 type ActiveClockEntry = {
@@ -84,11 +85,7 @@ export default function ClockScreen() {
   const isAdmin = salaried;
 
   const rawVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
-  const activeVenue = useMemo(() => {
-    if (!rawVenue) return null;
-    const geofenceRadiusM = 'geofenceRadiusM' in rawVenue ? rawVenue.geofenceRadiusM : rawVenue.geofence_radius_m;
-    return { name: rawVenue.name, latitude: rawVenue.latitude, longitude: rawVenue.longitude, geofenceRadiusM };
-  }, [rawVenue]);
+  const activeVenue = useMemo(() => (rawVenue ? venueFromApi(rawVenue) : null), [rawVenue]);
 
   const activeClockEntries = (clockBoard?.activeClockEntries ?? []) as ActiveClockEntry[];
   const managerAlerts = (clockBoard?.managerAlerts ?? []) as ManagerAlert[];

@@ -777,7 +777,7 @@ export class AuthController {
 }
 
 
-function mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number }) {
+function mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number; timezone?: string | null }) {
   return {
     _id: venue.id,
     id: venue.id,
@@ -786,6 +786,7 @@ function mapVenue(venue: { id: string; name: string; latitude: number; longitude
     longitude: venue.longitude,
     geofenceRadiusM: venue.geofenceRadiusM,
     geofence_radius_m: venue.geofenceRadiusM,
+    timezone: venue.timezone ?? null,
   };
 }
 

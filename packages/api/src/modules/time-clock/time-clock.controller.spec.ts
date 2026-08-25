@@ -95,9 +95,30 @@ describe('TimeClockController', () => {
       const { controller, prisma } = makeController();
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z')); // Wed noon UTC = 08:00 America/New_York
-      prisma.scheduleShift.findMany.mockResolvedValue([{ startMinutes: 600, endMinutes: 900, dayIndex: 3, status: 'scheduled' }]);
+      prisma.scheduleShift.findMany.mockResolvedValue([{
+        startMinutes: 600,
+        endMinutes: 900,
+        dayIndex: 3,
+        weekStart: '2026-07-12',
+        status: 'scheduled',
+      }]);
 
       await expect(controller.clockIn(authUser, scope, validPunch)).rejects.toThrow('Too early to clock in');
+    });
+
+    it('allows clock-in after midnight during an overnight shift', async () => {
+      const { controller, prisma } = makeController();
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-16T04:30:00.000Z'));
+      prisma.scheduleShift.findMany.mockResolvedValue([{
+        startMinutes: 1320,
+        endMinutes: 1560,
+        dayIndex: 3,
+        weekStart: '2026-07-12',
+        status: 'scheduled',
+      }]);
+
+      await expect(controller.clockIn(authUser, scope, validPunch)).resolves.toMatchObject({ isOpen: true });
     });
 
     it('does not apply the early-shift check to managers', async () => {

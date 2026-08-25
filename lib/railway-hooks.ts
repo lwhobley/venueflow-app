@@ -133,7 +133,7 @@ const mutationRoutes: Record<string, Route> = {
   'app.registerVenue': {
     path: '/v1/app/register-venue',
     method: 'POST',
-    body: ({ businessName, ownerName, phone, address, venueType, staffRange }) => ({ businessName, ownerName, phone, address, venueType, staffRange }),
+    body: ({ businessName, ownerName, phone, address, venueType, staffRange, latitude, longitude }) => ({ businessName, ownerName, phone, address, venueType, staffRange, latitude, longitude }),
     invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
   },
   'app.deleteMyAccount': {

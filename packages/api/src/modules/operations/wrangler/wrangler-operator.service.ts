@@ -106,7 +106,7 @@ CORRECT_PUNCH: {staffName:string, date:"YYYY-MM-DD", clockInAt?:string ISO-8601,
 
 Rules:
 - Use current venue date supplied in context for today/tomorrow/tonight or day names.
-- Convert 12-hour times to startMinutes/endMinutes from midnight (0–1440). E.g., 3pm = 900, 12am midnight = 1440.
+- Convert 12-hour times to startMinutes/endMinutes from midnight. Same-day ends are 1–1440; overnight ends are start+duration up to 2880 (e.g. 10pm–2am = 1320–1560). E.g., 3pm = 900.
 - Return one tool only. No prose outside JSON.`;
 
 @Injectable()

@@ -91,7 +91,7 @@ class ShiftDto {
 
   @IsInt()
   @Min(0)
-  @Max(1440)
+  @Max(1439)
   startMinutes!: number;
 
   @IsInt()
@@ -144,7 +144,7 @@ class TemplateShiftDto {
 
   @IsInt()
   @Min(0)
-  @Max(1440)
+  @Max(1439)
   startMinutes!: number;
 
   @IsInt()
@@ -241,7 +241,7 @@ class AiProposedShiftDto {
 
   @IsInt()
   @Min(0)
-  @Max(1440)
+  @Max(1439)
   startMinutes!: number;
 
   @IsInt()
@@ -301,7 +301,7 @@ function ensureValidShiftWindow(dayIndex: number, startMinutes: number, endMinut
   if (!Number.isInteger(dayIndex) || dayIndex < 0 || dayIndex > 6) {
     throw new BadRequestException('dayIndex must be between 0 and 6');
   }
-  if (!Number.isInteger(startMinutes) || startMinutes < 0 || startMinutes > 1440) {
+  if (!Number.isInteger(startMinutes) || startMinutes < 0 || startMinutes > 1439) {
     throw new BadRequestException('Invalid start time');
   }
   if (!Number.isInteger(endMinutes) || endMinutes < 0 || endMinutes > 2880) {

@@ -261,4 +261,17 @@ describe('WorkforceController venue search', () => {
       .rejects.toThrow('Search query must be 120 characters or fewer.');
     expect(findMany).not.toHaveBeenCalled();
   });
+
+  it('resolves only an exact join code and never searches name or address', async () => {
+    findMany.mockResolvedValue([{ id: 'venue-1', name: 'Hidden Bar' }]);
+    const controller = new WorkforceController(prisma as any, {} as any, {} as any);
+
+    await expect(controller.searchVenues(request as any, 'VW-ABCDEFGH'))
+      .resolves.toEqual({ venues: [{ id: 'venue-1', name: 'Hidden Bar', address: null }] });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { code: { equals: 'VW-ABCDEFGH', mode: 'insensitive' } },
+      select: { id: true, name: true },
+      take: 1,
+    }));
+  });
 });

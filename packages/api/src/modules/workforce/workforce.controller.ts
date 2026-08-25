@@ -22,6 +22,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { publicWebOrigin } from '../../common/public-web-url';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -178,7 +179,7 @@ export class WorkforceController {
       return this.reportStaleInviteStatus(email, undefined);
     }
 
-    const appUrl = (this.config.get<string>('APP_WEB_URL') ?? this.config.get<string>('WEB_BASE_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
+    const appUrl = publicWebOrigin(this.config);
     // A URL fragment (not a query string) so the token never reaches
     // server/CDN access logs — fragments aren't sent in the HTTP request at
     // all. site/join/index.html reads from the fragment first.
@@ -236,33 +237,12 @@ export class WorkforceController {
       return { venues: [] };
     }
 
-    // Exact code match takes priority; then name/address fuzzy match.
-    const [byCode, byText] = await Promise.all([
-      this.prisma.venue.findMany({
-        where: { code: { equals: term, mode: 'insensitive' } },
-        select: { id: true, name: true, address: true },
-        take: 3,
-      }),
-      this.prisma.venue.findMany({
-        where: {
-          OR: [
-            { name: { contains: term, mode: 'insensitive' } },
-            { address: { contains: term, mode: 'insensitive' } },
-          ],
-        },
-        select: { id: true, name: true, address: true },
-        take: 10,
-      }),
-    ]);
-
-    // Merge: code matches first, then text matches without duplicates.
-    const seen = new Set(byCode.map((v) => v.id));
-    const merged = [
-      ...byCode,
-      ...byText.filter((v) => !seen.has(v.id)),
-    ].slice(0, 10);
-
-    return { venues: merged };
+    const venues = await this.prisma.venue.findMany({
+      where: { code: { equals: term, mode: 'insensitive' } },
+      select: { id: true, name: true },
+      take: 1,
+    });
+    return { venues: venues.map((venue) => ({ id: venue.id, name: venue.name, address: null })) };
   }
 
   // ─── Authenticated: user's own join requests ───────────────────────────────

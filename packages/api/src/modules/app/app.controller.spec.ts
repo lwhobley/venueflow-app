@@ -196,7 +196,7 @@ describe('AppController multi-venue invariants', () => {
 
     await expect(controller.registerVenue(
       { sub: 'user-1', email: 'owner@example.com' } as any,
-      { businessName: 'Sixth Venue', staffRange: '1-15' } as any,
+      { businessName: 'Sixth Venue', staffRange: '1-15', latitude: 40.7, longitude: -74.0 } as any,
     )).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(prisma.$executeRaw.mock.calls[0]?.[1]).toBe('register-venue:user-1');
@@ -241,7 +241,7 @@ describe('AppController multi-venue invariants', () => {
 
     await controller.registerVenue(
       { sub: 'user-1', email: 'owner@example.com' } as any,
-      { businessName: 'New Venue', staffRange: '1-15' } as any,
+      { businessName: 'New Venue', staffRange: '1-15', latitude: 40.7, longitude: -74.0 } as any,
     );
 
     expect(prisma.profile.delete).toHaveBeenCalledWith({ where: { id: 'profile-signup' } });
@@ -282,10 +282,33 @@ describe('AppController multi-venue invariants', () => {
 
     await controller.registerVenue(
       { sub: 'user-1', email: 'owner@example.com' } as any,
-      { businessName: 'Second Venue', staffRange: '1-15' } as any,
+      { businessName: 'Second Venue', staffRange: '1-15', latitude: 40.7, longitude: -74.0 } as any,
     );
 
     expect(prisma.profile.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses to create a venue at the 0,0 geofence sentinel', async () => {
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      profile: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      venue: { create: vi.fn() },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const profiles = {
+      ensureUser: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      isEmailVerified: vi.fn().mockResolvedValue(true),
+    };
+    const controller = new AppController(prisma, {} as any, profiles as any);
+
+    await expect(controller.registerVenue(
+      { sub: 'user-1', email: 'owner@example.com' } as any,
+      { businessName: 'Null Island', staffRange: '1-15', latitude: 0, longitude: 0 } as any,
+    )).rejects.toThrow('Set the venue coordinates');
+    expect(prisma.venue.create).not.toHaveBeenCalled();
   });
 
   it('checks last-admin safety for every venue before deleting a multi-venue account', async () => {
@@ -304,7 +327,7 @@ describe('AppController multi-venue invariants', () => {
         deleteMany: vi.fn(),
       },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      timeEntry: { updateMany: vi.fn() }, scheduleShift: { updateMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn(), update: vi.fn(), findMany: vi.fn().mockResolvedValue([]) }, scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
     };
     prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
@@ -330,7 +353,7 @@ describe('AppController multi-venue invariants', () => {
         deleteMany: vi.fn(),
       },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      timeEntry: { updateMany: vi.fn() }, scheduleShift: { updateMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn(), update: vi.fn(), findMany: vi.fn().mockResolvedValue([]) }, scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
     };
     prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
@@ -365,7 +388,7 @@ describe('AppController multi-venue invariants', () => {
       objectDeletionJob: { create: vi.fn() },
       retainedTimeEntry: { createMany: vi.fn() },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      timeEntry: { updateMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
+      timeEntry: { updateMany: vi.fn(), update: vi.fn(), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn(), count: vi.fn().mockResolvedValue(0) },
       scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
     };
@@ -408,7 +431,7 @@ describe('AppController multi-venue invariants', () => {
       objectDeletionJob: { create: vi.fn() },
       retainedTimeEntry: { createMany: vi.fn() },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      timeEntry: { updateMany: vi.fn() },
+      timeEntry: { updateMany: vi.fn(), update: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
       scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
     };
@@ -470,8 +493,12 @@ describe('AppController multi-venue invariants', () => {
       // First call returns the page, second returns empty to end the loop.
       timeEntry: {
         updateMany: vi.fn(),
+        update: vi.fn(),
         deleteMany: vi.fn(),
-        findMany: vi.fn(async () => (timeEntryPage++ === 0 ? otherStaffEntries : [])),
+        findMany: vi.fn(async (args: any) => {
+          if (args?.where?.clockOutAt === null) return [];
+          return timeEntryPage++ === 0 ? otherStaffEntries : [];
+        }),
         count: vi.fn().mockResolvedValue(0),
       },
       scheduleShift: { updateMany: vi.fn() },
@@ -518,7 +545,13 @@ describe('AppController multi-venue invariants', () => {
       objectDeletionJob: { create: vi.fn() },
       retainedTimeEntry: { createMany: vi.fn() },
       pushToken: { deleteMany: vi.fn() }, availability: { deleteMany: vi.fn() },
-      timeEntry: { updateMany: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      timeEntry: {
+        updateMany: vi.fn(),
+        update: vi.fn(),
+        deleteMany: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([{ id: 'entry-open', breaks: [{ startAt: 1, endAt: null, type: 'unpaid' }] }]),
+        count: vi.fn().mockResolvedValue(0),
+      },
       scheduleShift: { updateMany: vi.fn() },
       session: { deleteMany: vi.fn() }, authAccount: { deleteMany: vi.fn() },
       // The surviving venue gets its member count resynced after the profile goes.
@@ -533,15 +566,19 @@ describe('AppController multi-venue invariants', () => {
     // invisible to payroll (which filters clockOutAt: { not: null }) and
     // unreachable by a correction request once profileId is nulled — the
     // employee's last partial shift would silently never be paid.
-    const closeCall = prisma.timeEntry.updateMany.mock.calls.find(
-      ([args]: any[]) => args?.where?.clockOutAt === null,
-    );
-    expect(closeCall).toBeDefined();
-    expect(closeCall[0].where.profileId).toEqual({ in: ['profile-leaver'] });
-    expect(closeCall[0].data.clockOutAt).toBeInstanceOf(Date);
-    expect(closeCall[0].data.isOpen).toBe(false);
-    // It must run before the de-identification pass, which only sets isOpen.
-    const closeOrder = prisma.timeEntry.updateMany.mock.invocationCallOrder[0];
+    expect(prisma.timeEntry.findMany).toHaveBeenCalledWith({
+      where: { profileId: { in: ['profile-leaver'] }, clockOutAt: null },
+      select: { id: true, breaks: true },
+    });
+    expect(prisma.timeEntry.update).toHaveBeenCalledWith({
+      where: { id: 'entry-open' },
+      data: expect.objectContaining({
+        clockOutAt: expect.any(Date),
+        isOpen: false,
+        breaks: [expect.objectContaining({ endAt: expect.any(Number), type: 'unpaid' })],
+      }),
+    });
+    const closeOrder = prisma.timeEntry.update.mock.invocationCallOrder[0];
     const renameCall = prisma.timeEntry.updateMany.mock.calls.findIndex(
       ([args]: any[]) => typeof args?.data?.profileFullName === 'string',
     );

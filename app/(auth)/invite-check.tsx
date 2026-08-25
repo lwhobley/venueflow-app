@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi, type InviteCheckResult } from '../../lib/api-client';
+import { userFromProfile, venueFromAuth } from '../../lib/session-from-auth';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
@@ -19,9 +20,7 @@ import { useI18n } from '../../lib/i18n';
 type Stage =
   | { kind: 'entry' }
   | { kind: 'found'; invite: Extract<InviteCheckResult, { status: 'found' }> }
-  | { kind: 'not_found' }
-  | { kind: 'expired' }
-  | { kind: 'used' };
+  | { kind: 'not_found' };
 
 export default function InviteCheckScreen() {
   const { t } = useI18n();
@@ -52,7 +51,7 @@ export default function InviteCheckScreen() {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setStage({ kind: 'found', invite: result });
       } else {
-        setStage({ kind: result.status });
+        setStage({ kind: 'not_found' });
       }
     } catch (e) {
       Alert.alert(t('inviteCheck.errorTitle'), e instanceof Error ? e.message : t('inviteCheck.genericError'));
@@ -82,25 +81,8 @@ export default function InviteCheckScreen() {
         const redemption = await appApi.redeemMyInvite();
         if (redemption.redeemed && redemption.profile) {
           setSession({
-            user: {
-              id: redemption.profile._id,
-              email: redemption.profile.email,
-              full_name: redemption.profile.fullName,
-              email_verified: true,
-              role: redemption.profile.role,
-              job_title: redemption.profile.jobTitle,
-              venue_id: redemption.profile.venueId ?? null,
-              all_access: redemption.profile.allAccess === true,
-            },
-            venue: redemption.venue
-              ? {
-                  id: redemption.venue._id,
-                  name: redemption.venue.name,
-                  latitude: redemption.venue.latitude,
-                  longitude: redemption.venue.longitude,
-                  geofence_radius_m: redemption.venue.geofenceRadiusM,
-                }
-              : null,
+            user: { ...userFromProfile(redemption.profile), email_verified: true },
+            venue: venueFromAuth({ ...redemption.profile, emailVerified: true }, redemption.venue),
             token,
           });
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -250,55 +232,6 @@ export default function InviteCheckScreen() {
                   }}
                 >
                   {t('inviteCheck.notFound.tryAgain')}
-                </Button>
-              </View>
-            )}
-
-            {stage.kind === 'expired' && (
-              <View style={{ gap: spacing.sm }}>
-                <Text variant="bodyMedium" style={{ color: colors.danger }}>
-                  {t('inviteCheck.expired.message')}
-                </Text>
-                <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  {t('inviteCheck.expired.hint')}
-                </Text>
-                <Button
-                  mode="outlined"
-                  textColor={colors.primary}
-                  onPress={() => {
-                    setContact('');
-                    setStage({ kind: 'entry' });
-                  }}
-                >
-                  {t('inviteCheck.expired.tryDifferentContact')}
-                </Button>
-              </View>
-            )}
-
-            {stage.kind === 'used' && (
-              <View style={{ gap: spacing.sm }}>
-                <Text variant="bodyMedium" style={{ color: colors.muted }}>
-                  {t('inviteCheck.used.message')}
-                </Text>
-                <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  {t('inviteCheck.used.hint')}
-                </Text>
-                <Button
-                  mode="outlined"
-                  textColor={colors.primary}
-                  onPress={() => router.push('/(auth)/sign-in')}
-                >
-                  {t('inviteCheck.used.signIn')}
-                </Button>
-                <Button
-                  mode="text"
-                  textColor={colors.muted}
-                  onPress={() => {
-                    setContact('');
-                    setStage({ kind: 'entry' });
-                  }}
-                >
-                  {t('inviteCheck.used.tryDifferentContact')}
                 </Button>
               </View>
             )}

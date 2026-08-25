@@ -13,9 +13,9 @@ import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertFixNotReplayed, assertWithinGeofence, type PriorFix } from '../../common/geofence';
 import { closeOpenBreaks, parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
-import { todayInZone, weekStartFor } from '../../common/pay-period';
+import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
-import { zonedDateBounds, zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
+import { isWithinShiftWindow, normalizedShiftEnd, shiftHasEnded, zonedDateBounds, zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AttestationService } from '../attestation/attestation.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -118,20 +118,32 @@ export class TimeClockController {
       const tz = venue.timezone ?? null;
       const today = zonedDayOfWeek(tz, now);
       const minutesNow = zonedMinutesOfDay(tz, now);
-      const weekStart = weekStartFor(todayInZone(tz));
+      const todayDate = todayInZone(tz);
+      const weekStart = weekStartFor(todayDate);
+      const yesterdayDate = addDays(todayDate, -1);
+      const yesterdayWeekStart = weekStartFor(yesterdayDate);
+      const yesterday = (today + 6) % 7;
       const openByProfile = new Set(
         entries.filter((entry) => entry.isOpen).map((entry) => entry.profileId),
       );
       const shifts = await this.prisma.scheduleShift.findMany({
-        where: { venueId: venue.id, weekStart },
+        where: {
+          venueId: venue.id,
+          OR: [
+            { weekStart, dayIndex: today },
+            { weekStart: yesterdayWeekStart, dayIndex: yesterday },
+          ],
+        },
         include: { profile: true },
       });
       for (const shift of shifts) {
-        if (shift.dayIndex !== today || !shift.profileId || shift.status === 'open') continue;
-        const shiftEnd = shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes;
+        const isToday = shift.weekStart === weekStart && shift.dayIndex === today;
+        const isOvernightYesterday = shift.weekStart === yesterdayWeekStart
+          && shift.dayIndex === yesterday
+          && normalizedShiftEnd(shift.startMinutes, shift.endMinutes) > 1440;
+        if ((!isToday && !isOvernightYesterday) || !shift.profileId || shift.status === 'open') continue;
         if (
-          minutesNow >= shift.startMinutes + 15 &&
-          minutesNow <= shiftEnd &&
+          isWithinShiftWindow(minutesNow, shift.startMinutes + 15, shift.endMinutes) &&
           !openByProfile.has(shift.profileId) &&
           shift.profile
         ) {
@@ -165,6 +177,8 @@ export class TimeClockController {
         latitude: venue.latitude,
         longitude: venue.longitude,
         geofenceRadiusM: venue.geofenceRadiusM,
+        geofence_radius_m: venue.geofenceRadiusM,
+        timezone: venue.timezone ?? null,
         subscriptionStatus: venue.subscriptionStatus ?? null,
         subscriptionPlatform: venue.subscriptionPlatform ?? null,
       },
@@ -275,27 +289,34 @@ export class TimeClockController {
       const nowMs = Date.now();
       const today = zonedDayOfWeek(venue.timezone, nowMs);
       const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
-      const weekStart = weekStartFor(todayInZone(venue.timezone));
-      const shifts = await this.prisma.scheduleShift.findMany({
+      const todayDate = todayInZone(venue.timezone);
+      const weekStart = weekStartFor(todayDate);
+      const yesterdayDate = addDays(todayDate, -1);
+      const yesterdayWeekStart = weekStartFor(yesterdayDate);
+      const yesterday = (today + 6) % 7;
+      const shifts = (await this.prisma.scheduleShift.findMany({
         where: {
           venueId: venue.id,
           profileId: profile.id,
-          weekStart,
-          dayIndex: today,
           status: { in: ['scheduled', 'covered'] },
+          OR: [
+            { weekStart, dayIndex: today },
+            { weekStart: yesterdayWeekStart, dayIndex: yesterday },
+          ],
         },
         orderBy: { startMinutes: 'asc' },
-      });
+      })).filter((shift) => (
+        (shift.weekStart === weekStart && shift.dayIndex === today)
+        || (shift.weekStart === yesterdayWeekStart && shift.dayIndex === yesterday && normalizedShiftEnd(shift.startMinutes, shift.endMinutes) > 1440)
+      ));
       if (shifts.length > 0) {
         const earlyWindow = venue.earlyClockInWindowMin ?? 10;
-        const windows = shifts.map((shift) => {
-          const shiftEnd = shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes;
-          return { start: shift.startMinutes - earlyWindow, end: shiftEnd, shift };
-        });
-        const inWindow = windows.some((window) => minutesNow >= window.start && minutesNow <= window.end);
-        const allEnded = windows.every((window) => minutesNow > window.end);
+        const inWindow = shifts.some((shift) =>
+          isWithinShiftWindow(minutesNow, shift.startMinutes, shift.endMinutes, earlyWindow),
+        );
+        const allEnded = shifts.every((shift) => shiftHasEnded(minutesNow, shift.startMinutes, shift.endMinutes));
         if (!inWindow && !allEnded) {
-          const next = windows.find((window) => minutesNow < window.start)?.shift ?? shifts[0];
+          const next = shifts.find((shift) => minutesNow < shift.startMinutes) ?? shifts[0];
           throw new BadRequestException(
             `Too early to clock in. Your shift starts at ${minutesToTime(next.startMinutes)}. You can clock in starting ${earlyWindow} minutes prior.`
           );

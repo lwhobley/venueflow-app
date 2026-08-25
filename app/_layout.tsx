@@ -74,6 +74,7 @@ export function RootLayout() {
   const fontsReady = fontsReadyForPlatform(Platform.OS, fontsLoaded, fontError);
   const debug = __DEV__;
   const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
+  const userId = useAuthStore((state: AuthState) => state.user?.id ?? null);
   const token = useAuthStore((state: AuthState) => state.token);
   const authScopeKey = useAuthStore(
     (state: AuthState) => `${state.authEpoch}:${state.user?.id ?? 'anon'}:${state.venue?.id ?? 'none'}`,
@@ -92,8 +93,8 @@ export function RootLayout() {
       void logoutPurchases();
       return;
     }
-    void configurePurchases(venueId ?? undefined);
-  }, [token, venueId]);
+    void configurePurchases(userId ?? undefined);
+  }, [token, userId]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;

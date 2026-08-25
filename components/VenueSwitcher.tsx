@@ -4,6 +4,8 @@ import { Button, Card, Chip, Dialog, Portal, Text, TextInput } from 'react-nativ
 import { router } from 'expo-router';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { ApiError } from '../lib/api-client';
+import { venueFromApi } from '../lib/session-from-auth';
+import { getPreciseLocation } from '../lib/location';
 import { useMutation } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import { colors, spacing, type } from '../lib/theme';
@@ -40,13 +42,7 @@ export function VenueSwitcher() {
     try {
       const result = await switchVenueMutation({ venueId: v.id });
       if (result?.venue) {
-        switchVenueAction({
-          id: result.venue._id ?? result.venue.id,
-          name: result.venue.name,
-          latitude: result.venue.latitude,
-          longitude: result.venue.longitude,
-          geofence_radius_m: result.venue.geofenceRadiusM ?? result.venue.geofence_radius_m,
-        });
+        switchVenueAction(venueFromApi(result.venue));
         if (result.venues) {
           useAuthStore.getState().setVenues(result.venues);
         }
@@ -69,26 +65,23 @@ export function VenueSwitcher() {
     setRegistering(true);
     setError(null);
     try {
+      const loc = await getPreciseLocation();
       const result = await registerVenueMutation({
         businessName: businessName.trim(),
         ownerName: ownerName.trim() || undefined,
         staffRange,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
       });
       if (result?.venue) {
-        const newVenue = {
-          id: result.venue._id ?? result.venue.id,
-          name: result.venue.name,
-          latitude: result.venue.latitude,
-          longitude: result.venue.longitude,
-          geofence_radius_m: result.venue.geofenceRadiusM ?? result.venue.geofence_radius_m,
-        };
-        switchVenueAction(newVenue);
+        switchVenueAction(venueFromApi(result.venue));
         if (result.venues) {
           useAuthStore.getState().setVenues(result.venues);
         }
       }
       setRegisterVisible(false);
       setBusinessName('');
+      router.push('/venue/settings');
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 402) {
         setError('Multi-Venue Pro subscription ($399/mo) required to register additional venues.');
@@ -185,7 +178,7 @@ export function VenueSwitcher() {
           <Dialog.Title>Add New Venue</Dialog.Title>
           <Dialog.Content style={styles.dialogContent}>
             <Text variant="bodyMedium" style={styles.dialogNotice}>
-              Registering a new venue will create an independent location with its own roster, schedule, and subscription.
+              Registering a new venue will create an independent location with its own roster, schedule, and subscription. Your current GPS fix is used as the clock-in geofence.
             </Text>
             <TextInput
               label="Venue / Business Name"

@@ -7,6 +7,7 @@ import { config } from '../lib/config';
 import { hasAllAccess } from '../lib/permissions';
 import type { SubscriptionRequiredReason } from '../lib/subscription-types';
 import { ApiError, type MeResponse } from '../lib/api-client';
+import { venueFromApi } from '../lib/session-from-auth';
 import { useQueryState } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 
@@ -107,9 +108,7 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
         venue_id: p.venueId ?? null,
         all_access: p.allAccess === true,
       },
-      venue: me.venue
-        ? { id: me.venue._id, name: me.venue.name, latitude: me.venue.latitude, longitude: me.venue.longitude, geofence_radius_m: me.venue.geofenceRadiusM }
-        : null,
+      venue: me.venue ? venueFromApi(me.venue) : null,
     });
   }, [me, user, setSession]);
 

@@ -256,7 +256,7 @@ export function useApiMutation<TArgs, TResult>(
 
 export type InviteCheckResult =
   | { status: 'found'; emailSent?: boolean; venueName?: string; jobTitle?: string; role?: string; expiresAt?: number }
-  | { status: 'not_found' | 'expired' | 'used' };
+  | { status: 'not_found' };
 
 /**
  * A time-clock punch. `attestation` is optional while the server has

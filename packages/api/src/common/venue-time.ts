@@ -59,6 +59,31 @@ export function zonedMinutesOfDay(timeZone: string | null | undefined, ts: numbe
   return (Number(parts.hour) % 24) * 60 + Number(parts.minute);
 }
 
+/** Persist overnight ends as start+duration, including past midnight (e.g. 1320–1560). */
+export function normalizedShiftEnd(startMinutes: number, endMinutes: number): number {
+  return endMinutes <= startMinutes ? endMinutes + 1440 : endMinutes;
+}
+
+export function isWithinShiftWindow(
+  minutesOfDay: number,
+  startMinutes: number,
+  endMinutes: number,
+  earlyWindow = 0,
+): boolean {
+  const normEnd = normalizedShiftEnd(startMinutes, endMinutes);
+  const windowStart = startMinutes - earlyWindow;
+  if (normEnd <= 1440) {
+    return minutesOfDay >= windowStart && minutesOfDay <= normEnd;
+  }
+  return minutesOfDay >= windowStart || minutesOfDay <= normEnd - 1440;
+}
+
+export function shiftHasEnded(minutesOfDay: number, startMinutes: number, endMinutes: number): boolean {
+  const normEnd = normalizedShiftEnd(startMinutes, endMinutes);
+  if (normEnd <= 1440) return minutesOfDay > normEnd;
+  return minutesOfDay > normEnd - 1440 && minutesOfDay < startMinutes;
+}
+
 /** The venue-local calendar date (YYYY-MM-DD) of the given instant. */
 export function zonedIsoDate(timeZone: string | null | undefined, ts: number): string {
   return new Intl.DateTimeFormat('en-CA', {

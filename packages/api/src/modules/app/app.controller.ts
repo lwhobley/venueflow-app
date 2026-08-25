@@ -9,7 +9,7 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { unpaidBreakMs } from '../../common/break-duration';
+import { closeOpenBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
@@ -96,6 +96,18 @@ class RegisterVenueDto {
 
   @IsString()
   staffRange!: string;
+
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @IsOptional()
+  latitude?: number;
+
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @IsOptional()
+  longitude?: number;
 }
 
 class UpdateVenueDto {
@@ -309,6 +321,11 @@ export class AppController {
     if (!(await this.isEmailVerified(user.sub))) {
       throw new ForbiddenException('Verify your email before creating a venue.');
     }
+    const latitude = Number.isFinite(body.latitude) ? body.latitude! : 0;
+    const longitude = Number.isFinite(body.longitude) ? body.longitude! : 0;
+    if (latitude === 0 && longitude === 0) {
+      throw new BadRequestException('Set the venue coordinates before creating it. Clock-in cannot run at an unconfigured location.');
+    }
 
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
@@ -381,8 +398,8 @@ export class AppController {
         data: {
           name: businessName,
           code: venueCode,
-          latitude: 0,
-          longitude: 0,
+          latitude,
+          longitude,
           geofenceRadiusM: 150,
           phone: body.phone?.trim() || null,
           address: body.address?.trim() || null,
@@ -456,6 +473,13 @@ export class AppController {
   async updateVenue(@CurrentUser() user: AuthUser, @Body() body: UpdateVenueDto) {
     const profile = await this.requireManagerProfile(user);
     if (!profile.venueId) return { venue: null };
+    const nextLat = body.latitude ?? profile.venue?.latitude;
+    const nextLng = body.longitude ?? profile.venue?.longitude;
+    if (body.latitude !== undefined || body.longitude !== undefined) {
+      if (nextLat === 0 && nextLng === 0) {
+        throw new BadRequestException('Venue coordinates cannot be 0,0. Use a real location for the time-clock geofence.');
+      }
+    }
     const venue = await this.prisma.venue.update({
       where: { id: profile.venueId },
       data: {
@@ -1113,10 +1137,21 @@ export class AppController {
         // isOpen entries, and once profileId is SET NULL no correction request
         // can reach it — so the employee's final partial shift silently became
         // unpayable at exactly the moment they left.
-        await tx.timeEntry.updateMany({
+        const openEntries = await tx.timeEntry.findMany({
           where: { profileId: { in: profileIds }, clockOutAt: null },
-          data: { clockOutAt: new Date(), isOpen: false },
+          select: { id: true, breaks: true },
         });
+        const clockOutAt = new Date();
+        for (const entry of openEntries) {
+          await tx.timeEntry.update({
+            where: { id: entry.id },
+            data: {
+              clockOutAt,
+              isOpen: false,
+              breaks: closeOpenBreaks(entry.breaks, clockOutAt.getTime()),
+            },
+          });
+        }
         for (const profile of profiles) {
           await tx.timeEntry.updateMany({
             where: { profileId: profile.id },

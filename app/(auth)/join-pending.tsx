@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
 import { useQueryClient } from '@tanstack/react-query';
 import { appApi } from '../../lib/api-client';
+import { venueFromApi } from '../../lib/session-from-auth';
 import { authCardStyle, authColors as colors, spacing, type } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
@@ -32,13 +33,7 @@ export default function JoinPendingScreen() {
     try {
       const me = await appApi.getMe();
       if (me?.venue) {
-        setVenue({
-          id: me.venue._id,
-          name: me.venue.name,
-          latitude: me.venue.latitude,
-          longitude: me.venue.longitude,
-          geofence_radius_m: me.venue.geofenceRadiusM,
-        });
+        setVenue(venueFromApi(me.venue));
         await queryClient.invalidateQueries({ queryKey: ['app', 'getMe'] });
       }
       router.replace('/(tabs)/home');

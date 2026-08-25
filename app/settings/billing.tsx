@@ -27,7 +27,7 @@ export default function BillingScreen() {
   // "never subscribed".
   const trialEndsAt: number | null = me?.profile?.trialEndsAt ?? null;
   const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
-  const isPaid = billing?.status === 'active';
+  const isPaid = billing?.status === 'active' || billing?.status === 'trialing';
   const trialDaysLeft = inTrial ? Math.max(0, Math.ceil((trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
   const upgradeLabel = inTrial ? t('settingsBilling.upgrade') : t('settingsBilling.subscribe');
   const canEditBilling = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));

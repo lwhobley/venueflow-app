@@ -66,8 +66,12 @@ function pct(minutes: number) {
   return `${((clamped - gridStart) / gridMinutes) * 100}%`;
 }
 
+function shiftSpan(start: number, end: number) {
+  return (end <= start ? end + 1440 : end) - start;
+}
+
 function durationHours(start: number, end: number) {
-  return Math.round(((end - start) / 60) * 10) / 10;
+  return Math.round((shiftSpan(start, end) / 60) * 10) / 10;
 }
 
 type AvailabilityRow = { dayIndex: number; startMinutes: number; endMinutes: number; available: boolean };
@@ -391,13 +395,13 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     if (!dragShiftId) return;
     const shift = shifts.find((row) => row._id === dragShiftId);
     if (!shift) return;
-    const length = Math.max(60, shift.endMinutes - shift.startMinutes);
+    const length = Math.max(60, shiftSpan(shift.startMinutes, shift.endMinutes));
     await updateShift({
       venueId,
       shiftId: shift._id,
       dayIndex: targetDay,
       startMinutes: targetStart,
-      endMinutes: Math.min(gridEnd, targetStart + length),
+      endMinutes: targetStart + length,
       jobTitle: shift.jobTitle,
       station: shift.station,
       notes: shift.notes ?? undefined,

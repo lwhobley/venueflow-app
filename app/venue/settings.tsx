@@ -12,6 +12,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { getPreciseLocation } from '../../lib/location';
 import { canManageVenue } from '../../lib/permissions';
 import { useI18n } from '../../lib/i18n';
+import { venueFromApi } from '../../lib/session-from-auth';
 
 export default function VenueSettingsScreen() {
   const { t } = useI18n();
@@ -73,17 +74,15 @@ export default function VenueSettingsScreen() {
       setError(t('venueSettings.invalidCoordinates'));
       return;
     }
+    if (latitude === 0 && longitude === 0) {
+      setError('Set a real venue location. 0,0 is not a valid geofence.');
+      return;
+    }
     savingRef.current = true;
     setSaving(true);
     try {
       const updated = await updateVenue({ venueId: venue.id, name: name.trim() || undefined, latitude, longitude, geofenceRadiusM: radius });
-      setVenue({
-        id: updated._id,
-        name: updated.name,
-        latitude: updated.latitude,
-        longitude: updated.longitude,
-        geofence_radius_m: updated.geofenceRadiusM,
-      });
+      setVenue(venueFromApi(updated));
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
@@ -153,6 +152,12 @@ export default function VenueSettingsScreen() {
       </View>
 
       <VenueSwitcher />
+
+      {venue && venue.latitude === 0 && venue.longitude === 0 ? (
+        <Text style={{ color: colors.danger }}>
+          This venue has no map location yet. Clock-in is blocked until you set coordinates.
+        </Text>
+      ) : null}
 
       <AppCard>
           <SectionHeader title={t('venueSettings.detailsSection')} />

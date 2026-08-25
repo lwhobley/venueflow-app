@@ -3,6 +3,7 @@ import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } f
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
+import { userFromProfile, venueFromAuth } from '../../lib/session-from-auth';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
@@ -38,25 +39,8 @@ export default function VerifyEmailScreen() {
         : await appApi.redeemMyInvite();
       if (redemption.redeemed && redemption.profile) {
         setSession({
-          user: {
-            id: redemption.profile._id,
-            email: redemption.profile.email,
-            full_name: redemption.profile.fullName,
-            email_verified: true,
-            role: redemption.profile.role,
-            job_title: redemption.profile.jobTitle,
-            venue_id: redemption.profile.venueId ?? null,
-            all_access: redemption.profile.allAccess === true,
-          },
-          venue: redemption.venue
-            ? {
-                id: redemption.venue._id,
-                name: redemption.venue.name,
-                latitude: redemption.venue.latitude,
-                longitude: redemption.venue.longitude,
-                geofence_radius_m: redemption.venue.geofenceRadiusM,
-              }
-            : null,
+          user: { ...userFromProfile(redemption.profile), email_verified: true },
+          venue: venueFromAuth({ ...redemption.profile, emailVerified: true }, redemption.venue),
           token,
         });
         const venueName = redemption.venue?.name;

@@ -19,14 +19,28 @@ export function userFromProfile(profile: ApiProfile): UserSummary {
   };
 }
 
-export function venueFromAuth(profile: ApiProfile, venue: ApiVenue | null | undefined): Venue | null {
-  if (!venue || !isUsableVenueMembership(profile)) return null;
+export function venueFromApi(venue: {
+  _id?: string;
+  id?: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusM?: number;
+  geofence_radius_m?: number;
+  timezone?: string | null;
+}): Venue {
   return {
-    id: venue._id,
+    id: venue._id ?? venue.id ?? '',
     name: venue.name,
     latitude: venue.latitude,
     longitude: venue.longitude,
-    geofence_radius_m: venue.geofenceRadiusM,
+    geofenceRadiusM: venue.geofenceRadiusM ?? venue.geofence_radius_m ?? 0,
+    geofence_radius_m: venue.geofenceRadiusM ?? venue.geofence_radius_m ?? 0,
     timezone: venue.timezone ?? null,
   };
+}
+
+export function venueFromAuth(profile: ApiProfile, venue: ApiVenue | null | undefined): Venue | null {
+  if (!venue || !isUsableVenueMembership(profile)) return null;
+  return venueFromApi(venue);
 }
