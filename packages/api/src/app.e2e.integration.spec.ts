@@ -42,8 +42,8 @@ describe('e2e smoke: auth, billing, scheduling', () => {
     venueIds = [activeVenue.id, expiredVenue.id];
 
     const [activeUser, expiredUser] = await Promise.all([
-      prisma.user.create({ data: { email: 'e2e-active@test.local' } }),
-      prisma.user.create({ data: { email: 'e2e-expired@test.local' } }),
+      prisma.user.create({ data: { email: 'e2e-active@test.local', emailVerifiedAt: new Date() } }),
+      prisma.user.create({ data: { email: 'e2e-expired@test.local', emailVerifiedAt: new Date() } }),
     ]);
 
     await Promise.all([
