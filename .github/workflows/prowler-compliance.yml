@@ -127,10 +127,15 @@ jobs:
       - name: Verify scan outputs generated
         shell: bash
         run: |
+          set -Eeuo pipefail
           if [ ! -d "prowler_output/gcp" ] && [ ! -d "prowler_output/aws" ]; then
             echo "::error::Neither GCP nor AWS credentials produced a compliance scan. Configure scan credentials or disable this workflow."
             exit 1
           fi
+          find prowler_output -type f \( -name '*.html' -o -name '*.csv' -o -name '*.json' \) -print -quit | grep -q . || {
+            echo "::error::Prowler output directories exist but contain no report files."
+            exit 1
+          }
 
       - name: Upload Compliance Assessment Reports (Evidence Artifacts)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

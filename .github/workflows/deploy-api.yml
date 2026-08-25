@@ -86,6 +86,30 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
+      - name: Require Secret Manager references for production credentials
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          restricted=(
+            DATABASE_URL DATABASE_DIRECT_URL JWT_SECRET
+            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
+            REVENUECAT_API_KEY REVENUECAT_WEBHOOK_SECRET
+            RESEND_API_KEY GEMINI_API_KEY
+          )
+          for name in "${restricted[@]}"; do
+            secret_ref="$(jq -r --arg name "$name" '
+              [.spec.template.spec.containers[0].env[]?
+                | select(.name == $name)
+                | (.valueFrom.secretKeyRef.name // .valueFrom.secretKeyRef.secret // "")]
+              | first // ""
+            ' <<<"$service_json")"
+            if [[ -z "$secret_ref" ]]; then
+              echo "::error::${name} must be supplied by a Cloud Run Secret Manager reference, not a literal environment value."
+              exit 1
+            fi
+          done
+
       - name: Verify required Cloud Run jobs before changing production
         run: |
           set -Eeuo pipefail

@@ -13,14 +13,29 @@ jobs:
     name: Backup production database to S3
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      restore-target:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: venue_restore_drill
+          POSTGRES_PASSWORD: restore-drill-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d venue_restore_drill"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: ${{ secrets.PRODUCTION_POOLER_DATABASE_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
       BACKUP_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
-      RESTORE_DRILL_DATABASE_URL: ${{ secrets.RESTORE_DRILL_DATABASE_URL }}
-      RESTORE_DRILL_DATABASE_FINGERPRINT: ${{ secrets.RESTORE_DRILL_DATABASE_FINGERPRINT }}
+      # The restore target is an ephemeral service container destroyed with
+      # the runner, so a production hostname cannot be substituted by secret.
+      RESTORE_DRILL_DATABASE_URL: postgresql://postgres:restore-drill-only@127.0.0.1:5432/venue_restore_drill
+      RESTORE_DRILL_DATABASE_FINGERPRINT: 127.0.0.1:5432/venue_restore_drill
       BACKUP_RETENTION_DAYS: "30"
     steps:
       - name: Install backup tools
