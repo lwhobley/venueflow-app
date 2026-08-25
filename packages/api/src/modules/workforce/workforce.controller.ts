@@ -98,37 +98,10 @@ export class WorkforceController {
       INVITE_EMAIL_LIMIT_WINDOW_MS,
     );
 
-    // Phone-only contacts never get emailed, so there's no token to mint or
-    // rotate — just report presence, matching the email path's fallback and
-    // stale-status logic below without ever touching the token machinery.
+    // Never reveal whether a phone number exists in an invite or roster. The
+    // public response is deliberately identical for every valid contact.
     if (!email) {
-      const invite = await this.prisma.invite.findFirst({
-        where: { phone, usedBy: null, expiresAt: { gt: new Date() } },
-        include: { venue: { select: { name: true } } },
-      });
-      if (invite) {
-        return {
-          status: 'found',
-          emailSent: false,
-          venueName: invite.venue?.name,
-          jobTitle: invite.jobTitle,
-          role: invite.role,
-        };
-      }
-      const unclaimedProfile = await this.prisma.profile.findFirst({
-        where: { userId: null, venueId: { not: null }, phone: phone ? { equals: phone } : undefined },
-        include: { venue: { select: { name: true } } },
-      });
-      if (unclaimedProfile?.venue) {
-        return {
-          status: 'found',
-          emailSent: false,
-          venueName: unclaimedProfile.venue.name,
-          jobTitle: unclaimedProfile.jobTitle,
-          role: unclaimedProfile.role,
-        };
-      }
-      return { status: 'not_found' };
+      return { status: 'ok' as const };
     }
 
     // The plaintext token is only needed when minting a new invite. Existing
@@ -175,9 +148,7 @@ export class WorkforceController {
       return { venueName: created.venue.name, jobTitle: created.jobTitle, emailSent: true } as const;
     });
 
-    if (!outcome) {
-      return this.reportStaleInviteStatus(email, undefined);
-    }
+    if (!outcome) return { status: 'ok' as const };
 
     const appUrl = publicWebOrigin(this.config);
     // A URL fragment (not a query string) so the token never reaches
@@ -185,39 +156,20 @@ export class WorkforceController {
     // all. site/join/index.html reads from the fragment first.
     const signupUrl = `${appUrl}/join#invite=${encodeURIComponent(freshToken)}`;
     const venueName = sanitizeForEmail(outcome.venueName);
-    // Fire-and-forget: awaiting the send here would (a) make `found`
-    // responses measurably slower than `not_found` ones (a timing side
-    // channel for the enumeration check above) and (b) turn a transient
-    // email-provider outage into a 500 that still confirms "found" via the
-    // error shape. The invite itself is already durable in the DB, so a
-    // failed send leaves the newly-created invite available for recovery.
-    if (outcome.emailSent) {
-      void this.email
-        .sendOrThrow({
-          to: email,
-          subject: `Create your Venue Wrangler account for ${venueName}`,
-          text:
-            `Your email address has been invited to join ${venueName} on Venue Wrangler as ${outcome.jobTitle}.\n\n` +
-            `Create your account using this secure link:\n${signupUrl}\n\n` +
-            `Create your account with this invited email address and you will automatically join ${venueName}.\n\n` +
-            `This link expires on ${newExpiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\n` +
-            `Questions? support@venuewrangler.com\n\n` +
-            `— The Venue Wrangler Team`,
-        })
-        .catch((err: unknown) => {
-          this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
-        });
-    }
-    return {
-      status: 'found',
-      emailSent: outcome.emailSent,
-      venueName: outcome.venueName,
-      jobTitle: outcome.jobTitle,
-    };
-  }
-
-  private async reportStaleInviteStatus(_email: string | undefined, _phone: string | undefined) {
-    return { status: 'not_found' as const };
+    // Fire-and-forget so delivery timing and provider failures cannot turn the
+    // otherwise uniform public response into an account-enumeration signal.
+    void this.email
+      .sendOrThrow({
+        to: email,
+        subject: `Your Venue Wrangler invitation for ${venueName}`,
+        text: outcome.emailSent
+          ? `Your email address has been invited to join ${venueName} on Venue Wrangler as ${outcome.jobTitle}.\n\nCreate your account using this secure link:\n${signupUrl}\n\nThis link expires on ${newExpiresAt.toLocaleDateString('en-US')}. If you did not expect this invitation, you can ignore this email.\n\nQuestions? support@venuewrangler.com\n\n— The Venue Wrangler Team`
+          : `An active invitation already exists for this email address at ${venueName}. Use the secure link in the original invitation email, or ask your manager to send a new invitation.\n\nIf you did not request this reminder, you can ignore it.\n\nQuestions? support@venuewrangler.com\n\n— The Venue Wrangler Team`,
+      })
+      .catch((err: unknown) => {
+        this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    return { status: 'ok' as const };
   }
 
   // ─── Public: venue search ──────────────────────────────────────────────────

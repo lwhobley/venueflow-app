@@ -98,10 +98,10 @@ export function mapClockEntry(
     venueId: string;
     clockInAt: Date;
     clockOutAt: Date | null;
-    clockInLat: number;
-    clockInLng: number;
-    clockInAccuracyM: number;
-    clockInMocked: boolean;
+    clockInLat: number | null;
+    clockInLng: number | null;
+    clockInAccuracyM: number | null;
+    clockInMocked: boolean | null;
     clockOutLat: number | null;
     clockOutLng: number | null;
     clockOutAccuracyM: number | null;

@@ -805,10 +805,12 @@ model TimeEntry {
   profileFullName   String?
   clockInAt         DateTime
   clockOutAt        DateTime?
-  clockInLat        Float
-  clockInLng        Float
-  clockInAccuracyM  Float
-  clockInMocked     Boolean
+  // Null for manager-approved administrative corrections that did not come
+  // from a device punch. Never fabricate a 0,0 GPS fix for those records.
+  clockInLat        Float?
+  clockInLng        Float?
+  clockInAccuracyM  Float?
+  clockInMocked     Boolean?
   clockOutLat       Float?
   clockOutLng       Float?
   clockOutAccuracyM Float?

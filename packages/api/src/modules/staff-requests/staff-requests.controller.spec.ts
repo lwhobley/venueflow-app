@@ -80,4 +80,92 @@ describe('StaffRequestsController', () => {
       data: { profileId: null, status: 'open' },
     });
   });
+
+  it('opens an overnight shift whose spill overlaps the first unavailable day', async () => {
+    const now = new Date('2026-08-24T12:00:00.000Z');
+    const request = {
+      id: 'request-overnight', venueId: 'venue-1', profileId: 'profile-1',
+      kind: 'time_off', status: 'pending', title: 'Unavailable', details: '',
+      requestedForDate: '2026-08-24', requestedShiftId: null,
+      requestedRangeStart: null, requestedRangeEnd: null, availability: null,
+      reviewerId: null, reviewedAt: null, responseNotes: null,
+      createdAt: now, updatedAt: now,
+    };
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      staffRequest: {
+        findUnique: vi.fn().mockResolvedValue(request),
+        update: vi.fn().mockResolvedValue({ ...request, status: 'approved' }),
+      },
+      profile: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'manager-1', fullName: 'Manager' }) },
+      scheduleShift: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'sat-night', weekStart: '2026-08-23', dayIndex: 0, startMinutes: 1320, endMinutes: 1560 },
+        ]),
+        updateMany,
+      },
+    };
+    const controller = new StaffRequestsController(
+      { $transaction: vi.fn((callback) => callback(tx)) } as any,
+      { notifyProfile: vi.fn().mockResolvedValue(undefined) } as any,
+      { sendToProfile: vi.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    await controller.reviewStaffRequest(
+      { venueId: 'venue-1', profileId: 'manager-1', role: 'manager' } as any,
+      request.id,
+      { status: 'approved' } as any,
+    );
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['sat-night'] } },
+      data: { profileId: null, status: 'open' },
+    });
+  });
+
+  it('records a manager-approved missing punch without fabricated GPS coordinates', async () => {
+    const now = new Date('2026-08-24T12:00:00.000Z');
+    const request = {
+      id: 'request-correction', venueId: 'venue-1', profileId: 'profile-1',
+      kind: 'time_correction', status: 'pending', title: 'Missing punch', details: '',
+      requestedForDate: null, requestedShiftId: null, requestedRangeStart: null,
+      requestedRangeEnd: null,
+      availability: {
+        clockInAt: '2026-08-24T14:00:00.000Z',
+        clockOutAt: '2026-08-24T22:00:00.000Z',
+      },
+      reviewerId: null, reviewedAt: null, responseNotes: null,
+      createdAt: now, updatedAt: now,
+    };
+    const create = vi.fn().mockResolvedValue({ id: 'entry-correction' });
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      staffRequest: {
+        findUnique: vi.fn().mockResolvedValue(request),
+        update: vi.fn().mockResolvedValue({ ...request, status: 'approved' }),
+      },
+      profile: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'manager-1', fullName: 'Manager' }) },
+      venue: { findUnique: vi.fn().mockResolvedValue({ timezone: 'UTC' }) },
+      timeEntry: { findFirst: vi.fn().mockResolvedValue(null), create },
+    };
+    const controller = new StaffRequestsController(
+      { $transaction: vi.fn((callback) => callback(tx)) } as any,
+      { notifyProfile: vi.fn().mockResolvedValue(undefined) } as any,
+      { sendToProfile: vi.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    await controller.reviewStaffRequest(
+      { venueId: 'venue-1', profileId: 'manager-1', role: 'manager' } as any,
+      request.id,
+      { status: 'approved' } as any,
+    );
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        clockInLat: null, clockInLng: null, clockInAccuracyM: null, clockInMocked: null,
+        clockOutLat: null, clockOutLng: null, clockOutAccuracyM: null, clockOutMocked: null,
+      }),
+    });
+  });
 });
