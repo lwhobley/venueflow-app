@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     include: ['tests/ui/**/*.spec.tsx', 'components/**/*.spec.tsx'],
     exclude: [...configDefaults.exclude, '.claude/**'],
+    setupFiles: ['tests/ui/setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text-summary'],
@@ -20,10 +21,10 @@ export default defineConfig({
       // untested screens. It starts at the measured repository-wide baseline;
       // new tests should raise it without narrowing the include set.
       thresholds: {
-        statements: 2.6,
-        branches: 1.7,
-        functions: 2.2,
-        lines: 2.8,
+        statements: 3.7,
+        branches: 2.5,
+        functions: 2.8,
+        lines: 3.9,
       },
     } as any,
   },

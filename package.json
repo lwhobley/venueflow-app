@@ -28,7 +28,7 @@
     "doctor": "expo-doctor",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:ui": "vitest run --config vitest.ui.config.ts",
+    "test:ui": "vitest run --config vitest.ui.config.mts",
     "test:watch": "vitest"
   },
   "dependencies": {

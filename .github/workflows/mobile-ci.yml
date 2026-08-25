@@ -17,8 +17,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
-      - 'vitest.config.ts'
-      - 'vitest.ui.config.ts'
+      - 'vitest.config.mts'
+      - 'vitest.ui.config.mts'
       - '.github/workflows/mobile-ci.yml'
   pull_request:
     branches: [main]
@@ -35,8 +35,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
-      - 'vitest.config.ts'
-      - 'vitest.ui.config.ts'
+      - 'vitest.config.mts'
+      - 'vitest.ui.config.mts'
       - '.github/workflows/mobile-ci.yml'
 
 permissions:
