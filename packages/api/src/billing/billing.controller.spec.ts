@@ -185,4 +185,47 @@ describe('BillingController applySubscription P2002 handling', () => {
 
     await expect(controller.applyStripeSubscription(input)).rejects.toBe(error);
   });
+
+  it('resolves primary venue for multi-venue owner on single-venue RevenueCat purchase', async () => {
+    const prisma = {
+      venue: { findUnique: vi.fn().mockResolvedValue(null) },
+      profile: {
+        findMany: vi.fn().mockResolvedValue([
+          { venueId: 'venue-latest', createdAt: new Date(2000) },
+          { venueId: 'venue-older', createdAt: new Date(1000) },
+        ]),
+      },
+      $transaction: vi.fn().mockImplementation(async (cb: any) => cb({
+        $executeRaw: vi.fn().mockResolvedValue(undefined),
+        venue: { findUnique: vi.fn().mockResolvedValue({ id: 'venue-latest' }), update: vi.fn().mockResolvedValue({}) },
+        subscription: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
+        subscriptionEvent: { create: vi.fn().mockResolvedValue({}) },
+      })),
+    };
+    const config = {
+      get: vi.fn((key: string) => {
+        if (key === 'REVENUECAT_WEBHOOK_SECRET') return 'secret';
+        if (key === 'REVENUECAT_ALLOWED_PRODUCT_IDS') return 'com.venuewrangler.monthly';
+        return undefined;
+      }),
+    };
+    const controller = new BillingController(prisma as any, config as any);
+
+    const result = await controller.revenueCatWebhook(
+      { ip: '127.0.0.1' } as any,
+      'Bearer secret',
+      {
+        event: {
+          id: 'evt-1',
+          type: 'INITIAL_PURCHASE',
+          app_user_id: 'user-multi-owner',
+          product_id: 'com.venuewrangler.monthly',
+          purchased_at_ms: Date.now(),
+          expiration_at_ms: Date.now() + 86400000,
+        },
+      } as any,
+    );
+    expect(result).toEqual({ ok: true });
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+  });
 });

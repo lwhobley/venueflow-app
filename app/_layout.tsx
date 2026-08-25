@@ -138,7 +138,7 @@ export function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <PaperProvider theme={makePaperTheme(themeMode)}>
-            <A0PurchaseProvider config={{ appUserId: venueId ?? undefined, debug }}>
+            <A0PurchaseProvider config={{ appUserId: userId ?? undefined, debug }}>
               {/* Top inset keeps content below the status bar / notch; the tab
                   bar and screens handle the bottom inset. */}
               <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={['top', 'left', 'right']}>

@@ -320,6 +320,9 @@ export class AppStaffController {
           where: { id: existing.id },
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },
         });
+        if (roleChanged && existing.userId) {
+          await tx.session.deleteMany({ where: { userId: existing.userId } });
+        }
       } else {
         created = await tx.profile.create({
           data: { email: body.email.toLowerCase(), fullName: body.fullName, role: body.role, jobTitle: body.jobTitle, venueId: body.venueId, ...employeeFields },

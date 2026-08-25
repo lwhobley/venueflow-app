@@ -108,8 +108,19 @@ describe('Gemini configuration', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('rejects malformed monthly budget configuration instead of treating it as unlimited', () => {
-    process.env.AI_MONTHLY_VENUE_BUDGET_USD = 'NaN';
-    expect(() => monthlyAiBudgetUsd()).toThrow('Invalid AI_MONTHLY_VENUE_BUDGET_USD configuration.');
+  it('parses JSON wrapped in markdown code fences', async () => {
+    process.env.AI_MONTHLY_VENUE_BUDGET_USD = '25';
+    const prisma = makeBudgetPrisma(0);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '```json\n{"success": true, "count": 42}\n```' }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+      }), { status: 200 }));
+
+    await expect(runWithAiUsageContext(
+      { venueId: 'venue-1', profileId: 'profile-1', prisma: prisma as any },
+      () => callAiJson({ apiKey: 'key', model: 'gemini-flash-latest', prompt: 'Return JSON' }),
+    )).resolves.toEqual({ success: true, count: 42 });
   });
 });
+

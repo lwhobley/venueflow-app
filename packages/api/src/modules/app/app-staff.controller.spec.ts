@@ -352,7 +352,7 @@ describe('AppStaffController', () => {
       expect(prisma.profile.update).toHaveBeenCalled();
     });
 
-    it('preserves multi-venue sessions when a live role changes', async () => {
+    it('invalidates sessions when a live role changes', async () => {
       const { controller, prisma, profiles } = makeController();
       profiles.requireManagerProfile.mockResolvedValue(ownerViewer);
       prisma.profile.findFirst.mockResolvedValue(profileRow({ id: 'staff-2', role: 'staff', userId: 'staff-2-user' }));
@@ -362,7 +362,7 @@ describe('AppStaffController', () => {
         venueId: 'venue-1', staffId: 'staff-2', email: 'staff@example.com', fullName: 'Staff Person', role: 'manager', jobTitle: 'Manager',
       } as any);
 
-      expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'staff-2-user' } });
     });
 
     it('does not invalidate sessions when the role is unchanged', async () => {
