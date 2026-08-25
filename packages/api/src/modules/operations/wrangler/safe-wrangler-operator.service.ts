@@ -3,6 +3,8 @@ import { canManageVenue } from '../../../auth/roles';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ReservationMutationService } from '../../reservations/reservation-mutation.service';
 import { SchedulingAssignmentService } from '../../scheduling/scheduling-assignment.service';
+import { weekStartFor } from '../../../common/pay-period';
+import { normalizedShiftEnd } from '../../../common/venue-time';
 import { WranglerOperatorService } from './wrangler-operator.service';
 
 @Injectable()
@@ -35,7 +37,7 @@ export class SafeWranglerOperatorService {
       throw new ForbiddenException('Manager access required for Wrangler operator actions');
     }
     const tool = String(input.plan?.tool ?? '');
-    if (!['CREATE_RESERVATION', 'UPDATE_RESERVATION', 'UPDATE_SHIFT', 'ASSIGN_SHIFT', 'CORRECT_PUNCH'].includes(tool)) {
+    if (!['CREATE_RESERVATION', 'UPDATE_RESERVATION', 'CREATE_SHIFT', 'UPDATE_SHIFT', 'ASSIGN_SHIFT', 'CORRECT_PUNCH'].includes(tool)) {
       return this.parser.execute(input);
     }
     const args = { ...(input.plan?.args ?? {}) };
@@ -65,13 +67,27 @@ export class SafeWranglerOperatorService {
         tags: old.tags, specialRequests: old.specialRequests ?? undefined, phone: old.guestPhone ?? undefined, email: old.guestEmail ?? undefined,
       });
       result = saved.reservation;
+    } else if (tool === 'CREATE_SHIFT') {
+      const date = this.text(args.date, 'Shift date is required (YYYY-MM-DD)');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Date must be YYYY-MM-DD');
+      const startMinutes = this.shiftStart(args.startMinutes);
+      const endMinutes = this.shiftEnd(startMinutes, args.endMinutes);
+      result = await this.scheduling.createShift({
+        venueId: input.venueId,
+        weekStart: weekStartFor(date),
+        dayIndex: new Date(`${date}T12:00:00Z`).getUTCDay(),
+        ...(args.profileId ? { profileId: this.text(args.profileId, 'profileId is required') } : {}),
+        startMinutes,
+        endMinutes,
+        jobTitle: typeof args.jobTitle === 'string' ? args.jobTitle : 'Server',
+        station: typeof args.station === 'string' ? args.station : 'Floor',
+      });
     } else if (tool === 'UPDATE_SHIFT') {
       const id = this.text(args.shiftId, 'shiftId is required');
       const old = await this.prisma.scheduleShift.findFirst({ where: { id, venueId: input.venueId } });
       if (!old) throw new NotFoundException('Shift no longer exists');
-      const startMinutes = args.startMinutes == null ? old.startMinutes : this.minute(args.startMinutes, 'startMinutes');
-      const endMinutes = args.endMinutes == null ? old.endMinutes : this.minute(args.endMinutes, 'endMinutes');
-      if (endMinutes <= startMinutes) throw new BadRequestException('Shift end must be after shift start');
+      const startMinutes = args.startMinutes == null ? old.startMinutes : this.shiftStart(args.startMinutes);
+      const endMinutes = args.endMinutes == null ? old.endMinutes : this.shiftEnd(startMinutes, args.endMinutes);
       await this.scheduling.updateShift({ venueId: input.venueId, shiftId: old.id, dayIndex: old.dayIndex, startMinutes, endMinutes,
         jobTitle: args.jobTitle == null ? old.jobTitle : this.text(args.jobTitle, 'jobTitle is required'), station: args.station == null ? old.station : this.text(args.station, 'station is required'), notes: old.notes ?? undefined });
       result = await this.prisma.scheduleShift.findUniqueOrThrow({ where: { id: old.id } });
@@ -106,7 +122,14 @@ export class SafeWranglerOperatorService {
 
   private text(value: unknown, message: string) { const v = typeof value === 'string' ? value.trim() : ''; if (!v) throw new BadRequestException(message); return v; }
   private positiveInt(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 1) throw new BadRequestException(`${field} must be a positive whole number`); return n; }
-  private minute(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > 1440) throw new BadRequestException(`${field} must be between 0 and 1440`); return n; }
+  private shiftStart(value: unknown) { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > 1439) throw new BadRequestException('startMinutes must be between 0 and 1439'); return n; }
+  private shiftEnd(startMinutes: number, value: unknown) {
+    const raw = Number(value);
+    if (!Number.isInteger(raw) || raw < 0 || raw > 2880) throw new BadRequestException('endMinutes must be between 0 and 2880');
+    const end = normalizedShiftEnd(startMinutes, raw);
+    if (end <= startMinutes || end > 2880 || end - startMinutes > 1440) throw new BadRequestException('Shift must end after it starts and cannot exceed 24 hours');
+    return end;
+  }
   private date(value: unknown, message: string) { const d = new Date(String(value ?? '')); if (Number.isNaN(d.getTime())) throw new BadRequestException(message); return d; }
   private reservationStatus(value: unknown) {
     const status = this.text(value, 'Invalid reservation status');

@@ -315,7 +315,7 @@ describe('AuthController email invite signup', () => {
     await expect((controller as any).password(
       { ip: '127.0.0.1' },
       { email: 'existing@example.com', password: 'password123', flow: 'signUp', termsAccepted: true },
-    )).rejects.toThrow('An account already exists for this email');
+    )).rejects.toThrow('Unable to create account with those details');
   });
 
   it('handles P2002 unique violation race condition gracefully during signup transaction', async () => {
@@ -336,7 +336,7 @@ describe('AuthController email invite signup', () => {
     await expect((controller as any).password(
       { ip: '127.0.0.1' },
       { email: 'concurrent@example.com', password: 'password123', flow: 'signUp', termsAccepted: true },
-    )).rejects.toThrow('An account already exists for this email');
+    )).rejects.toThrow('Unable to create account with those details');
   });
 });
 

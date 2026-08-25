@@ -24,8 +24,8 @@ type ShiftSnapshot = {
 };
 
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const hourTicks = [8, 10, 12, 14, 16, 18, 20, 22];
-const gridStart = 8 * 60;
+const hourTicks = [0, 3, 6, 9, 12, 15, 18, 21];
+const gridStart = 0;
 const gridEnd = 24 * 60;
 const gridMinutes = gridEnd - gridStart;
 
@@ -566,7 +566,27 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                   </View>
                   
                   {dayLabels.map((label, dayIndex) => {
-                    const dayShifts = shifts.filter((shift) => shift.dayIndex === dayIndex);
+                    const dayShifts = shifts.flatMap((shift) => {
+                      const segments: Array<ManagerShift & { segmentKey: string; renderStart: number; renderEnd: number }> = [];
+                      if (shift.dayIndex === dayIndex) {
+                        segments.push({
+                          ...shift,
+                          segmentKey: `${shift._id}:start`,
+                          renderStart: shift.startMinutes,
+                          renderEnd: Math.min(1440, shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes),
+                        });
+                      }
+                      const normalizedEnd = shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes;
+                      if (shift.dayIndex < 6 && shift.dayIndex + 1 === dayIndex && normalizedEnd > 1440) {
+                        segments.push({
+                          ...shift,
+                          segmentKey: `${shift._id}:spill`,
+                          renderStart: 0,
+                          renderEnd: normalizedEnd - 1440,
+                        });
+                      }
+                      return segments;
+                    });
                     const today = isToday(dayIndex);
                     const active = day === dayIndex;
                     return (
@@ -608,11 +628,11 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                           
                           {dayShifts.map((shift) => {
                             const accent = roleAccent(shift.jobTitle);
-                            const left = pct(shift.startMinutes);
-                            const width = `${Math.max(8, ((Math.min(gridEnd, shift.endMinutes) - Math.max(gridStart, shift.startMinutes)) / gridMinutes) * 100)}%`;
+                            const left = pct(shift.renderStart);
+                            const width = `${Math.max(2, ((Math.min(gridEnd, shift.renderEnd) - Math.max(gridStart, shift.renderStart)) / gridMinutes) * 100)}%`;
                             return (
                               <Pressable
-                                key={shift._id}
+                                key={shift.segmentKey}
                                 onPress={() => setSelectedShiftId(shift._id)}
                                 {...({
                                   draggable: true,

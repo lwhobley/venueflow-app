@@ -2,6 +2,29 @@ import { describe, expect, it, vi } from 'vitest';
 import { WranglerService } from './wrangler.service';
 
 describe('WranglerService reservation reassignment', () => {
+  it('includes the previous calendar day only when a shift spills past midnight', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-24T01:00:00.000Z'));
+    try {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const service = new WranglerService({ scheduleShift: { findMany } } as any);
+
+      await service.getSnapshot('venue-1', 'UTC');
+
+      expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: {
+          venueId: 'venue-1',
+          OR: [
+            { weekStart: '2026-08-23', dayIndex: 1 },
+            { weekStart: '2026-08-23', dayIndex: 0, endMinutes: { gt: 1440 } },
+          ],
+        },
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shares the reservation-holds venue lock with standard reservation mutations', async () => {
     const tx: any = {
       $executeRaw: vi.fn().mockResolvedValue(undefined),

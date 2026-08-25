@@ -222,7 +222,7 @@ export class AuthController {
     // an existing User record would allow claiming passwordless/OAuth/invited
     // accounts without proving ownership.
     if (user) {
-      throw new BadRequestException('An account already exists for this email. Sign in instead.');
+      throw new BadRequestException('Unable to create account with those details. Try signing in or resetting your password.');
     }
     // The DTO's MinLength(6) is a floor shared with sign-in (existing users may
     // have shorter legacy passwords); new passwords must meet the current bar.
@@ -286,7 +286,7 @@ export class AuthController {
     } catch (error: any) {
       // Unique violation on email or userId: the concurrent signup won the race.
       if (error?.code === 'P2002') {
-        throw new BadRequestException('An account already exists for this email. Sign in instead.');
+        throw new BadRequestException('Unable to create account with those details. Try signing in or resetting your password.');
       }
       throw error;
     }
@@ -830,4 +830,3 @@ function mapProfile(profile: {
     certifications: profile.certifications ?? [],
   };
 }
-

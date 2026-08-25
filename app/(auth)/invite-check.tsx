@@ -10,24 +10,17 @@ import {
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
-import { appApi, type InviteCheckResult } from '../../lib/api-client';
-import { userFromProfile, venueFromAuth } from '../../lib/session-from-auth';
-import { useAuthStore, type AuthState } from '../../lib/auth-store';
+import { appApi } from '../../lib/api-client';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useI18n } from '../../lib/i18n';
 
 type Stage =
   | { kind: 'entry' }
-  | { kind: 'found'; invite: Extract<InviteCheckResult, { status: 'found' }> }
-  | { kind: 'not_found' };
+  | { kind: 'submitted' };
 
 export default function InviteCheckScreen() {
   const { t } = useI18n();
-  const user = useAuthStore((s: AuthState) => s.user);
-  const token = useAuthStore((s: AuthState) => s.token);
-  const setSession = useAuthStore((s: AuthState) => s.setSession);
-
   const [contact, setContact] = useState('');
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'entry' });
@@ -46,65 +39,14 @@ export default function InviteCheckScreen() {
       const body = looksLikeEmail
         ? { email: trimmed }
         : { phone: trimmed };
-      const result = await appApi.inviteCheck(body);
-      if (result.status === 'found') {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setStage({ kind: 'found', invite: result });
-      } else {
-        setStage({ kind: 'not_found' });
-      }
+      await appApi.inviteCheck(body);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setStage({ kind: 'submitted' });
     } catch (e) {
       Alert.alert(t('inviteCheck.errorTitle'), e instanceof Error ? e.message : t('inviteCheck.genericError'));
     } finally {
       setLoading(false);
     }
-  };
-
-  const continueWithInvite = async (invite: Extract<InviteCheckResult, { status: 'found' }>) => {
-    // redeemMyInvite is a one-shot mutation on the account-join path — a
-    // double-tap must not fire it twice.
-    if (loading) return;
-    if (!looksLikeEmail) {
-      Alert.alert(
-        t('inviteCheck.emailOnlyTitle'),
-        t('inviteCheck.emailOnlyMessage'),
-      );
-      return;
-    }
-    if (user) {
-      if (!user.email_verified) {
-        router.push('/(auth)/verify-email');
-        return;
-      }
-      setLoading(true);
-      try {
-        const redemption = await appApi.redeemMyInvite();
-        if (redemption.redeemed && redemption.profile) {
-          setSession({
-            user: { ...userFromProfile(redemption.profile), email_verified: true },
-            venue: venueFromAuth({ ...redemption.profile, emailVerified: true }, redemption.venue),
-            token,
-          });
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          router.replace('/(tabs)/home');
-        } else {
-          Alert.alert(t('inviteCheck.joinFailedTitle'), t('inviteCheck.joinFailedMessage'));
-        }
-      } catch (e) {
-        Alert.alert(t('inviteCheck.errorTitle'), e instanceof Error ? e.message : t('inviteCheck.genericError'));
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-    router.push({
-      pathname: '/(auth)/register',
-      params: {
-        email: contact.trim(),
-        ...(invite.venueName ? { venueName: invite.venueName } : {}),
-        inviteFound: '1',
-      },
-    });
   };
 
   return (
@@ -167,41 +109,14 @@ export default function InviteCheckScreen() {
               </>
             )}
 
-            {stage.kind === 'found' && (
+            {stage.kind === 'submitted' && (
               <View style={{ gap: spacing.sm }}>
-                <Text variant="labelMedium" style={{ color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
-                  {t('inviteCheck.found.label')}
+                <Text variant="bodyMedium" style={{ color: colors.text }}>
+                  {t('inviteCheck.submitted.message')}
                 </Text>
-                {stage.invite.venueName ? (
-                  <Text style={{ ...type.heading, color: colors.text }}>
-                    {stage.invite.venueName}
-                  </Text>
-                ) : null}
-                {stage.invite.jobTitle ? (
-                  <Text variant="bodyMedium" style={{ color: colors.muted }}>
-                    {t('inviteCheck.found.role', { jobTitle: stage.invite.jobTitle })}
-                  </Text>
-                ) : null}
                 <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  {!user && stage.invite.emailSent
-                    ? t('inviteCheck.found.emailSentNote', { email: contact.trim() })
-                    : user
-                    ? t('inviteCheck.found.confirmNote')
-                    : t('inviteCheck.found.signUpNote')}
+                  {t('inviteCheck.submitted.hint')}
                 </Text>
-                {user || !stage.invite.emailSent ? (
-                  <Button
-                    mode="contained"
-                    buttonColor={colors.primary}
-                    textColor={colors.buttonText}
-                    loading={loading}
-                    disabled={loading}
-                    onPress={() => continueWithInvite(stage.invite)}
-                    style={{ marginTop: 4 }}
-                  >
-                    {user ? t('inviteCheck.found.joinTeamButton') : t('inviteCheck.found.createAccountButton')}
-                  </Button>
-                ) : null}
                 <Button
                   mode="text"
                   textColor={colors.muted}
@@ -210,28 +125,7 @@ export default function InviteCheckScreen() {
                     setStage({ kind: 'entry' });
                   }}
                 >
-                  {t('inviteCheck.found.tryDifferentContact')}
-                </Button>
-              </View>
-            )}
-
-            {stage.kind === 'not_found' && (
-              <View style={{ gap: spacing.sm }}>
-                <Text variant="bodyMedium" style={{ color: colors.danger }}>
-                  {t('inviteCheck.notFound.message', { contact: contact.trim() })}
-                </Text>
-                <Text variant="bodySmall" style={{ color: colors.muted }}>
-                  {t('inviteCheck.notFound.hint')}
-                </Text>
-                <Button
-                  mode="outlined"
-                  textColor={colors.primary}
-                  onPress={() => {
-                    setContact('');
-                    setStage({ kind: 'entry' });
-                  }}
-                >
-                  {t('inviteCheck.notFound.tryAgain')}
+                  {t('inviteCheck.submitted.tryAgain')}
                 </Button>
               </View>
             )}

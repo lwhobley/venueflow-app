@@ -3,8 +3,9 @@ import { Role, TableStatus, CrmLeadStatus } from '@prisma/client';
 import { canManageRole } from '../../../auth/roles';
 import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../../common/ai-json-parse';
 import { weekStartFor } from '../../../common/pay-period';
+import { assignmentDayKeys, shiftsOverlap } from '../../../common/shift-overlap';
 import { syncTeamMemberCount } from '../../../common/team-sync';
-import { zonedDateBounds, zonedIsoDate } from '../../../common/venue-time';
+import { normalizedShiftEnd, zonedDateBounds, zonedIsoDate } from '../../../common/venue-time';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { runWithoutTenant } from '../../../prisma/tenant-context';
 
@@ -252,10 +253,10 @@ export class WranglerOperatorService {
       'ADD_STAFF', 'CREATE_SHIFT', 'CLEAR_TABLE', 'UPDATE_TABLE_STATUS',
       'ADD_WAITLIST', 'CREATE_CRM_LEAD', 'POST_CHAT_ANNOUNCEMENT',
       'UPDATE_ITEM_86', 'UPDATE_BAR_STOCK', 'CREATE_RESERVATION',
-      'UPDATE_RESERVATION', 'UPDATE_SHIFT', 'ASSIGN_SHIFT',
+      'UPDATE_RESERVATION',
     ].includes(tool)) return 'operational_write';
 
-    if (['REMOVE_STAFF', 'CORRECT_PUNCH', 'CANCEL_RESERVATION', 'UPDATE_CRM_LEAD'].includes(tool)) return 'sensitive_write';
+    if (['REMOVE_STAFF', 'CORRECT_PUNCH', 'CANCEL_RESERVATION', 'UPDATE_CRM_LEAD', 'CREATE_SHIFT', 'UPDATE_SHIFT', 'ASSIGN_SHIFT'].includes(tool)) return 'sensitive_write';
     return 'operational_write';
   }
 
@@ -459,9 +460,8 @@ export class WranglerOperatorService {
     if (plan.tool === 'CREATE_SHIFT') {
       const date = this.requiredText(args.date, 'Shift date is required (YYYY-MM-DD)');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Date must be YYYY-MM-DD');
-      const startMinutes = this.minuteValue(args.startMinutes, 'startMinutes');
-      const endMinutes = this.minuteValue(args.endMinutes, 'endMinutes');
-      if (endMinutes <= startMinutes) throw new BadRequestException('Shift end must be after shift start');
+      const startMinutes = this.shiftStart(args.startMinutes);
+      const endMinutes = this.shiftEnd(startMinutes, args.endMinutes);
       const staffName = this.cleanText(args.staffName);
       let profile: any = null;
       if (staffName) {
@@ -504,8 +504,9 @@ export class WranglerOperatorService {
       args.shiftId = shift.id;
       preview.push(`${shift.jobTitle} shift ${this.minutesLabel(shift.startMinutes)}–${this.minutesLabel(shift.endMinutes)}${shift.profile?.fullName ? ` assigned to ${shift.profile.fullName}` : ' currently open'}`);
       if (plan.tool === 'UPDATE_SHIFT') {
-        if (args.startMinutes != null) preview.push(`New start: ${this.minutesLabel(this.minuteValue(args.startMinutes, 'startMinutes'))}`);
-        if (args.endMinutes != null) preview.push(`New end: ${this.minutesLabel(this.minuteValue(args.endMinutes, 'endMinutes'))}`);
+        const nextStart = args.startMinutes != null ? this.shiftStart(args.startMinutes) : shift.startMinutes;
+        if (args.startMinutes != null) preview.push(`New start: ${this.minutesLabel(nextStart)}`);
+        if (args.endMinutes != null) preview.push(`New end: ${this.minutesLabel(this.shiftEnd(nextStart, args.endMinutes))}`);
       } else {
         const staffName = this.requiredText(args.staffName, 'Tell Wrangler which staff member should take the shift');
         const profile = await this.resolveProfile(venueId, staffName);
@@ -686,9 +687,8 @@ export class WranglerOperatorService {
 
     if (plan.tool === 'CREATE_SHIFT') {
       const date = this.requiredText(args.date, 'date is required');
-      const startMinutes = this.minuteValue(args.startMinutes, 'startMinutes');
-      const endMinutes = this.minuteValue(args.endMinutes, 'endMinutes');
-      if (endMinutes <= startMinutes) throw new BadRequestException('Shift end must be after shift start');
+      const startMinutes = this.shiftStart(args.startMinutes);
+      const endMinutes = this.shiftEnd(startMinutes, args.endMinutes);
       const weekStart = weekStartFor(date);
       const dayIndex = this.dayIndex(date);
       const profileId = this.cleanText(args.profileId);
@@ -765,9 +765,8 @@ export class WranglerOperatorService {
       const id = this.requiredText(args.shiftId, 'shiftId is required');
       const existing = await this.prisma.scheduleShift.findFirst({ where: { id, venueId } });
       if (!existing) throw new NotFoundException('Shift no longer exists');
-      const startMinutes = args.startMinutes != null ? this.minuteValue(args.startMinutes, 'startMinutes') : existing.startMinutes;
-      const endMinutes = args.endMinutes != null ? this.minuteValue(args.endMinutes, 'endMinutes') : existing.endMinutes;
-      if (endMinutes <= startMinutes) throw new BadRequestException('Shift end must be after shift start');
+      const startMinutes = args.startMinutes != null ? this.shiftStart(args.startMinutes) : existing.startMinutes;
+      const endMinutes = args.endMinutes != null ? this.shiftEnd(startMinutes, args.endMinutes) : existing.endMinutes;
       if (existing.profileId) await this.assertNoShiftOverlap(venueId, existing.profileId, existing.weekStart ?? weekStartFor(zonedIsoDate(timezone, Date.now())), existing.dayIndex, startMinutes, endMinutes, existing.id);
       const row = await this.prisma.scheduleShift.update({ where: { id }, data: { startMinutes, endMinutes, ...(args.jobTitle != null ? { jobTitle: this.requiredText(args.jobTitle, 'jobTitle') } : {}), ...(args.station != null ? { station: this.requiredText(args.station, 'station') } : {}) } });
       await this.markScheduleEdited(venueId);
@@ -925,7 +924,19 @@ export class WranglerOperatorService {
   }
 
   private async assertNoShiftOverlap(venueId: string, profileId: string, weekStart: string, dayIndex: number, startMinutes: number, endMinutes: number, excludeShiftId?: string) {
-    const conflict = await this.prisma.scheduleShift.findFirst({ where: { venueId, profileId, weekStart, dayIndex, status: { in: ['scheduled', 'covered'] }, startMinutes: { lt: endMinutes }, endMinutes: { gt: startMinutes }, ...(excludeShiftId ? { id: { not: excludeShiftId } } : {}) } });
+    const candidate = { weekStart, dayIndex, startMinutes, endMinutes };
+    const dayKeys = assignmentDayKeys(candidate);
+    const shifts = await this.prisma.scheduleShift.findMany({
+      where: {
+        venueId,
+        profileId,
+        status: { in: ['scheduled', 'covered'] },
+        OR: dayKeys.map((key) => ({ weekStart: key.weekStart ?? null, dayIndex: key.dayIndex })),
+        ...(excludeShiftId ? { id: { not: excludeShiftId } } : {}),
+      },
+      select: { weekStart: true, dayIndex: true, startMinutes: true, endMinutes: true },
+    });
+    const conflict = shifts.some((shift) => shiftsOverlap(candidate, shift));
     if (conflict) throw new ConflictException('That staff member already has an overlapping shift');
   }
 
@@ -959,14 +970,21 @@ export class WranglerOperatorService {
   private cleanText(value: unknown) { const text = typeof value === 'string' ? value.trim() : ''; return text || undefined; }
   private requiredText(value: unknown, message: string) { const text = this.cleanText(value); if (!text) throw new BadRequestException(message); return text; }
   private positiveInt(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 1) throw new BadRequestException(`${field} must be a positive whole number`); return n; }
-  private minuteValue(value: unknown, field: string) { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > 1440) throw new BadRequestException(`${field} must be between 0 and 1440`); return n; }
+  private shiftStart(value: unknown) { const n = Number(value); if (!Number.isInteger(n) || n < 0 || n > 1439) throw new BadRequestException('startMinutes must be between 0 and 1439'); return n; }
+  private shiftEnd(startMinutes: number, value: unknown) {
+    const raw = Number(value);
+    if (!Number.isInteger(raw) || raw < 0 || raw > 2880) throw new BadRequestException('endMinutes must be between 0 and 2880');
+    const end = normalizedShiftEnd(startMinutes, raw);
+    if (end <= startMinutes || end > 2880 || end - startMinutes > 1440) throw new BadRequestException('Shift must end after it starts and cannot exceed 24 hours');
+    return end;
+  }
   private tableStatus(value: unknown, fallback: TableStatus) { const status = this.cleanText(value) ?? fallback; if (!['available', 'seated', 'dirty', 'reserved', 'held', 'out_of_service'].includes(status)) throw new BadRequestException('Invalid table status'); return status as TableStatus; }
   private crmLeadStatus(value: unknown) { const status = this.requiredText(value, 'Invalid CRM lead status'); if (!['new', 'contacted', 'qualified', 'proposal_sent', 'negotiating', 'won', 'lost', 'unqualified', 'on_hold'].includes(status)) throw new BadRequestException('Invalid CRM lead status'); return status as CrmLeadStatus; }
   private requiredDate(value: unknown, message: string) { const date = this.optionalDate(value, message); if (!date) throw new BadRequestException(message); return date; }
   private optionalDate(value: unknown, field: string) { if (value == null || value === '') return undefined; const date = new Date(String(value)); if (Number.isNaN(date.getTime())) throw new BadRequestException(`Invalid ${field}`); return date; }
   private dateBounds(timezone: string | null | undefined, date: string) { if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Date must be YYYY-MM-DD'); const bounds = zonedDateBounds(timezone, date); return { start: new Date(bounds.start), end: new Date(bounds.end) }; }
   private dayIndex(date: string) { if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequestException('Date must be YYYY-MM-DD'); return new Date(`${date}T12:00:00Z`).getUTCDay(); }
-  private minutesLabel(minutes: number) { const hour = Math.floor(minutes / 60); const min = minutes % 60; const h = hour % 12 || 12; return `${h}:${String(min).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`; }
+  private minutesLabel(minutes: number) { const hour = Math.floor(minutes / 60) % 24; const min = minutes % 60; const h = hour % 12 || 12; return `${h}:${String(min).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`; }
   private defaultSummary(tool: OperatorTool) { return tool.toLowerCase().replaceAll('_', ' '); }
   private auditArgs(args: Record<string, unknown>) { const safe = { ...args }; delete safe.email; delete safe.notes; delete safe.staffName; delete safe.guestName; return safe; }
 }

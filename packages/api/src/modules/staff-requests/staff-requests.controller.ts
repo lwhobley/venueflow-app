@@ -29,6 +29,7 @@ import { RequireSubscription } from '../../billing/require-subscription.decorato
 import { mapStaffRequest } from '../../common/mappers';
 import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
 import { addDays, weekStartFor } from '../../common/pay-period';
+import { occupiedSlots } from '../../common/shift-overlap';
 import { EmailService } from '../../email/email.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -346,15 +347,18 @@ export class StaffRequestsController {
                 profileId: request.profileId,
                 weekStart: { gte: addDays(weekStartFor(unavailableStart), -6), lte: unavailableEnd },
               },
-              select: { id: true, weekStart: true, dayIndex: true },
+              select: { id: true, weekStart: true, dayIndex: true, startMinutes: true, endMinutes: true },
             });
             const affectedIds = assignedShifts
               .filter((shift) => {
                 if (!shift.weekStart) return false;
-                const date = new Date(`${shift.weekStart}T00:00:00.000Z`);
-                date.setUTCDate(date.getUTCDate() + shift.dayIndex);
-                const iso = date.toISOString().slice(0, 10);
-                return iso >= unavailableStart && iso <= unavailableEnd;
+                return occupiedSlots(shift).some((slot) => {
+                  if (!slot.weekStart) return false;
+                  const date = new Date(`${slot.weekStart}T00:00:00.000Z`);
+                  date.setUTCDate(date.getUTCDate() + slot.dayIndex);
+                  const iso = date.toISOString().slice(0, 10);
+                  return iso >= unavailableStart && iso <= unavailableEnd;
+                });
               })
               .map((shift) => shift.id);
             if (affectedIds.length > 0) {
@@ -461,14 +465,14 @@ export class StaffRequestsController {
                   venueId: request.venueId,
                   clockInAt: correctedClockIn,
                   clockOutAt: correctedClockOut,
-                  clockInLat: 0,
-                  clockInLng: 0,
-                  clockInAccuracyM: 0,
-                  clockInMocked: false,
-                  clockOutLat: 0,
-                  clockOutLng: 0,
-                  clockOutAccuracyM: 0,
-                  clockOutMocked: false,
+                  clockInLat: null,
+                  clockInLng: null,
+                  clockInAccuracyM: null,
+                  clockInMocked: null,
+                  clockOutLat: null,
+                  clockOutLng: null,
+                  clockOutAccuracyM: null,
+                  clockOutMocked: null,
                   isOpen: false,
                 },
               });

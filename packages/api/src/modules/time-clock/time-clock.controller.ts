@@ -257,11 +257,16 @@ export class TimeClockController {
   private async priorDayFix(profileId: string, timezone: string | null | undefined): Promise<PriorFix | null> {
     const startOfToday = zonedDayBounds(timezone, 0).start;
     const previous = await this.prisma.timeEntry.findFirst({
-      where: { profileId, clockInAt: { lt: new Date(startOfToday) } },
+      where: {
+        profileId,
+        clockInAt: { lt: new Date(startOfToday) },
+        clockInLat: { not: null },
+        clockInLng: { not: null },
+      },
       orderBy: { clockInAt: 'desc' },
       select: { clockInLat: true, clockInLng: true },
     });
-    if (!previous) return null;
+    if (!previous || previous.clockInLat == null || previous.clockInLng == null) return null;
     return { lat: previous.clockInLat, lng: previous.clockInLng };
   }
 

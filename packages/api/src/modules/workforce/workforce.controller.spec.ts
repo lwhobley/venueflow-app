@@ -39,7 +39,7 @@ describe('WorkforceController invite check email', () => {
     sendOrThrow.mockResolvedValue(undefined);
   });
 
-  it('keeps an existing redeemable invite valid without sending another email', async () => {
+  it('keeps an existing redeemable invite valid and sends a private reminder', async () => {
     txFindInvite.mockResolvedValue({
       id: 'invite-1',
       email: 'staff@example.com',
@@ -51,9 +51,9 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: ' Staff@Example.com ' }))
-      .resolves.toEqual({ status: 'found', emailSent: false, venueName: 'Test Venue', jobTitle: 'Server' });
+      .resolves.toEqual({ status: 'ok' });
     expect(txCreateInvite).not.toHaveBeenCalled();
-    expect(sendOrThrow).not.toHaveBeenCalled();
+    expect(sendOrThrow).toHaveBeenCalledOnce();
   });
 
   it('mints an invite token for a legacy unclaimed roster profile', async () => {
@@ -74,7 +74,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
-      .resolves.toEqual({ status: 'found', emailSent: true, venueName: 'Legacy Venue', jobTitle: 'Bartender' });
+      .resolves.toEqual({ status: 'ok' });
     expect(txCreateInvite).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         venueId: 'venue-1',
@@ -101,9 +101,9 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
-      .resolves.toEqual({ status: 'found', emailSent: false, venueName: 'Legacy Venue', jobTitle: 'Bartender' });
+      .resolves.toEqual({ status: 'ok' });
     expect(txCreateInvite).not.toHaveBeenCalled();
-    expect(sendOrThrow).not.toHaveBeenCalled();
+    expect(sendOrThrow).toHaveBeenCalledOnce();
   });
 
   it('mints a fresh invite for an unclaimed roster profile even when a used invite exists for the email', async () => {
@@ -127,7 +127,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
-      .resolves.toEqual({ status: 'found', emailSent: true, venueName: 'Legacy Venue', jobTitle: 'Bartender' });
+      .resolves.toEqual({ status: 'ok' });
     expect(txCreateInvite).toHaveBeenCalledOnce();
   });
 
@@ -138,7 +138,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'gone@example.com' }))
-      .resolves.toEqual({ status: 'not_found' });
+      .resolves.toEqual({ status: 'ok' });
     expect(txCreateInvite).not.toHaveBeenCalled();
     expect(sendOrThrow).not.toHaveBeenCalled();
   });
@@ -150,7 +150,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'stale@example.com' }))
-      .resolves.toEqual({ status: 'not_found' });
+      .resolves.toEqual({ status: 'ok' });
   });
 
   it('reports "not_found" when there is no invite history and no roster fallback', async () => {
@@ -160,7 +160,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { email: 'nobody@example.com' }))
-      .resolves.toEqual({ status: 'not_found' });
+      .resolves.toEqual({ status: 'ok' });
   });
 
   it('does not claim that an email was sent for phone-only roster matches', async () => {
@@ -175,7 +175,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { phone: '555-0100' }))
-      .resolves.toEqual({ status: 'found', emailSent: false, venueName: 'Test Venue', jobTitle: 'Bartender', role: 'staff' });
+      .resolves.toEqual({ status: 'ok' });
     expect(txCreateInvite).not.toHaveBeenCalled();
     expect(sendOrThrow).not.toHaveBeenCalled();
   });
@@ -186,7 +186,7 @@ describe('WorkforceController invite check email', () => {
     const controller = new WorkforceController(prisma as any, email as any, config as any);
 
     await expect((controller as any).inviteCheck(request, { phone: '555-0199' }))
-      .resolves.toEqual({ status: 'not_found' });
+      .resolves.toEqual({ status: 'ok' });
   });
 });
 

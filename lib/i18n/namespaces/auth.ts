@@ -149,6 +149,11 @@ export const en = {
     emailOnlyMessage: 'For security, team invites now attach only after email verification. Ask your manager to send the invite to your email address.',
     joinFailedTitle: 'Could not join team',
     joinFailedMessage: 'We could not attach your profile. Ask your manager to verify your invite details.',
+    submitted: {
+      message: 'If this contact matches an invitation, instructions will be sent to the invited email address.',
+      hint: 'Check your inbox and spam folder, or ask your manager to send a new invitation.',
+      tryAgain: 'Try a different contact',
+    },
     found: {
       label: 'Invite found',
       role: 'Role: {jobTitle}',
@@ -372,6 +377,11 @@ export const es: AuthDictionary = {
     emailOnlyMessage: 'Por seguridad, las invitaciones de equipo ahora se vinculan solo después de verificar el correo. Pide a tu gerente que envíe la invitación a tu correo electrónico.',
     joinFailedTitle: 'No se pudo unir al equipo',
     joinFailedMessage: 'No pudimos vincular tu perfil. Pide a tu gerente que verifique los datos de tu invitación.',
+    submitted: {
+      message: 'Si este contacto coincide con una invitación, enviaremos instrucciones al correo electrónico invitado.',
+      hint: 'Revisa tu bandeja de entrada y spam, o pide a tu gerente que envíe una nueva invitación.',
+      tryAgain: 'Probar con otro contacto',
+    },
     found: {
       label: 'Invitación encontrada',
       role: 'Puesto: {jobTitle}',
@@ -593,6 +603,11 @@ export const fr: AuthDictionary = {
     emailOnlyMessage: 'Pour des raisons de sécurité, les invitations d\'équipe ne se rattachent désormais qu\'après vérification de l\'e-mail. Demandez à votre responsable d\'envoyer l\'invitation à votre adresse e-mail.',
     joinFailedTitle: 'Impossible de rejoindre l\'équipe',
     joinFailedMessage: 'Nous n\'avons pas pu rattacher votre profil. Demandez à votre responsable de vérifier les détails de votre invitation.',
+    submitted: {
+      message: 'Si ce contact correspond à une invitation, des instructions seront envoyées à l\'adresse e-mail invitée.',
+      hint: 'Vérifiez votre boîte de réception et vos indésirables, ou demandez une nouvelle invitation à votre responsable.',
+      tryAgain: 'Essayer un autre contact',
+    },
     found: {
       label: 'Invitation trouvée',
       role: 'Poste : {jobTitle}',

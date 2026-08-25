@@ -88,6 +88,19 @@ describe('BillingController webhook authentication', () => {
     )).resolves.toEqual({ ok: true, ignored: true });
   });
 
+  it('ignores signed RevenueCat events with neither product nor entitlement identifiers', async () => {
+    const config = {
+      get: vi.fn((key: string) => (key === 'REVENUECAT_WEBHOOK_SECRET' ? 'secret' : undefined)),
+    };
+    const controller = new BillingController({} as any, config as any);
+
+    await expect(controller.revenueCatWebhook(
+      { ip: '127.0.0.1' } as any,
+      'Bearer secret',
+      { event: { id: 'evt-no-product', type: 'RENEWAL', app_user_id: 'venue-1' } } as any,
+    )).resolves.toEqual({ ok: true, ignored: true });
+  });
+
   it('fails closed when the Stripe secret is missing and does not rate-limit', async () => {
     const controller = new BillingController({} as any, { get: vi.fn() } as any);
 

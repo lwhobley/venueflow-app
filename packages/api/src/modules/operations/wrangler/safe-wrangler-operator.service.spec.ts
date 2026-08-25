@@ -4,6 +4,64 @@ import { SafeWranglerOperatorService } from './safe-wrangler-operator.service';
 import { WranglerOperatorService } from './wrangler-operator.service';
 
 describe('SafeWranglerOperatorService', () => {
+  it('normalizes and delegates an overnight CREATE_SHIFT to the scheduling service', async () => {
+    const scheduling = {
+      createShift: vi.fn().mockResolvedValue({
+        id: 'shift-night', startMinutes: 1320, endMinutes: 1560,
+        profileId: 'staff-1', status: 'scheduled',
+      }),
+    };
+    const prisma = {
+      scheduleShift: { findUniqueOrThrow: vi.fn() },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-1' }) },
+    };
+    const service = new SafeWranglerOperatorService(prisma as never, {} as never, scheduling as never);
+
+    const result = await service.execute({
+      venueId: 'venue-1',
+      actor: { profileId: 'manager-1', fullName: 'Manager', role: 'manager', allAccess: false },
+      plan: {
+        tool: 'CREATE_SHIFT',
+        args: {
+          date: '2026-08-23', profileId: 'staff-1', startMinutes: 1320,
+          endMinutes: 120, jobTitle: 'Server', station: 'Floor',
+        },
+      },
+    });
+
+    expect(scheduling.createShift).toHaveBeenCalledWith(expect.objectContaining({
+      venueId: 'venue-1', weekStart: '2026-08-23', dayIndex: 0,
+      profileId: 'staff-1', startMinutes: 1320, endMinutes: 1560,
+    }));
+    expect(result.result).toEqual(expect.objectContaining({ id: 'shift-night', endMinutes: 1560 }));
+  });
+
+  it('normalizes a wrapped overnight end when updating a shift', async () => {
+    const scheduling = { updateShift: vi.fn().mockResolvedValue({}) };
+    const prisma = {
+      scheduleShift: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'shift-night', weekStart: '2026-08-23', dayIndex: 0,
+          startMinutes: 1320, endMinutes: 1560, jobTitle: 'Server',
+          station: 'Floor', notes: null,
+        }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'shift-night', endMinutes: 1560 }),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-1' }) },
+    };
+    const service = new SafeWranglerOperatorService(prisma as never, {} as never, scheduling as never);
+
+    await service.execute({
+      venueId: 'venue-1',
+      actor: { profileId: 'manager-1', fullName: 'Manager', role: 'manager', allAccess: false },
+      plan: { tool: 'UPDATE_SHIFT', args: { shiftId: 'shift-night', endMinutes: 120 } },
+    });
+
+    expect(scheduling.updateShift).toHaveBeenCalledWith(expect.objectContaining({
+      startMinutes: 1320, endMinutes: 1560,
+    }));
+  });
+
   it('rejects direct write plans from non-manager members', async () => {
     const reservations = { saveReservation: vi.fn() };
     const service = new SafeWranglerOperatorService({} as never, reservations as never, {} as never);
@@ -76,7 +134,7 @@ describe('SafeWranglerOperatorService', () => {
         findMany: vi.fn().mockResolvedValue([{ id: 'prof-jose', fullName: 'Jose Santos', jobTitle: 'Server' }]),
       },
       scheduleShift: {
-        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn().mockResolvedValue({
           id: 'shift-100',
           startMinutes: 900,

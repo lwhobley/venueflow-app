@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { weekStartFor } from '../../../common/pay-period';
+import { addDays, weekStartFor } from '../../../common/pay-period';
 import { withSerializableRetry } from '../../../common/tx-retry';
 import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../../common/venue-time';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -23,6 +23,9 @@ export class WranglerService {
     const todayEnd = new Date(bounds.end);
     const weekStart = weekStartFor(today);
     const dayIndex = zonedDayOfWeek(timezone, nowMs);
+    const previousDate = addDays(today, -1);
+    const previousWeekStart = weekStartFor(previousDate);
+    const previousDayIndex = new Date(`${previousDate}T12:00:00Z`).getUTCDay();
     const fourHoursFromNow = new Date(nowMs + 4 * 60 * 60_000);
     const thirtyMinutesFromNowMs = nowMs + 30 * 60_000;
 
@@ -45,7 +48,17 @@ export class WranglerService {
         ? this.prisma.reservation.findMany({ where: { venueId, reservationTime: { gte: todayStart, lt: todayEnd }, status: { notIn: ['cancelled', 'no_show'] } }, orderBy: { reservationTime: 'asc' }, take: 200 })
         : Promise.resolve([]),
       this.prisma.scheduleShift?.findMany
-        ? this.prisma.scheduleShift.findMany({ where: { venueId, weekStart, dayIndex }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 200 })
+        ? this.prisma.scheduleShift.findMany({
+            where: {
+              venueId,
+              OR: [
+                { weekStart, dayIndex },
+                { weekStart: previousWeekStart, dayIndex: previousDayIndex, endMinutes: { gt: 1440 } },
+              ],
+            },
+            orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }, { jobTitle: 'asc' }],
+            take: 200,
+          })
         : Promise.resolve([]),
       this.prisma.staffRequest?.findMany
         ? this.prisma.staffRequest.findMany({ where: { venueId, status: 'pending' }, select: { id: true }, take: 100 })
