@@ -6,6 +6,7 @@ import { Public } from '../auth/public.decorator';
 import { getClientIp } from '../common/http';
 import { assertWithinSharedRateLimit } from '../common/rate-limit';
 import { secretsMatch, verifyStripeSignature } from '../common/webhook-auth';
+import { ACTIVE_MEMBERSHIP } from '../common/membership';
 import { PrismaService } from '../prisma/prisma.service';
 
 type RevenueCatWebhookBody = {
@@ -106,16 +107,12 @@ export class BillingController {
     await assertWithinSharedRateLimit(this.prisma, `revenuecat:${getClientIp(request)}`, WEBHOOK_RATE_LIMIT_MAX, WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
 
     const event = body.event;
-    // app_user_id is whatever the client passed to Purchases.configure/logIn
-    // (see configurePurchases(venueId) in app/_layout.tsx) — trusted here only
-    // because the HMAC signature above proves RevenueCat itself sent this
-    // event for a purchase it actually processed under that identity. This
-    // does NOT prove the purchaser held membership at that venue: RevenueCat's
-    // project-level "Transfer behavior" setting must be "Do not transfer" so a
-    // purchase cannot be re-attributed to a different app_user_id after the
-    // fact. Verify that setting in the RevenueCat dashboard.
-    const venueId = event?.app_user_id;
-    if (!event?.type || !venueId) {
+    // app_user_id is the account id passed to Purchases.configure/logIn
+    // (see configurePurchases(userId) in app/_layout.tsx). Older clients sent
+    // venueId. Trusted only after the Bearer secret check above. RevenueCat
+    // "Transfer behavior" must stay "Do not transfer".
+    const subscriberId = event?.app_user_id;
+    if (!event?.type || !subscriberId) {
       return { ok: true, ignored: true };
     }
     // Only apply state for the product/entitlement this app actually sells.
@@ -137,22 +134,29 @@ export class BillingController {
       return { ok: true, ignored: true };
     }
 
-    await this.applyAppleSubscription({
-      venueId,
-      status,
-      planId: event.product_id ?? 'apple_subscription',
-      externalSubscriptionId: event.original_transaction_id ?? event.transaction_id ?? null,
-      externalCustomerId: venueId,
-      currentPeriodStart: event.purchased_at_ms ? new Date(event.purchased_at_ms) : null,
-      currentPeriodEnd: event.expiration_at_ms ? new Date(event.expiration_at_ms) : null,
-      trialStartedAt: status === 'trialing' && event.purchased_at_ms ? new Date(event.purchased_at_ms) : null,
-      trialEndsAt: status === 'trialing' && event.expiration_at_ms ? new Date(event.expiration_at_ms) : null,
-      cancelAtPeriodEnd: event.type === 'CANCELLATION' && expiresInFuture,
-      eventId: event.id ?? `${event.type}:${venueId}:${event.event_timestamp_ms ?? Date.now()}`,
-      eventType: event.type,
-      eventAt: new Date(event.event_timestamp_ms ?? event.purchased_at_ms ?? Date.now()),
-      payload: body,
-    });
+    const venueIds = await this.resolveRevenueCatVenueIds(subscriberId, event.entitlement_ids);
+    if (venueIds.length === 0) {
+      return { ok: true, ignored: true };
+    }
+
+    for (const venueId of venueIds) {
+      await this.applyAppleSubscription({
+        venueId,
+        status,
+        planId: event.product_id ?? 'apple_subscription',
+        externalSubscriptionId: event.original_transaction_id ?? event.transaction_id ?? null,
+        externalCustomerId: subscriberId,
+        currentPeriodStart: event.purchased_at_ms ? new Date(event.purchased_at_ms) : null,
+        currentPeriodEnd: event.expiration_at_ms ? new Date(event.expiration_at_ms) : null,
+        trialStartedAt: status === 'trialing' && event.purchased_at_ms ? new Date(event.purchased_at_ms) : null,
+        trialEndsAt: status === 'trialing' && event.expiration_at_ms ? new Date(event.expiration_at_ms) : null,
+        cancelAtPeriodEnd: event.type === 'CANCELLATION' && expiresInFuture,
+        eventId: event.id ?? `${event.type}:${venueId}:${event.event_timestamp_ms ?? Date.now()}`,
+        eventType: event.type,
+        eventAt: new Date(event.event_timestamp_ms ?? event.purchased_at_ms ?? Date.now()),
+        payload: body,
+      });
+    }
 
     return { ok: true };
   }
@@ -495,5 +499,24 @@ export class BillingController {
       }
       throw error;
     }
+  }
+
+  private async resolveRevenueCatVenueIds(subscriberId: string, entitlementIds?: string[]): Promise<string[]> {
+    const asVenue = await this.prisma.venue.findUnique({ where: { id: subscriberId }, select: { id: true } });
+    if (asVenue) return [asVenue.id];
+
+    const profiles = await this.prisma.profile.findMany({
+      where: {
+        userId: subscriberId,
+        venueId: { not: null },
+        OR: ACTIVE_MEMBERSHIP,
+        role: { in: ['owner', 'admin'] },
+      },
+      select: { venueId: true },
+    });
+    const venueIds = Array.from(new Set(profiles.map((profile) => profile.venueId).filter((id): id is string => Boolean(id))));
+    const isMulti = (entitlementIds ?? []).some((id) => id.toLowerCase().includes('multi'));
+    if (isMulti || venueIds.length <= 1) return venueIds;
+    return [];
   }
 }

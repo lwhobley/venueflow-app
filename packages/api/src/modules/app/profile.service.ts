@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { canManageVenue } from '../../auth/roles';
 import type { AuthUser } from '../../auth/auth.guard';
-import { isActiveMembership } from '../../common/membership';
+import { ACTIVE_MEMBERSHIP, isActiveMembership } from '../../common/membership';
 import { PrismaService } from '../../prisma/prisma.service';
 import { runWithoutTenant } from '../../prisma/tenant-context';
 
@@ -23,7 +23,7 @@ export class ProfileService {
     const resolvedVenueId = venueId ?? user.venueId;
     if (resolvedVenueId) {
       return this.prisma.profile.findFirst({
-        where: { userId: user.sub, venueId: resolvedVenueId },
+        where: { userId: user.sub, venueId: resolvedVenueId, OR: ACTIVE_MEMBERSHIP },
         include: { venue: true },
       });
     }
@@ -34,13 +34,13 @@ export class ProfileService {
     // Prefer the venued profile first so callers that check `.venue` (e.g.
     // requireVenueProfile) see the real membership instead of failing.
     const venued = await this.prisma.profile.findFirst({
-      where: { userId: user.sub, venueId: { not: null } },
+      where: { userId: user.sub, venueId: { not: null }, OR: ACTIVE_MEMBERSHIP },
       include: { venue: true },
       orderBy: { createdAt: 'asc' },
     });
     if (venued) return venued;
     return this.prisma.profile.findFirst({
-      where: { userId: user.sub },
+      where: { userId: user.sub, venueId: null },
       include: { venue: true },
       orderBy: { createdAt: 'asc' },
     });

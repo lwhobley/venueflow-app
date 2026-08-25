@@ -296,7 +296,11 @@ export class StaffRequestsController {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT 1 FROM "StaffRequest" WHERE "id" = ${id} FOR UPDATE`;
+      // Scoped by hand: $executeRaw bypasses the tenant-isolation extension, so
+      // without the venueId predicate a manager could take a row lock on another
+      // venue's request. Nothing leaks (the scoped findUnique below 404s), but
+      // the lock itself should never cross tenants.
+      await tx.$executeRaw`SELECT 1 FROM "StaffRequest" WHERE "id" = ${id} AND "venueId" = ${scope.venueId} FOR UPDATE`;
       const request = await tx.staffRequest.findUnique({ where: { id } });
       if (!request) throw new NotFoundException('Request not found');
       if (request.venueId !== scope.venueId) {
@@ -442,13 +446,21 @@ export class StaffRequestsController {
                   );
                 }
               }
+              // Refuse rather than invent. Defaulting to +8h silently
+              // manufactured a full shift of paid time from an employee-supplied
+              // request, with nothing on the approval screen telling the manager
+              // a duration had been fabricated.
+              if (!correctedClockOut) {
+                throw new BadRequestException(
+                  'This correction has no clock-out time. Ask the employee to resubmit with both times before approving.',
+                );
+              }
               await tx.timeEntry.create({
                 data: {
                   profileId: request.profileId,
                   venueId: request.venueId,
                   clockInAt: correctedClockIn,
-                  clockOutAt: correctedClockOut
-                    ?? new Date(correctedClockIn.getTime() + 8 * 60 * 60 * 1000),
+                  clockOutAt: correctedClockOut,
                   clockInLat: 0,
                   clockInLng: 0,
                   clockInAccuracyM: 0,

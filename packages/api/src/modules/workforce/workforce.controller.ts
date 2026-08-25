@@ -22,6 +22,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
+import { publicWebOrigin } from '../../common/public-web-url';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -103,14 +104,31 @@ export class WorkforceController {
     if (!email) {
       const invite = await this.prisma.invite.findFirst({
         where: { phone, usedBy: null, expiresAt: { gt: new Date() } },
+        include: { venue: { select: { name: true } } },
       });
-      if (invite) return { status: 'found', emailSent: false };
+      if (invite) {
+        return {
+          status: 'found',
+          emailSent: false,
+          venueName: invite.venue?.name,
+          jobTitle: invite.jobTitle,
+          role: invite.role,
+        };
+      }
       const unclaimedProfile = await this.prisma.profile.findFirst({
         where: { userId: null, venueId: { not: null }, phone: phone ? { equals: phone } : undefined },
         include: { venue: { select: { name: true } } },
       });
-      if (unclaimedProfile?.venue) return { status: 'found', emailSent: false };
-      return this.reportStaleInviteStatus(undefined, phone);
+      if (unclaimedProfile?.venue) {
+        return {
+          status: 'found',
+          emailSent: false,
+          venueName: unclaimedProfile.venue.name,
+          jobTitle: unclaimedProfile.jobTitle,
+          role: unclaimedProfile.role,
+        };
+      }
+      return { status: 'not_found' };
     }
 
     // The plaintext token is only needed when minting a new invite. Existing
@@ -161,7 +179,7 @@ export class WorkforceController {
       return this.reportStaleInviteStatus(email, undefined);
     }
 
-    const appUrl = (this.config.get<string>('APP_WEB_URL') ?? this.config.get<string>('WEB_BASE_URL') ?? 'https://venuewrangler.com').replace(/\/+$/, '');
+    const appUrl = publicWebOrigin(this.config);
     // A URL fragment (not a query string) so the token never reaches
     // server/CDN access logs — fragments aren't sent in the HTTP request at
     // all. site/join/index.html reads from the fragment first.
@@ -190,27 +208,20 @@ export class WorkforceController {
           this.logger.error(`Invite-check email failed for a venue invite: ${err instanceof Error ? err.message : String(err)}`);
         });
     }
-    return { status: 'found', emailSent: outcome.emailSent };
+    return {
+      status: 'found',
+      emailSent: outcome.emailSent,
+      venueName: outcome.venueName,
+      jobTitle: outcome.jobTitle,
+    };
   }
 
-  // No redeemable invite and no roster row to fall back to — report the most
-  // specific status we can from invite history (used/expired), so e.g.
-  // someone reusing an old link still gets a helpful message instead of a
-  // generic "not found".
-  private async reportStaleInviteStatus(email: string | undefined, phone: string | undefined) {
-    const staleInvite = await this.prisma.invite.findFirst({
-      where: email ? { email: { equals: email, mode: 'insensitive' } } : { phone },
-      orderBy: { createdAt: 'desc' },
-      select: { usedBy: true, expiresAt: true },
-    });
-    if (staleInvite?.usedBy) return { status: 'used' };
-    if (staleInvite && staleInvite.expiresAt.getTime() < Date.now()) return { status: 'expired' };
-    return { status: 'not_found' };
+  private async reportStaleInviteStatus(_email: string | undefined, _phone: string | undefined) {
+    return { status: 'not_found' as const };
   }
 
   // ─── Public: venue search ──────────────────────────────────────────────────
 
-  @Public()
   @Get('venues/search')
   async searchVenues(@Req() req: Request, @Query('q') q: unknown) {
     await assertWithinSharedRateLimit(this.prisma, `venue-search:ip:${getClientIp(req)}`, INVITE_CHECK_LIMIT_MAX, INVITE_CHECK_LIMIT_WINDOW_MS);
@@ -226,33 +237,12 @@ export class WorkforceController {
       return { venues: [] };
     }
 
-    // Exact code match takes priority; then name/address fuzzy match.
-    const [byCode, byText] = await Promise.all([
-      this.prisma.venue.findMany({
-        where: { code: { equals: term, mode: 'insensitive' } },
-        select: { id: true, name: true, address: true },
-        take: 3,
-      }),
-      this.prisma.venue.findMany({
-        where: {
-          OR: [
-            { name: { contains: term, mode: 'insensitive' } },
-            { address: { contains: term, mode: 'insensitive' } },
-          ],
-        },
-        select: { id: true, name: true, address: true },
-        take: 10,
-      }),
-    ]);
-
-    // Merge: code matches first, then text matches without duplicates.
-    const seen = new Set(byCode.map((v) => v.id));
-    const merged = [
-      ...byCode,
-      ...byText.filter((v) => !seen.has(v.id)),
-    ].slice(0, 10);
-
-    return { venues: merged };
+    const venues = await this.prisma.venue.findMany({
+      where: { code: { equals: term, mode: 'insensitive' } },
+      select: { id: true, name: true },
+      take: 1,
+    });
+    return { venues: venues.map((venue) => ({ id: venue.id, name: venue.name, address: null })) };
   }
 
   // ─── Authenticated: user's own join requests ───────────────────────────────
@@ -282,6 +272,19 @@ export class WorkforceController {
   async submitJoinRequest(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: JoinRequestDto) {
     await assertWithinSharedRateLimit(this.prisma, `join-request:user:${user.sub}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
     await assertWithinSharedRateLimit(this.prisma, `join-request:ip:${getClientIp(req)}`, JOIN_REQUEST_LIMIT_MAX, JOIN_REQUEST_LIMIT_WINDOW_MS);
+
+    // Every other membership-granting path (registerVenue, joinByCode, invite
+    // redemption) requires a verified email first. Without this, someone could
+    // register an address they don't control, never verify it, and be approved
+    // into a venue — and the approving manager sees only the raw email, with
+    // nothing indicating it was never proven.
+    const account = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { emailVerifiedAt: true },
+    });
+    if (!account?.emailVerifiedAt) {
+      throw new ForbiddenException('Verify your email address before requesting to join a workplace.');
+    }
 
     const venue = await this.prisma.venue.findUnique({
       where: { id: body.venueId },
@@ -399,6 +402,10 @@ export class WorkforceController {
       if (msg.includes('request_not_found')) throw new NotFoundException('Join request not found.');
       if (msg.includes('request_not_pending')) throw new BadRequestException('Request is no longer pending.');
       if (msg.includes('not_authorized')) throw new ForbiddenException('You are not authorized to approve requests for this workplace.');
+      if (msg.includes('email_not_verified')) {
+        throw new BadRequestException('This person has not verified their email address yet, so they cannot be added to the workplace.');
+      }
+      if (msg.includes('already_member')) throw new BadRequestException('This person already belongs to a workplace.');
       throw err;
     }
     void this.emailJoinRequestDecision(id, 'approved');

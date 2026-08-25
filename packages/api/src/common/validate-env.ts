@@ -82,6 +82,8 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
       const missingBilling = [
         !String(config.REVENUECAT_WEBHOOK_SECRET ?? '').trim() ? 'REVENUECAT_WEBHOOK_SECRET' : null,
         !String(config.REVENUECAT_API_KEY ?? config.REVENUECAT_SECRET_API_KEY ?? '').trim() ? 'REVENUECAT_API_KEY' : null,
+        !String(config.STRIPE_SECRET_KEY ?? '').trim() ? 'STRIPE_SECRET_KEY' : null,
+        !String(config.STRIPE_WEBHOOK_SECRET ?? '').trim() ? 'STRIPE_WEBHOOK_SECRET' : null,
       ].filter((value): value is string => Boolean(value));
       if (missingBilling.length > 0) {
         throw new Error(`Billing is enabled but required environment variable(s) are missing: ${missingBilling.join(', ')}`);

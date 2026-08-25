@@ -6,6 +6,7 @@ const cleanupExpiredChallenges = vi.fn();
 const closeApp = vi.fn();
 const initSentry = vi.fn();
 const captureException = vi.fn();
+const flushSentry = vi.fn().mockResolvedValue(true);
 
 vi.mock('@nestjs/core', () => ({
   NestFactory: {
@@ -20,7 +21,7 @@ vi.mock('@nestjs/core', () => ({
   },
 }));
 
-vi.mock('./observability/sentry', () => ({ initSentry, captureException }));
+vi.mock('./observability/sentry', () => ({ initSentry, captureException, flushSentry }));
 
 // Real classes, used only as map keys above — retention.ts imports the actual
 // exports, so `app.get(AuditService)` in production resolves against these
@@ -68,5 +69,22 @@ describe('runRetention', () => {
     expect(closeApp).toHaveBeenCalledTimes(1);
     // The job that runs after the failure must not have been reached.
     expect(cleanupExpiredChallenges).not.toHaveBeenCalled();
+  });
+
+  it('captures and flushes a fatal job error before marking the process failed', async () => {
+    const originalExitCode = process.exitCode;
+    const { reportRetentionFailure } = await import('./retention');
+    const error = new Error('retention failed');
+
+    try {
+      await reportRetentionFailure(error);
+
+      expect(captureException).toHaveBeenCalledWith(error, { job: 'retention' });
+      expect(flushSentry).toHaveBeenCalledOnce();
+      expect(captureException.mock.invocationCallOrder[0]).toBeLessThan(flushSentry.mock.invocationCallOrder[0]);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = originalExitCode;
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTimeBreaks, unpaidBreakMs } from './break-duration';
+import { closeOpenBreaks, parseTimeBreaks, unpaidBreakMs } from './break-duration';
 
 describe('break duration helpers', () => {
   it('drops malformed persisted break rows and normalizes numeric strings', () => {
@@ -19,5 +19,15 @@ describe('break duration helpers', () => {
     expect(unpaidBreakMs('bad', 200)).toBe(0);
     expect(unpaidBreakMs(200, 100)).toBe(0);
     expect(unpaidBreakMs(100, 250)).toBe(150);
+  });
+
+  it('closes open breaks at clock-out so unpaid time is deducted', () => {
+    expect(closeOpenBreaks([
+      { startAt: 100, endAt: 200, type: 'unpaid' },
+      { startAt: 300, endAt: null, type: 'unpaid' },
+    ], 400)).toEqual([
+      { startAt: 100, endAt: 200, type: 'unpaid' },
+      { startAt: 300, endAt: 400, type: 'unpaid' },
+    ]);
   });
 });

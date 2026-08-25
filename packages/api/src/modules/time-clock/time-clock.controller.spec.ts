@@ -95,9 +95,30 @@ describe('TimeClockController', () => {
       const { controller, prisma } = makeController();
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z')); // Wed noon UTC = 08:00 America/New_York
-      prisma.scheduleShift.findFirst.mockResolvedValue({ startMinutes: 600, dayIndex: 3, status: 'scheduled' });
+      prisma.scheduleShift.findMany.mockResolvedValue([{
+        startMinutes: 600,
+        endMinutes: 900,
+        dayIndex: 3,
+        weekStart: '2026-07-12',
+        status: 'scheduled',
+      }]);
 
       await expect(controller.clockIn(authUser, scope, validPunch)).rejects.toThrow('Too early to clock in');
+    });
+
+    it('allows clock-in after midnight during an overnight shift', async () => {
+      const { controller, prisma } = makeController();
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-16T04:30:00.000Z'));
+      prisma.scheduleShift.findMany.mockResolvedValue([{
+        startMinutes: 1320,
+        endMinutes: 1560,
+        dayIndex: 3,
+        weekStart: '2026-07-12',
+        status: 'scheduled',
+      }]);
+
+      await expect(controller.clockIn(authUser, scope, validPunch)).resolves.toMatchObject({ isOpen: true });
     });
 
     it('does not apply the early-shift check to managers', async () => {
@@ -106,7 +127,7 @@ describe('TimeClockController', () => {
 
       const result = await controller.clockIn(authUser, managerScope, validPunch);
 
-      expect(prisma.scheduleShift.findFirst).not.toHaveBeenCalled();
+      expect(prisma.scheduleShift.findMany).not.toHaveBeenCalled();
       expect(result.memberId).toBe('manager-1');
     });
 
@@ -164,7 +185,34 @@ describe('TimeClockController', () => {
 
       expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
         where: { id: 'entry-1', isOpen: true, updatedAt: openEntry.updatedAt },
-        data: expect.objectContaining({ isOpen: false }),
+        data: expect.objectContaining({ isOpen: false, breaks: [] }),
+      });
+    });
+
+    it('closes an open unpaid break when clocking out', async () => {
+      const { controller, prisma } = makeController();
+      const openEntry = {
+        id: 'entry-1',
+        updatedAt: new Date('2026-07-15T00:00:00Z'),
+        breaks: [{ startAt: 1, endAt: null, type: 'unpaid' }],
+      };
+      prisma.timeEntry.findFirst.mockResolvedValue(openEntry);
+      prisma.timeEntry.findUniqueOrThrow.mockResolvedValue({
+        id: 'entry-1',
+        clockInAt: new Date(),
+        clockOutAt: new Date(),
+        isOpen: false,
+        breaks: [{ startAt: 1, endAt: Date.now(), type: 'unpaid' }],
+      });
+
+      await controller.clockOut(authUser, scope, validPunch);
+
+      expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
+        where: { id: 'entry-1', isOpen: true, updatedAt: openEntry.updatedAt },
+        data: expect.objectContaining({
+          isOpen: false,
+          breaks: [expect.objectContaining({ startAt: 1, type: 'unpaid', endAt: expect.any(Number) })],
+        }),
       });
     });
 

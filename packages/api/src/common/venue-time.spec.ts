@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { zonedDateBounds, zonedDayBounds, zonedIsoDate } from './venue-time';
+import { isWithinShiftWindow, normalizedShiftEnd, shiftHasEnded, zonedDateBounds, zonedDayBounds, zonedIsoDate } from './venue-time';
+
+describe('overnight shift minutes', () => {
+  it('keeps same-day ends unchanged and wraps overnight ends', () => {
+    expect(normalizedShiftEnd(540, 900)).toBe(900);
+    expect(normalizedShiftEnd(1320, 120)).toBe(1560);
+    expect(normalizedShiftEnd(1320, 1560)).toBe(1560);
+  });
+
+  it('treats overnight windows as evening plus post-midnight', () => {
+    expect(isWithinShiftWindow(480, 600, 900, 10)).toBe(false);
+    expect(isWithinShiftWindow(600, 600, 900, 10)).toBe(true);
+    expect(isWithinShiftWindow(1260, 1320, 1560, 10)).toBe(false);
+    expect(isWithinShiftWindow(1315, 1320, 1560, 10)).toBe(true);
+    expect(isWithinShiftWindow(30, 1320, 1560, 10)).toBe(true);
+    expect(shiftHasEnded(180, 1320, 1560)).toBe(true);
+    expect(shiftHasEnded(480, 600, 900)).toBe(false);
+  });
+});
 
 describe('zonedIsoDate', () => {
   it('renders a known instant in venue-local time', () => {

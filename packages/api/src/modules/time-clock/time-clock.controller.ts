@@ -12,10 +12,10 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertFixNotReplayed, assertWithinGeofence, type PriorFix } from '../../common/geofence';
-import { parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
-import { todayInZone, weekStartFor } from '../../common/pay-period';
+import { closeOpenBreaks, parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
+import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
-import { zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
+import { isWithinShiftWindow, normalizedShiftEnd, shiftHasEnded, zonedDateBounds, zonedDayOfWeek, zonedMinutesOfDay, zonedDayBounds } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AttestationService } from '../attestation/attestation.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -118,19 +118,32 @@ export class TimeClockController {
       const tz = venue.timezone ?? null;
       const today = zonedDayOfWeek(tz, now);
       const minutesNow = zonedMinutesOfDay(tz, now);
-      const weekStart = weekStartFor(todayInZone(tz));
+      const todayDate = todayInZone(tz);
+      const weekStart = weekStartFor(todayDate);
+      const yesterdayDate = addDays(todayDate, -1);
+      const yesterdayWeekStart = weekStartFor(yesterdayDate);
+      const yesterday = (today + 6) % 7;
       const openByProfile = new Set(
         entries.filter((entry) => entry.isOpen).map((entry) => entry.profileId),
       );
       const shifts = await this.prisma.scheduleShift.findMany({
-        where: { venueId: venue.id, weekStart },
+        where: {
+          venueId: venue.id,
+          OR: [
+            { weekStart, dayIndex: today },
+            { weekStart: yesterdayWeekStart, dayIndex: yesterday },
+          ],
+        },
         include: { profile: true },
       });
       for (const shift of shifts) {
-        if (shift.dayIndex !== today || !shift.profileId || shift.status === 'open') continue;
+        const isToday = shift.weekStart === weekStart && shift.dayIndex === today;
+        const isOvernightYesterday = shift.weekStart === yesterdayWeekStart
+          && shift.dayIndex === yesterday
+          && normalizedShiftEnd(shift.startMinutes, shift.endMinutes) > 1440;
+        if ((!isToday && !isOvernightYesterday) || !shift.profileId || shift.status === 'open') continue;
         if (
-          minutesNow >= shift.startMinutes + 15 &&
-          minutesNow <= shift.endMinutes &&
+          isWithinShiftWindow(minutesNow, shift.startMinutes + 15, shift.endMinutes) &&
           !openByProfile.has(shift.profileId) &&
           shift.profile
         ) {
@@ -151,7 +164,7 @@ export class TimeClockController {
             severity: 'danger',
             profileId: entry.profile.id,
             memberName: entry.profile.fullName,
-            detail: `Clocked in since ${entry.clockInAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`,
+            detail: `Clocked in since ${entry.clockInAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz || 'UTC' })}.`,
           });
         }
       }
@@ -164,6 +177,8 @@ export class TimeClockController {
         latitude: venue.latitude,
         longitude: venue.longitude,
         geofenceRadiusM: venue.geofenceRadiusM,
+        geofence_radius_m: venue.geofenceRadiusM,
+        timezone: venue.timezone ?? null,
         subscriptionStatus: venue.subscriptionStatus ?? null,
         subscriptionPlatform: venue.subscriptionPlatform ?? null,
       },
@@ -206,15 +221,16 @@ export class TimeClockController {
     }
     punches.sort((a, b) => a.at - b.at);
 
-    const weekMs = 1000 * 60 * 60 * 24 * 7;
-    const regularHours = closed.reduce((sum, entry) => {
-      const outAt = entry.clockOutAt?.getTime();
-      if (!outAt || now - outAt > weekMs) return sum;
-      let durationMs = outAt - entry.clockInAt.getTime();
+    const weekStartMs = zonedDateBounds(tz, weekStartFor(todayInZone(tz))).start;
+    const regularHours = all.reduce((sum, entry) => {
+      const outAt = entry.clockOutAt?.getTime() ?? (entry.isOpen ? now : null);
+      if (!outAt || outAt < weekStartMs) return sum;
+      const startAt = Math.max(entry.clockInAt.getTime(), weekStartMs);
+      let durationMs = outAt - startAt;
       const breaks = parseTimeBreaks(entry.breaks);
       for (const b of breaks) {
         if (b.type === 'unpaid' && b.startAt && b.endAt) {
-          durationMs -= unpaidBreakMs(b.startAt, b.endAt);
+          durationMs -= unpaidBreakMs(Math.max(b.startAt, weekStartMs), b.endAt);
         }
       }
       return sum + Math.max(0, durationMs) / 3600000;
@@ -273,23 +289,36 @@ export class TimeClockController {
       const nowMs = Date.now();
       const today = zonedDayOfWeek(venue.timezone, nowMs);
       const minutesNow = zonedMinutesOfDay(venue.timezone, nowMs);
-      const weekStart = weekStartFor(todayInZone(venue.timezone));
-      const shift = await this.prisma.scheduleShift.findFirst({
+      const todayDate = todayInZone(venue.timezone);
+      const weekStart = weekStartFor(todayDate);
+      const yesterdayDate = addDays(todayDate, -1);
+      const yesterdayWeekStart = weekStartFor(yesterdayDate);
+      const yesterday = (today + 6) % 7;
+      const shifts = (await this.prisma.scheduleShift.findMany({
         where: {
           venueId: venue.id,
           profileId: profile.id,
-          weekStart,
-          dayIndex: today,
           status: { in: ['scheduled', 'covered'] },
+          OR: [
+            { weekStart, dayIndex: today },
+            { weekStart: yesterdayWeekStart, dayIndex: yesterday },
+          ],
         },
         orderBy: { startMinutes: 'asc' },
-      });
-      if (shift) {
+      })).filter((shift) => (
+        (shift.weekStart === weekStart && shift.dayIndex === today)
+        || (shift.weekStart === yesterdayWeekStart && shift.dayIndex === yesterday && normalizedShiftEnd(shift.startMinutes, shift.endMinutes) > 1440)
+      ));
+      if (shifts.length > 0) {
         const earlyWindow = venue.earlyClockInWindowMin ?? 10;
-        if (minutesNow < shift.startMinutes - earlyWindow) {
-          const formattedStart = minutesToTime(shift.startMinutes);
+        const inWindow = shifts.some((shift) =>
+          isWithinShiftWindow(minutesNow, shift.startMinutes, shift.endMinutes, earlyWindow),
+        );
+        const allEnded = shifts.every((shift) => shiftHasEnded(minutesNow, shift.startMinutes, shift.endMinutes));
+        if (!inWindow && !allEnded) {
+          const next = shifts.find((shift) => minutesNow < shift.startMinutes) ?? shifts[0];
           throw new BadRequestException(
-            `Too early to clock in. Your shift starts at ${formattedStart}. You can clock in starting ${earlyWindow} minutes prior.`
+            `Too early to clock in. Your shift starts at ${minutesToTime(next.startMinutes)}. You can clock in starting ${earlyWindow} minutes prior.`
           );
         }
       }
@@ -333,15 +362,17 @@ export class TimeClockController {
     if (!active) throw new BadRequestException('No active clock-in found');
 
     const profile = await this.prisma.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
+    const clockOutAt = new Date();
     const count = await this.prisma.timeEntry.updateMany({
       where: { id: active.id, isOpen: true, updatedAt: active.updatedAt },
       data: {
-        clockOutAt: new Date(),
+        clockOutAt,
         clockOutLat: body.lat,
         clockOutLng: body.lng,
         clockOutAccuracyM: body.accuracy,
         clockOutMocked: body.mocked,
         isOpen: false,
+        breaks: closeOpenBreaks(active.breaks, clockOutAt.getTime()),
       },
     });
     if (count.count === 0) throw new BadRequestException('Clock-out state changed. Refresh and try again.');

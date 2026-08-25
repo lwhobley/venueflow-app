@@ -9,7 +9,7 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { unpaidBreakMs } from '../../common/break-duration';
+import { closeOpenBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { csvCell } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
@@ -22,6 +22,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { runWithoutTenant } from '../../prisma/tenant-context';
 import { mapClockEntry, mapProfile, mapShift, mapVenue, toMs } from './app-mappers';
 import { ProfileService } from './profile.service';
+import { isActiveMembership } from '../../common/membership';
 import { syncTeamMemberCount } from '../../common/team-sync';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { endBreakForProfile, startBreakForProfile } from '../time-clock/break-transitions';
@@ -95,6 +96,18 @@ class RegisterVenueDto {
 
   @IsString()
   staffRange!: string;
+
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @IsOptional()
+  latitude?: number;
+
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @IsOptional()
+  longitude?: number;
 }
 
 class UpdateVenueDto {
@@ -185,13 +198,21 @@ export class AppController {
   @Get('me')
   async getMe(@CurrentUser() user: AuthUser, @Req() req: Request) {
     const requestedVenueId = (req.headers['x-venue-id'] as string | undefined) || user.venueId || undefined;
-    const profile = await this.getProfile(user, requestedVenueId);
+    let profile = await this.getProfile(user, requestedVenueId);
+    if (!profile) {
+      profile = await this.prisma.profile.findFirst({
+        where: { userId: user.sub },
+        include: { venue: true },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
     if (!profile) return null;
     const emailVerified = await this.isEmailVerified(user.sub);
     const venues = await this.profiles.listUserVenues(user.sub);
+    const venueReady = emailVerified && isActiveMembership(profile.membershipStatus);
     return {
       profile: mapProfile(profile, emailVerified),
-      venue: profile.venue ? mapVenue(profile.venue) : null,
+      venue: venueReady && profile.venue ? mapVenue(profile.venue) : null,
       venues,
     };
   }
@@ -300,6 +321,11 @@ export class AppController {
     if (!(await this.isEmailVerified(user.sub))) {
       throw new ForbiddenException('Verify your email before creating a venue.');
     }
+    const latitude = Number.isFinite(body.latitude) ? body.latitude! : 0;
+    const longitude = Number.isFinite(body.longitude) ? body.longitude! : 0;
+    if (latitude === 0 && longitude === 0) {
+      throw new BadRequestException('Set the venue coordinates before creating it. Clock-in cannot run at an unconfigured location.');
+    }
 
     const trialStartedAt = new Date();
     const trialEndsAt = new Date(trialStartedAt.getTime() + TRIAL_DURATION_MS);
@@ -372,8 +398,8 @@ export class AppController {
         data: {
           name: businessName,
           code: venueCode,
-          latitude: 0,
-          longitude: 0,
+          latitude,
+          longitude,
           geofenceRadiusM: 150,
           phone: body.phone?.trim() || null,
           address: body.address?.trim() || null,
@@ -447,6 +473,13 @@ export class AppController {
   async updateVenue(@CurrentUser() user: AuthUser, @Body() body: UpdateVenueDto) {
     const profile = await this.requireManagerProfile(user);
     if (!profile.venueId) return { venue: null };
+    const nextLat = body.latitude ?? profile.venue?.latitude;
+    const nextLng = body.longitude ?? profile.venue?.longitude;
+    if (body.latitude !== undefined || body.longitude !== undefined) {
+      if (nextLat === 0 && nextLng === 0) {
+        throw new BadRequestException('Venue coordinates cannot be 0,0. Use a real location for the time-clock geofence.');
+      }
+    }
     const venue = await this.prisma.venue.update({
       where: { id: profile.venueId },
       data: {
@@ -742,6 +775,9 @@ export class AppController {
     const canElevate = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess;
     const inviteRole = body.role === 'manager' && canElevate ? 'manager' : 'staff';
     const email = body.email?.trim().toLowerCase() || null;
+    if (inviteRole === 'manager' && !email) {
+      throw new BadRequestException('Manager invites require an email address.');
+    }
     // The plaintext token is only ever needed for the instant it's embedded
     // in the deep-link/response/email below — only its hash is persisted
     // (Invite.tokenHash), so a DB dump/backup leak can't yield a usable
@@ -923,6 +959,7 @@ export class AppController {
           where: { id: unclaimedProfile.id },
           data: {
             userId: user.sub,
+            role: 'staff',
           },
           include: { venue: true },
         });
@@ -978,6 +1015,7 @@ export class AppController {
   @UseGuards(AuthGuard)
   @Delete('me')
   async deleteMyAccount(@CurrentUser() user: AuthUser, @Body() body: DeleteAccountDto = {}) {
+    const deletionRunId = randomBytes(16).toString('hex');
     const deletion = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
       const [account, profiles] = await Promise.all([
         tx.user.findUnique({ where: { id: user.sub }, select: { email: true } }),
@@ -1014,133 +1052,72 @@ export class AppController {
         }
       }
 
-      if (venuesToDelete.length > 0) {
-        // The batch walks below share this one transaction's 120s budget. A
-        // venue with a pathological amount of media/wage history could still
-        // exhaust it and roll back after minutes of work with no partial
-        // progress kept. Rather than let that happen silently, reject up
-        // front with an actionable message — cheap indexed counts, not the
-        // expensive walk itself. 250k combined rows is a generous multiple of
-        // any venue seen in practice; revisit if real usage approaches it.
-        const DELETION_ROW_LIMIT = 250_000;
-        const [chatImageCount, venueDocumentCount, checklistPhotoCount, timeEntryCount] = await Promise.all([
-          tx.chatImage.count({ where: { venueId: { in: venuesToDelete } } }),
-          tx.venueDocument.count({ where: { venueId: { in: venuesToDelete } } }),
-          tx.checklistCompletion.count({ where: { venueId: { in: venuesToDelete }, photoKey: { not: null } } }),
-          tx.timeEntry.count({ where: { venueId: { in: venuesToDelete } } }),
-        ]);
-        const totalRows = chatImageCount + venueDocumentCount + checklistPhotoCount + timeEntryCount;
-        if (totalRows > DELETION_ROW_LIMIT) {
-          throw new ConflictException(
-            `This venue has too much history (${totalRows.toLocaleString()} records) to delete automatically. Contact support@venuewrangler.com for assisted account deletion.`,
-          );
-        }
-      }
-
       const mediaJobIds: string[] = [];
       if (venuesToDelete.length > 0) {
-        const MEDIA_BATCH = 500;
-        const pendingKeys = new Set<string>();
-        const flushMediaJob = async () => {
-          if (pendingKeys.size === 0) return;
-          const job = await tx.objectDeletionJob.create({
-            data: { objectKeys: Array.from(pendingKeys) },
-            select: { id: true },
-          });
-          mediaJobIds.push(job.id);
-          pendingKeys.clear();
-        };
-        const addKeys = async (keys: Array<string | null>) => {
-          for (const key of keys) {
-            if (key) pendingKeys.add(key);
-            if (pendingKeys.size >= MEDIA_BATCH) await flushMediaJob();
-          }
-        };
+        const venueList = Prisma.join(venuesToDelete);
+        // Child inserts take a foreign-key KEY SHARE lock on Venue. Holding an
+        // UPDATE lock closes the gap between snapshotting object/wage rows and
+        // cascading the venue, so no newly committed S3 key can be missed.
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id" FROM "Venue" WHERE "id" IN (${venueList}) FOR UPDATE
+        `);
+        // Keep the transaction set-based. The previous implementation pulled
+        // every key through Node in 500-row pages, turning tenant erasure into
+        // thousands of network round trips while locks remained open. Postgres
+        // now deduplicates and shards the durable outbox in one statement.
+        const jobs = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          WITH media_keys AS (
+            SELECT "s3Key" AS "objectKey" FROM "ChatImage" WHERE "venueId" IN (${venueList})
+            UNION
+            SELECT "s3Key" AS "objectKey" FROM "VenueDocument" WHERE "venueId" IN (${venueList})
+            UNION
+            SELECT "photoKey" AS "objectKey" FROM "ChecklistCompletion"
+              WHERE "venueId" IN (${venueList}) AND "photoKey" IS NOT NULL
+          ), numbered AS (
+            SELECT "objectKey", ((row_number() OVER (ORDER BY "objectKey") - 1) / 500)::integer AS batch
+            FROM media_keys
+          ), batches AS (
+            SELECT batch, array_agg("objectKey" ORDER BY "objectKey") AS "objectKeys"
+            FROM numbered GROUP BY batch
+          )
+          INSERT INTO "ObjectDeletionJob" ("id", "objectKeys", "status", "attempts", "createdAt", "updatedAt")
+          SELECT ${`account-delete-${deletionRunId}-`} || batch::text, "objectKeys", 'pending', 0, NOW(), NOW()
+          FROM batches
+          RETURNING "id"
+        `);
+        mediaJobIds.push(...jobs.map(({ id }) => id));
 
-        let afterId: string | undefined;
-        for (;;) {
-          const batch: Array<{ id: string; s3Key: string }> = await tx.chatImage.findMany({
-            where: { venueId: { in: venuesToDelete }, ...(afterId ? { id: { gt: afterId } } : {}) },
-            orderBy: { id: 'asc' },
-            take: MEDIA_BATCH,
-            select: { id: true, s3Key: true },
-          });
-          if (batch.length === 0) break;
-          await addKeys(batch.map(({ s3Key }) => s3Key));
-          afterId = batch.at(-1)!.id;
-        }
-        afterId = undefined;
-        for (;;) {
-          const batch: Array<{ id: string; s3Key: string }> = await tx.venueDocument.findMany({
-            where: { venueId: { in: venuesToDelete }, ...(afterId ? { id: { gt: afterId } } : {}) },
-            orderBy: { id: 'asc' },
-            take: MEDIA_BATCH,
-            select: { id: true, s3Key: true },
-          });
-          if (batch.length === 0) break;
-          await addKeys(batch.map(({ s3Key }) => s3Key));
-          afterId = batch.at(-1)!.id;
-        }
-        afterId = undefined;
-        for (;;) {
-          const batch: Array<{ id: string; photoKey: string | null }> = await tx.checklistCompletion.findMany({
-            where: {
-              venueId: { in: venuesToDelete },
-              photoKey: { not: null },
-              ...(afterId ? { id: { gt: afterId } } : {}),
-            },
-            orderBy: { id: 'asc' },
-            take: MEDIA_BATCH,
-            select: { id: true, photoKey: true },
-          });
-          if (batch.length === 0) break;
-          await addKeys(batch.map(({ photoKey }) => photoKey));
-          afterId = batch.at(-1)!.id;
-        }
-        await flushMediaJob();
         // Archive wage records BEFORE anything cascades. TimeEntry.venue is
         // onDelete: Cascade, so deleting the Venue would otherwise destroy every
         // employee's clock-in history — not just the departing account's. FLSA
         // requires three-year retention, and those other employees are not the
         // data subject here. RetainedTimeEntry carries no Venue FK so it
         // survives the cascade (see its schema comment).
-        const venuesBeingDeleted = await tx.venue.findMany({
-          where: { id: { in: venuesToDelete } },
-          select: { id: true, name: true },
-        });
-        const venueNameById = new Map(venuesBeingDeleted.map((venue) => [venue.id, venue.name]));
-        const RETAIN_BATCH = 500;
-        for (;;) {
-          const batch = await tx.timeEntry.findMany({
-            where: { venueId: { in: venuesToDelete } },
-            orderBy: { id: 'asc' },
-            take: RETAIN_BATCH,
-            select: {
-              id: true, venueId: true, profileId: true, profileFullName: true, clockInAt: true,
-              clockOutAt: true, isOpen: true, breaks: true, createdAt: true,
-              profile: { select: { fullName: true, email: true } },
-            },
-          });
-          if (batch.length === 0) break;
-          await tx.retainedTimeEntry.createMany({
-            data: batch.map((entry) => ({
-              originVenueId: entry.venueId,
-              originVenueName: venueNameById.get(entry.venueId) ?? null,
-              // Pseudonymize employee identity with a stable synthetic identifier
-              // (deleted_user_<profileId>) so individual staff wage records can be
-              // distinguished and reconstructed for FLSA compliance without storing
-              // raw personal names or email addresses.
-              profileFullName: entry.profileId ? `deleted_user_${entry.profileId}` : `deleted_user_${entry.id}`,
-              profileEmail: null,
-              clockInAt: entry.clockInAt,
-              clockOutAt: entry.clockOutAt,
-              isOpen: entry.isOpen,
-              breaks: entry.breaks ?? Prisma.DbNull,
-              originCreatedAt: entry.createdAt,
-            })),
-          });
-          await tx.timeEntry.deleteMany({ where: { id: { in: batch.map((entry) => entry.id) } } });
-        }
+        // Pseudonymize ONLY the departing account's own rows. Blanket-anonymizing
+        // every employee at the venue defeated the point of this table: FLSA
+        // §516.2 requires the employee's name, so a retained-but-unattributable
+        // row carries the storage and privacy cost of retention with none of its
+        // compliance value. Co-workers are not the data subject of this erasure.
+        const departingProfileIds = profiles.map((profile) => profile.id);
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO "RetainedTimeEntry" (
+            "id", "originVenueId", "originVenueName", "profileFullName", "profileEmail",
+            "clockInAt", "clockOutAt", "isOpen", "breaks", "originCreatedAt", "retainedAt"
+          )
+          SELECT
+            ${`retained-${deletionRunId}-`} || t."id", t."venueId", v."name",
+            CASE WHEN t."profileId" IS NOT NULL AND t."profileId" IN (${Prisma.join(departingProfileIds)})
+                 THEN 'deleted_user_' || t."profileId"
+                 ELSE t."profileFullName" END,
+            CASE WHEN t."profileId" IS NOT NULL AND t."profileId" IN (${Prisma.join(departingProfileIds)})
+                 THEN NULL
+                 ELSE p."email" END,
+            t."clockInAt", t."clockOutAt", t."isOpen", t."breaks", t."createdAt", NOW()
+          FROM "TimeEntry" t
+          JOIN "Venue" v ON v."id" = t."venueId"
+          LEFT JOIN "Profile" p ON p."id" = t."profileId"
+          WHERE t."venueId" IN (${venueList})
+        `);
 
         // Profile.venue uses SetNull because profiles can temporarily be
         // venueless during onboarding. Tenant offboarding is different: remove
@@ -1153,6 +1130,28 @@ export class AppController {
       if (profileIds.length) {
         await tx.pushToken.deleteMany({ where: { profileId: { in: profileIds } } });
         await tx.availability.deleteMany({ where: { profileId: { in: profileIds } } });
+        // Close any still-running punch with a real clock-out BEFORE the
+        // de-identification pass below. Flipping isOpen to false while leaving
+        // clockOutAt null produces a row every consumer discards — payroll
+        // filters on `clockOutAt: { not: null }`, the clock board only lists
+        // isOpen entries, and once profileId is SET NULL no correction request
+        // can reach it — so the employee's final partial shift silently became
+        // unpayable at exactly the moment they left.
+        const openEntries = await tx.timeEntry.findMany({
+          where: { profileId: { in: profileIds }, clockOutAt: null },
+          select: { id: true, breaks: true },
+        });
+        const clockOutAt = new Date();
+        for (const entry of openEntries) {
+          await tx.timeEntry.update({
+            where: { id: entry.id },
+            data: {
+              clockOutAt,
+              isOpen: false,
+              breaks: closeOpenBreaks(entry.breaks, clockOutAt.getTime()),
+            },
+          });
+        }
         for (const profile of profiles) {
           await tx.timeEntry.updateMany({
             where: { profileId: profile.id },
@@ -1175,10 +1174,10 @@ export class AppController {
         deletedVenueCount: venuesToDelete.length,
       };
     }, {
-      // Tenant offboarding walks every venue-owned table plus a batched wage-record
-      // archive. Prisma's 5s interactive default aborts that on any venue with real
-      // history, leaving the account permanently undeletable — itself a GDPR problem.
-      timeout: 120_000,
+      // Set-based archival/outbox insertion leaves only the final atomic erase
+      // in this critical section. Keep a bounded allowance for large cascades
+      // without permitting a request to hold locks for minutes.
+      timeout: 30_000,
       maxWait: 10_000,
     }));
     if (deletion?.mediaJobIds.length && this.mediaCleanup) {

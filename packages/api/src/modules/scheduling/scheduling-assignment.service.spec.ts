@@ -28,13 +28,35 @@ describe('SchedulingAssignmentService', () => {
   it('rejects overlap checks when another shift conflicts', async () => {
     const prisma = {
       scheduleShift: {
-        findFirst: vi.fn().mockResolvedValue({ id: 'overlap' }),
+        findMany: vi.fn().mockResolvedValue([{ weekStart: null, dayIndex: 2, startMinutes: 480, endMinutes: 720 }]),
       },
     };
     const service = new SchedulingAssignmentService(prisma as any);
 
     await expect(
       service.assertNoDoubleBook('venue-1', 'profile-1', 2, 480, 720, 'shift-1'),
+    ).rejects.toThrow('This assignment overlaps another shift.');
+  });
+
+  it('rejects a Monday morning shift that overlaps Sunday overnight', async () => {
+    const prisma = {
+      scheduleShift: {
+        findMany: vi.fn().mockResolvedValue([
+          { weekStart: '2026-08-23', dayIndex: 0, startMinutes: 1320, endMinutes: 1560 },
+        ]),
+      },
+    };
+    const service = new SchedulingAssignmentService(prisma as any);
+
+    await expect(
+      service.assertNoDoubleBookTx(
+        prisma as any,
+        'venue-1',
+        'profile-1',
+        1,
+        60,
+        180,
+      ),
     ).rejects.toThrow('This assignment overlaps another shift.');
   });
 
@@ -64,6 +86,7 @@ describe('SchedulingAssignmentService', () => {
     const prisma = {
       scheduleShift: {
         findFirst: vi.fn().mockResolvedValue(shift),
+        findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn().mockResolvedValue({}),
       },
       profile: {
@@ -95,6 +118,7 @@ describe('SchedulingAssignmentService', () => {
     const prisma = {
       scheduleShift: {
         create: vi.fn().mockResolvedValue(createdShift),
+        findMany: vi.fn().mockResolvedValue([]),
       },
       profile: {
         findFirst: vi.fn().mockResolvedValue({ id: 'profile-1', venueId: 'venue-1' }),
@@ -151,6 +175,7 @@ describe('SchedulingAssignmentService', () => {
     const prisma = {
       scheduleShift: {
         findFirst: vi.fn().mockResolvedValue(shift),
+        findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn().mockResolvedValue({}),
       },
       venue: {
@@ -160,7 +185,6 @@ describe('SchedulingAssignmentService', () => {
     };
     const service = new SchedulingAssignmentService(prisma as any);
     const lockSpy = vi.spyOn(service, 'lockAssignmentKeys').mockResolvedValue(undefined);
-    const overlapSpy = vi.spyOn(service, 'assertNoDoubleBookTx').mockResolvedValue(undefined);
 
     const result = await service.updateShift({
       venueId: 'venue-1',
@@ -175,15 +199,7 @@ describe('SchedulingAssignmentService', () => {
 
     expect(result).toEqual(shift);
     expect(lockSpy).toHaveBeenCalled();
-    expect(overlapSpy).toHaveBeenCalledWith(
-      expect.anything(),
-      'venue-1',
-      'profile-1',
-      2,
-      540,
-      780,
-      'shift-3',
-    );
+    expect(prisma.scheduleShift.findMany).toHaveBeenCalled();
     expect(prisma.scheduleShift.update).toHaveBeenCalledWith({
       where: { id: 'shift-3' },
       data: {
@@ -218,6 +234,7 @@ describe('SchedulingAssignmentService', () => {
         findFirst: vi.fn()
           .mockResolvedValueOnce(staleShift)
           .mockResolvedValueOnce(reassignedShift),
+        findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn().mockResolvedValue({}),
       },
       venue: {
@@ -227,7 +244,6 @@ describe('SchedulingAssignmentService', () => {
     };
     const service = new SchedulingAssignmentService(prisma as any);
     const lockSpy = vi.spyOn(service, 'lockAssignmentKeys').mockResolvedValue(undefined);
-    const overlapSpy = vi.spyOn(service, 'assertNoDoubleBookTx').mockResolvedValue(undefined);
 
     const result = await service.updateShift({
       venueId: 'venue-1',
@@ -241,18 +257,11 @@ describe('SchedulingAssignmentService', () => {
 
     // Locking and the double-book check must use the freshly-read assignee
     // (profile-2), not the stale one captured before the transaction.
-    expect(lockSpy).toHaveBeenCalledWith(expect.anything(), [
-      expect.objectContaining({ profileId: 'profile-2' }),
-    ]);
-    expect(overlapSpy).toHaveBeenCalledWith(
+    expect(lockSpy).toHaveBeenCalledWith(
       expect.anything(),
-      'venue-1',
-      'profile-2',
-      2,
-      540,
-      780,
-      'shift-5',
+      expect.arrayContaining([expect.objectContaining({ profileId: 'profile-2' })]),
     );
+    expect(prisma.scheduleShift.findMany).toHaveBeenCalled();
     // The returned profileId reflects the current assignee too, so the
     // caller's edit-notification email goes to profile-2, not profile-1.
     expect(result.profileId).toBe('profile-2');
@@ -301,6 +310,7 @@ describe('SchedulingAssignmentService', () => {
       },
       scheduleShift: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         create: vi
           .fn()
           .mockResolvedValueOnce({ id: 'shift-5' })
@@ -670,6 +680,7 @@ describe('SchedulingAssignmentService', () => {
           .fn()
           .mockResolvedValueOnce(requesterShift)
           .mockResolvedValueOnce(targetShift),
+        findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn().mockResolvedValue({}),
       },
       venue: {

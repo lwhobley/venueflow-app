@@ -258,7 +258,7 @@ describe('SchedulingController', () => {
       const { controller, assignments } = makeController();
 
       await expect(
-        controller.createShift(managerScope, { dayIndex: 1, startMinutes: 900, endMinutes: 600, jobTitle: 'Server', station: 'Floor' } as any),
+        controller.createShift(managerScope, { dayIndex: 1, startMinutes: 900, endMinutes: 900, jobTitle: 'Server', station: 'Floor' } as any),
       ).rejects.toThrow('End time must be after start time');
       expect(assignments.createShift).not.toHaveBeenCalled();
     });
@@ -579,7 +579,7 @@ describe('SchedulingController', () => {
       const { controller, assignments } = makeController();
 
       const result = await controller.commitAiSchedule(managerScope, {
-        shifts: [{ dayIndex: 1, startMinutes: 900, endMinutes: 600, jobTitle: 'Server', station: 'Floor' }],
+        shifts: [{ dayIndex: 1, startMinutes: 900, endMinutes: 900, jobTitle: 'Server', station: 'Floor' }],
       });
 
       expect(result.created).toBe(0);
@@ -827,7 +827,7 @@ describe('SchedulingController', () => {
 
       await expect(
         controller.restoreShifts(managerScope, {
-          shifts: [{ dayIndex: 1, startMinutes: 900, endMinutes: 600, jobTitle: 'Server', station: 'Floor', status: 'scheduled' as any }],
+          shifts: [{ dayIndex: 1, startMinutes: 900, endMinutes: 900, jobTitle: 'Server', station: 'Floor', status: 'scheduled' as any }],
         }),
       ).rejects.toThrow('End time must be after start time');
       expect(assignments.restoreShifts).not.toHaveBeenCalled();

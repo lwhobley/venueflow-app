@@ -131,10 +131,13 @@ export class AiSchedulerService {
         const endMinutes = Number(item.endMinutes);
         if (
           !Number.isInteger(dayIndex) || dayIndex < 0 || dayIndex > 6 ||
-          !Number.isInteger(startMinutes) || startMinutes < 0 || startMinutes > 1440 ||
-          !Number.isInteger(endMinutes) || endMinutes < 0 || endMinutes > 1440 ||
-          endMinutes <= startMinutes
+          !Number.isInteger(startMinutes) || startMinutes < 0 || startMinutes > 1439 ||
+          !Number.isInteger(endMinutes) || endMinutes < 0 || endMinutes > 2880
         ) {
+          return null;
+        }
+        const normalizedEnd = endMinutes < startMinutes && endMinutes <= 1440 ? endMinutes + 1440 : endMinutes;
+        if (normalizedEnd <= startMinutes || normalizedEnd - startMinutes > 1440) {
           return null;
         }
         const jobTitle = cleanText(item.jobTitle) ?? 'Staff';
@@ -142,7 +145,7 @@ export class AiSchedulerService {
         const profileIdRaw = cleanText(item.profileId);
         const profileId = profileIdRaw && validProfileIds.has(profileIdRaw) ? profileIdRaw : null;
         const reason = cleanText(item.reason) ?? (profileId ? 'AI-assigned to fill demand gap' : 'Open shift proposed to fill demand gap');
-        return { dayIndex, startMinutes, endMinutes, jobTitle, station, profileId, reason };
+        return { dayIndex, startMinutes, endMinutes: normalizedEnd, jobTitle, station, profileId, reason };
       })
       .filter((shift): shift is ProposedShift => shift !== null);
 

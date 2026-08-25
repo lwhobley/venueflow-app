@@ -8,6 +8,7 @@ import { Prisma, ShiftStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
+import { assignmentDayKeys, occupiedSlots, shiftsOverlap, type ShiftWindow } from '../../common/shift-overlap';
 
 @Injectable()
 export class SchedulingAssignmentService {
@@ -32,15 +33,8 @@ export class SchedulingAssignmentService {
 
     return withSerializableRetry(this.prisma, async (tx) => {
       if (args.profileId) {
-        await this.lockAssignmentKeys(tx, [
-          {
-            venueId: args.venueId,
-            profileId: args.profileId,
-            ...(args.weekStart ? { weekStart: args.weekStart } : {}),
-            dayIndex: args.dayIndex,
-          },
-        ]);
-        await this.assertNotUnavailable(tx, args.venueId, args.profileId, args.dayIndex, args.weekStart);
+        await this.lockAssignmentKeys(tx, this.profileLockKeys(args.venueId, args.profileId, args));
+        await this.assertNotUnavailable(tx, args.venueId, args.profileId, args);
         await this.assertNoDoubleBookInWeekTx(
           tx,
           args.venueId,
@@ -100,14 +94,20 @@ export class SchedulingAssignmentService {
 
       if (current.profileId) {
         await this.lockAssignmentKeys(tx, [
-          {
-            venueId: args.venueId,
-            profileId: current.profileId,
-            weekStart: current.weekStart ?? undefined,
+          ...this.profileLockKeys(args.venueId, current.profileId, current),
+          ...this.profileLockKeys(args.venueId, current.profileId, {
+            weekStart: current.weekStart,
             dayIndex: args.dayIndex,
-          },
+            startMinutes: args.startMinutes,
+            endMinutes: args.endMinutes,
+          }),
         ]);
-        await this.assertNotUnavailable(tx, args.venueId, current.profileId, args.dayIndex, current.weekStart ?? undefined);
+        await this.assertNotUnavailable(tx, args.venueId, current.profileId, {
+          weekStart: current.weekStart,
+          dayIndex: args.dayIndex,
+          startMinutes: args.startMinutes,
+          endMinutes: args.endMinutes,
+        });
         await this.assertNoDoubleBookInWeekTx(
           tx,
           args.venueId,
@@ -168,15 +168,8 @@ export class SchedulingAssignmentService {
       });
       if (!current) throw new NotFoundException('Shift not found');
 
-      await this.lockAssignmentKeys(tx, [
-        {
-          venueId: args.venueId,
-          profileId,
-          weekStart: current.weekStart ?? undefined,
-          dayIndex: current.dayIndex,
-        },
-      ]);
-      await this.assertNotUnavailable(tx, args.venueId, profileId, current.dayIndex, current.weekStart ?? undefined);
+      await this.lockAssignmentKeys(tx, this.profileLockKeys(args.venueId, profileId, current));
+      await this.assertNotUnavailable(tx, args.venueId, profileId, current);
       await this.assertNoDoubleBookInWeekTx(
         tx,
         args.venueId,
@@ -244,12 +237,12 @@ export class SchedulingAssignmentService {
         shift,
         profileId: shift.profileId && memberIds.has(shift.profileId) ? shift.profileId : undefined,
       }));
-      await this.lockAssignmentKeys(tx, prepared.flatMap(({ shift, profileId }) => profileId ? [{
-        venueId: args.venueId, profileId, weekStart: args.weekStart, dayIndex: shift.dayIndex,
-      }] : []));
+      await this.lockAssignmentKeys(tx, prepared.flatMap(({ shift, profileId }) => profileId
+        ? this.profileLockKeys(args.venueId, profileId, { ...shift, weekStart: args.weekStart })
+        : []));
       for (const { shift, profileId } of prepared) {
         if (profileId) {
-          await this.assertNotUnavailable(tx, args.venueId, profileId, shift.dayIndex, args.weekStart);
+          await this.assertNotUnavailable(tx, args.venueId, profileId, { ...shift, weekStart: args.weekStart });
           await this.assertNoDoubleBookInWeekTx(
             tx, args.venueId, profileId, args.weekStart, shift.dayIndex, shift.startMinutes, shift.endMinutes,
           );
@@ -466,28 +459,14 @@ export class SchedulingAssignmentService {
           throw new NotFoundException('Shift not found');
         }
 
-        await this.assertNotUnavailable(tx, args.venueId, swap.targetProfileId, requesterShift.dayIndex, requesterShift.weekStart);
+        await this.assertNotUnavailable(tx, args.venueId, swap.targetProfileId, requesterShift);
         if (targetShift) {
-          await this.assertNotUnavailable(tx, args.venueId, swap.requesterProfileId, targetShift.dayIndex, targetShift.weekStart);
+          await this.assertNotUnavailable(tx, args.venueId, swap.requesterProfileId, targetShift);
         }
 
         await this.lockAssignmentKeys(tx, [
-          {
-            venueId: args.venueId,
-            profileId: swap.targetProfileId,
-            weekStart: requesterShift.weekStart ?? undefined,
-            dayIndex: requesterShift.dayIndex,
-          },
-          ...(targetShift
-            ? [
-                {
-                  venueId: args.venueId,
-                  profileId: swap.requesterProfileId,
-                  weekStart: targetShift.weekStart ?? undefined,
-                  dayIndex: targetShift.dayIndex,
-                },
-              ]
-            : []),
+          ...this.profileLockKeys(args.venueId, swap.targetProfileId, requesterShift),
+          ...(targetShift ? this.profileLockKeys(args.venueId, swap.requesterProfileId, targetShift) : []),
         ]);
         await this.assertNoDoubleBookInWeekTx(
           tx,
@@ -560,8 +539,8 @@ export class SchedulingAssignmentService {
         where: { id: shift.id, venueId: args.venueId, status: 'open', profileId: null },
       });
       if (!current) throw new BadRequestException('This shift is no longer open');
-      await this.lockAssignmentKeys(tx, [{ venueId: args.venueId, profileId: args.profileId, weekStart: current.weekStart ?? undefined, dayIndex: current.dayIndex }]);
-      await this.assertNotUnavailable(tx, args.venueId, args.profileId, current.dayIndex, current.weekStart);
+      await this.lockAssignmentKeys(tx, this.profileLockKeys(args.venueId, args.profileId, current));
+      await this.assertNotUnavailable(tx, args.venueId, args.profileId, current);
       await this.assertNoDoubleBookInWeekTx(tx, args.venueId, args.profileId, current.weekStart, current.dayIndex, current.startMinutes, current.endMinutes, current.id);
       await tx.scheduleShift.update({ where: { id: current.id }, data: { profileId: args.profileId, status: 'covered' } });
     });
@@ -622,15 +601,8 @@ export class SchedulingAssignmentService {
           if (!current || current.profileId || current.status !== 'open') {
             throw new BadRequestException('Shift is no longer open.');
           }
-          await this.assertNotUnavailable(tx, args.venueId, assignment.profileId, current.dayIndex, current.weekStart);
-          await this.lockAssignmentKeys(tx, [
-            {
-              venueId: args.venueId,
-              profileId: assignment.profileId,
-              weekStart: current.weekStart ?? undefined,
-              dayIndex: current.dayIndex,
-            },
-          ]);
+          await this.assertNotUnavailable(tx, args.venueId, assignment.profileId, current);
+          await this.lockAssignmentKeys(tx, this.profileLockKeys(args.venueId, assignment.profileId, current));
           await this.assertNoDoubleBookInWeekTx(
             tx,
             args.venueId,
@@ -690,27 +662,28 @@ export class SchedulingAssignmentService {
     db: Prisma.TransactionClient | PrismaService,
     venueId: string,
     profileId: string,
-    dayIndex: number,
-    shiftWeekStart?: string | null,
+    shift: ShiftWindow,
   ) {
     // Keep lightweight service unit doubles usable; real Prisma clients always
     // expose both delegates below.
     if (!db.venue?.findUnique || !db.staffRequest?.findMany) return;
-    const venue = shiftWeekStart
+    const venue = shift.weekStart
       ? null
       : await db.venue.findUnique({ where: { id: venueId }, select: { timezone: true } });
-    const weekStart = shiftWeekStart ?? weekStartFor(todayInZone(venue?.timezone ?? null));
-    const date = addDays(weekStart, dayIndex);
+    const weekStart = shift.weekStart ?? weekStartFor(todayInZone(venue?.timezone ?? null));
+    const dates = [...new Set(
+      occupiedSlots({ ...shift, weekStart }).map((slot) => addDays(slot.weekStart ?? weekStart, slot.dayIndex)),
+    )];
     const requests = await db.staffRequest.findMany({
       where: {
         venueId,
         profileId,
         status: 'approved',
         kind: { in: ['time_off', 'sick_leave'] },
-        OR: [
+        OR: dates.flatMap((date) => [
           { requestedForDate: date },
           { requestedRangeStart: { lte: date }, requestedRangeEnd: { gte: date } },
-        ],
+        ]),
       },
       select: { title: true },
       take: 1,
@@ -754,18 +727,16 @@ export class SchedulingAssignmentService {
     endMinutes: number,
     ...excludeShiftIds: Array<string | undefined>
   ) {
-    const excluded = excludeShiftIds.filter((id): id is string => Boolean(id));
-    const overlapping = await tx.scheduleShift.findFirst({
-      where: {
-        venueId,
-        profileId,
-        dayIndex,
-        ...(excluded.length > 0 ? { id: { notIn: excluded } } : {}),
-        startMinutes: { lt: endMinutes },
-        endMinutes: { gt: startMinutes },
-      },
-    });
-    if (overlapping) throw new BadRequestException('This assignment overlaps another shift.');
+    await this.assertNoDoubleBookInWeekTx(
+      tx,
+      venueId,
+      profileId,
+      undefined,
+      dayIndex,
+      startMinutes,
+      endMinutes,
+      ...excludeShiftIds,
+    );
   }
 
   private async assertNoDoubleBookInWeekTx(
@@ -778,30 +749,33 @@ export class SchedulingAssignmentService {
     endMinutes: number,
     ...excludeShiftIds: Array<string | undefined>
   ) {
-    if (weekStart === undefined) {
-      return this.assertNoDoubleBookTx(
-        tx,
-        venueId,
-        profileId,
-        dayIndex,
-        startMinutes,
-        endMinutes,
-        ...excludeShiftIds,
-      );
-    }
     const excluded = excludeShiftIds.filter((id): id is string => Boolean(id));
-    const overlapping = await tx.scheduleShift.findFirst({
+    const candidate: ShiftWindow = { weekStart, dayIndex, startMinutes, endMinutes };
+    const adjacentWeeks = weekStart
+      ? { weekStart: { in: [addDays(weekStart, -7), weekStart, addDays(weekStart, 7)] } }
+      : {};
+    const others = await tx.scheduleShift.findMany({
       where: {
         venueId,
         profileId,
-        ...(weekStart !== undefined ? { weekStart } : {}),
-        dayIndex,
         ...(excluded.length > 0 ? { id: { notIn: excluded } } : {}),
-        startMinutes: { lt: endMinutes },
-        endMinutes: { gt: startMinutes },
+        ...(weekStart
+          ? { OR: [adjacentWeeks, { weekStart: null }] }
+          : {}),
       },
+      select: { weekStart: true, dayIndex: true, startMinutes: true, endMinutes: true },
     });
-    if (overlapping) throw new BadRequestException('This assignment overlaps another shift.');
+    if (others.some((other) => shiftsOverlap(candidate, other))) {
+      throw new BadRequestException('This assignment overlaps another shift.');
+    }
+  }
+
+  private profileLockKeys(
+    venueId: string,
+    profileId: string,
+    shift: ShiftWindow,
+  ): Array<{ venueId: string; profileId: string; weekStart?: string; dayIndex: number }> {
+    return assignmentDayKeys(shift).map((key) => ({ venueId, profileId, ...key }));
   }
 
   async lockAssignmentKeys(

@@ -1,7 +1,8 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
+import { createHmac, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { promisify } from 'util';
 import { hashInviteToken } from '../common/invite-token';
 
@@ -14,7 +15,10 @@ const PASSWORD_DIGEST = 'sha256';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config?: ConfigService,
+  ) {}
 
   async hashPassword(password: string) {
     const salt = randomBytes(16).toString('hex');
@@ -33,7 +37,8 @@ export class AuthService {
   }
 
   hashOneTimeCode(code: string) {
-    return createHash('sha256').update(code.trim()).digest('hex');
+    const pepper = this.config?.get<string>('JWT_SECRET')?.trim() || process.env.JWT_SECRET || '';
+    return createHmac('sha256', pepper).update(code.trim()).digest('hex');
   }
 
   /** Constant-time comparison of two one-time-code hashes (both fixed-length hex digests). */
@@ -122,7 +127,7 @@ export class AuthService {
           await tx.profile.delete({ where: { id: existingByUser.id } });
           result = await tx.profile.update({
             where: { id: adoptableProfile.id },
-            data: { userId },
+            data: { userId, role: 'staff' },
             include: { venue: true },
           });
           await this.logProfileAdoption(tx, result);
@@ -174,7 +179,7 @@ export class AuthService {
               userId,
               email,
               fullName: trimmedFullName || adoptableProfile.fullName,
-              role: grant?.role ?? adoptableProfile.role,
+              role: grant?.role ?? 'staff',
               jobTitle: grant?.jobTitle ?? adoptableProfile.jobTitle,
               venueId: grant?.venueId ?? adoptableProfile.venueId,
               trialEndsAt: adoptableProfile.trialEndsAt ?? trialEndsAt,

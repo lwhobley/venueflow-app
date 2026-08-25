@@ -146,7 +146,7 @@ describe('validateEnv', () => {
         ATTESTATION_ENFORCED: 'true',
         APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),
-    ).toThrow(/REVENUECAT_WEBHOOK_SECRET, REVENUECAT_API_KEY/);
+    ).toThrow(/REVENUECAT_WEBHOOK_SECRET, REVENUECAT_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET/);
     expect(() =>
       validateEnv({
         ...REQUIRED,
@@ -154,6 +154,8 @@ describe('validateEnv', () => {
         BILLING_ENABLED: 'true',
         REVENUECAT_WEBHOOK_SECRET: 'webhook',
         REVENUECAT_API_KEY: 'secret',
+        STRIPE_SECRET_KEY: 'sk_test_x',
+        STRIPE_WEBHOOK_SECRET: 'whsec_x',
         ATTESTATION_ENFORCED: 'true',
         APP_ATTEST_TEAM_ID: 'TEAM123456',
       }),

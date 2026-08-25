@@ -42,9 +42,9 @@ describe('AiSchedulerService.normalize', () => {
           { dayIndex: 7, startMinutes: 0, endMinutes: 60 }, // dayIndex out of range
           { dayIndex: -1, startMinutes: 0, endMinutes: 60 }, // dayIndex negative
           { dayIndex: 1, startMinutes: 1.5, endMinutes: 60 }, // non-integer start
-          { dayIndex: 1, startMinutes: 500, endMinutes: 400 }, // end before start
+          { dayIndex: 1, startMinutes: 500, endMinutes: 4000 }, // duration too long
           { dayIndex: 1, startMinutes: 0, endMinutes: 0 }, // end equals start
-          { dayIndex: 1, startMinutes: 0, endMinutes: 1500 }, // end past 1440
+          { dayIndex: 1, startMinutes: 0, endMinutes: 3000 }, // end past 2880
         ],
       },
       validProfileIds,

@@ -8,6 +8,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { stripeRequest } from '../../billing/stripe-api';
 import { PrismaService } from '../../prisma/prisma.service';
+import { publicWebOrigin } from '../../common/public-web-url';
 import { toMs } from './app-mappers';
 import { ProfileService } from './profile.service';
 
@@ -95,8 +96,8 @@ export class AppBillingController {
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/checkout/sessions', {
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${base}/app/billing?status=success`,
-      cancel_url: `${base}/app/billing?status=cancelled`,
+      success_url: `${base}/billing?status=success`,
+      cancel_url: `${base}/billing?status=cancelled`,
       client_reference_id: profile.venueId,
       ...(existing?.externalCustomerId ? { customer: existing.externalCustomerId } : {}),
       allow_promotion_codes: true,
@@ -128,7 +129,7 @@ export class AppBillingController {
     const base = this.webBaseUrl();
     const session = await stripeRequest<{ url?: string }>(secret, 'POST', '/billing_portal/sessions', {
       customer: subscription.externalCustomerId,
-      return_url: `${base}/app/billing`,
+      return_url: `${base}/billing`,
     });
     if (!session.url) {
       throw new ServiceUnavailableException('Stripe did not return a portal URL.');
@@ -143,7 +144,7 @@ export class AppBillingController {
   }
 
   private webBaseUrl(): string {
-    return (this.config.get<string>('WEB_BASE_URL') || this.config.get<string>('APP_WEB_URL') || 'https://venuewrangler.com').replace(/\/+$/, '');
+    return publicWebOrigin(this.config);
   }
 
   private async resolveStripePriceId(secret: string, planType: 'single' | 'multi_venue' = 'single'): Promise<string> {
@@ -221,7 +222,7 @@ export class AppBillingController {
 
     const profile = await this.profiles.requireBillingProfile(user);
     this.assertAllowedAppleSync(body.productId, body.entitlementId);
-    const verified = await this.verifyRevenueCatEntitlement(profile.venueId!, body.productId, body.entitlementId);
+    const verified = await this.verifyRevenueCatEntitlement(user.sub, profile.venueId!, body.productId, body.entitlementId);
     if (!verified) {
       return this.getMyVenueBilling(user);
     }
@@ -296,7 +297,7 @@ export class AppBillingController {
     }
   }
 
-  private async verifyRevenueCatEntitlement(venueId: string, productId: string, entitlementId?: string) {
+  private async verifyRevenueCatEntitlement(userId: string, venueId: string, productId: string, entitlementId?: string) {
     const apiKey = this.config.get<string>('REVENUECAT_API_KEY') ?? this.config.get<string>('REVENUECAT_SECRET_API_KEY');
     if (!apiKey) {
       throw new ServiceUnavailableException('Apple subscription verification is not configured. Please contact support.');
@@ -306,7 +307,7 @@ export class AppBillingController {
     let json: any = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(venueId)}`, {
+        response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(userId)}`, {
           headers: {
             Authorization: `Bearer ${apiKey}`,
             Accept: 'application/json',
@@ -323,6 +324,13 @@ export class AppBillingController {
       if (attempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
+    }
+    if (response && response.status === 404 && userId !== venueId) {
+      response = await fetch(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(venueId)}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout(10000),
+      });
+      json = await response.json().catch(() => null);
     }
     if (!response || !response.ok) {
       this.logger.warn(`RevenueCat verification failed for venue ${venueId}: ${json?.message ?? response?.statusText ?? 'Unknown error'}`);

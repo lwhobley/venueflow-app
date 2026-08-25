@@ -16,6 +16,8 @@ import { getClientIp } from '../common/http';
 import { assertWithinSharedRateLimit } from '../common/rate-limit';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { runWithoutTenant } from '../prisma/tenant-context';
+import { isActiveMembership } from '../common/membership';
 import { AuthService } from './auth.service';
 import { AuditService } from '../modules/audit/audit.service';
 
@@ -463,7 +465,14 @@ export class AuthController {
     if (!this.authService.oneTimeCodeHashesMatch(account.emailVerificationCodeHash, this.authService.hashOneTimeCode(body.code))) {
       throw new BadRequestException('That verification code is not valid.');
     }
-    await this.prisma.$transaction(async (tx) => {
+    // Unscoped on purpose. This route is authenticated, so AuthGuard has bound
+    // the caller's CURRENT venue — and both Profile and Invite are venue-scoped,
+    // so a pending membership at a DIFFERENT venue was invisible here. The user
+    // row still got emailVerifiedAt, and because verifyEmail short-circuits on
+    // `alreadyVerified` there was no second chance: the invited membership could
+    // never be activated, locking the user out of that venue permanently.
+    // Every query below is already constrained by userId.
+    await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: user.sub },
         data: {
@@ -495,7 +504,7 @@ export class AuthController {
           });
         }
       }
-    });
+    }));
     return { ok: true };
   }
 
@@ -716,7 +725,7 @@ export class AuthController {
     return {
       token,
       profile: mapProfile(profile, emailVerified),
-      venue: profile.venue ? mapVenue(profile.venue) : null,
+      venue: emailVerified && isActiveMembership(profile.membershipStatus) && profile.venue ? mapVenue(profile.venue) : null,
       venues,
     };
   }
@@ -768,7 +777,7 @@ export class AuthController {
 }
 
 
-function mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number }) {
+function mapVenue(venue: { id: string; name: string; latitude: number; longitude: number; geofenceRadiusM: number; timezone?: string | null }) {
   return {
     _id: venue.id,
     id: venue.id,
@@ -777,6 +786,7 @@ function mapVenue(venue: { id: string; name: string; latitude: number; longitude
     longitude: venue.longitude,
     geofenceRadiusM: venue.geofenceRadiusM,
     geofence_radius_m: venue.geofenceRadiusM,
+    timezone: venue.timezone ?? null,
   };
 }
 
@@ -788,6 +798,7 @@ function mapProfile(profile: {
   jobTitle: string;
   venueId: string | null;
   allAccess: boolean;
+  membershipStatus?: string | null;
   trialEndsAt?: Date | null;
   phone?: string | null;
   altPhone?: string | null;
@@ -806,6 +817,7 @@ function mapProfile(profile: {
     job_title: profile.jobTitle,
     venueId: profile.venueId,
     venue_id: profile.venueId,
+    membershipStatus: profile.membershipStatus ?? null,
     allAccess: profile.allAccess,
     all_access: profile.allAccess,
     emailVerified,
