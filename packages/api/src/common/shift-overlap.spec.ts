@@ -53,6 +53,7 @@ describe('shiftsOverlap', () => {
   });
 
   it('does not match a dated Saturday spill against a legacy Sunday', () => {
+    // A legacy undated row cannot be assumed to belong to every calendar week.
     expect(shiftsOverlap(
       { weekStart: '2026-08-23', dayIndex: 6, startMinutes: 1320, endMinutes: 1560 },
       { weekStart: null, dayIndex: 0, startMinutes: 0, endMinutes: 180 },

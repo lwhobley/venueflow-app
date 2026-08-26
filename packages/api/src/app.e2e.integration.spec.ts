@@ -53,8 +53,8 @@ describe('e2e smoke: auth, billing, scheduling', () => {
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const [activeSession, expiredSession] = await Promise.all([
-      prisma.session.create({ data: { userId: activeUser.id, expiresAt } }),
-      prisma.session.create({ data: { userId: expiredUser.id, expiresAt } }),
+      prisma.session.create({ data: { userId: activeUser.id, expiresAt, tokenHash: 'pending-active-session' } }),
+      prisma.session.create({ data: { userId: expiredUser.id, expiresAt, tokenHash: 'pending-expired-session' } }),
     ]);
     subscribedSession = { userId: activeUser.id, sid: activeSession.id };
     unsubscribedSession = { userId: expiredUser.id, sid: expiredSession.id };

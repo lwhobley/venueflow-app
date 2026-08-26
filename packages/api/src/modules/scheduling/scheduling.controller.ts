@@ -435,12 +435,23 @@ export class SchedulingController {
   async getManagerSchedule(@VenueScope() scope: Scope, @Query('weekStart') requestedWeekStart?: string) {
     this.requireManager(scope);
     const selectedWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, requestedWeekStart);
-    const [venue, shifts, staff] = await Promise.all([
+    const previousWeekStart = addDays(selectedWeekStart, -7);
+    const [venue, shifts, carryInShifts, staff] = await Promise.all([
       this.prisma.venue.findUniqueOrThrow({ where: { id: scope!.venueId } }),
       this.prisma.scheduleShift.findMany({
         where: { venueId: scope!.venueId, weekStart: selectedWeekStart },
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+      }),
+      this.prisma.scheduleShift.findMany({
+        where: {
+          venueId: scope!.venueId,
+          weekStart: previousWeekStart,
+          dayIndex: 6,
+          endMinutes: { gt: 1440 },
+        },
+        include: { profile: true },
+        orderBy: { startMinutes: 'asc' },
       }),
       this.prisma.profile.findMany({
         where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
@@ -465,6 +476,7 @@ export class SchedulingController {
         const rows = shift.profileId ? availabilityByProfile.get(shift.profileId) : undefined;
         return this.mapManagerShift(shift, rows && rows.length > 0 ? !availabilityCovers(rows, shift) : false);
       }),
+      carryInShifts: carryInShifts.map((shift) => this.mapManagerShift(shift, false)),
       staff: staff.map((member) => {
         const mins = weeklyMinutes.get(member.id) ?? 0;
         return {

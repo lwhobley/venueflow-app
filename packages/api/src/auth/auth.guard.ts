@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Unauthor
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
+import type { SubscriptionStatus } from '@prisma/client';
 import { createHash } from 'crypto';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,6 +25,15 @@ export type AuthUser = {
 
 export type AuthenticatedRequest = Request & {
   user?: AuthUser;
+  verifiedVenueProfile?: {
+    id: string;
+    fullName: string;
+    role: string;
+    allAccess: boolean;
+    trialEndsAt: Date | null;
+    venueId: string | null;
+    venue: { id: string; name: string; subscriptionStatus: SubscriptionStatus | null } | null;
+  };
 };
 
 // Session lookup queries the database directly to ensure instant revocation
@@ -82,10 +92,6 @@ export class AuthGuard implements CanActivate {
     if (!session || session.userId !== payload.sub || session.expiresAt <= now) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
-    // Fail closed when the hash is absent. The column is nullable and is set in
-    // a follow-up update after the Session row is created, so a row whose hash
-    // never landed must be rejected rather than silently skipping the binding
-    // check — otherwise any validly-signed JWT carrying that sid is accepted.
     if (!session.tokenHash || session.tokenHash !== createHash('sha256').update(token).digest('hex')) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
@@ -168,6 +174,21 @@ export class AuthGuard implements CanActivate {
     };
 
     request.user = resolvedUser;
+    request.verifiedVenueProfile = liveProfile?.venueId && liveProfile.venue
+      ? {
+          id: liveProfile.id,
+          fullName: liveProfile.fullName,
+          role: liveProfile.role,
+          allAccess: liveProfile.allAccess,
+          trialEndsAt: liveProfile.trialEndsAt ?? null,
+          venueId: liveProfile.venueId,
+          venue: {
+            id: liveProfile.venueId,
+            name: liveProfile.venue.name,
+            subscriptionStatus: liveProfile.venue.subscriptionStatus,
+          },
+        }
+      : undefined;
 
     // Bind tenant context for the rest of the request. Inert unless the env
     // flag is on AND a verified active profile carries a venueId (auth flows, webhooks, and

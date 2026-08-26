@@ -51,8 +51,8 @@ export class VenueScopeInterceptor implements NestInterceptor {
       ? rawVenueHeader.trim()
       : undefined;
 
-    let profile;
-    if (requestedVenueId) {
+    let profile: VenueScopedRequest['verifiedVenueProfile'] | null = request.verifiedVenueProfile;
+    if (!profile && requestedVenueId) {
       profile = await this.prisma.profile.findFirst({
         where: {
           userId: user.sub,
@@ -65,7 +65,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
         throw new ForbiddenException('You do not have an active membership at the requested venue.');
       }
     }
-    if (!requestedVenueId) {
+    if (!profile && !requestedVenueId) {
       profile = await this.prisma.profile.findFirst({
         where: {
           userId: user.sub,

@@ -210,8 +210,12 @@ export class AuthService {
       return result;
     });
 
+    // Keep the row unusable until AuthController replaces this random value
+    // with the hash of the signed JWT. The non-null placeholder makes partial
+    // session issuance fail closed without requiring the final token up front.
+    const tokenHash = randomBytes(32).toString('hex');
     const session = await this.prisma.session.create({
-      data: { userId, expiresAt: new Date(Date.now() + SESSION_DURATION_MS) },
+      data: { userId, expiresAt: new Date(Date.now() + SESSION_DURATION_MS), tokenHash },
     });
     return { session, profile };
   }

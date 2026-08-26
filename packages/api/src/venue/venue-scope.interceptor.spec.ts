@@ -45,6 +45,30 @@ describe('VenueScopeInterceptor', () => {
     expect(observable).toBeDefined();
   });
 
+  it('reuses the membership already verified by AuthGuard', async () => {
+    const prisma = {
+      profile: { findFirst: vi.fn() },
+      subscription: { findFirst: vi.fn().mockResolvedValue(null) },
+    } as any;
+    const reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) } as any;
+    const interceptor = new VenueScopeInterceptor(prisma, reflector);
+    const request: any = {
+      user: { sub: 'user-1', venueId: 'venue-1' },
+      headers: {},
+      verifiedVenueProfile: {
+        id: 'profile-1', fullName: 'Manager', venueId: 'venue-1', role: 'manager', allAccess: false,
+        trialEndsAt: null,
+        venue: { id: 'venue-1', name: 'Venue', subscriptionStatus: 'active' },
+      },
+    };
+
+    const observable = await interceptor.intercept(contextFor(request), { handle: vi.fn(() => of('ok')) });
+
+    expect(request.venueScope).toMatchObject({ venueId: 'venue-1', profileId: 'profile-1' });
+    expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+    expect(observable).toBeDefined();
+  });
+
   it('brackets deferred handler execution with the resolved tenant context', async () => {
     const prisma = {} as any;
     const reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) } as any;

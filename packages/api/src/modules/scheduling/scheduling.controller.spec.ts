@@ -227,7 +227,27 @@ describe('SchedulingController', () => {
 
       expect(prisma.venue.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'venue-1' } });
       expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1', weekStart: '2026-08-02' }) }));
+      expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ venueId: 'venue-1', weekStart: '2026-07-26', dayIndex: 6, endMinutes: { gt: 1440 } }),
+      }));
       expect(prisma.profile.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1' }) }));
+    });
+
+    it('returns prior Saturday overnight shifts for Sunday carry-in rendering', async () => {
+      const { controller, prisma } = makeController();
+      const overnight = {
+        id: 'shift-sat', weekStart: '2026-07-26', dayIndex: 6, startMinutes: 1320, endMinutes: 1560,
+        jobTitle: 'Server', station: 'Floor', status: 'scheduled', profileId: null, notes: null, profile: null,
+      };
+      prisma.scheduleShift.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([overnight]);
+
+      const result = await controller.getManagerSchedule(managerScope, '2026-08-02');
+
+      expect(result.carryInShifts).toEqual([
+        expect.objectContaining({ _id: 'shift-sat', dayIndex: 6, startMinutes: 1320, endMinutes: 1560 }),
+      ]);
     });
 
     it('scopes listBlackouts to the caller venue', async () => {

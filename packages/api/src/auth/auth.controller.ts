@@ -201,20 +201,20 @@ export class AuthController {
           this.logger.warn(`Failed to upgrade password hash strength for user ${user.id}: ${err?.message ?? String(err)}`);
         }
       }
-      const session = await this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
+      const result = await this.issueSession(user.id, email, body.fullName, body.inviteToken, body.phone);
       void this.audit?.record({
-        venueId: session.profile.venueId,
-        actorProfileId: session.profile.id,
-        actorName: session.profile.fullName,
-        actorRole: session.profile.role,
+        venueId: result.profile.venueId,
+        actorProfileId: result.profile.id,
+        actorName: result.profile.fullName,
+        actorRole: result.profile.role,
         action: 'auth.login.success',
         entityType: 'User',
         entityId: user.id,
-        summary: `User ${session.profile.fullName || email} signed in successfully`,
+        summary: `User ${result.profile.fullName || email} signed in successfully`,
         ipAddress: getClientIp(request),
         userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
       });
-      return session;
+      return result;
     }
 
     // Reject signup whenever an account already exists for this email (with or
@@ -290,16 +290,16 @@ export class AuthController {
       }
       throw error;
     }
-    const session = await this.issueSession(nextUserId, email, resolvedFullName, body.inviteToken, body.phone);
+    const sessionResult = await this.issueSession(nextUserId, email, resolvedFullName, body.inviteToken, body.phone);
     void this.audit?.record({
-      venueId: session.profile.venueId,
-      actorProfileId: session.profile.id,
-      actorName: session.profile.fullName,
-      actorRole: session.profile.role,
+      venueId: sessionResult.profile.venueId,
+      actorProfileId: sessionResult.profile.id,
+      actorName: sessionResult.profile.fullName,
+      actorRole: sessionResult.profile.role,
       action: 'auth.signup.success',
       entityType: 'User',
       entityId: nextUserId,
-      summary: `User ${session.profile.fullName || email} registered account`,
+      summary: `User ${sessionResult.profile.fullName || email} registered account`,
       ipAddress: getClientIp(request),
       userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
     });
@@ -308,74 +308,12 @@ export class AuthController {
     // verify-email screen if the email didn't arrive.
     if (!emailInvite) {
       try {
-        await this.sendVerificationEmail(nextUserId, email, session.profile.fullName);
+        await this.sendVerificationEmail(nextUserId, email, sessionResult.profile.fullName);
       } catch (err: any) {
         this.logger.error(`Verification email failed for ${email}: ${err?.message ?? String(err)}`);
       }
     }
-    const isElevated =
-      session.profile.role === 'admin' ||
-      session.profile.role === 'owner' ||
-      session.profile.role === 'manager';
-
-    if (isElevated) {
-      void this.email.send({
-        to: email,
-        subject: 'Welcome to Venue Wrangler — Your Hospitality Command Center is Ready',
-        text:
-          `Hi ${session.profile.fullName},\n\n` +
-          `Welcome to Venue Wrangler — the luxury hospitality operations platform built to give you full control over your venue, your team, and your events, all in one place.\n\n` +
-          `Your account is set up and ready to go. Here's a quick overview of everything at your fingertips:\n\n` +
-          `🏢 Venue & Floor Plan Management\n` +
-          `Set up your venue spaces, configure floor plans, and manage room/section assignments. Everything is laid out visually so you always know your venue's capacity and layout at a glance.\n\n` +
-          `📅 Event Sales Inbox\n` +
-          `Receive, qualify, and respond to event inquiries directly in the app. Track leads from first contact through proposal, booking, and confirmation — no more lost emails or missed opportunities.\n\n` +
-          `🗓️ Staff Scheduling\n` +
-          `Build and publish staff schedules with ease. Approve or deny unavailable-day requests, handle open shift postings, and process shift swaps — all in one workflow modeled for speed and clarity.\n\n` +
-          `👥 Team Management\n` +
-          `Add and manage your entire staff roster. Assign roles (admin, manager, staff), control what each member can see and do, and keep your org structure clean as your team grows.\n\n` +
-          `⏱️ Clock In / Clock Out & Timekeeping\n` +
-          `Staff can clock in and out directly from the app. You get a real-time view of who's on the floor, track hours worked, and pull timekeeping data for payroll prep.\n\n` +
-          `📋 Requests & Approvals\n` +
-          `All time-off, schedule change, and shift swap requests are routed to you for approval. Review, approve, or deny with a single tap — your team stays informed automatically.\n\n` +
-          `📊 Operations Dashboard\n` +
-          `Get a live snapshot of your venue's operational health — active shifts, upcoming events, pending requests, and staff status — from one central dashboard built for decision-makers.\n\n` +
-          `🔔 Notifications & Alerts\n` +
-          `Stay informed without being glued to your screen. Real-time push notifications keep you updated on schedule changes, new requests, event confirmations, and more.\n\n` +
-          `You have full administrative access. If you need to add team members, configure your venue, or adjust permissions, head to Settings to get started.\n\n` +
-          `Questions? Reach us at support@venuewrangler.com\n\n` +
-          `Let's wrangle. 🤘\n\n` +
-          `— The Venue Wrangler Team`,
-      });
-    } else {
-      void this.email.send({
-        to: email,
-        subject: "Welcome to Venue Wrangler — Here's Everything You Need to Know",
-        text:
-          `Hi ${session.profile.fullName},\n\n` +
-          `Welcome to Venue Wrangler! Your manager has added you to the team. This is the app your venue uses to manage schedules, shifts, and day-to-day operations. Here's how to get the most out of it:\n\n` +
-          `📆 View Your Schedule\n` +
-          `See your upcoming shifts at any time, right from the app. Your schedule is updated in real time — the moment your manager publishes or makes changes, you'll see it instantly.\n\n` +
-          `🏖️ Request Unavailable Days\n` +
-          `Need a day off? Submit a time-off request directly through the app. You'll get notified as soon as your manager reviews it — no chasing anyone down.\n\n` +
-          `🔄 Shift Swaps & Open Shifts\n` +
-          `Life happens. If you need to swap a shift with a coworker or pick up extra hours, you can request swaps and claim open shifts — all subject to manager approval.\n\n` +
-          `⏱️ Clock In & Clock Out\n` +
-          `When you arrive for your shift, clock in directly from the app. Clock out when you're done. It's fast, accurate, and keeps your hours logged automatically.\n\n` +
-          `🔔 Stay in the Loop\n` +
-          `Push notifications will keep you updated on schedule changes, request approvals, and any important updates from your manager — so you're never caught off guard.\n\n` +
-          `🏢 Venue & Ops Visibility\n` +
-          `Get a read-only view of venue operations so you always know what's happening around you — active events, floor plans, and shift context relevant to your role.\n\n` +
-          `Getting started is simple:\n\n` +
-          `Download Venue Wrangler from the App Store or Google Play\n\n` +
-          `Sign in with the email your manager used to add you\n\n` +
-          `Review your schedule and submit any unavailable-day requests\n\n` +
-          `Questions? Ask your manager or reach us at support@venuewrangler.com\n\n` +
-          `We're glad you're here. 👋\n\n` +
-          `— The Venue Wrangler Team`,
-      });
-    }
-    return session;
+    return sessionResult;
   }
 
   // Authenticated (not @Public): the global AuthGuard requires a valid bearer

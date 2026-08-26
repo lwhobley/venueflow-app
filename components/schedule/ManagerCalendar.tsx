@@ -11,6 +11,7 @@ import { useIsDesktop } from '../../lib/responsive';
 import { AutoScheduleModal } from './AutoScheduleModal';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
 import { CollapsibleSection } from '../AppCard';
+import { calendarSegmentsForDay } from '../../lib/schedule-segments';
 
 type ShiftSnapshot = {
   dayIndex: number;
@@ -226,6 +227,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const [undo, setUndo] = useState<{ label: string; shifts: ShiftSnapshot[] } | null>(null);
 
   const shifts = useMemo(() => (data?.shifts ?? []) as ManagerShift[], [data]);
+  const carryInShifts = useMemo(() => (data?.carryInShifts ?? []) as ManagerShift[], [data]);
   const staff = useMemo(() => (data?.staff ?? []) as Staff[], [data]);
   const templateList = useMemo(() => (templates ?? []) as Template[], [templates]);
   const requests = useMemo(() => ((requestRows ?? []) as StaffRequest[]).filter((row) => row.status === 'pending'), [requestRows]);
@@ -569,27 +571,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                   </View>
                   
                   {dayLabels.map((label, dayIndex) => {
-                    const dayShifts = shifts.flatMap((shift) => {
-                      const segments: Array<ManagerShift & { segmentKey: string; renderStart: number; renderEnd: number }> = [];
-                      if (shift.dayIndex === dayIndex) {
-                        segments.push({
-                          ...shift,
-                          segmentKey: `${shift._id}:start`,
-                          renderStart: shift.startMinutes,
-                          renderEnd: Math.min(1440, shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes),
-                        });
-                      }
-                      const normalizedEnd = shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes;
-                      if (shift.dayIndex < 6 && shift.dayIndex + 1 === dayIndex && normalizedEnd > 1440) {
-                        segments.push({
-                          ...shift,
-                          segmentKey: `${shift._id}:spill`,
-                          renderStart: 0,
-                          renderEnd: normalizedEnd - 1440,
-                        });
-                      }
-                      return segments;
-                    });
+                    const dayShifts = calendarSegmentsForDay(shifts, carryInShifts, dayIndex);
                     const today = isToday(dayIndex);
                     const active = day === dayIndex;
                     return (

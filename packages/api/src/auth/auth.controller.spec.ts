@@ -46,13 +46,19 @@ describe('AuthController email invite signup', () => {
       {} as any,
       { verifyPassword: verifyPasswordSuccess } as any,
     );
-    (controllerSuccess as any).issueSession = vi.fn().mockResolvedValue({ ok: true });
+    const authResponse = {
+      token: 'jwt-token',
+      profile: { id: 'profile-1', venueId: 'venue-1', role: 'owner' },
+      venue: { _id: 'venue-1', name: 'Test Venue' },
+      venues: [],
+    };
+    (controllerSuccess as any).issueSession = vi.fn().mockResolvedValue(authResponse);
 
     // Correct password succeeds and clears lockout
     await expect((controllerSuccess as any).password(
       { ip: '127.0.0.1' },
       { email: 'staff@example.com', password: 'password123', flow: 'signIn' },
-    )).resolves.toEqual({ ok: true });
+    )).resolves.toEqual(authResponse);
     expect(update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
       data: { failedSignInCount: 0, lockedUntil: null },
@@ -101,12 +107,18 @@ describe('AuthController email invite signup', () => {
       {} as any,
       { verifyPassword } as any,
     );
-    (controller as any).issueSession = vi.fn().mockResolvedValue({ ok: true });
+    const authResponse = {
+      token: 'jwt-token',
+      profile: { id: 'profile-1', venueId: 'venue-1', role: 'owner' },
+      venue: { _id: 'venue-1', name: 'Test Venue' },
+      venues: [],
+    };
+    (controller as any).issueSession = vi.fn().mockResolvedValue(authResponse);
 
     await expect((controller as any).password(
       { ip: '127.0.0.1' },
       { email: 'staff@example.com', password: 'password123', flow: 'signIn' },
-    )).resolves.toEqual({ ok: true });
+    )).resolves.toEqual(authResponse);
     expect(update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
       data: { failedSignInCount: 0, lockedUntil: null },
@@ -224,6 +236,7 @@ describe('AuthController email invite signup', () => {
     );
     expect(result.profile.emailVerified).toBe(true);
     expect(result.profile.venueId).toBe('venue-1');
+    expect(result.token).toBe('jwt-token');
     expect(result.venue.name).toBe('Test Venue');
     expect(email.sendOrThrow).not.toHaveBeenCalled();
   });
@@ -269,7 +282,7 @@ describe('AuthController email invite signup', () => {
     };
     const authService = {
       hashPassword: vi.fn().mockResolvedValue({ salt: 'salt', hash: 'hash' }),
-      issueSession: vi.fn().mockResolvedValue({ session: { id: 'session-1' }, profile }),
+      issueSession: vi.fn().mockResolvedValue({ session: { id: 'session-1' }, profile: { id: 'profile-1', venueId: 'venue-1', role: 'staff', emailVerified: true, venue: { id: 'venue-1', name: 'Test Venue' } } }),
       generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };

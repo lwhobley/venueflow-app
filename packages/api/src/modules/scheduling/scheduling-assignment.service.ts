@@ -18,7 +18,7 @@ export class SchedulingAssignmentService {
 
   async createShift(args: {
     venueId: string;
-    weekStart?: string;
+    weekStart: string;
     profileId?: string;
     dayIndex: number;
     startMinutes: number;
@@ -50,7 +50,7 @@ export class SchedulingAssignmentService {
         data: {
           venueId: args.venueId,
           profileId: args.profileId,
-          ...(args.weekStart ? { weekStart: args.weekStart } : {}),
+          weekStart: args.weekStart,
           dayIndex: args.dayIndex,
           startMinutes: args.startMinutes,
           endMinutes: args.endMinutes,
@@ -205,7 +205,7 @@ export class SchedulingAssignmentService {
 
   async restoreShifts(args: {
     venueId: string;
-    weekStart?: string;
+    weekStart: string;
     shifts: Array<{
       dayIndex: number;
       startMinutes: number;
@@ -250,7 +250,7 @@ export class SchedulingAssignmentService {
         await tx.scheduleShift.create({
           data: {
             venueId: args.venueId,
-            ...(args.weekStart ? { weekStart: args.weekStart } : {}),
+            weekStart: args.weekStart,
             profileId,
             dayIndex: shift.dayIndex,
             startMinutes: shift.startMinutes,
@@ -270,14 +270,14 @@ export class SchedulingAssignmentService {
 
   async copyDayShifts(args: {
     venueId: string;
-    weekStart?: string;
+    weekStart: string;
     fromDay: number;
     toDays: number[];
   }) {
     const added = await withSerializableRetry(this.prisma, async (tx) => {
       await this.lockBulkSchedule(tx, args.venueId, args.weekStart);
       const source = await tx.scheduleShift.findMany({
-        where: { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}), dayIndex: args.fromDay },
+        where: { venueId: args.venueId, weekStart: args.weekStart, dayIndex: args.fromDay },
       });
       let count = 0;
       for (const day of [...new Set(args.toDays)].filter((value) => value !== args.fromDay)) {
@@ -285,7 +285,7 @@ export class SchedulingAssignmentService {
           await tx.scheduleShift.create({
             data: {
               venueId: args.venueId,
-              ...(args.weekStart ? { weekStart: args.weekStart } : {}),
+              weekStart: args.weekStart,
               dayIndex: day,
               startMinutes: shift.startMinutes,
               endMinutes: shift.endMinutes,
@@ -305,9 +305,9 @@ export class SchedulingAssignmentService {
 
   async clearWeek(args: {
     venueId: string;
-    weekStart?: string;
+    weekStart: string;
   }) {
-    const weekWhere = { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}) };
+    const weekWhere = { venueId: args.venueId, weekStart: args.weekStart };
     const snapshots = await withSerializableRetry(this.prisma, async (tx) => {
       await this.lockBulkSchedule(tx, args.venueId, args.weekStart);
       const shifts = await tx.scheduleShift.findMany({ where: weekWhere });
@@ -329,7 +329,7 @@ export class SchedulingAssignmentService {
 
   async applyTemplate(args: {
     venueId: string;
-    weekStart?: string;
+    weekStart: string;
     replace: boolean;
     slots: Array<{
       dayIndex: number;
@@ -343,13 +343,13 @@ export class SchedulingAssignmentService {
     await withSerializableRetry(this.prisma, async (tx) => {
       await this.lockBulkSchedule(tx, args.venueId, args.weekStart);
       if (args.replace) {
-        await tx.scheduleShift.deleteMany({ where: { venueId: args.venueId, ...(args.weekStart ? { weekStart: args.weekStart } : {}) } });
+        await tx.scheduleShift.deleteMany({ where: { venueId: args.venueId, weekStart: args.weekStart } });
       }
       for (const slot of args.slots) {
         await tx.scheduleShift.create({
           data: {
             venueId: args.venueId,
-            ...(args.weekStart ? { weekStart: args.weekStart } : {}),
+            weekStart: args.weekStart,
             dayIndex: slot.dayIndex,
             startMinutes: slot.startMinutes,
             endMinutes: slot.endMinutes,
@@ -759,9 +759,7 @@ export class SchedulingAssignmentService {
         venueId,
         profileId,
         ...(excluded.length > 0 ? { id: { notIn: excluded } } : {}),
-        ...(weekStart
-          ? { OR: [adjacentWeeks, { weekStart: null }] }
-          : {}),
+        ...(weekStart ? adjacentWeeks : {}),
       },
       select: { weekStart: true, dayIndex: true, startMinutes: true, endMinutes: true },
     });

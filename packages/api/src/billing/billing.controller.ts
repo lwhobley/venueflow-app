@@ -513,6 +513,8 @@ export class BillingController {
     const isMulti = (entitlementIds ?? []).some((id) => id.toLowerCase().includes('multi'));
     if (isMulti) return venueIds;
     if (venueIds.length === 1) return venueIds;
+    // A user id is not an unambiguous venue binding for a single-venue
+    // purchase. Fail closed instead of assigning the entitlement arbitrarily.
     return [];
   }
 }

@@ -292,7 +292,7 @@ model AttestationChallenge {
 model Session {
   id        String   @id @default(cuid())
   userId    String
-  tokenHash String?  @unique
+  tokenHash String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -469,7 +469,7 @@ model ScheduleShift {
   venueId        String
   profileId      String?
   // Sunday (YYYY-MM-DD) of the concrete calendar week this shift belongs to.
-  weekStart      String?
+  weekStart      String
   dayIndex       Int
   startMinutes   Int
   endMinutes     Int
