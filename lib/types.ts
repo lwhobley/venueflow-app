@@ -7,7 +7,9 @@ export type Venue = {
   name: string;
   latitude: number;
   longitude: number;
+  geofenceRadiusM: number;
   geofence_radius_m: number;
+  timezone?: string | null;
 };
 
 export type VenueSummary = {
@@ -103,3 +105,78 @@ export type StaffRequest = {
 };
 
 export type TimeEntry = ClockEntry;
+
+export type TableShape = 'rectangle' | 'circle' | 'square' | 'booth';
+export type TableSection = 'main_floor' | 'patio' | 'bar' | 'mezzanine' | 'private_dining' | 'lounge' | 'outdoor' | 'counter';
+export type TableStatus = 'available' | 'reserved' | 'seated' | 'dirty' | 'blocked';
+
+export type TableState = {
+  id: string;
+  venueId: string;
+  tableId: string;
+  status: TableStatus;
+  partySize: number | null;
+  serverId: string | null;
+  seatedAt: number | null;
+  lastActivityAt: number;
+  notes: string | null;
+  mergeGroupId: string | null;
+};
+
+export type TableAssignment = {
+  id: string;
+  tableId: string;
+  reservationId: string | null;
+  waitlistId: string | null;
+  startsAt: number;
+  endsAt: number;
+  releasedAt: number | null;
+  partySize: number | null;
+  guestName: string | null;
+  source: string | null;
+  status: string | null;
+  tags: string[];
+  specialRequests: string | null;
+};
+
+export type WaitlistEntry = {
+  id: string;
+  venueId: string;
+  guestName: string;
+  guestPhone: string | null;
+  partySize: number;
+  quotedWaitMinutes: number | null;
+  status: 'waiting' | 'notified' | 'seated' | 'cancelled' | 'no_show';
+  source: string;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type FloorStats = {
+  totalTables: number;
+  occupiedTables: number;
+  availableTables: number;
+  dirtyCleaning: number;
+  occupiedCount: number;
+  availableCount: number;
+  dirtyCount: number;
+  waitlistSize: number;
+  avgTurnTimeMinutes: number;
+  longestSeatedDurationMinutes: number;
+};
+
+export type ShiftSwapStatus = 'proposed' | 'accepted' | 'declined' | 'approved' | 'denied' | 'cancelled';
+
+export type ShiftSwap = {
+  id: string;
+  venueId: string;
+  requesterProfileId: string;
+  requesterShiftId: string;
+  targetProfileId: string;
+  targetShiftId: string | null;
+  status: ShiftSwapStatus;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+};

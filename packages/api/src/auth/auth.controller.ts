@@ -468,24 +468,23 @@ export class AuthController {
           passwordResetSentAt: new Date(),
         },
       });
-      try {
-        await this.email.sendOrThrow({
-          to: account.email,
-          subject: 'Reset Your Venue Wrangler Password',
-          text:
-            `Hi ${account.profiles?.[0]?.fullName ?? 'there'},\n\n` +
-            `We received a request to reset the password for your Venue Wrangler account.\n\n` +
-            `To complete your password reset, enter the following code when prompted in the app:\n\n` +
-            `   ${code}\n\n` +
-            `Note: This code is valid for 60 minutes. If you did not request a password reset, you can safely ignore this email — your account remains secure.\n\n` +
-            `Questions? support@venuewrangler.com\n\n` +
-            `— The Venue Wrangler Team`,
-        });
-      } catch (error: any) {
-        // Keep the public response identical for existing and unknown accounts;
-        // otherwise a provider outage becomes an account-enumeration oracle.
+      void this.email.send({
+        to: account.email,
+        subject: 'Reset Your Venue Wrangler Password',
+        text:
+          `Hi ${account.profiles?.[0]?.fullName ?? 'there'},\n\n` +
+          `We received a request to reset the password for your Venue Wrangler account.\n\n` +
+          `To complete your password reset, enter the following code when prompted in the app:\n\n` +
+          `   ${code}\n\n` +
+          `Note: This code is valid for 60 minutes. If you did not request a password reset, you can safely ignore this email — your account remains secure.\n\n` +
+          `Questions? support@venuewrangler.com\n\n` +
+          `— The Venue Wrangler Team`,
+      }).catch((error: any) => {
         this.logger.error(`Password reset email failed for user ${account.id}: ${error?.message ?? String(error)}`);
-      }
+      });
+    } else {
+      // Perform identical hash work on the non-existent path to eliminate timing difference
+      this.authService.hashOneTimeCode('00000000');
     }
     return { ok: true };
   }

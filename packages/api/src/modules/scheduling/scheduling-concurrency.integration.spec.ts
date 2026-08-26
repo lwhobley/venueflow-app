@@ -75,10 +75,10 @@ describe('scheduling concurrency (integration)', () => {
       // Create two open shifts at the same time
       const [shift1, shift2] = await Promise.all([
         prisma.scheduleShift.create({
-          data: { venueId: venue.id, dayIndex: 2, startMinutes: 480, endMinutes: 720, jobTitle: 'Server', station: 'Bar', status: 'open' },
+          data: { venueId: venue.id, weekStart: '2026-08-24', dayIndex: 2, startMinutes: 480, endMinutes: 720, jobTitle: 'Server', station: 'Bar', status: 'open' },
         }),
         prisma.scheduleShift.create({
-          data: { venueId: venue.id, dayIndex: 2, startMinutes: 480, endMinutes: 720, jobTitle: 'Server', station: 'Patio', status: 'open' },
+          data: { venueId: venue.id, weekStart: '2026-08-24', dayIndex: 2, startMinutes: 480, endMinutes: 720, jobTitle: 'Server', station: 'Patio', status: 'open' },
         }),
       ]);
 
@@ -139,10 +139,10 @@ describe('scheduling concurrency (integration)', () => {
       // Create two shifts, one per person
       const [shiftA, shiftB] = await Promise.all([
         prisma.scheduleShift.create({
-          data: { venueId: venue.id, profileId: profileA.id, dayIndex: 3, startMinutes: 600, endMinutes: 900, jobTitle: 'Server', station: 'Bar', status: 'scheduled' },
+          data: { venueId: venue.id, weekStart: '2026-08-24', profileId: profileA.id, dayIndex: 3, startMinutes: 600, endMinutes: 900, jobTitle: 'Server', station: 'Bar', status: 'scheduled' },
         }),
         prisma.scheduleShift.create({
-          data: { venueId: venue.id, profileId: profileB.id, dayIndex: 3, startMinutes: 600, endMinutes: 900, jobTitle: 'Server', station: 'Patio', status: 'scheduled' },
+          data: { venueId: venue.id, weekStart: '2026-08-24', profileId: profileB.id, dayIndex: 3, startMinutes: 600, endMinutes: 900, jobTitle: 'Server', station: 'Patio', status: 'scheduled' },
         }),
       ]);
 
@@ -204,10 +204,10 @@ describe('scheduling concurrency (integration)', () => {
 
       const [morning, evening] = await Promise.all([
         prisma.scheduleShift.create({
-          data: { venueId: venue.id, dayIndex: 4, startMinutes: 480, endMinutes: 720, jobTitle: 'Server', station: 'Bar', status: 'open' },
+          data: { venueId: venue.id, weekStart: '2026-08-24', dayIndex: 4, startMinutes: 480, endMinutes: 720, jobTitle: 'Server', station: 'Bar', status: 'open' },
         }),
         prisma.scheduleShift.create({
-          data: { venueId: venue.id, dayIndex: 4, startMinutes: 960, endMinutes: 1200, jobTitle: 'Server', station: 'Patio', status: 'open' },
+          data: { venueId: venue.id, weekStart: '2026-08-24', dayIndex: 4, startMinutes: 960, endMinutes: 1200, jobTitle: 'Server', station: 'Patio', status: 'open' },
         }),
       ]);
 

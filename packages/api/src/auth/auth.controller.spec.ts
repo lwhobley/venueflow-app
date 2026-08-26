@@ -413,7 +413,10 @@ describe('AuthController recovery and logout safety', () => {
         update: vi.fn().mockResolvedValue({}),
       },
     };
-    const email = { sendOrThrow: vi.fn().mockRejectedValue(new Error('provider down')) };
+    const email = {
+      send: vi.fn().mockRejectedValue(new Error('provider down')),
+      sendOrThrow: vi.fn().mockRejectedValue(new Error('provider down')),
+    };
     const authService = {
       generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
