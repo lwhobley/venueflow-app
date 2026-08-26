@@ -167,12 +167,15 @@ describe('ChatController', () => {
       { id: 'manager-1', jobTitle: 'Manager', role: 'manager', allAccess: false },
       { id: 'staff-1', jobTitle: 'Server', role: 'staff', allAccess: false },
     ]);
-    prisma.scheduleShift.findMany.mockResolvedValue([{ profileId: 'staff-1', dayIndex: 6 }]);
+    prisma.scheduleShift.findMany.mockResolvedValue([{ profileId: 'staff-1', weekStart: '2026-07-05', dayIndex: 6, startMinutes: 1080, endMinutes: 1320 }]);
 
     await controller.ensureContextualConversations('venue-1');
 
     expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { venueId: 'venue-1', weekStart: '2026-07-05' },
+      where: expect.objectContaining({
+        venueId: 'venue-1',
+        OR: expect.arrayContaining([{ weekStart: '2026-07-05' }]),
+      }),
     }));
     expect(prisma.conversation.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({

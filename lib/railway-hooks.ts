@@ -115,7 +115,7 @@ const mutationRoutes: Record<string, Route> = {
   'app.updateVenue': {
     path: '/v1/app/venue',
     method: 'PATCH',
-    body: ({ name, latitude, longitude, geofenceRadiusM }) => ({ name, latitude, longitude, geofenceRadiusM }),
+    body: ({ name, latitude, longitude, geofenceRadiusM, timezone }) => ({ name, latitude, longitude, geofenceRadiusM, timezone }),
     invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
   },
   'app.rotateVenueJoinCode': {
@@ -133,7 +133,7 @@ const mutationRoutes: Record<string, Route> = {
   'app.registerVenue': {
     path: '/v1/app/register-venue',
     method: 'POST',
-    body: ({ businessName, ownerName, phone, address, venueType, staffRange, latitude, longitude }) => ({ businessName, ownerName, phone, address, venueType, staffRange, latitude, longitude }),
+    body: ({ businessName, ownerName, phone, address, venueType, staffRange, latitude, longitude, timezone }) => ({ businessName, ownerName, phone, address, venueType, staffRange, latitude, longitude, timezone }),
     invalidate: [['app', 'getMe'], ['app', 'getDashboard']],
   },
   'app.deleteMyAccount': {

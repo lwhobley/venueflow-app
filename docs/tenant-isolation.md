@@ -51,10 +51,9 @@ only when `NODE_ENV` is not `production`; production fails startup instead.
    Nest lifecycle hooks on the wrapper. This preserves the `PrismaService`
    injection token across the codebase. `$transaction`'s `tx` callback is also
    extension-aware, so transactional writes are scoped.
-2. **`auth.guard.ts`** — unless disabled, when the token carries a `venueId`,
-   `enterTenant(venueId)` binds the AsyncLocalStorage tenant context for the
-   rest of the request. Tokens without a venueId (auth flows, system tasks)
-   stay unscoped, which is correct.
+2. **`auth.guard.ts`** — binds tenant context from the caller's **live**
+   venue membership (not a stale JWT `venueId` claim). Requests without an
+   active membership stay unscoped, which is correct for auth/system routes.
 
 Production incident response: roll back to the last known-good Cloud Run
 revision. Do not disable the isolation layer in a production revision.

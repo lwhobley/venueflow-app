@@ -33,7 +33,7 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router, Nes
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `EXPO_PUBLIC_API_URL` | NestJS API endpoint the client connects to | required |
-| `EXPO_PUBLIC_BILLING_ENABLED` | Enables the subscription gate. Keep `false` until Stripe billing or RevenueCat in-app purchase is active. | `false` |
+| `EXPO_PUBLIC_BILLING_ENABLED` | Enables the subscription gate. Production EAS profiles set this to `true`. | `false` locally |
 
 ## Quality gates
 

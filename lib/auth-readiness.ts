@@ -4,6 +4,7 @@ import { canManageBilling, canManageVenue } from './permissions';
 import type { MeResponse } from './api-client';
 import { useQueryState } from './railway-hooks';
 import { api } from './railway-api';
+import { venueFromApi } from './session-from-auth';
 
 export function useAuthenticatedSession() {
   const hydrated = useAuthStore((state: AuthState) => state.hydrated);
@@ -22,9 +23,11 @@ export function useAuthenticatedSession() {
   // in the always-mounted authed tree, so it covers every sign-in path and
   // drops venues the user was revoked from.
   const setVenues = useAuthStore((state: AuthState) => state.setVenues);
+  const setVenue = useAuthStore((state: AuthState) => state.setVenue);
   useEffect(() => {
     if (me?.venues) setVenues(me.venues);
-  }, [me?.venues, setVenues]);
+    if (me?.venue) setVenue(venueFromApi(me.venue));
+  }, [me?.venues, me?.venue, setVenues, setVenue]);
 
   // Cache the last resolved role keyed by venue so a venue switch never shows
   // the previous venue's permissions during the refetch window.

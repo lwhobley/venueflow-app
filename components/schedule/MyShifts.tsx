@@ -9,6 +9,7 @@ import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
+import { zonedDayIndex, zonedMinutesNow } from '../../lib/zoned-datetime';
 
 type Shift = {
   _id: Id<'scheduleShifts'>;
@@ -126,26 +127,32 @@ export function MyShifts() {
 
   const weekDates = useMemo(() => {
     const today = new Date();
+    const todayIndex = zonedDayIndex(venue?.timezone, today);
     const sunday = new Date(today);
-    sunday.setDate(today.getDate() - today.getDay());
+    sunday.setDate(today.getDate() - todayIndex);
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(sunday);
       d.setDate(sunday.getDate() + i);
       return d;
     });
-  }, []);
-  const todayDayIndex = new Date().getDay();
+  }, [venue?.timezone]);
+  const todayDayIndex = zonedDayIndex(venue?.timezone);
 
   const shiftDate = (dayIndex: number) =>
     weekDates[dayIndex]?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) ?? '';
   const nextShift = useMemo(() => {
-    const now = new Date();
-    const today = now.getDay();
-    const minutesNow = now.getHours() * 60 + now.getMinutes();
+    const today = todayDayIndex;
+    const minutesNow = zonedMinutesNow(venue?.timezone);
+    const stillOn = (shift: Shift) => {
+      const end = shift.endMinutes <= shift.startMinutes ? shift.endMinutes + 1440 : shift.endMinutes;
+      if (shift.dayIndex === today) return minutesNow < end;
+      if (shift.dayIndex === (today + 6) % 7 && end > 1440) return minutesNow <= end - 1440;
+      return shift.dayIndex > today;
+    };
     return [...mine]
-      .filter((shift) => shift.dayIndex > today || (shift.dayIndex === today && shift.startMinutes >= minutesNow))
+      .filter(stillOn)
       .sort((a, b) => a.dayIndex - b.dayIndex || a.startMinutes - b.startMinutes)[0] ?? null;
-  }, [mine]);
+  }, [mine, todayDayIndex, venue?.timezone]);
 
   const submitTimeOff = async () => {
     setOffError(null);

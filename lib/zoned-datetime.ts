@@ -35,6 +35,34 @@ export function zonedDateTimeMs(date: string, time: string, timeZone?: string | 
   }
 }
 
+export function zonedDayIndex(timeZone: string | null | undefined, at: Date = new Date()): number {
+  try {
+    const weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: timeZone || undefined,
+      weekday: 'short',
+    }).format(at);
+    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday);
+  } catch {
+    return at.getDay();
+  }
+}
+
+export function zonedMinutesNow(timeZone: string | null | undefined, at: Date = new Date()): number {
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: timeZone || undefined,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(at).map((part) => [part.type, part.value]),
+    );
+    return (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  } catch {
+    return at.getHours() * 60 + at.getMinutes();
+  }
+}
+
 export function overnightAwareRange(date: string, startTime: string, endTime: string, timeZone?: string | null): { start: number; end: number } {
   const start = zonedDateTimeMs(date, startTime, timeZone);
   let end = zonedDateTimeMs(date, endTime, timeZone);

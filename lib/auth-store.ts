@@ -140,31 +140,13 @@ const splitNativeStorage = {
   },
 };
 
-const webStorage = {
-  getItem: async (key: string) => {
-    try {
-      return typeof window !== 'undefined' && window.localStorage ? window.localStorage.getItem(key) : null;
-    } catch {
-      return null;
-    }
-  },
-  setItem: async (key: string, value: string) => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(key, value);
-      }
-    } catch {}
-  },
-  removeItem: async (key: string) => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.removeItem(key);
-      }
-    } catch {}
-  },
-};
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  try {
+    window.localStorage?.removeItem(AUTH_PERSIST_NAME);
+  } catch {}
+}
 
-const storage = Platform.OS === 'web' ? webStorage : splitNativeStorage;
+const storage = Platform.OS === 'web' ? memoryStorage : splitNativeStorage;
 
 const createAuthStore = (set: any): AuthState => ({
   authEpoch: 0,

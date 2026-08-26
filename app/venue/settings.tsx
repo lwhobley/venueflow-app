@@ -30,6 +30,7 @@ export default function VenueSettingsScreen() {
   const [lat, setLat] = useState(venue ? String(venue.latitude) : '');
   const [lng, setLng] = useState(venue ? String(venue.longitude) : '');
   const [radius, setRadius] = useState(venue?.geofence_radius_m ?? 120);
+  const [timezone, setTimezone] = useState(venue?.timezone ?? '');
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -43,6 +44,7 @@ export default function VenueSettingsScreen() {
     setLat(String(venue.latitude));
     setLng(String(venue.longitude));
     setRadius(venue.geofence_radius_m);
+    setTimezone(venue.timezone ?? '');
   }, [venue]);
 
   const useMyLocation = async () => {
@@ -81,7 +83,7 @@ export default function VenueSettingsScreen() {
     savingRef.current = true;
     setSaving(true);
     try {
-      const updated = await updateVenue({ venueId: venue.id, name: name.trim() || undefined, latitude, longitude, geofenceRadiusM: radius });
+      const updated = await updateVenue({ venueId: venue.id, name: name.trim() || undefined, latitude, longitude, geofenceRadiusM: radius, timezone: timezone.trim() || undefined });
       setVenue(venueFromApi(updated));
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -162,6 +164,7 @@ export default function VenueSettingsScreen() {
       <AppCard>
           <SectionHeader title={t('venueSettings.detailsSection')} />
           <TextInput label={t('venueSettings.venueNameLabel')} value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <TextInput label="Timezone (IANA)" value={timezone} onChangeText={setTimezone} mode="outlined" autoCapitalize="none" placeholder="America/New_York" style={{ backgroundColor: colors.surface }} />
       </AppCard>
 
       <AppCard>

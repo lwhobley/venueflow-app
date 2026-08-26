@@ -91,7 +91,7 @@ jobs:
           set -Eeuo pipefail
           service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           restricted=(
-            DATABASE_URL DATABASE_DIRECT_URL JWT_SECRET
+            DATABASE_URL JWT_SECRET
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
             REVENUECAT_API_KEY REVENUECAT_WEBHOOK_SECRET
@@ -182,7 +182,7 @@ jobs:
           service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           candidate_url="$(jq -r --arg tag "$RELEASE_TAG" '.status.traffic[] | select(.tag == $tag) | .url' <<<"$service_json")"
           [[ "$candidate_url" == https://* ]] || { echo "::error::Could not resolve candidate revision URL"; exit 1; }
-          curl --fail --retry 8 --retry-delay 5 --retry-all-errors "$candidate_url/api/health"
+          curl --fail --connect-timeout 5 --max-time 20 --retry 8 --retry-delay 5 --retry-all-errors "$candidate_url/api/health"
 
       - name: Capture the revision currently serving traffic before promoting
         run: |

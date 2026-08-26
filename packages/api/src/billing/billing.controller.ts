@@ -512,6 +512,7 @@ export class BillingController {
     const venueIds = Array.from(new Set(profiles.map((profile) => profile.venueId).filter((id): id is string => Boolean(id))));
     const isMulti = (entitlementIds ?? []).some((id) => id.toLowerCase().includes('multi'));
     if (isMulti) return venueIds;
-    return venueIds.length > 0 ? [venueIds[0]] : [];
+    if (venueIds.length === 1) return venueIds;
+    return [];
   }
 }

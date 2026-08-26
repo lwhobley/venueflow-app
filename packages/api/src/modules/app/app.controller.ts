@@ -16,7 +16,7 @@ import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
-import { zonedDayBounds } from '../../common/venue-time';
+import { isIanaTimeZone, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { runWithoutTenant } from '../../prisma/tenant-context';
@@ -28,6 +28,15 @@ import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { endBreakForProfile, startBreakForProfile } from '../time-clock/break-transitions';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+
+function parseVenueTimeZone(value: string | undefined): string | undefined {
+  if (value == null || value.trim() === '') return undefined;
+  const timezone = value.trim();
+  if (!isIanaTimeZone(timezone)) {
+    throw new BadRequestException('timezone must be a valid IANA time zone');
+  }
+  return timezone;
+}
 const STAFF_RANGES = ['1-15', '16-30', '31-50'] as const;
 const FLAT_PLAN_ID = 'venueflow_monthly';
 const FLAT_PLAN_PRICE_CENTS = 9999;
@@ -108,6 +117,10 @@ class RegisterVenueDto {
   @Max(180)
   @IsOptional()
   longitude?: number;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
 }
 
 class UpdateVenueDto {
@@ -131,6 +144,10 @@ class UpdateVenueDto {
   @Min(25)
   @IsOptional()
   geofenceRadiusM?: number;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
 }
 
 class BreakStartDto {
@@ -401,6 +418,7 @@ export class AppController {
           latitude,
           longitude,
           geofenceRadiusM: 150,
+          timezone: parseVenueTimeZone(body.timezone) ?? null,
           phone: body.phone?.trim() || null,
           address: body.address?.trim() || null,
           venueType: body.venueType?.trim() || null,
@@ -487,6 +505,7 @@ export class AppController {
         ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
         ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
         ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(25, Math.min(2000, body.geofenceRadiusM)) } : {}),
+        ...(body.timezone !== undefined ? { timezone: parseVenueTimeZone(body.timezone) ?? null } : {}),
       },
     });
     return mapVenue(venue);

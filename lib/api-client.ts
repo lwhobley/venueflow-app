@@ -325,7 +325,7 @@ export const appApi = {
   deactivateVenueStaff: (staffId: string) => apiRequest(`/v1/app/staff/${encodeURIComponent(staffId)}`, { method: 'DELETE' }),
   createStaffRequest: (body: { kind: string; title: string; details: string; availability?: any; timeCorrection?: { timeEntryId?: string | null; clockInAt: number; clockOutAt?: number | null; reason?: string } }) =>
     apiRequest('/v1/staff-requests', { method: 'POST', body }),
-  updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number }) =>
+  updateVenue: (body: { name?: string; latitude?: number; longitude?: number; geofenceRadiusM?: number; timezone?: string }) =>
     apiRequest<ApiVenue>('/v1/app/venue', { method: 'PATCH', body }),
   deleteMyAccount: (deleteOwnedVenues = false) =>
     apiRequest('/v1/app/me', { method: 'DELETE', body: { deleteOwnedVenues } }),

@@ -186,7 +186,7 @@ describe('BillingController applySubscription P2002 handling', () => {
     await expect(controller.applyStripeSubscription(input)).rejects.toBe(error);
   });
 
-  it('resolves primary venue for multi-venue owner on single-venue RevenueCat purchase', async () => {
+  it('ignores single-venue RevenueCat events when the owner has more than one venue', async () => {
     const prisma = {
       venue: { findUnique: vi.fn().mockResolvedValue(null) },
       profile: {
@@ -225,7 +225,7 @@ describe('BillingController applySubscription P2002 handling', () => {
         },
       } as any,
     );
-    expect(result).toEqual({ ok: true });
-    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(result).toEqual({ ok: true, ignored: true });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

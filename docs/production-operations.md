@@ -25,7 +25,7 @@ After rollback, verify `/api/health`, `/api/v1/documents` (expect `401` without 
 
 ## Database backups and restore
 
-The production database is Supabase project `dhgyezfkgbzzsuyrdpek`. It is currently on Supabase's **Free plan**, which does **not** include scheduled backups. Point-in-time recovery (PITR) is also unavailable until the project is upgraded to Pro and the PITR add-on is enabled. Upgrade before launch, then verify **Database → Backups** and perform a restore drill against a separate project before the first customer migration.
+The production database is Supabase project `dhgyezfkgbzzsuyrdpek`. Confirm the current plan and PITR in the Supabase dashboard before treating managed backups as the primary recovery path. `.github/workflows/database-backup.yml` is the required nightly logical backup; deploys also require `backups_and_restore_verified=true`.
 
 Until an upgrade is possible, `.github/workflows/database-backup.yml` provides a nightly logical backup to S3 with SSE-S3 encryption and restores every dump into an isolated PostgreSQL service container that is destroyed with the GitHub runner. Configure these repository secrets before relying on it: `PRODUCTION_POOLER_DATABASE_URL` (Supavisor session-mode URL), `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`, `BACKUP_AWS_REGION`, and `BACKUP_S3_BUCKET`. The backup IAM identity must allow `s3:GetLifecycleConfiguration` on that bucket in addition to object upload/read verification; the workflow fails if its enabled `database-backups/` lifecycle rule is not exactly 30 days or if the restore/integrity check fails.
 

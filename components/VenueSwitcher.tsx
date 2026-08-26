@@ -72,6 +72,7 @@ export function VenueSwitcher() {
         staffRange,
         latitude: loc.latitude,
         longitude: loc.longitude,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       if (result?.venue) {
         switchVenueAction(venueFromApi(result.venue));
