@@ -507,6 +507,34 @@ describe('SchedulingController', () => {
         where: { venueId: 'venue-1', status: { in: ['proposed', 'accepted'] } },
       }));
     });
+
+    it('labels swaps from only the referenced shifts instead of loading all venue shifts', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findMany.mockResolvedValue([
+        { id: 'staff-1', fullName: 'Alex' },
+        { id: 'staff-2', fullName: 'Sam' },
+      ]);
+      prisma.shiftSwap.findMany.mockResolvedValue([
+        { id: 'swap-1', status: 'proposed', note: null, requesterProfileId: 'staff-1', targetProfileId: 'staff-2', requesterShiftId: 'shift-a', targetShiftId: 'shift-b', createdAt: new Date() },
+        { id: 'swap-2', status: 'proposed', note: null, requesterProfileId: 'staff-2', targetProfileId: null, requesterShiftId: 'shift-c', targetShiftId: null, createdAt: new Date() },
+      ]);
+      prisma.scheduleShift.findMany.mockResolvedValue([
+        { id: 'shift-a', dayIndex: 1, startMinutes: 600, endMinutes: 720 },
+        { id: 'shift-c', dayIndex: 3, startMinutes: 480, endMinutes: 600 },
+      ]);
+
+      const result = await controller.listShiftSwaps(managerScope);
+
+      // The shift lookup must be bounded to the referenced ids — an unbounded
+      // venue-wide findMany here grew with the venue's full shift history.
+      expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1', id: { in: ['shift-a', 'shift-b', 'shift-c'] } },
+        select: { id: true, dayIndex: true, startMinutes: true, endMinutes: true },
+      });
+      expect(result[0].requesterShift).toBe('Mon 10:00 AM-12:00 PM');
+      expect(result[0].targetShift).toBeNull(); // unknown/deleted shift renders as null
+      expect(result[1].targetShift).toBeNull();
+    });
   });
 
   // ---------------------------------------------------------------------

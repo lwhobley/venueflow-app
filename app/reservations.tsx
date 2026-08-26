@@ -14,7 +14,7 @@ import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { canManageVenue } from '../lib/permissions';
 import { formatTime, formatShortDate, formatWeekdayDate, pad2, dollarsToCents, splitTags, errorMessage } from '../lib/format';
 import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
-import { overnightAwareRange, zonedDateTimeMs } from '../lib/zoned-datetime';
+import { overnightAwareRange, zonedDayIndex, zonedDateTimeMs } from '../lib/zoned-datetime';
 
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
@@ -33,6 +33,21 @@ function getMealsForDayOfWeek(dow: number) {
   return isWeekend
     ? [MEAL_TIMES.brunch, MEAL_TIMES.dinner]
     : [MEAL_TIMES.breakfast, MEAL_TIMES.lunch, MEAL_TIMES.dinner];
+}
+
+/** Today's YYYY-MM-DD in the venue's timezone (device-local fallback). */
+function zonedTodayIso(timeZone: string | null | undefined): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timeZone || undefined,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  } catch {
+    const n = new Date();
+    return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`;
+  }
 }
 
 type ReservationRow = {
@@ -298,21 +313,32 @@ function ReservationsScreen() {
     [...openTables].filter((item) => item.table.seats >= party).sort((a, b) => (a.table.seats - party) - (b.table.seats - party))
   ), [openTables]);
 
-  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  // Anchor the date picker on the venue's business day — the device clock can
+  // already be on the venue's "tomorrow" (or yesterday) near midnight.
+  const venueTimezone = me?.venue?.timezone ?? venue?.timezone ?? null;
+  const todayStr = zonedTodayIso(venueTimezone);
   const dateOptions = useMemo(() => {
-    const today = new Date();
+    const [y, m, d] = todayStr.split('-').map(Number);
     return Array.from({ length: 14 }, (_, i) => {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      const value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      const label = i === 0 ? t('reservations.form.dateToday', { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }) : i === 1 ? t('reservations.form.dateTomorrow', { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }) : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-      return { value, label, dayOfWeek: d.getDay() };
+      const utcMs = Date.UTC(y, m - 1, d + i);
+      const value = new Date(utcMs).toISOString().slice(0, 10);
+      const display = new Date(utcMs);
+      const label = i === 0 ? t('reservations.form.dateToday', { date: display.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) }) : i === 1 ? t('reservations.form.dateTomorrow', { date: display.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) }) : display.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+      return { value, label, dayOfWeek: display.getUTCDay() };
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayStr]);
 
   const selectedDateOption = dateOptions.find((o) => o.value === date) ?? dateOptions[0];
-  const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? new Date().getDay());
+  const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? zonedDayIndex(venueTimezone));
+
+  // Until the user picks a date themselves, follow the venue's business day —
+  // the mount-time default came from the device clock, which near midnight can
+  // disagree with the venue (or the venue timezone loads after mount).
+  const dateTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!dateTouchedRef.current) setDate(todayStr);
+  }, [todayStr]);
 
   const createReservation = async () => {
     if (creatingRef.current) return;
@@ -377,7 +403,7 @@ function ReservationsScreen() {
       setEstimatedValue('');
       setDepositDue('');
       setPartySize(2);
-      const todayDow = new Date().getDay();
+      const todayDow = dateOptions[0]?.dayOfWeek ?? zonedDayIndex(venueTimezone);
       setSelectedMeal(todayDow === 0 || todayDow === 6 ? 'brunch' : 'dinner');
       setTime(todayDow === 0 || todayDow === 6 ? '10:00' : '18:00');
       setShowForm(false);
@@ -671,6 +697,7 @@ function ReservationsScreen() {
                         key={opt.value}
                         title={opt.label}
                         onPress={() => {
+                          dateTouchedRef.current = true;
                           setDate(opt.value);
                           setDateMenuOpen(false);
                           const meals = getMealsForDayOfWeek(opt.dayOfWeek);

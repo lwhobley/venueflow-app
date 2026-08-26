@@ -1506,10 +1506,16 @@ export class SchedulingController {
   }
 
   private async mapSwaps(venueId: string, swaps: Array<{ id: string; status: string; note: string | null; requesterProfileId: string; targetProfileId: string; requesterShiftId: string; targetShiftId: string | null; createdAt: Date }>, meId: string | null) {
-    const [staff, shifts] = await Promise.all([
-      this.prisma.profile.findMany({ where: { venueId, OR: ACTIVE_MEMBERSHIP } }),
-      this.prisma.scheduleShift.findMany({ where: { venueId } }),
-    ]);
+    // Labels only ever need the shifts these swaps reference — loading the
+    // venue's entire shift history here grew unbounded with venue age.
+    const staff = await this.prisma.profile.findMany({ where: { venueId, OR: ACTIVE_MEMBERSHIP } });
+    const referencedShiftIds = [...new Set(swaps.flatMap((swap) => [swap.requesterShiftId, swap.targetShiftId].filter((id): id is string => Boolean(id))))];
+    const shifts = referencedShiftIds.length > 0
+      ? await this.prisma.scheduleShift.findMany({
+          where: { venueId, id: { in: referencedShiftIds } },
+          select: { id: true, dayIndex: true, startMinutes: true, endMinutes: true },
+        })
+      : [];
     const nameById = new Map(staff.map((member) => [member.id, member.fullName]));
     const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
     return swaps
