@@ -3,8 +3,27 @@
 // has no timezone configured, preserving the previous behavior.
 
 const FALLBACK_TZ = 'UTC';
+const VALID_IANA_TIMEZONES = new Set([
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Phoenix',
+  'UTC',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Asia/Tokyo',
+  'Asia/Shanghai',
+  'Australia/Sydney',
+  'America/Montreal',
+  'America/Vancouver',
+  'America/Toronto',
+]);
 
 export function isIanaTimeZone(timeZone: string): boolean {
+  if (!timeZone) return false;
+  if (VALID_IANA_TIMEZONES.has(timeZone)) return true;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone });
     return true;

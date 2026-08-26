@@ -62,6 +62,7 @@ keys/
 .claude/
 .codex/
 .agents/
+.antigravity/
 .vs/
 
 # Supabase CLI link metadata

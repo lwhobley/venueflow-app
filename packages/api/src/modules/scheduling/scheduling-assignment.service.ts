@@ -447,31 +447,39 @@ export class SchedulingAssignmentService {
 
     if (args.approve) {
       await withSerializableRetry(this.prisma, async (tx) => {
-        const requesterShift = await tx.scheduleShift.findFirst({
-          where: { id: swap.requesterShiftId, venueId: args.venueId },
+        await tx.$executeRaw`SELECT 1 FROM "ShiftSwap" WHERE "id" = ${swap.id} FOR UPDATE`;
+        const currentSwap = await tx.shiftSwap.findFirst({
+          where: { id: swap.id, venueId: args.venueId },
         });
-        const targetShift = swap.targetShiftId
+        if (!currentSwap || !['accepted', 'proposed'].includes(currentSwap.status)) {
+          throw new BadRequestException('Swap is not pending');
+        }
+
+        const requesterShift = await tx.scheduleShift.findFirst({
+          where: { id: currentSwap.requesterShiftId, venueId: args.venueId },
+        });
+        const targetShift = currentSwap.targetShiftId
           ? await tx.scheduleShift.findFirst({
-              where: { id: swap.targetShiftId, venueId: args.venueId },
+              where: { id: currentSwap.targetShiftId, venueId: args.venueId },
             })
           : null;
-        if (!requesterShift || (swap.targetShiftId && !targetShift)) {
+        if (!requesterShift || (currentSwap.targetShiftId && !targetShift)) {
           throw new NotFoundException('Shift not found');
         }
 
-        await this.assertNotUnavailable(tx, args.venueId, swap.targetProfileId, requesterShift);
+        await this.assertNotUnavailable(tx, args.venueId, currentSwap.targetProfileId, requesterShift);
         if (targetShift) {
-          await this.assertNotUnavailable(tx, args.venueId, swap.requesterProfileId, targetShift);
+          await this.assertNotUnavailable(tx, args.venueId, currentSwap.requesterProfileId, targetShift);
         }
 
         await this.lockAssignmentKeys(tx, [
-          ...this.profileLockKeys(args.venueId, swap.targetProfileId, requesterShift),
-          ...(targetShift ? this.profileLockKeys(args.venueId, swap.requesterProfileId, targetShift) : []),
+          ...this.profileLockKeys(args.venueId, currentSwap.targetProfileId, requesterShift),
+          ...(targetShift ? this.profileLockKeys(args.venueId, currentSwap.requesterProfileId, targetShift) : []),
         ]);
         await this.assertNoDoubleBookInWeekTx(
           tx,
           args.venueId,
-          swap.targetProfileId,
+          currentSwap.targetProfileId,
           requesterShift.weekStart,
           requesterShift.dayIndex,
           requesterShift.startMinutes,
@@ -483,7 +491,7 @@ export class SchedulingAssignmentService {
           await this.assertNoDoubleBookInWeekTx(
             tx,
             args.venueId,
-            swap.requesterProfileId,
+            currentSwap.requesterProfileId,
             targetShift.weekStart,
             targetShift.dayIndex,
             targetShift.startMinutes,
@@ -494,16 +502,16 @@ export class SchedulingAssignmentService {
         }
         await tx.scheduleShift.update({
           where: { id: requesterShift.id },
-          data: { profileId: swap.targetProfileId, status: 'scheduled' },
+          data: { profileId: currentSwap.targetProfileId, status: 'scheduled' },
         });
         if (targetShift) {
           await tx.scheduleShift.update({
             where: { id: targetShift.id },
-            data: { profileId: swap.requesterProfileId, status: 'scheduled' },
+            data: { profileId: currentSwap.requesterProfileId, status: 'scheduled' },
           });
         }
         const reviewed = await tx.shiftSwap.updateMany({
-          where: { id: swap.id, status: { in: ['accepted', 'proposed'] } },
+          where: { id: currentSwap.id, status: { in: ['accepted', 'proposed'] } },
           data: { status: 'approved' },
         });
         if (reviewed.count === 0) {
@@ -515,9 +523,18 @@ export class SchedulingAssignmentService {
         });
       });
     } else {
-      await this.prisma.shiftSwap.update({
-        where: { id: swap.id },
-        data: { status: 'denied' },
+      await withSerializableRetry(this.prisma, async (tx) => {
+        await tx.$executeRaw`SELECT 1 FROM "ShiftSwap" WHERE "id" = ${swap.id} FOR UPDATE`;
+        const currentSwap = await tx.shiftSwap.findFirst({
+          where: { id: swap.id, venueId: args.venueId },
+        });
+        if (!currentSwap || !['accepted', 'proposed'].includes(currentSwap.status)) {
+          throw new BadRequestException('Swap is not pending');
+        }
+        await tx.shiftSwap.update({
+          where: { id: swap.id },
+          data: { status: 'denied' },
+        });
       });
     }
 

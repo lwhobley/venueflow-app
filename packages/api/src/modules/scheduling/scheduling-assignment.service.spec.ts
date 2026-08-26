@@ -95,6 +95,7 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
+      $executeRaw: vi.fn().mockResolvedValue(1),
       $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma as unknown)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
@@ -126,6 +127,7 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
+      $executeRaw: vi.fn().mockResolvedValue(1),
       $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma as unknown)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
@@ -134,6 +136,7 @@ describe('SchedulingAssignmentService', () => {
 
     const result = await service.createShift({
       venueId: 'venue-1',
+      weekStart: '2026-08-24',
       profileId: 'profile-1',
       dayIndex: 3,
       startMinutes: 600,
@@ -147,6 +150,7 @@ describe('SchedulingAssignmentService', () => {
     expect(prisma.scheduleShift.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         venueId: 'venue-1',
+        weekStart: '2026-08-24',
         profileId: 'profile-1',
         dayIndex: 3,
         startMinutes: 600,
@@ -181,6 +185,7 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
+      $executeRaw: vi.fn().mockResolvedValue(1),
       $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma as unknown)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
@@ -226,8 +231,6 @@ describe('SchedulingAssignmentService', () => {
       station: 'Main',
       status: 'scheduled',
     };
-    // Simulates a concurrent assignShift reassigning shift-5 from profile-1 to
-    // profile-2 between the initial getVenueShift read and this transaction.
     const reassignedShift = { ...staleShift, profileId: 'profile-2' };
     const prisma = {
       scheduleShift: {
@@ -240,6 +243,7 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
+      $executeRaw: vi.fn().mockResolvedValue(1),
       $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma as unknown)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
@@ -255,15 +259,11 @@ describe('SchedulingAssignmentService', () => {
       station: 'Roof',
     });
 
-    // Locking and the double-book check must use the freshly-read assignee
-    // (profile-2), not the stale one captured before the transaction.
     expect(lockSpy).toHaveBeenCalledWith(
       expect.anything(),
       expect.arrayContaining([expect.objectContaining({ profileId: 'profile-2' })]),
     );
     expect(prisma.scheduleShift.findMany).toHaveBeenCalled();
-    // The returned profileId reflects the current assignee too, so the
-    // caller's edit-notification email goes to profile-2, not profile-1.
     expect(result.profileId).toBe('profile-2');
   });
 
@@ -326,6 +326,7 @@ describe('SchedulingAssignmentService', () => {
 
     const result = await service.restoreShifts({
       venueId: 'venue-1',
+      weekStart: '2026-08-24',
       shifts: [
         {
           dayIndex: 1,
@@ -362,6 +363,7 @@ describe('SchedulingAssignmentService', () => {
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(1, {
       data: expect.objectContaining({
         venueId: 'venue-1',
+        weekStart: '2026-08-24',
         profileId: 'profile-1',
         status: 'scheduled',
       }),
@@ -369,6 +371,7 @@ describe('SchedulingAssignmentService', () => {
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(2, {
       data: expect.objectContaining({
         venueId: 'venue-1',
+        weekStart: '2026-08-24',
         profileId: undefined,
         status: 'open',
       }),
@@ -411,17 +414,19 @@ describe('SchedulingAssignmentService', () => {
 
     const result = await service.copyDayShifts({
       venueId: 'venue-1',
+      weekStart: '2026-08-24',
       fromDay: 1,
       toDays: [1, 3, 3, 5],
     });
 
     expect(result).toEqual({ added: 4 });
     expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith({
-      where: { venueId: 'venue-1', dayIndex: 1 },
+      where: { venueId: 'venue-1', weekStart: '2026-08-24', dayIndex: 1 },
     });
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(1, {
       data: expect.objectContaining({
         venueId: 'venue-1',
+        weekStart: '2026-08-24',
         dayIndex: 3,
         status: 'open',
       }),
@@ -429,6 +434,7 @@ describe('SchedulingAssignmentService', () => {
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(3, {
       data: expect.objectContaining({
         venueId: 'venue-1',
+        weekStart: '2026-08-24',
         dayIndex: 5,
         status: 'open',
       }),
@@ -475,6 +481,7 @@ describe('SchedulingAssignmentService', () => {
 
     const result = await service.clearWeek({
       venueId: 'venue-1',
+      weekStart: '2026-08-24',
     });
 
     expect(result).toEqual({
@@ -482,7 +489,7 @@ describe('SchedulingAssignmentService', () => {
       shifts,
     });
     expect(prisma.scheduleShift.deleteMany).toHaveBeenCalledWith({
-      where: { venueId: 'venue-1' },
+      where: { venueId: 'venue-1', weekStart: '2026-08-24' },
     });
     expect(prisma.venue.update).toHaveBeenCalled();
   });
@@ -506,6 +513,7 @@ describe('SchedulingAssignmentService', () => {
 
     const result = await service.applyTemplate({
       venueId: 'venue-1',
+      weekStart: '2026-08-24',
       replace: true,
       slots: [
         {
@@ -531,6 +539,7 @@ describe('SchedulingAssignmentService', () => {
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(1, {
       data: {
         venueId: 'venue-1',
+        weekStart: '2026-08-24',
         dayIndex: 1,
         startMinutes: 480,
         endMinutes: 720,
@@ -543,6 +552,7 @@ describe('SchedulingAssignmentService', () => {
     expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(2, {
       data: {
         venueId: 'venue-1',
+        weekStart: '2026-08-24',
         dayIndex: 2,
         startMinutes: 720,
         endMinutes: 900,
@@ -553,7 +563,7 @@ describe('SchedulingAssignmentService', () => {
       },
     });
     expect(prisma.scheduleShift.deleteMany).toHaveBeenCalledWith({
-      where: { venueId: 'venue-1' },
+      where: { venueId: 'venue-1', weekStart: '2026-08-24' },
     });
     expect(prisma.$transaction).toHaveBeenCalled();
     expect(prisma.venue.update).toHaveBeenCalled();
@@ -686,6 +696,7 @@ describe('SchedulingAssignmentService', () => {
       venue: {
         update: vi.fn().mockResolvedValue({}),
       },
+      $executeRaw: vi.fn().mockResolvedValue(1),
       $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma as unknown)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
@@ -732,6 +743,8 @@ describe('SchedulingAssignmentService', () => {
       scheduleShift: {
         update: vi.fn().mockResolvedValue({}),
       },
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma as unknown)),
     };
     const service = new SchedulingAssignmentService(prisma as any);
 
