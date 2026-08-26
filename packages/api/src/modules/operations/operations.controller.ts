@@ -27,6 +27,7 @@ import { parseTimeBreaks } from '../../common/break-duration';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { isActiveMembership } from '../../common/membership';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
+import { previousOvernightFilter } from '../../common/shift-overlap';
 import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaAccessService } from '../chat/media-access.service';
@@ -386,7 +387,13 @@ export class OperationsController {
         take: 100,
       }),
       this.prisma.scheduleShift.findMany({
-        where: { venueId, weekStart, dayIndex: zonedDayOfWeek(timezone, now.getTime()) },
+        where: {
+          venueId,
+          OR: [
+            { weekStart, dayIndex: zonedDayOfWeek(timezone, now.getTime()) },
+            { ...previousOvernightFilter(weekStart, zonedDayOfWeek(timezone, now.getTime())), endMinutes: { gt: 1440 } },
+          ],
+        },
         orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }],
         take: 100,
       }),
@@ -748,7 +755,18 @@ export class OperationsController {
     if (!workspace) throw new NotFoundException('Execution workspace not found');
     const tasks = workspace.tasks;
     const eventWeekStart = weekStartFor(zonedIsoDate(profile.venue?.timezone, start.getTime()));
-    const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId, weekStart: eventWeekStart, dayIndex: zonedDayOfWeek(profile.venue?.timezone, start.getTime()) }, orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }], take: 100 });
+    const eventDayIndex = zonedDayOfWeek(profile.venue?.timezone, start.getTime());
+    const shifts = await this.prisma.scheduleShift.findMany({
+      where: {
+        venueId,
+        OR: [
+          { weekStart: eventWeekStart, dayIndex: eventDayIndex },
+          { ...previousOvernightFilter(eventWeekStart, eventDayIndex), endMinutes: { gt: 1440 } },
+        ],
+      },
+      orderBy: [{ startMinutes: 'asc' }, { jobTitle: 'asc' }],
+      take: 100,
+    });
     const openTasks = tasks.filter((task) => task.status !== 'done');
     const openShifts = shifts.filter((shift) => shift.status === 'open');
     const hasFloorAssignment = reservation ? reservation.tableAssignments.length > 0 : true;

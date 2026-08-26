@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View, Modal } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Chip, Divider, IconButton, Menu, Searchbar, SegmentedButtons, Snackbar, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { useMutation, useQuery, useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, spacing } from '../../lib/theme';
@@ -11,6 +11,7 @@ import { useIsDesktop } from '../../lib/responsive';
 import { AutoScheduleModal } from './AutoScheduleModal';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
 import { CollapsibleSection } from '../AppCard';
+import { calendarSegmentsForDay } from '../../lib/schedule-segments';
 
 type ShiftSnapshot = {
   dayIndex: number;
@@ -24,8 +25,8 @@ type ShiftSnapshot = {
 };
 
 const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const hourTicks = [8, 10, 12, 14, 16, 18, 20, 22];
-const gridStart = 8 * 60;
+const hourTicks = [0, 3, 6, 9, 12, 15, 18, 21];
+const gridStart = 0;
 const gridEnd = 24 * 60;
 const gridMinutes = gridEnd - gridStart;
 
@@ -66,8 +67,12 @@ function pct(minutes: number) {
   return `${((clamped - gridStart) / gridMinutes) * 100}%`;
 }
 
+function shiftSpan(start: number, end: number) {
+  return (end <= start ? end + 1440 : end) - start;
+}
+
 function durationHours(start: number, end: number) {
-  return Math.round(((end - start) / 60) * 10) / 10;
+  return Math.round((shiftSpan(start, end) / 60) * 10) / 10;
 }
 
 type AvailabilityRow = { dayIndex: number; startMinutes: number; endMinutes: number; available: boolean };
@@ -136,7 +141,10 @@ function availabilityLabel(rows: AvailabilityRow[] | undefined, dayIndex: number
 }
 
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
-  return aStart < bEnd && bStart < aEnd;
+  const normEnd = aEnd <= aStart ? aEnd + 1440 : aEnd;
+  if (aStart < bEnd && bStart < normEnd) return true;
+  if (normEnd > 1440 && 0 < bEnd && bStart < normEnd - 1440) return true;
+  return false;
 }
 
 export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
@@ -169,7 +177,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   }, [weekOffset]);
 
   const selectedWeekStart = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
-  const data = useQuery(api.scheduling.getManagerSchedule, { venueId, weekStart: selectedWeekStart });
+  const { data, error, isLoading, refetch } = useQueryState(api.scheduling.getManagerSchedule, { venueId, weekStart: selectedWeekStart });
   const forecast = useQuery(api.scheduling.getLaborForecast, { venueId, weekStart: selectedWeekStart }) as LaborForecast | undefined;
   const templates = useQuery(api.scheduling.listScheduleTemplates, { venueId });
   const requestRows = useQuery(api.app.listStaffRequests, { venueId });
@@ -219,6 +227,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const [undo, setUndo] = useState<{ label: string; shifts: ShiftSnapshot[] } | null>(null);
 
   const shifts = useMemo(() => (data?.shifts ?? []) as ManagerShift[], [data]);
+  const carryInShifts = useMemo(() => (data?.carryInShifts ?? []) as ManagerShift[], [data]);
   const staff = useMemo(() => (data?.staff ?? []) as Staff[], [data]);
   const templateList = useMemo(() => (templates ?? []) as Template[], [templates]);
   const requests = useMemo(() => ((requestRows ?? []) as StaffRequest[]).filter((row) => row.status === 'pending'), [requestRows]);
@@ -283,12 +292,24 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     setTimeout(() => setActionMsg(null), 2600);
   };
 
+  // react-native-paper's Button forwards `disabled` to the touchable but NOT
+  // `loading`, so a spinner alone never blocks a second press. A ref (not
+  // state) because the guard has to hold before the next render commits.
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+
   const safe = async (action: () => Promise<unknown>, ok?: string) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     try {
       await action();
       if (ok) flash(ok);
     } catch (e) {
       flash(e instanceof Error ? e.message : 'Action failed.');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   };
 
@@ -324,7 +345,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
   const savePanel = async () => {
     const startMinutes = parseTime(start);
     const endMinutes = parseTime(end);
-    if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+    if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) {
       flash('Enter a valid start and end time.');
       return;
     }
@@ -379,13 +400,13 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     if (!dragShiftId) return;
     const shift = shifts.find((row) => row._id === dragShiftId);
     if (!shift) return;
-    const length = Math.max(60, shift.endMinutes - shift.startMinutes);
+    const length = Math.max(60, shiftSpan(shift.startMinutes, shift.endMinutes));
     await updateShift({
       venueId,
       shiftId: shift._id,
       dayIndex: targetDay,
       startMinutes: targetStart,
-      endMinutes: Math.min(gridEnd, targetStart + length),
+      endMinutes: targetStart + length,
       jobTitle: shift.jobTitle,
       station: shift.station,
       notes: shift.notes ?? undefined,
@@ -413,7 +434,21 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
     );
   }, [shifts]);
 
-  if (data === undefined) {
+  if (error) {
+    return (
+      <Card style={{ backgroundColor: colors.surface, borderRadius: 10, padding: spacing.lg }}>
+        <Card.Content style={{ gap: spacing.md, alignItems: 'center' }}>
+          <Text style={{ color: colors.danger, fontWeight: '700' }}>Failed to load schedule</Text>
+          <Text style={{ color: colors.muted }}>{error instanceof Error ? error.message : 'Please check your connection and try again.'}</Text>
+          <Button mode="contained" buttonColor={colors.primary} onPress={() => refetch()}>
+            Retry
+          </Button>
+        </Card.Content>
+      </Card>
+    );
+  }
+
+  if (isLoading || data === undefined) {
     return <ScheduleSkeleton rows={5} />;
   }
 
@@ -459,7 +494,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                 icon="send"
                 style={topButtonStyle}
                 labelStyle={{ fontSize: 12 }}
-                onPress={() => void safe(async () => {
+                disabled={busy} onPress={() => void safe(async () => {
                   const r = await publishSchedule({ venueId, weekStart: selectedWeekStart });
                   setStatus('Published');
                   flash(`Published and notified ${r.notified} staff.`);
@@ -536,7 +571,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                   </View>
                   
                   {dayLabels.map((label, dayIndex) => {
-                    const dayShifts = shifts.filter((shift) => shift.dayIndex === dayIndex);
+                    const dayShifts = calendarSegmentsForDay(shifts, carryInShifts, dayIndex);
                     const today = isToday(dayIndex);
                     const active = day === dayIndex;
                     return (
@@ -578,11 +613,11 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                           
                           {dayShifts.map((shift) => {
                             const accent = roleAccent(shift.jobTitle);
-                            const left = pct(shift.startMinutes);
-                            const width = `${Math.max(8, ((Math.min(gridEnd, shift.endMinutes) - Math.max(gridStart, shift.startMinutes)) / gridMinutes) * 100)}%`;
+                            const left = pct(shift.renderStart);
+                            const width = `${Math.max(2, ((Math.min(gridEnd, shift.renderEnd) - Math.max(gridStart, shift.renderStart)) / gridMinutes) * 100)}%`;
                             return (
                               <Pressable
-                                key={shift._id}
+                                key={shift.segmentKey}
                                 onPress={() => setSelectedShiftId(shift._id)}
                                 {...({
                                   draggable: true,
@@ -630,7 +665,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
             <View style={{ gap: spacing.md }}>
               <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TextInput dense label="Template name" value={templateName} onChangeText={setTemplateName} mode="outlined" style={{ flex: 1, minWidth: 200, backgroundColor: colors.surface }} />
-                <Button mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim(), weekStart: selectedWeekStart }); setTemplateName(''); }, 'Template saved.')}>
+                <Button mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void safe(async () => { if (!templateName.trim()) throw new Error('Enter a template name.'); await saveTemplate({ venueId, name: templateName.trim(), weekStart: selectedWeekStart }); setTemplateName(''); }, 'Template saved.')}>
                   Save current week
                 </Button>
               </View>
@@ -642,10 +677,10 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       <Text style={{ color: colors.charcoal, fontWeight: '800' }}>{template.name}</Text>
                       <Text style={{ color: colors.muted, fontSize: 12 }}>{template.shiftCount} open shifts</Text>
                     </View>
-                    <Button compact mode="outlined" textColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false, weekStart: selectedWeekStart }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
+                    <Button compact mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: false, weekStart: selectedWeekStart }); markEdited(); flash(`Added ${r.added} shifts.`); })}>
                       Add
                     </Button>
-                    <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true, weekStart: selectedWeekStart }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
+                    <Button compact mode="contained" buttonColor={colors.primary} disabled={busy} onPress={() => void safe(async () => { const r = await applyTemplate({ venueId, templateId: template._id, replace: true, weekStart: selectedWeekStart }); markEdited(); flash(`Replaced week with ${r.added} shifts.`); })}>
                       Replace
                     </Button>
                     <IconButton
@@ -653,7 +688,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                       size={18}
                       iconColor={colors.danger}
                       accessibilityLabel={`Delete ${template.name} template`}
-                      onPress={() => void safe(() => deleteTemplate({ venueId, templateId: template._id }), 'Template deleted.')}
+                      disabled={busy} onPress={() => void safe(() => deleteTemplate({ venueId, templateId: template._id }), 'Template deleted.')}
                     />
                   </View>
                 ))}

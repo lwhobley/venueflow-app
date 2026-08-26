@@ -38,7 +38,7 @@ import {
   todayInZone,
   weekStartFor,
 } from '../../common/pay-period';
-import { occupiedSlots, shiftsOverlap } from '../../common/shift-overlap';
+import { occupiedSlots, previousOvernightFilter, shiftsOverlap } from '../../common/shift-overlap';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { zonedDateBounds } from '../../common/venue-time';
@@ -435,12 +435,23 @@ export class SchedulingController {
   async getManagerSchedule(@VenueScope() scope: Scope, @Query('weekStart') requestedWeekStart?: string) {
     this.requireManager(scope);
     const selectedWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, requestedWeekStart);
-    const [venue, shifts, staff] = await Promise.all([
+    const previousWeekStart = addDays(selectedWeekStart, -7);
+    const [venue, shifts, carryInShifts, staff] = await Promise.all([
       this.prisma.venue.findUniqueOrThrow({ where: { id: scope!.venueId } }),
       this.prisma.scheduleShift.findMany({
         where: { venueId: scope!.venueId, weekStart: selectedWeekStart },
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
+      }),
+      this.prisma.scheduleShift.findMany({
+        where: {
+          venueId: scope!.venueId,
+          weekStart: previousWeekStart,
+          dayIndex: 6,
+          endMinutes: { gt: 1440 },
+        },
+        include: { profile: true },
+        orderBy: { startMinutes: 'asc' },
       }),
       this.prisma.profile.findMany({
         where: { venueId: scope!.venueId, OR: ACTIVE_MEMBERSHIP },
@@ -465,6 +476,7 @@ export class SchedulingController {
         const rows = shift.profileId ? availabilityByProfile.get(shift.profileId) : undefined;
         return this.mapManagerShift(shift, rows && rows.length > 0 ? !availabilityCovers(rows, shift) : false);
       }),
+      carryInShifts: carryInShifts.map((shift) => this.mapManagerShift(shift, false)),
       staff: staff.map((member) => {
         const mins = weeklyMinutes.get(member.id) ?? 0;
         return {
@@ -728,8 +740,15 @@ export class SchedulingController {
     if (!scope) return { mine: [], open: [], roster: [] };
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } });
     const weekStart = weekStartFor(todayInZone(venue?.timezone ?? null));
+    const previousSaturday = previousOvernightFilter(weekStart, 0);
     const shifts = await this.prisma.scheduleShift.findMany({
-      where: { venueId: scope.venueId, weekStart },
+      where: {
+        venueId: scope.venueId,
+        OR: [
+          { weekStart },
+          { weekStart: previousSaturday.weekStart, dayIndex: previousSaturday.dayIndex, endMinutes: { gt: 1440 } },
+        ],
+      },
       include: { profile: true },
       orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
     });
@@ -737,13 +756,17 @@ export class SchedulingController {
       await this.unavailableRequests(scope.venueId, weekStart),
       weekStart,
     );
+    const occupiesDay = (shift: { weekStart: string | null; dayIndex: number; startMinutes: number; endMinutes: number }, dayIndex: number) =>
+      occupiedSlots({ ...shift, weekStart: shift.weekStart ?? weekStart }).some(
+        (slot) => (slot.weekStart ?? weekStart) === weekStart && slot.dayIndex === dayIndex,
+      );
     const mine = shifts.filter((shift) => shift.profileId === scope.profileId);
-    const open = shifts.filter((shift) => shift.status === 'open' && !shift.profileId);
+    const open = shifts.filter((shift) => shift.status === 'open' && !shift.profileId && (shift.weekStart ?? weekStart) === weekStart);
     const roster = [0, 1, 2, 3, 4, 5, 6].map((dayIndex) => ({
       dayIndex,
       dayLabel: dayLabel(dayIndex),
       coworkers: shifts
-        .filter((shift) => shift.dayIndex === dayIndex && shift.profileId && shift.profileId !== scope.profileId)
+        .filter((shift) => occupiesDay(shift, dayIndex) && shift.profileId && shift.profileId !== scope.profileId)
         .map((shift) => ({
           shiftId: shift.id,
           profileId: shift.profileId,
@@ -1048,9 +1071,16 @@ export class SchedulingController {
   async previewAutoSchedule(@VenueScope() scope: Scope, @Query('weekStartDate') weekStartDate?: string) {
     this.requireManager(scope);
     const availabilityWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, weekStartDate);
+    const previousSaturday = previousOvernightFilter(availabilityWeekStart, 0);
     const [shifts, staff, requests] = await Promise.all([
       this.prisma.scheduleShift.findMany({
-        where: { venueId: scope!.venueId, weekStart: availabilityWeekStart },
+        where: {
+          venueId: scope!.venueId,
+          OR: [
+            { weekStart: availabilityWeekStart },
+            { weekStart: previousSaturday.weekStart, dayIndex: previousSaturday.dayIndex, endMinutes: { gt: 1440 } },
+          ],
+        },
         include: { profile: true },
         orderBy: [{ dayIndex: 'asc' }, { startMinutes: 'asc' }],
       }),
@@ -1061,7 +1091,9 @@ export class SchedulingController {
       this.unavailableRequests(scope!.venueId, availabilityWeekStart),
     ]);
     const availabilityByProfile = this.unavailableByProfile(requests, availabilityWeekStart);
-    const openShifts = shifts.filter((shift) => shift.status === 'open' && !shift.profileId);
+    const openShifts = shifts.filter((shift) =>
+      shift.status === 'open' && !shift.profileId && (shift.weekStart ?? availabilityWeekStart) === availabilityWeekStart,
+    );
     const assignments = new Map<string, number>();
     const assignedWindows: Array<{ profileId: string; weekStart: string | null; dayIndex: number; startMinutes: number; endMinutes: number }> = [];
     const proposals = openShifts.map((shift) => {
@@ -1486,10 +1518,16 @@ export class SchedulingController {
   }
 
   private async mapSwaps(venueId: string, swaps: Array<{ id: string; status: string; note: string | null; requesterProfileId: string; targetProfileId: string; requesterShiftId: string; targetShiftId: string | null; createdAt: Date }>, meId: string | null) {
-    const [staff, shifts] = await Promise.all([
-      this.prisma.profile.findMany({ where: { venueId, OR: ACTIVE_MEMBERSHIP } }),
-      this.prisma.scheduleShift.findMany({ where: { venueId } }),
-    ]);
+    // Labels only ever need the shifts these swaps reference — loading the
+    // venue's entire shift history here grew unbounded with venue age.
+    const staff = await this.prisma.profile.findMany({ where: { venueId, OR: ACTIVE_MEMBERSHIP } });
+    const referencedShiftIds = [...new Set(swaps.flatMap((swap) => [swap.requesterShiftId, swap.targetShiftId].filter((id): id is string => Boolean(id))))];
+    const shifts = referencedShiftIds.length > 0
+      ? await this.prisma.scheduleShift.findMany({
+          where: { venueId, id: { in: referencedShiftIds } },
+          select: { id: true, dayIndex: true, startMinutes: true, endMinutes: true },
+        })
+      : [];
     const nameById = new Map(staff.map((member) => [member.id, member.fullName]));
     const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
     return swaps

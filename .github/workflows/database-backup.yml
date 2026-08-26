@@ -13,18 +13,38 @@ jobs:
     name: Backup production database to S3
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      restore-target:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: venue_restore_drill
+          POSTGRES_PASSWORD: restore-drill-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d venue_restore_drill"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: ${{ secrets.PRODUCTION_POOLER_DATABASE_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
       BACKUP_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+      # The restore target is an ephemeral service container destroyed with
+      # the runner, so a production hostname cannot be substituted by secret.
+      RESTORE_DRILL_DATABASE_URL: postgresql://postgres:restore-drill-only@127.0.0.1:5432/venue_restore_drill
+      RESTORE_DRILL_DATABASE_FINGERPRINT: 127.0.0.1:5432/venue_restore_drill
+      BACKUP_RETENTION_DAYS: "30"
     steps:
       - name: Install backup tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends unzip curl
-          curl --fail --silent --show-error --location https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip --output /tmp/awscliv2.zip
+          sudo apt-get install --yes --no-install-recommends unzip curl jq
+          # Pinned AWS CLI version (not the floating "latest" zip) so the backup
+          # toolchain is reproducible; bump deliberately.
+          curl --fail --silent --show-error --location https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.36.19.zip --output /tmp/awscliv2.zip
           unzip -q /tmp/awscliv2.zip -d /tmp
           sudo /tmp/aws/install --update
 
@@ -37,6 +57,27 @@ jobs:
           : "${AWS_SECRET_ACCESS_KEY:?BACKUP_AWS_SECRET_ACCESS_KEY is not configured}"
           : "${AWS_DEFAULT_REGION:?BACKUP_AWS_REGION is not configured}"
           : "${BACKUP_BUCKET:?BACKUP_S3_BUCKET is not configured}"
+          : "${RESTORE_DRILL_DATABASE_URL:?RESTORE_DRILL_DATABASE_URL is not configured}"
+          : "${RESTORE_DRILL_DATABASE_FINGERPRINT:?RESTORE_DRILL_DATABASE_FINGERPRINT is not configured}"
+          [[ "$RESTORE_DRILL_DATABASE_URL" != "$DATABASE_URL" ]] || {
+            echo "::error::Restore drill target must never equal production DATABASE_URL"
+            exit 1
+          }
+          restore_database="$(python3 -c 'import os,urllib.parse; print(urllib.parse.urlparse(os.environ["RESTORE_DRILL_DATABASE_URL"]).path.lstrip("/"))')"
+          restore_fingerprint="$(python3 -c 'import os,urllib.parse; u=urllib.parse.urlparse(os.environ["RESTORE_DRILL_DATABASE_URL"]); print(f"{u.hostname}:{u.port or 5432}/{u.path.lstrip(chr(47))}")')"
+          production_fingerprint="$(python3 -c 'import os,urllib.parse; u=urllib.parse.urlparse(os.environ["DATABASE_URL"]); print(f"{u.hostname}:{u.port or 5432}/{u.path.lstrip(chr(47))}")')"
+          [[ "$restore_fingerprint" == "$RESTORE_DRILL_DATABASE_FINGERPRINT" ]] || {
+            echo "::error::Restore target fingerprint does not match the approved disposable database"
+            exit 1
+          }
+          [[ "$restore_fingerprint" != "$production_fingerprint" ]] || {
+            echo "::error::Restore target resolves to the production database"
+            exit 1
+          }
+          [[ "$restore_database" =~ (test|restore|drill) ]] || {
+            echo "::error::Restore target database name must contain test, restore, or drill"
+            exit 1
+          }
 
           timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
           dump="/tmp/venue-wrangler-${timestamp}.dump"
@@ -44,11 +85,42 @@ jobs:
 
           docker run --rm --network host --user "$(id -u):$(id -g)" \
             --env DATABASE_URL="$DATABASE_URL" --volume /tmp:/backup \
-            postgres:17-alpine pg_dump "$DATABASE_URL" --format=custom --no-owner --no-acl \
+            postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+            pg_dump "$DATABASE_URL" --format=custom --no-owner --no-acl \
+            --schema=public \
             --file="/backup/$(basename "$dump")"
+          # A successful upload alone does not prove the dump is readable.
+          docker run --rm --user "$(id -u):$(id -g)" --volume /tmp:/backup \
+            postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+            pg_restore --list "/backup/$(basename "$dump")" >/dev/null
+          # Prove recoverability, not merely archive readability. This target is
+          # a dedicated disposable database enforced by the checks above.
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            --volume /tmp:/backup \
+            postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+            pg_restore --clean --if-exists --no-owner --no-acl \
+            --dbname "$RESTORE_DRILL_DATABASE_URL" "/backup/$(basename "$dump")"
+          docker run --rm --network host \
+            postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+            psql "$RESTORE_DRILL_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc \
+            'SELECT COUNT(*) > 0 FROM "_prisma_migrations" WHERE finished_at IS NOT NULL' | grep -qx t
           gzip --best "$dump"
+          gzip --test "$archive"
           aws s3 cp "$archive" "s3://${BACKUP_BUCKET}/database-backups/$(basename "$archive")" \
             --sse AES256 --only-show-errors
           aws s3api head-object --bucket "$BACKUP_BUCKET" \
             --key "database-backups/$(basename "$archive")" >/dev/null
+          lifecycle="$(aws s3api get-bucket-lifecycle-configuration --bucket "$BACKUP_BUCKET" --output json)"
+          if ! jq -e --argjson days "$BACKUP_RETENTION_DAYS" '
+            any(.Rules[]?; .Status == "Enabled"
+              and ((.Filter.Prefix? // .Prefix? // "") == "database-backups/")
+              and ((.Expiration.Days? // 0) == $days))
+          ' <<<"$lifecycle" >/dev/null; then
+            echo "::error::Expected an enabled ${BACKUP_RETENTION_DAYS}-day lifecycle rule for database-backups/."
+            exit 1
+          fi
           rm -f "$archive"
+
+      # Retention is enforced by the verified lifecycle rule above. The backup
+      # IAM identity needs no ListBucket or delete access, keeping the blast
+      # radius of this credential smaller.

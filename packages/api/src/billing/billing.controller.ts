@@ -471,7 +471,7 @@ export class BillingController {
               ...eventTimestamp,
             },
           });
-        }
+                }
         if (input.eventId && input.eventType) {
           await tx.subscriptionEvent.create({
             data: {
@@ -488,13 +488,6 @@ export class BillingController {
         return { status: input.status };
       });
     } catch (error: any) {
-      // Only swallow the specific replay-dedupe constraint (SubscriptionEvent's
-      // [source, externalEventId] unique index) — a concurrent delivery of the
-      // same webhook event. Any other unique violation (e.g. Subscription's
-      // venueId/externalSubscriptionId uniqueness) indicates a real conflict —
-      // such as a subscription id already bound to a different venue — and
-      // must propagate so the caller (Stripe/RevenueCat) retries the delivery
-      // instead of getting a silent 200 while the venue's status stays stale.
       if (error?.code === 'P2002' && (error.meta?.target as string[] | undefined)?.includes('externalEventId')) {
         return { ok: true, duplicate: true };
       }
@@ -514,10 +507,14 @@ export class BillingController {
         role: { in: ['owner', 'admin'] },
       },
       select: { venueId: true },
+      orderBy: { createdAt: 'desc' },
     });
     const venueIds = Array.from(new Set(profiles.map((profile) => profile.venueId).filter((id): id is string => Boolean(id))));
     const isMulti = (entitlementIds ?? []).some((id) => id.toLowerCase().includes('multi'));
-    if (isMulti || venueIds.length <= 1) return venueIds;
+    if (isMulti) return venueIds;
+    if (venueIds.length === 1) return venueIds;
+    // A user id is not an unambiguous venue binding for a single-venue
+    // purchase. Fail closed instead of assigning the entitlement arbitrarily.
     return [];
   }
 }

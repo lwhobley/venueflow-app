@@ -3,7 +3,7 @@ import { Role, TableStatus, CrmLeadStatus } from '@prisma/client';
 import { canManageRole } from '../../../auth/roles';
 import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../../common/ai-json-parse';
 import { weekStartFor } from '../../../common/pay-period';
-import { assignmentDayKeys, shiftsOverlap } from '../../../common/shift-overlap';
+import { adjacentWeekStarts, previousOvernightFilter, shiftsOverlap } from '../../../common/shift-overlap';
 import { syncTeamMemberCount } from '../../../common/team-sync';
 import { normalizedShiftEnd, zonedDateBounds, zonedIsoDate } from '../../../common/venue-time';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -369,8 +369,16 @@ export class WranglerOperatorService {
       const staffName = this.cleanText(args.staffName);
       let profileIds: string[] | undefined;
       if (staffName) profileIds = (await this.findProfiles(venueId, staffName)).map((p) => p.id);
+      const overnight = previousOvernightFilter(weekStart, dayIndex);
       const shifts = await this.prisma.scheduleShift.findMany({
-        where: { venueId, weekStart, dayIndex, ...(profileIds ? { profileId: { in: profileIds } } : {}) },
+        where: {
+          venueId,
+          ...(profileIds ? { profileId: { in: profileIds } } : {}),
+          OR: [
+            { weekStart, dayIndex },
+            { weekStart: overnight.weekStart, dayIndex: overnight.dayIndex, endMinutes: { gt: 1440 } },
+          ],
+        },
         include: { profile: { select: { id: true, fullName: true } } }, orderBy: { startMinutes: 'asc' }, take: 200,
       });
       return shifts.map((shift) => ({ id: shift.id, date, startMinutes: shift.startMinutes, endMinutes: shift.endMinutes, jobTitle: shift.jobTitle, station: shift.station, status: shift.status, profileId: shift.profileId, staffName: shift.profile?.fullName ?? null }));
@@ -906,7 +914,21 @@ export class WranglerOperatorService {
     let profileIds: string[] | undefined;
     if (staffName) profileIds = (await this.findProfiles(venueId, staffName)).map((p) => p.id);
     const jobTitle = this.cleanText(args.jobTitle);
-    const rows = await this.prisma.scheduleShift.findMany({ where: { venueId, weekStart, dayIndex, ...(profileIds ? { profileId: { in: profileIds } } : {}), ...(jobTitle ? { jobTitle: { contains: jobTitle, mode: 'insensitive' } } : {}) } as any, include: { profile: { select: { fullName: true } } }, orderBy: { startMinutes: 'asc' }, take: 10 });
+    const overnight = previousOvernightFilter(weekStart, dayIndex);
+    const rows = await this.prisma.scheduleShift.findMany({
+      where: {
+        venueId,
+        ...(profileIds ? { profileId: { in: profileIds } } : {}),
+        ...(jobTitle ? { jobTitle: { contains: jobTitle, mode: 'insensitive' } } : {}),
+        OR: [
+          { weekStart, dayIndex },
+          { weekStart: overnight.weekStart, dayIndex: overnight.dayIndex, endMinutes: { gt: 1440 } },
+        ],
+      } as any,
+      include: { profile: { select: { fullName: true } } },
+      orderBy: { startMinutes: 'asc' },
+      take: 10,
+    });
     if (rows.length === 0) throw new NotFoundException('No matching shift found');
     if (rows.length > 1) throw new ConflictException(`I found ${rows.length} matching shifts. Include the staff name, role, or exact shift in your command.`);
     return rows[0];
@@ -925,13 +947,12 @@ export class WranglerOperatorService {
 
   private async assertNoShiftOverlap(venueId: string, profileId: string, weekStart: string, dayIndex: number, startMinutes: number, endMinutes: number, excludeShiftId?: string) {
     const candidate = { weekStart, dayIndex, startMinutes, endMinutes };
-    const dayKeys = assignmentDayKeys(candidate);
     const shifts = await this.prisma.scheduleShift.findMany({
       where: {
         venueId,
         profileId,
         status: { in: ['scheduled', 'covered'] },
-        OR: dayKeys.map((key) => ({ weekStart: key.weekStart ?? null, dayIndex: key.dayIndex })),
+        weekStart: { in: adjacentWeekStarts(weekStart) },
         ...(excludeShiftId ? { id: { not: excludeShiftId } } : {}),
       },
       select: { weekStart: true, dayIndex: true, startMinutes: true, endMinutes: true },

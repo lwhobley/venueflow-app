@@ -146,7 +146,7 @@ describe('AuthGuard', () => {
     await expect(guard.canActivate(makeContext('token-1'))).rejects.toThrow('Session is no longer valid. Please sign in again.');
   });
 
-  it('rejects a session row with no stored token hash instead of skipping the binding check', async () => {
+  it('rejects a session row with no stored token hash', async () => {
     const { guard } = makeGuard({
       session: {
         userId: 'user-1',

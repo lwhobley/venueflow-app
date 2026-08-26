@@ -218,8 +218,9 @@ export async function callAiJsonWithUsage(input: AiJsonCallInput): Promise<AiJso
     if (!response.ok) throw await providerFailure(response, 'AI parsing failed. Try again or enter the details manually.');
     const json: any = await response.json();
     const rawText = json?.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('') ?? '{}';
+    const cleanedText = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     let data: unknown;
-    try { data = JSON.parse(rawText); } catch { throw new BadRequestException('AI parser returned invalid JSON. Try again with clearer input.'); }
+    try { data = JSON.parse(cleanedText); } catch { throw new BadRequestException('AI parser returned invalid JSON. Try again with clearer input.'); }
     const metadata = json?.usageMetadata ?? {};
     const usage: AiUsage = { promptTokens: Number(metadata.promptTokenCount ?? 0), completionTokens: Number(metadata.candidatesTokenCount ?? 0), totalTokens: Number(metadata.totalTokenCount ?? 0), cachedTokens: Number(metadata.cachedContentTokenCount ?? 0) };
     await meter(input, usage, reservation);

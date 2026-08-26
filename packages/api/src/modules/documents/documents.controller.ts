@@ -181,7 +181,9 @@ export class DocumentsController {
       await tx.venueDocument.delete({ where: { id: document.id } });
       return job.id;
     });
-    void this.mediaCleanup.processJob(jobId).catch(() => undefined);
+    void this.mediaCleanup.processJob(jobId).catch((error) => {
+      this.logger.error(`Document media cleanup job ${jobId} failed:`, error instanceof Error ? error.stack : String(error));
+    });
     return { ok: true };
   }
 }

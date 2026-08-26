@@ -168,4 +168,30 @@ describe('StaffRequestsController', () => {
       }),
     });
   });
+
+  it('rejects a manager approving their own time correction', async () => {
+    const now = new Date('2026-08-24T12:00:00.000Z');
+    const request = {
+      id: 'request-self', venueId: 'venue-1', profileId: 'manager-1',
+      kind: 'time_correction', status: 'pending', title: 'Missing punch', details: '',
+      requestedForDate: null, requestedShiftId: null, requestedRangeStart: null,
+      requestedRangeEnd: null, availability: {}, reviewerId: null, reviewedAt: null,
+      responseNotes: null, createdAt: now, updatedAt: now,
+    };
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      staffRequest: { findUnique: vi.fn().mockResolvedValue(request), update: vi.fn() },
+    };
+    const controller = new StaffRequestsController(
+      { $transaction: vi.fn((callback) => callback(tx)) } as any,
+      { notifyProfile: vi.fn() } as any,
+      { sendToProfile: vi.fn() } as any,
+    );
+
+    await expect(controller.reviewStaffRequest(
+      { venueId: 'venue-1', profileId: 'manager-1', role: 'manager' } as any,
+      request.id,
+      { status: 'approved' } as any,
+    )).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });

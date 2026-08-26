@@ -310,6 +310,9 @@ export class StaffRequestsController {
       if (request.status !== 'pending') {
         throw new BadRequestException('Only pending requests can be reviewed');
       }
+      if (body.status === 'approved' && request.kind === 'time_correction' && request.profileId === scope.profileId) {
+        throw new ForbiddenException('A second manager must approve your own time correction.');
+      }
 
       const reviewer = await tx.profile.findUniqueOrThrow({ where: { id: scope.profileId } });
 

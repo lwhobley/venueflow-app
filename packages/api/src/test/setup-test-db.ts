@@ -229,6 +229,7 @@ export async function seedSchedulingFixtures(prisma: PrismaClient) {
     data: {
       venueId: venue.id,
       profileId: null,
+      weekStart: '2026-08-23',
       dayIndex: 1,
       startMinutes: 600,
       endMinutes: 900,

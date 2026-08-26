@@ -1,0 +1,276 @@
+name: Deploy API to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_uri:
+        description: Immutable Artifact Registry image URI including @sha256 digest
+        required: true
+        type: string
+      backups_and_restore_verified:
+        description: Managed/off-site backups are healthy and the latest restore drill passed
+        required: true
+        type: boolean
+      secondary_alerting_verified:
+        description: A staffed secondary production alert destination has been tested
+        required: true
+        type: boolean
+      billing_secrets_verified:
+        description: RevenueCat/Stripe production secrets, products, and no-transfer setting were verified
+        required: true
+        type: boolean
+      attestation_rollout_verified:
+        description: The observe-only device-attestation posture was verified for the supported iOS and Android install base
+        required: true
+        type: boolean
+      attestation_mode:
+        description: Device-attestation posture for clock punches
+        required: true
+        type: choice
+        options:
+          - observe
+      app_attest_team_id:
+        description: Apple Developer Team ID used to verify App Attest assertions
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-api-deploy
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: venuewrangler
+  GCP_REGION: us-east1
+  CLOUD_RUN_SERVICE: venue-wrangler-api
+  CLOUD_RUN_MIGRATION_JOB: venue-wrangler-api-migrate
+  CLOUD_RUN_RETENTION_JOB: venue-wrangler-api-retention
+
+jobs:
+  migrate-and-deploy:
+    environment: production
+    runs-on: ubuntu-latest
+    # Without this a hung curl (no --max-time previously) could hold the
+    # non-cancellable production-api-deploy concurrency group for the 6-hour
+    # runner default — blocking the very deploy that would fix the outage.
+    timeout-minutes: 30
+    steps:
+      - name: Require an immutable image digest
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+          APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
+          BACKUPS_AND_RESTORE_VERIFIED: ${{ inputs.backups_and_restore_verified }}
+          SECONDARY_ALERTING_VERIFIED: ${{ inputs.secondary_alerting_verified }}
+          BILLING_SECRETS_VERIFIED: ${{ inputs.billing_secrets_verified }}
+          ATTESTATION_ROLLOUT_VERIFIED: ${{ inputs.attestation_rollout_verified }}
+          ATTESTATION_MODE: ${{ inputs.attestation_mode }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$IMAGE_URI" == *@sha256:* ]] || {
+            echo "::error::image_uri must include an immutable @sha256 digest"
+            exit 1
+          }
+          [[ "$BACKUPS_AND_RESTORE_VERIFIED" == "true" ]] || { echo "::error::Backups and restore drill must be verified"; exit 1; }
+          [[ "$SECONDARY_ALERTING_VERIFIED" == "true" ]] || { echo "::error::Secondary alerting must be verified"; exit 1; }
+          [[ "$BILLING_SECRETS_VERIFIED" == "true" ]] || { echo "::error::Billing configuration must be verified"; exit 1; }
+          [[ "$ATTESTATION_ROLLOUT_VERIFIED" == "true" ]] || { echo "::error::Device-attestation rollout must be verified"; exit 1; }
+          [[ "$ATTESTATION_MODE" == "observe" ]] || { echo "::error::Enforcement is blocked until Android Play Integrity verification is implemented"; exit 1; }
+          [[ "$APP_ATTEST_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::app_attest_team_id must be a 10-character Apple Developer Team ID"; exit 1; }
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Require Secret Manager references for production credentials
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          restricted=(
+            DATABASE_URL JWT_SECRET
+            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
+            REVENUECAT_API_KEY REVENUECAT_WEBHOOK_SECRET
+            RESEND_API_KEY GEMINI_API_KEY
+          )
+          for name in "${restricted[@]}"; do
+            secret_ref="$(jq -r --arg name "$name" '
+              [.spec.template.spec.containers[0].env[]?
+                | select(.name == $name)
+                | (.valueFrom.secretKeyRef.name // .valueFrom.secretKeyRef.secret // "")]
+              | first // ""
+            ' <<<"$service_json")"
+            if [[ -z "$secret_ref" ]]; then
+              echo "::error::${name} must be supplied by a Cloud Run Secret Manager reference, not a literal environment value."
+              exit 1
+            fi
+          done
+
+      - name: Verify required Cloud Run jobs before changing production
+        run: |
+          set -Eeuo pipefail
+          migration_job_json="$(gcloud run jobs describe "$CLOUD_RUN_MIGRATION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          direct_url_secret_ref="$(jq -r --arg name "DATABASE_DIRECT_URL" '
+            [.. | objects
+              | select(.name? == $name)
+              | (.valueSource.secretKeyRef.secret
+                  // .valueFrom.secretKeyRef.name
+                  // .valueFrom.secretKeyRef.secret
+                  // "")]
+            | first // ""
+          ' <<<"$migration_job_json")"
+          if [[ -z "$direct_url_secret_ref" ]]; then
+            echo "::error::The migration job must supply DATABASE_DIRECT_URL through a Secret Manager reference."
+            exit 1
+          fi
+          gcloud run jobs describe "$CLOUD_RUN_RETENTION_JOB" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" >/dev/null
+
+      - name: Apply migrations in the single-run release job
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+        run: |
+          set -Eeuo pipefail
+          gcloud run jobs update "$CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$IMAGE_URI" \
+            --command npm \
+            --args run,release,-w,@venue-wrangler/api \
+            --quiet
+          gcloud run jobs execute "$CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait
+
+      - name: Update the externally scheduled retention job
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+        run: |
+          set -Eeuo pipefail
+          gcloud run jobs update "$CLOUD_RUN_RETENTION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$IMAGE_URI" \
+            --command npm \
+            --args run,retention,-w,@venue-wrangler/api \
+            --quiet
+
+      - name: Deploy a no-traffic candidate revision
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+          ATTESTATION_MODE: ${{ inputs.attestation_mode }}
+          APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
+        run: |
+          set -Eeuo pipefail
+          release_tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
+          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$IMAGE_URI" \
+            --update-env-vars "TRUST_PROXY_HOPS=1,DEVICE_ATTESTATION_MODE=${ATTESTATION_MODE},APP_ATTEST_TEAM_ID=${APP_ATTEST_TEAM_ID}" \
+            --no-traffic \
+            --tag "$release_tag" \
+            --quiet
+
+      - name: Verify live attestation configuration
+        env:
+          EXPECTED_ATTESTATION_MODE: ${{ inputs.attestation_mode }}
+          EXPECTED_APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          actual_mode="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "DEVICE_ATTESTATION_MODE") | .value' <<<"$service_json")"
+          actual_team_id="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "APP_ATTEST_TEAM_ID") | .value' <<<"$service_json")"
+          [[ "$actual_mode" == "$EXPECTED_ATTESTATION_MODE" ]] || { echo "::error::Live DEVICE_ATTESTATION_MODE does not match the approved mode"; exit 1; }
+          [[ "$actual_team_id" == "$EXPECTED_APP_ATTEST_TEAM_ID" ]] || { echo "::error::Live APP_ATTEST_TEAM_ID does not match the approved Team ID"; exit 1; }
+
+      - name: Verify the candidate revision health endpoint
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          candidate_url="$(jq -r --arg tag "$RELEASE_TAG" '.status.traffic[] | select(.tag == $tag) | .url' <<<"$service_json")"
+          [[ "$candidate_url" == https://* ]] || { echo "::error::Could not resolve candidate revision URL"; exit 1; }
+          curl --fail --connect-timeout 5 --max-time 20 --retry 8 --retry-delay 5 --retry-all-errors "$candidate_url/api/health"
+
+      - name: Capture the revision currently serving traffic before promoting
+        run: |
+          set -Eeuo pipefail
+          service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
+          # .status.traffic is an array and `percent` is optional per entry, so
+          # this filter is a stream that can emit zero, one, or many lines.
+          # Multi-line would corrupt $GITHUB_ENV (a second line with no '='),
+          # failing the step AFTER migrations have already applied. Collect and
+          # assert cardinality instead of assuming one match.
+          mapfile -t revs < <(jq -r '[.status.traffic[] | select(.percent == 100) | .revisionName] | unique | .[]' <<<"$service_json")
+          if (( ${#revs[@]} > 1 )); then
+            echo "::error::Ambiguous serving revision (${revs[*]}) — refusing to promote without an unambiguous rollback target."
+            exit 1
+          fi
+          previous_revision="${revs[0]:-}"
+          if [[ -z "$previous_revision" ]]; then
+            # Either a first-ever deploy (fine) or a split/in-progress rollout
+            # (not fine — promoting would leave no rollback target). Distinguish
+            # them: a service with any existing traffic assignment is the
+            # latter, and should not be steamrolled by an automated deploy.
+            existing_targets="$(jq -r '[.status.traffic[]? | select((.percent // 0) > 0)] | length' <<<"$service_json")"
+            if [[ "$existing_targets" != "0" ]]; then
+              echo "::error::Traffic is split across revisions with none at 100%. Resolve the rollout manually before deploying."
+              exit 1
+            fi
+            echo "::warning::No previously-serving revision found (first deploy) — automatic rollback will be unavailable."
+          fi
+          echo "PREVIOUS_REVISION=${previous_revision}" >> "$GITHUB_ENV"
+
+      - name: Promote the verified candidate to production traffic
+        run: |
+          set -Eeuo pipefail
+          gcloud run services update-traffic "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-tags "${RELEASE_TAG}=100" \
+            --quiet
+
+      - name: Verify the production health endpoint after promotion, rolling back on failure
+        run: |
+          set -Eeuo pipefail
+          # Derive the URL rather than hardcoding one: the shipped app points at
+          # a different hostname form, so a hardcoded URL can validate an
+          # endpoint no client actually hits.
+          service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
+          [[ "$service_url" == https://* ]] || { echo "::error::Could not resolve the service URL"; exit 1; }
+          probe() { curl --fail --silent --show-error -o /dev/null --connect-timeout 10 --max-time 30 --retry 8 --retry-delay 5 --retry-all-errors "$1/api/health"; }
+
+          if probe "$service_url"; then
+            exit 0
+          fi
+          echo "::error::Production health check failed after promoting ${RELEASE_TAG}."
+          if [[ -z "${PREVIOUS_REVISION:-}" ]]; then
+            echo "::error::No previous revision captured - nothing to automatically roll back to. Manual intervention required."
+            exit 1
+          fi
+          echo "::error::Rolling traffic back to ${PREVIOUS_REVISION}."
+          gcloud run services update-traffic "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --to-revisions "${PREVIOUS_REVISION}=100" \
+            --quiet
+
+          # update-traffic returning 0 only means the API accepted the change,
+          # not that the old revision is actually serving healthy traffic.
+          serving="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json | jq -r '[.status.traffic[] | select(.percent == 100) | .revisionName] | first // ""')"
+          if [[ "$serving" != "$PREVIOUS_REVISION" ]]; then
+            echo "::error::Rollback did not take effect (serving='${serving:-none}', expected '${PREVIOUS_REVISION}'). PRODUCTION IS DEGRADED - page on-call."
+            exit 1
+          fi
+          if ! probe "$service_url"; then
+            echo "::error::Rolled back to ${PREVIOUS_REVISION} but health is STILL failing. PRODUCTION IS DEGRADED - page on-call."
+            exit 1
+          fi
+          echo "::error::Rolled back to ${PREVIOUS_REVISION} and confirmed healthy. Failing this deploy for investigation."
+          exit 1

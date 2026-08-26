@@ -244,6 +244,20 @@ describe('buildLaborForecast — totals and events', () => {
     expect(result.totals.gapHours).toBe(0);
   });
 
+  it('splits overnight scheduled hours onto the next calendar day', () => {
+    const result = buildLaborForecast(
+      baseInput({
+        shifts: [{ weekStart: '2024-01-07', dayIndex: 0, startMinutes: 1320, endMinutes: 1560, profileId: 'p1' }],
+        nameById: new Map([['p1', 'Closer']]),
+      }),
+    );
+    const sunday = result.days.find((d) => d.dayIndex === 0)!;
+    const monday = result.days.find((d) => d.dayIndex === 1)!;
+    expect(sunday.scheduledHours).toBe(2);
+    expect(monday.scheduledHours).toBe(2);
+    expect(monday.dayparts.find((dp) => dp.key === 'late')?.scheduledPeople).toBe(1);
+  });
+
   it('treats a venue event as a private-event labor block even with no covers', () => {
     const result = buildLaborForecast(
       baseInput({

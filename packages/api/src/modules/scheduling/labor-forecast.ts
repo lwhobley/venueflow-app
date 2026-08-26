@@ -1,4 +1,5 @@
 import { dayLabel } from '../../common/mappers';
+import { occupiedSlots } from '../../common/shift-overlap';
 import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
 
 // Dayparts are venue-local minute windows. `late` wraps past midnight
@@ -21,8 +22,7 @@ export function minuteInDaypart(mod: number, dp: DaypartWindow): boolean {
     : mod >= dp.startMin || mod < dp.endMin;
 }
 
-/** A shift window [start, end) overlaps a daypart, accounting for wrap. Shifts
- *  never exceed 1440, so the wrap case only needs to test the two sub-ranges. */
+/** A shift window [start, end) overlaps a daypart, accounting for wrap. */
 export function shiftOverlapsDaypart(start: number, end: number, dp: DaypartWindow): boolean {
   return dp.startMin <= dp.endMin
     ? start < dp.endMin && end > dp.startMin
@@ -30,6 +30,7 @@ export function shiftOverlapsDaypart(start: number, end: number, dp: DaypartWind
 }
 
 export type ForecastShift = {
+  weekStart?: string | null;
   dayIndex: number;
   startMinutes: number;
   endMinutes: number;
@@ -95,24 +96,34 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
   const daypartStaff = new Map<number, Map<string, Set<string>>>();
 
   for (const shift of shifts) {
-    const minutes = Math.max(0, shift.endMinutes - shift.startMinutes);
-    const row = scheduledByDay.get(shift.dayIndex) ?? { minutes: 0, people: new Set<string>() };
-    row.minutes += minutes;
-    if (shift.profileId) {
-      row.people.add(shift.profileId);
-      weeklyMinutes.set(shift.profileId, (weeklyMinutes.get(shift.profileId) ?? 0) + minutes);
-    }
-    scheduledByDay.set(shift.dayIndex, row);
-
-    const dpMap = daypartStaff.get(shift.dayIndex) ?? new Map<string, Set<string>>();
-    for (const dp of DAYPARTS) {
-      if (shiftOverlapsDaypart(shift.startMinutes, shift.endMinutes, dp)) {
-        const s = dpMap.get(dp.key) ?? new Set<string>();
-        if (shift.profileId) s.add(shift.profileId);
-        dpMap.set(dp.key, s);
+    const slots = occupiedSlots(shift).filter((slot) =>
+      !shift.weekStart || !slot.weekStart || slot.weekStart === shift.weekStart,
+    );
+    for (const slot of slots) {
+      const minutes = Math.max(0, slot.end - slot.start);
+      const row = scheduledByDay.get(slot.dayIndex) ?? { minutes: 0, people: new Set<string>() };
+      row.minutes += minutes;
+      if (shift.profileId) {
+        row.people.add(shift.profileId);
       }
+      scheduledByDay.set(slot.dayIndex, row);
+
+      const dpMap = daypartStaff.get(slot.dayIndex) ?? new Map<string, Set<string>>();
+      for (const dp of DAYPARTS) {
+        if (shiftOverlapsDaypart(slot.start, slot.end, dp)) {
+          const s = dpMap.get(dp.key) ?? new Set<string>();
+          if (shift.profileId) s.add(shift.profileId);
+          dpMap.set(dp.key, s);
+        }
+      }
+      daypartStaff.set(slot.dayIndex, dpMap);
     }
-    daypartStaff.set(shift.dayIndex, dpMap);
+    if (shift.profileId) {
+      weeklyMinutes.set(
+        shift.profileId,
+        (weeklyMinutes.get(shift.profileId) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes),
+      );
+    }
   }
 
   const demandByDay = new Map<number, { covers: number; privateEvents: number }>();

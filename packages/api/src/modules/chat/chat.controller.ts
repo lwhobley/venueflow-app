@@ -23,6 +23,7 @@ import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
+import { occupiedSlots, previousOvernightFilter } from '../../common/shift-overlap';
 import { tryAcquireSharedLease, releaseSharedLease } from '../../common/shared-lease';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -148,8 +149,16 @@ export class ChatController {
         select: { id: true, jobTitle: true, role: true, allAccess: true },
       }),
       this.prisma.scheduleShift.findMany({
-        where: { venueId, ...(weekStart ? { weekStart } : {}) },
-        select: { profileId: true, dayIndex: true },
+        where: weekStart
+          ? {
+              venueId,
+              OR: [
+                { weekStart },
+                { ...previousOvernightFilter(weekStart, 0), endMinutes: { gt: 1440 } },
+              ],
+            }
+          : { venueId },
+        select: { profileId: true, weekStart: true, dayIndex: true, startMinutes: true, endMinutes: true },
       }),
       this.prisma.conversation.findMany({
         where: { venueId, type: { in: ['role', 'shift'] } },
@@ -189,8 +198,10 @@ export class ChatController {
     const dayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const shiftsByDay = Array.from({ length: 7 }, () => [] as string[]);
     for (const s of allShifts) {
-      if (s.profileId) {
-        shiftsByDay[s.dayIndex].push(s.profileId);
+      if (!s.profileId) continue;
+      for (const slot of occupiedSlots({ ...s, weekStart: s.weekStart ?? weekStart ?? null })) {
+        if (weekStart && slot.weekStart && slot.weekStart !== weekStart) continue;
+        shiftsByDay[slot.dayIndex].push(s.profileId);
       }
     }
 
@@ -392,24 +403,27 @@ export class ChatController {
     });
     if (!other) throw new BadRequestException('User is not an active member of this venue');
 
-    const existing = await this.prisma.conversation.findFirst({
-      where: {
-        venueId: scope.venueId,
-        type: 'dm',
-        memberIds: { hasEvery: [scope.profileId, body.targetProfileId] },
-      },
-    });
-    if (existing) return { conversationId: existing.id };
+    const pairKey = [scope.profileId, body.targetProfileId].sort().join(':');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-dm:${scope.venueId}:${pairKey}`}))`;
+      const existing = await tx.conversation.findFirst({
+        where: {
+          venueId: scope.venueId,
+          type: 'dm',
+          memberIds: { hasEvery: [scope.profileId, body.targetProfileId] },
+        },
+      });
+      if (existing) return { conversationId: existing.id };
 
-    const conv = await this.prisma.conversation.create({
-      data: {
-        venueId: scope.venueId,
-        type: 'dm',
-        memberIds: [scope.profileId, body.targetProfileId],
-      },
+      const conv = await tx.conversation.create({
+        data: {
+          venueId: scope.venueId,
+          type: 'dm',
+          memberIds: [scope.profileId, body.targetProfileId],
+        },
+      });
+      return { conversationId: conv.id };
     });
-
-    return { conversationId: conv.id };
   }
 
   @RequireSubscription('active')

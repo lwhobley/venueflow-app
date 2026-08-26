@@ -4,14 +4,18 @@
 
 const FALLBACK_TZ = 'UTC';
 
-function safeTimeZone(timeZone: string | null | undefined): string {
-  if (!timeZone) return FALLBACK_TZ;
+export function isIanaTimeZone(timeZone: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone });
-    return timeZone;
+    return true;
   } catch {
-    return FALLBACK_TZ;
+    return false;
   }
+}
+
+function safeTimeZone(timeZone: string | null | undefined): string {
+  if (!timeZone || !isIanaTimeZone(timeZone)) return FALLBACK_TZ;
+  return timeZone;
 }
 
 // Milliseconds the zone is ahead of UTC at the given instant (DST-aware).

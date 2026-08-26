@@ -185,4 +185,103 @@ describe('BillingController applySubscription P2002 handling', () => {
 
     await expect(controller.applyStripeSubscription(input)).rejects.toBe(error);
   });
+
+  it('ignores single-venue RevenueCat events when the owner has more than one venue', async () => {
+    const prisma = {
+      venue: { findUnique: vi.fn().mockResolvedValue(null) },
+      profile: {
+        findMany: vi.fn().mockResolvedValue([
+          { venueId: 'venue-latest', createdAt: new Date(2000) },
+          { venueId: 'venue-older', createdAt: new Date(1000) },
+        ]),
+      },
+      $transaction: vi.fn().mockImplementation(async (cb: any) => cb({
+        $executeRaw: vi.fn().mockResolvedValue(undefined),
+        venue: { findUnique: vi.fn().mockResolvedValue({ id: 'venue-latest' }), update: vi.fn().mockResolvedValue({}) },
+        subscription: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
+        subscriptionEvent: { create: vi.fn().mockResolvedValue({}) },
+      })),
+    };
+    const config = {
+      get: vi.fn((key: string) => {
+        if (key === 'REVENUECAT_WEBHOOK_SECRET') return 'secret';
+        if (key === 'REVENUECAT_ALLOWED_PRODUCT_IDS') return 'com.venuewrangler.monthly';
+        return undefined;
+      }),
+    };
+    const controller = new BillingController(prisma as any, config as any);
+
+    const result = await controller.revenueCatWebhook(
+      { ip: '127.0.0.1' } as any,
+      'Bearer secret',
+      {
+        event: {
+          id: 'evt-1',
+          type: 'INITIAL_PURCHASE',
+          app_user_id: 'user-multi-owner',
+          product_id: 'com.venuewrangler.monthly',
+          purchased_at_ms: Date.now(),
+          expiration_at_ms: Date.now() + 86400000,
+        },
+      } as any,
+    );
+    expect(result).toEqual({ ok: true, ignored: true });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('applies a multi-venue RevenueCat entitlement to every owned venue', async () => {
+    const updatedVenueIds: string[] = [];
+    const prisma = {
+      venue: { findUnique: vi.fn().mockResolvedValue(null) },
+      profile: { findMany: vi.fn().mockResolvedValue([{ venueId: 'venue-a' }, { venueId: 'venue-b' }]) },
+      $transaction: vi.fn().mockImplementation(async (cb: any) => cb({
+        $executeRaw: vi.fn().mockResolvedValue(undefined),
+        venue: {
+          findUnique: vi.fn(({ where }: any) => Promise.resolve({ id: where.id })),
+          update: vi.fn(({ where }: any) => {
+            updatedVenueIds.push(where.id);
+            return Promise.resolve({});
+          }),
+        },
+        subscription: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
+        subscriptionEvent: { create: vi.fn().mockResolvedValue({}) },
+      })),
+    };
+    const config = {
+      get: vi.fn((key: string) => {
+        if (key === 'REVENUECAT_WEBHOOK_SECRET') return 'secret';
+        if (key === 'REVENUECAT_ALLOWED_PRODUCT_IDS') return 'com.venuewrangler.multivenue.399';
+        return undefined;
+      }),
+    };
+    const controller = new BillingController(prisma as any, config as any);
+
+    await controller.revenueCatWebhook(
+      { ip: '127.0.0.1' } as any,
+      'Bearer secret',
+      {
+        event: {
+          id: 'evt-multi',
+          type: 'INITIAL_PURCHASE',
+          app_user_id: 'user-multi-owner',
+          product_id: 'com.venuewrangler.multivenue.399',
+          entitlement_ids: ['multi_venue'],
+        },
+      } as any,
+    );
+
+    expect(updatedVenueIds).toEqual(['venue-a', 'venue-b']);
+  });
+
+  it('does not resolve unknown Stripe references through coincidental profile user ids', async () => {
+    const prisma = {
+      subscription: { findFirst: vi.fn().mockResolvedValue(null) },
+      profile: { findMany: vi.fn().mockResolvedValue([{ venueId: 'venue-wrong' }]) },
+    };
+    const controller = new BillingController(prisma as any, { get: vi.fn() } as any);
+
+    await expect((controller as any).resolveStripeVenueIdByRefs(null, 'sub_collision', 'cus_collision'))
+      .resolves.toBeNull();
+    expect(prisma.profile.findMany).not.toHaveBeenCalled();
+  });
 });
