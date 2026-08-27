@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 function source(relativePath: string): string {
-  return readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
+  return readFileSync(join(process.cwd(), relativePath), 'utf8');
 }
 
 describe('production readiness regressions', () => {
