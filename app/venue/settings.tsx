@@ -44,7 +44,7 @@ function VenueSettingsScreen() {
     setName(venue.name);
     setLat(String(venue.latitude));
     setLng(String(venue.longitude));
-    setRadius(venue.geofence_radius_m);
+    setRadius(venue.geofence_radius_m ?? 120);
     setTimezone(venue.timezone ?? '');
   }, [venue]);
 

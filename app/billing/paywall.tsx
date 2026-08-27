@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
@@ -24,7 +24,7 @@ const MULTI_PRICE_LABEL = '$399.00';
 // (no native key), or before the App Store subscription is approved. Keeps
 // default plans visible so the screen is never blank. Real packages from
 // getOfferingPackages() override this whenever they're available.
-const FALLBACK_TIERS: (PurchasePackage & { planKey?: 'single' | 'multi_venue'; description?: string })[] = [
+const FALLBACK_TIERS: (PurchasePackage & { planKey: 'single' | 'multi_venue'; description: string })[] = [
   {
     id: 'venueflow-monthly',
     title: 'Single Venue Standard',
@@ -35,7 +35,7 @@ const FALLBACK_TIERS: (PurchasePackage & { planKey?: 'single' | 'multi_venue'; d
   },
   {
     id: 'venueflow-multi-venue-5',
-    title: 'Multi-Venue Pro (Up to 5 Venues)',
+    title: 'Multi-Venue Pro',
     priceString: MULTI_PRICE_LABEL,
     productId: 'com.venuewrangler.multivenue.399',
     planKey: 'multi_venue',
@@ -79,15 +79,7 @@ export default function PaywallScreen() {
     };
   }, []);
 
-  // useState alone doesn't guard re-entry: setBusy(id) doesn't apply until the
-  // next render, so two taps in the same tick both pass before `disabled`
-  // flips. These call real purchase APIs (StoreKit / Stripe checkout), so a
-  // race here can open two purchase sheets or two checkout sessions.
-  const busyRef = useRef(false);
-
   const buy = async (id: string, productId?: string) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
     setBusy(id);
     setError(null);
     try {
@@ -104,38 +96,29 @@ export default function PaywallScreen() {
       // Swallow the user-cancelled case quietly.
       if (!/cancel/i.test(msg)) setError(msg);
     } finally {
-      busyRef.current = false;
       setBusy(null);
     }
   };
 
   const restore = async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
     setBusy('restore');
     setError(null);
     try {
-      const restored = await restorePurchases();
-      if (restored.active) {
-        await appApi.syncAppleSubscription({
-          productId: restored.productId || 'com.venuewrangler.monthly',
-          entitlementId: restored.entitlementId || 'pro',
-        });
+      const active = await restorePurchases();
+      if (active) {
+        await appApi.syncAppleSubscription({ productId: 'com.venuewrangler.monthly', entitlementId: 'pro' });
         router.replace('/(tabs)/home');
       }
       else setError(t('paywall.restoreNoneFound'));
     } catch (e) {
       setError(e instanceof Error ? e.message : t('paywall.restoreFailed'));
     } finally {
-      busyRef.current = false;
       setBusy(null);
     }
   };
 
-  const buyWithStripe = async (plan: 'single' | 'multi_venue' = 'single') => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy('stripe_' + plan);
+  const buyWithStripe = async (plan: 'single' | 'multi_venue') => {
+    setBusy(`stripe_${plan}`);
     setError(null);
     try {
       const { url } = await appApi.createStripeCheckout({ plan });
@@ -143,7 +126,6 @@ export default function PaywallScreen() {
     } catch (e) {
       setError(e instanceof Error ? e.message : t('paywall.purchaseFailed'));
     } finally {
-      busyRef.current = false;
       setBusy(null);
     }
   };
@@ -167,30 +149,38 @@ export default function PaywallScreen() {
 
       {!PURCHASES_SUPPORTED ? (
         <View style={{ gap: spacing.md }}>
-          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>Single Venue Standard</Text>
-              <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{SINGLE_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-              <Text style={{ color: colors.muted }}>Manage 1 venue with full operational tools & unlimited staff.</Text>
-              <Button mode="contained" buttonColor={colors.primary} loading={busy === 'stripe_single'} disabled={Boolean(busy)} onPress={() => void buyWithStripe('single')}>
-                {ctaLabel} — Single Venue
-              </Button>
-            </Card.Content>
-          </Card>
-
-          <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp, borderWidth: 1.5, borderColor: colors.primary }}>
-            <Card.Content style={{ gap: spacing.sm }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>Multi-Venue Pro</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary, backgroundColor: colors.surface, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>UP TO 5 VENUES</Text>
-              </View>
-              <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{MULTI_PRICE_LABEL}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
-              <Text style={{ color: colors.muted }}>Manage up to 5 venues under a single organization account.</Text>
-              <Button mode="contained" buttonColor={colors.primary} loading={busy === 'stripe_multi_venue'} disabled={Boolean(busy)} onPress={() => void buyWithStripe('multi_venue')}>
-                {ctaLabel} — Multi-Venue Pro ($399/mo)
-              </Button>
-            </Card.Content>
-          </Card>
+          {FALLBACK_TIERS.map((tier) => {
+            const isMulti = tier.planKey === 'multi_venue';
+            return (
+              <Card
+                key={tier.id}
+                style={{
+                  backgroundColor: colors.surface,
+                  borderRadius: radius.sharp,
+                  borderWidth: isMulti ? 1.5 : StyleSheet.hairlineWidth,
+                  borderColor: isMulti ? colors.primary : colors.border,
+                }}
+              >
+                <Card.Content style={{ gap: spacing.sm }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                    <Text variant="titleMedium" style={{ flex: 1, fontWeight: '800', color: colors.primary }}>{tier.title}</Text>
+                    {isMulti ? <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>UP TO 5 VENUES</Text> : null}
+                  </View>
+                  <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{tier.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
+                  <Text style={{ color: colors.muted }}>{tier.description}</Text>
+                  <Button
+                    mode="contained"
+                    buttonColor={colors.primary}
+                    loading={busy === `stripe_${tier.planKey}`}
+                    disabled={Boolean(busy)}
+                    onPress={() => void buyWithStripe(tier.planKey)}
+                  >
+                    {ctaLabel} — {isMulti ? 'Multi-Venue Pro ($399/mo)' : 'Single Venue'}
+                  </Button>
+                </Card.Content>
+              </Card>
+            );
+          })}
         </View>
       ) : loading ? (
         <Text style={{ color: colors.muted }}>{t('paywall.loadingPricing')}</Text>
@@ -200,8 +190,8 @@ export default function PaywallScreen() {
           return (
             <Card key={pkg.id} style={{ backgroundColor: colors.surface, borderRadius: radius.soft, borderWidth: isMulti ? 1.5 : StyleSheet.hairlineWidth, borderColor: isMulti ? colors.primary : colors.border }}>
               <Card.Content style={{ gap: spacing.sm }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text variant="titleMedium" style={{ fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                  <Text variant="titleMedium" style={{ flex: 1, fontWeight: '800', color: colors.primary }}>{pkg.title}</Text>
                   {isMulti ? <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>UP TO 5 VENUES</Text> : null}
                 </View>
                 <Text style={{ color: colors.charcoal, fontSize: 24, fontWeight: '800' }}>{pkg.priceString}<Text style={{ color: colors.muted, fontSize: 14, fontWeight: '400' }}> / month</Text></Text>
@@ -215,10 +205,10 @@ export default function PaywallScreen() {
                   mode="contained"
                   buttonColor={colors.primary}
                   loading={busy === pkg.id}
-                  disabled={!busy && !livePackagesLoaded ? false : !!busy}
+                  disabled={Boolean(busy)}
                   onPress={() => void buy(pkg.id, pkg.productId)}
                 >
-                  {ctaLabel} {isMulti ? '— Multi-Venue ($399/mo)' : ''}
+                  {ctaLabel}{isMulti ? ' — Multi-Venue ($399/mo)' : ''}
                 </Button>
               </Card.Content>
             </Card>

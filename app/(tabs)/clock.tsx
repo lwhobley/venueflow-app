@@ -118,7 +118,15 @@ function ClockScreen() {
     };
   }, []);
 
-  const canClock = Boolean(activeVenue && location && isWithinGeofence(location, activeVenue));
+  const canClock = Boolean(
+    activeVenue &&
+      location &&
+      isWithinGeofence(location, {
+        latitude: activeVenue.latitude,
+        longitude: activeVenue.longitude,
+        geofenceRadiusM: activeVenue.geofenceRadiusM ?? 120,
+      })
+  );
 
   const onPunch = async () => {
     if (!activeVenue || busyRef.current) return;
@@ -127,7 +135,13 @@ function ClockScreen() {
     try {
       const fresh = await getPreciseLocation();
       setLocation(fresh);
-      if (!isWithinGeofence(fresh, activeVenue)) {
+      if (
+        !isWithinGeofence(fresh, {
+          latitude: activeVenue.latitude,
+          longitude: activeVenue.longitude,
+          geofenceRadiusM: activeVenue.geofenceRadiusM ?? 120,
+        })
+      ) {
         Alert.alert(
           t('clock.punchFailedTitle'),
           t('clock.mustBeWithin', { radius: activeVenue.geofenceRadiusM ?? 120, venue: activeVenue.name ?? t('common.yourVenue') }),
