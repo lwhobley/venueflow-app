@@ -165,7 +165,7 @@ function VenueSettingsScreen() {
       <AppCard>
           <SectionHeader title={t('venueSettings.detailsSection')} />
           <TextInput label={t('venueSettings.venueNameLabel')} value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <TextInput label="Timezone (IANA)" value={timezone} onChangeText={setTimezone} mode="outlined" autoCapitalize="none" placeholder="America/New_York" style={{ backgroundColor: colors.surf[...]
+          <TextInput label="Timezone (IANA)" value={timezone} onChangeText={setTimezone} mode="outlined" autoCapitalize="none" placeholder="America/New_York" style={{ backgroundColor: colors.surface }} />
       </AppCard>
 
       <AppCard>
@@ -189,8 +189,8 @@ function VenueSettingsScreen() {
             {t('venueSettings.useMyLocation')}
           </Button>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <TextInput label={t('venueSettings.latitudeLabel')} value={lat} onChangeText={setLat} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, ba[...]
-            <TextInput label={t('venueSettings.longitudeLabel')} value={lng} onChangeText={setLng} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, b[...]
+            <TextInput label={t('venueSettings.latitudeLabel')} value={lat} onChangeText={setLat} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
+            <TextInput label={t('venueSettings.longitudeLabel')} value={lng} onChangeText={setLng} mode="outlined" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={{ flex: 1, backgroundColor: colors.surface }} />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ width: 110 }}>{t('venueSettings.geofenceRadius')}</Text>
