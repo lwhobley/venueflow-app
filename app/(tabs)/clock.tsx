@@ -1,15 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, View, Linking, TextInput } from 'react-native';
 import { Card, Text } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
 import { formatTime, errorMessage } from '../../lib/format';
 import { getPreciseLocation, isWithinGeofence, type CurrentLocation } from '../../lib/location';
-import { appApi, useApiMutation, useApiQuery } from '../../lib/api-client';
+import { ApiError, appApi, useApiMutation, type ApiClockBreak } from '../../lib/api-client';
+import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { api } from '../../lib/railway-api';
+import { attestPayload, resetAttestationKey } from '../../lib/attestation';
+import { overnightAwareRange } from '../../lib/zoned-datetime';
+import { venueFromApi } from '../../lib/session-from-auth';
 import { useI18n } from '../../lib/i18n';
 
 type ActiveClockEntry = {
@@ -21,7 +27,7 @@ type ActiveClockEntry = {
   clockInLat?: number | null;
   clockInLng?: number | null;
   clockInAccuracyM?: number | null;
-  breaks?: any[];
+  breaks?: ApiClockBreak[];
 };
 
 type ManagerAlert = {
@@ -48,7 +54,7 @@ function fmtDate(d: Date) {
   return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-export default function ClockScreen() {
+function ClockScreen() {
   const { t } = useI18n();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -57,16 +63,16 @@ export default function ClockScreen() {
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [now, setNow] = useState(() => new Date());
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
-  const { data: clockBoard } = useApiQuery<any | null>(['time-clock', 'board'], '/v1/time-clock/board', isReady);
-  const { data: dashboard } = useApiQuery<any | null>(['app', 'dashboard'], '/v1/app/dashboard', isReady);
-  const { data: timeClock } = useApiQuery<any | null>(['time-clock', 'me'], '/v1/time-clock/me', isReady);
+  const clockBoard = useQuery(api.app.getClockBoard, isReady ? {} : 'skip') as any;
+  const dashboard = useQuery(api.app.getDashboard, isReady ? {} : 'skip') as any;
+  const timeClock = useQuery(api.app.getMyTimeClock, isReady ? {} : 'skip') as any;
 
-  const clockInvalidations = [['time-clock', 'board'], ['time-clock', 'me'], ['app', 'dashboard']];
-  const clockIn = useApiMutation(appApi.clockIn, clockInvalidations);
-  const clockOut = useApiMutation(appApi.clockOut, clockInvalidations);
-  const breakStart = useApiMutation(appApi.breakStart, clockInvalidations);
-  const breakEnd = useApiMutation(appApi.breakEnd, clockInvalidations);
+  const clockIn = useMutation(api.app.clockIn);
+  const clockOut = useMutation(api.app.clockOut);
+  const breakStart = useMutation(api.app.breakStart);
+  const breakEnd = useMutation(api.app.breakEnd);
   const createCorrectionRequest = useApiMutation(appApi.createStaffRequest, [['app', 'listStaffRequests']]);
 
   const [showCorrection, setShowCorrection] = useState(false);
@@ -80,19 +86,15 @@ export default function ClockScreen() {
   const isAdmin = salaried;
 
   const rawVenue = venue ?? clockBoard?.venue ?? dashboard?.venue ?? null;
-  const activeVenue = useMemo(() => {
-    if (!rawVenue) return null;
-    const geofenceRadiusM = 'geofenceRadiusM' in rawVenue ? rawVenue.geofenceRadiusM : rawVenue.geofence_radius_m;
-    return { name: rawVenue.name, latitude: rawVenue.latitude, longitude: rawVenue.longitude, geofenceRadiusM };
-  }, [rawVenue]);
+  const activeVenue = useMemo(() => (rawVenue ? venueFromApi(rawVenue) : null), [rawVenue]);
 
   const activeClockEntries = (clockBoard?.activeClockEntries ?? []) as ActiveClockEntry[];
   const managerAlerts = (clockBoard?.managerAlerts ?? []) as ManagerAlert[];
   const isClockedIn = timeClock?.isClockedIn ?? Boolean(clockBoard?.employeeEntry);
 
   const employeeEntry = clockBoard?.employeeEntry;
-  const breaks = (employeeEntry?.breaks || []) as any[];
-  const activeBreak = breaks.find((b: any) => b.endAt === null);
+  const breaks = (employeeEntry?.breaks || []) as ApiClockBreak[];
+  const activeBreak = breaks.find((b) => b.endAt === null);
   const isOnBreak = Boolean(activeBreak);
   const breakType = activeBreak?.type;
 
@@ -119,42 +121,73 @@ export default function ClockScreen() {
   const canClock = Boolean(activeVenue && location && isWithinGeofence(location, activeVenue));
 
   const onPunch = async () => {
-    if (!location || !canClock || busy) return;
+    if (!activeVenue || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
-      const args = { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy, mocked: location.mocked };
-      if (isClockedIn) await clockOut.mutateAsync(args);
-      else await clockIn.mutateAsync(args);
+      const fresh = await getPreciseLocation();
+      setLocation(fresh);
+      if (!isWithinGeofence(fresh, activeVenue)) {
+        Alert.alert(
+          t('clock.punchFailedTitle'),
+          t('clock.mustBeWithin', { radius: activeVenue.geofenceRadiusM ?? 120, venue: activeVenue.name ?? t('common.yourVenue') }),
+        );
+        return;
+      }
+      const punch = { lat: fresh.latitude, lng: fresh.longitude, accuracy: fresh.accuracy, mocked: fresh.mocked };
+      const submit = async () => {
+        // Prove this punch came from a genuine build on real hardware. Returns
+        // null on devices that cannot attest; the server still accepts those
+        // until ATTESTATION_ENFORCED is turned on.
+        const attestation = await attestPayload(punch);
+        const args = { ...punch, ...(attestation ? { attestation } : {}) };
+        if (isClockedIn) await clockOut(args);
+        else await clockIn(args);
+      };
+      try {
+        await submit();
+      } catch (error) {
+        // A shared-device account switch can invalidate a previously cached
+        // App Attest key. Re-enrol and retry exactly once on that server signal.
+        if (!(error instanceof ApiError) || !/not registered for attestation/i.test(error.message)) throw error;
+        await resetAttestationKey();
+        await submit();
+      }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert(t('clock.punchFailedTitle'), errorMessage(error, t('clock.punchFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   const onStartBreak = async (type: 'paid' | 'unpaid') => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
-      await breakStart.mutateAsync({ type });
+      await breakStart({ type });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert(t('clock.breakFailedTitle'), errorMessage(error, t('clock.breakFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   const onEndBreak = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
-      await breakEnd.mutateAsync({});
+      await breakEnd({});
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Alert.alert(t('clock.endBreakFailedTitle'), errorMessage(error, t('clock.endBreakFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -172,10 +205,19 @@ export default function ClockScreen() {
       Alert.alert(t('clock.errorTitle'), t('clock.timeFormatError'));
       return;
     }
+    // Shares busyRef with the punch/break handlers on purpose: without it a
+    // correction could be submitted twice (double-crediting hours once a
+    // manager approves both), and a punch could run concurrently with it.
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
-      const clockInAt = new Date(`${correctionDate}T${correctionInTime}:00`).getTime();
-      const clockOutAt = new Date(`${correctionDate}T${correctionOutTime}:00`).getTime();
+      const { start: clockInAt, end: clockOutAt } = overnightAwareRange(
+        correctionDate,
+        correctionInTime,
+        correctionOutTime,
+        venue?.timezone,
+      );
       if (isNaN(clockInAt) || isNaN(clockOutAt)) {
         Alert.alert(t('clock.errorTitle'), t('clock.invalidDateTime'));
         return;
@@ -204,6 +246,7 @@ export default function ClockScreen() {
     } catch (error) {
       Alert.alert(t('clock.submissionFailedTitle'), errorMessage(error, t('clock.submissionFailedDefault')));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -537,4 +580,8 @@ export default function ClockScreen() {
       ) : null}
     </ScrollView>
   );
+}
+
+export default function ClockScreenWrapper() {
+  return <ScreenErrorBoundary><ClockScreen /></ScreenErrorBoundary>;
 }

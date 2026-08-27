@@ -10,6 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsInt,
@@ -95,11 +96,18 @@ class TableDto {
   isReservable?: boolean;
 
   @IsArray()
+  @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => TableChairDto)
   @IsOptional()
   chairs?: TableChairDto[];
 }
+
+// Generous ceiling on the number of tables/chairs a single floor plan save can
+// carry — real venues top out in the low hundreds. Without this a payload
+// under the 1mb body limit could still hold thousands of tables, each driving
+// its own sequential write inside one locked transaction (see floor.service).
+const MAX_FLOOR_PLAN_TABLES = 500;
 
 class SaveFloorPlanDto {
   @IsString()
@@ -119,11 +127,13 @@ class SaveFloorPlanDto {
   backgroundImageUrl?: string | null;
 
   @IsArray()
+  @ArrayMaxSize(MAX_FLOOR_PLAN_TABLES)
   @ValidateNested({ each: true })
   @Type(() => TableDto)
   tables!: TableDto[];
 
   @IsArray()
+  @ArrayMaxSize(MAX_FLOOR_PLAN_TABLES * 20)
   @ValidateNested({ each: true })
   @Type(() => TableChairDto)
   @IsOptional()
@@ -162,6 +172,7 @@ class AssignReservationDto {
   reservationId!: string;
 
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   tableIds!: string[];
 
@@ -184,6 +195,7 @@ class AssignWaitlistDto {
   waitlistId!: string;
 
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   tableIds!: string[];
 
@@ -203,6 +215,7 @@ class AssignWaitlistDto {
 
 class MergeTablesDto {
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   tableIds!: string[];
 

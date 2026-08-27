@@ -1,49 +1,43 @@
 name: Branch API Parity Check
 
-# packages/api is meant to be identical between `main` (deployed to Railway)
-# and `desktop-web` (deployed to Cloudflare Pages, but sharing the same
+# packages/api is meant to be identical between `main` (deployed to Cloud
+# Run) and `desktop-web` (deployed to Cloudflare Pages, but sharing the same
 # backend source so EAS/mobile builds taken from that branch stay correct).
-# A real production bug (floor module routes + response shapes) shipped
-# because a fix landed on desktop-web and was never ported to main — this
-# check catches that class of drift the moment it happens instead of weeks
-# later. It only reports; it does not gate merges on either branch.
+# A real production bug shipped because a backend fix landed on one branch
+# and was never ported to the other. Persistent divergence is therefore a
+# failure, not an informational success.
 
 on:
-  # NOT triggered on push: the normal flow is merge to main -> then port to
-  # desktop-web, so a push-triggered run would fail by design in that window
-  # every single merge, training people to ignore it. Run on a schedule (a
-  # standing divergence past the daily check is a genuine "you forgot to port"
-  # signal) plus on-demand.
   schedule:
     - cron: '0 13 * * *'
   workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   check-parity:
     name: Diff packages/api between main and desktop-web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Diff packages/api/** between branches
+        shell: bash
         run: |
+          set -Eeuo pipefail
           git fetch origin main desktop-web --quiet
-          DIFF=$(git diff origin/main origin/desktop-web -- packages/api/ | cat)
-          if [ -n "$DIFF" ]; then
-            echo "## ⚠️ packages/api has diverged between main and desktop-web" >> "$GITHUB_STEP_SUMMARY"
-            echo '```diff' >> "$GITHUB_STEP_SUMMARY"
-            echo "$DIFF" | head -c 60000 >> "$GITHUB_STEP_SUMMARY"
+          if ! git diff --quiet origin/main origin/desktop-web -- packages/api/; then
+            echo "## ❌ packages/api has diverged between main and desktop-web" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            # `| head` makes git exit 141 on SIGPIPE; under pipefail that aborts
+            # the step mid-summary, leaving the fenced block unclosed.
+            { git diff --name-status origin/main origin/desktop-web -- packages/api/ || true; } | head -200 >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            echo ""
-            echo "packages/api differs between main and desktop-web:"
-            echo "$DIFF"
-            echo ""
-            echo "If this is a deliberate in-progress change, ignore this run."
-            echo "If a real fix landed on one branch and not the other, cherry-pick it now."
-            # This scheduled workflow is an informational drift report. The
-            # production branch remains merge-gated by its own CI checks.
-            exit 0
+            echo "packages/api differs between main and desktop-web. Reconcile the branches before treating parity as healthy."
+            { git diff --name-status origin/main origin/desktop-web -- packages/api/ || true; } | head -200
+            exit 1
           fi
           echo "packages/api is in sync between main and desktop-web." >> "$GITHUB_STEP_SUMMARY"

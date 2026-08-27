@@ -38,6 +38,7 @@ export default function EventCommandCenterScreen() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const prepareWorkspace = async () => {
+    if (generationState === 'loading') return;
     if (!eventId) {
       setGenerationState('error');
       return;

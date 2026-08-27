@@ -1,12 +1,13 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Dialog, HelperText, IconButton, Portal, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
-import { resolveMediaUrl } from '../../lib/api-client';
+import { apiRequest, resolveMediaUrl } from '../../lib/api-client';
 import type { Id } from '../../lib/ids';
 import { accents, colors, radius, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
@@ -176,7 +177,7 @@ function ActionCard({
   );
 }
 
-export default function ConversationScreen() {
+function ConversationScreen() {
   const { t } = useI18n();
   const params = useLocalSearchParams<{ id: string }>();
   const { isReady } = useAuthenticatedSession();
@@ -197,14 +198,30 @@ export default function ConversationScreen() {
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Synchronous guards — a useState check doesn't apply until the next render,
+  // so two taps in the same tick both pass it.
+  const sendingRef = useRef(false);
+  const deletingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [reactMsgId, setReactMsgId] = useState<string | null>(null);
   const [showShareDialog, setShowShareDialog] = useState(false);
 
+  // Older pages loaded by "Load earlier messages", kept separate from the
+  // live query's tail page so paging back never disturbs the auto-scroll
+  // that runs when a new message arrives (see the effect below, which keys
+  // off the tail page only).
+  const [olderMessages, setOlderMessages] = useState<ChatMessage[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
   const scrollRef = useRef<ScrollView>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
-  const messages = (data?.messages ?? []) as ChatMessage[];
+  const latestMessages = (data?.messages ?? []) as ChatMessage[];
+  const messages = useMemo(
+    () => [...olderMessages, ...latestMessages],
+    [olderMessages, latestMessages],
+  );
   messagesRef.current = messages;
   const readReceipts = (data?.readReceipts ?? []) as Array<{ name: string; readAt: number }>;
   const mineShifts = myScheduleData?.mine ?? [];
@@ -212,9 +229,41 @@ export default function ConversationScreen() {
   const renderItems = useMemo(() => groupMessages(messages, t), [messages, t]);
 
   useEffect(() => {
+    setOlderMessages([]);
+    setHasMoreOlder(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    // Only the initial (unpaginated) load reports hasMore for the whole
+    // history; once older pages are loaded, loadEarlier keeps this in sync
+    // from each page's own hasMore instead.
+    if (olderMessages.length === 0) setHasMoreOlder(Boolean(data?.hasMore));
+  }, [data?.hasMore, olderMessages.length]);
+
+  const loadEarlier = async () => {
+    const oldestId = messages[0]?.id;
+    if (!conversationId || !oldestId || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await apiRequest<{ messages: ChatMessage[]; hasMore: boolean }>(
+        `/v1/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(oldestId)}`,
+      );
+      setOlderMessages((prev) => [...page.messages, ...prev]);
+      setHasMoreOlder(page.hasMore);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  useEffect(() => {
+    // Keyed on the live tail page only (not the combined `messages`, which
+    // also grows when older history is paged in) so loading earlier history
+    // never yanks the scroll position back down to the bottom.
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 70);
     return () => clearTimeout(timer);
-  }, [messages.length]);
+  }, [latestMessages.length]);
 
   useEffect(() => {
     if (!toast) return;
@@ -224,7 +273,8 @@ export default function ConversationScreen() {
 
   const onSend = async () => {
     const trimmed = text.trim();
-    if (!trimmed || !conversationId || sending) return;
+    if (sendingRef.current || !trimmed || !conversationId) return;
+    sendingRef.current = true;
     setText('');
     setSending(true);
     setError(null);
@@ -234,6 +284,7 @@ export default function ConversationScreen() {
       setText(trimmed);
       setError(errorMessage(e, t('chatThread.errorSend')));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -282,8 +333,9 @@ export default function ConversationScreen() {
       base64: true,
     });
     const asset = result.canceled ? null : result.assets[0];
-    if (!asset?.base64 || !conversationId) return;
+    if (!asset?.base64 || !conversationId || sendingRef.current) return;
 
+    sendingRef.current = true;
     setError(null);
     setSending(true);
     try {
@@ -295,6 +347,7 @@ export default function ConversationScreen() {
     } catch (e) {
       setError(errorMessage(e, t('chatThread.errorUpload')));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -311,15 +364,30 @@ export default function ConversationScreen() {
     }
   };
 
-  const onDeleteChat = async () => {
+  // Irreversible: the header trash icon deleted the conversation for everyone
+  // on a single tap, with no prompt and no re-entrancy guard.
+  const onDeleteChat = () => {
     if (!conversationId) return;
-    setError(null);
-    try {
-      await deleteConversation({ conversationId });
-      router.back();
-    } catch (e) {
-      setError(errorMessage(e, t('chatThread.errorDelete')));
-    }
+    Alert.alert(t('chatThread.deleteTitle'), t('chatThread.deleteMessage'), [
+      { text: t('chatThread.deleteCancel'), style: 'cancel' },
+      {
+        text: t('chatThread.deleteConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          if (deletingRef.current) return;
+          deletingRef.current = true;
+          setError(null);
+          try {
+            await deleteConversation({ conversationId });
+            router.back();
+          } catch (e) {
+            setError(errorMessage(e, t('chatThread.errorDelete')));
+          } finally {
+            deletingRef.current = false;
+          }
+        },
+      },
+    ]);
   };
 
   const renderChecklist = (messageId: string, msgText: string, mine: boolean) => {
@@ -461,12 +529,12 @@ export default function ConversationScreen() {
     <Portal.Host>
       <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.divider, backgroundColor: colors.surface }}>
-          <IconButton icon="arrow-left" iconColor={colors.charcoal} onPress={() => router.back()} />
+          <IconButton icon="arrow-left" iconColor={colors.charcoal} onPress={() => router.back()} accessibilityLabel={t('chatThread.backLabel')} />
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ color: colors.charcoal, fontSize: 18, fontWeight: '900' }} numberOfLines={1}>{data?.title ?? t('chatThread.headerFallback')}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>{t('chatThread.teamConversation')}</Text>
           </View>
-          <IconButton icon="delete-outline" iconColor={colors.danger} onPress={() => void onDeleteChat()} />
+          <IconButton icon="delete-outline" iconColor={colors.danger} onPress={() => void onDeleteChat()} accessibilityLabel={t('chatThread.deleteLabel')} />
         </View>
 
         {error ? <HelperText type="error" visible>{error}</HelperText> : null}
@@ -477,6 +545,19 @@ export default function ConversationScreen() {
           contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xl }}
           showsVerticalScrollIndicator={false}
         >
+          {hasMoreOlder ? (
+            <View style={{ alignItems: 'center', paddingBottom: spacing.sm }}>
+              <Button
+                mode="text"
+                compact
+                loading={loadingOlder}
+                disabled={loadingOlder}
+                onPress={() => void loadEarlier()}
+              >
+                {t('chatThread.loadEarlier')}
+              </Button>
+            </View>
+          ) : null}
           {messages.length === 0 ? (
             <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl, gap: spacing.sm }}>
               <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.cream, alignItems: 'center', justifyContent: 'center' }}>
@@ -592,6 +673,10 @@ export default function ConversationScreen() {
       </KeyboardAvoidingView>
     </Portal.Host>
   );
+}
+
+export default function ConversationScreenWrapper() {
+  return <ScreenErrorBoundary><ConversationScreen /></ScreenErrorBoundary>;
 }
 
 function ShiftShareRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {

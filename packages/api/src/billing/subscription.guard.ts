@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
 import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.decorator';
 import { ACTIVE_MEMBERSHIP, isActiveMembership } from '../common/membership';
+import { venueIdHeader } from '../common/http';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveVenueSubscriptionStatus } from './subscription-status';
 
@@ -70,7 +71,30 @@ export class SubscriptionGuard implements CanActivate {
     const user = request.user;
     if (!user?.sub) return null;
 
-    const requestedVenueId = (request.headers?.['x-venue-id'] as string | undefined) || user.venueId || undefined;
+    // AuthGuard runs before this guard and has already loaded and validated the
+    // live membership selected by X-Venue-Id/JWT fallback. Reuse that result so
+    // every subscription-gated request does not repeat the same Profile query.
+    const verified = request.verifiedVenueProfile;
+    if (verified?.venueId && verified.venue) {
+      const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
+        venueId: verified.venueId,
+        venueStatus: verified.venue.subscriptionStatus,
+        trialEndsAt: verified.trialEndsAt,
+      });
+      request.venueScope = {
+        profileId: verified.id,
+        fullName: verified.fullName,
+        venueId: verified.venueId,
+        venueName: verified.venue.name,
+        role: verified.role,
+        allAccess: verified.allAccess,
+        subscriptionStatus,
+        trialEndsAt: verified.trialEndsAt ?? null,
+      };
+      return request.venueScope;
+    }
+
+    const requestedVenueId = venueIdHeader(request.headers) || user.venueId || undefined;
     const profile = await this.prisma.profile.findFirst({
       where: {
         userId: user.sub,

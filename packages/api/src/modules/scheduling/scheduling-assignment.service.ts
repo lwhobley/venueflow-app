@@ -345,9 +345,12 @@ export class SchedulingAssignmentService {
       if (args.replace) {
         await tx.scheduleShift.deleteMany({ where: { venueId: args.venueId, weekStart: args.weekStart } });
       }
-      for (const slot of args.slots) {
-        await tx.scheduleShift.create({
-          data: {
+      // One insert for up to 1000 slots (@ArrayMaxSize on the DTO) instead of
+      // one create() round-trip per slot inside this same locked transaction —
+      // no created row is read back, so createMany needs no follow-up query.
+      if (args.slots.length > 0) {
+        await tx.scheduleShift.createMany({
+          data: args.slots.map((slot) => ({
             venueId: args.venueId,
             weekStart: args.weekStart,
             dayIndex: slot.dayIndex,
@@ -357,7 +360,7 @@ export class SchedulingAssignmentService {
             station: slot.station,
             notes: slot.notes?.trim() || null,
             status: 'open',
-          },
+          })),
         });
       }
     });

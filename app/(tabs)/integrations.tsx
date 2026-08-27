@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
@@ -6,6 +6,7 @@ import { api } from '../../lib/railway-api';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatMoney, formatShortDateTime, errorMessage } from '../../lib/format';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
 import { InlineMessage } from '../../components/InlineMessage';
@@ -38,7 +39,7 @@ type ReservationProvider = (typeof reservationProviderOptions)[number]['value'];
 
 
 
-export default function IntegrationsScreen() {
+function IntegrationsScreen() {
   return (
     <PremiumFeatureGate feature="Integrations">
       <IntegrationsScreenInner />
@@ -48,7 +49,7 @@ export default function IntegrationsScreen() {
 
 function IntegrationsScreenInner() {
   const { t } = useI18n();
-  const { venue, isReady, canManage, profileLoading } = useVenueAuth();
+  const { venue, isReady, canManage, profileLoading, profileError, refetchProfile } = useVenueAuth();
   const overview = useQuery(api.pos.getPosOverview, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const reservationOverview = useQuery(
     api.reservationIntegrations.getReservationIntegrationOverview,
@@ -69,9 +70,15 @@ function IntegrationsScreenInner() {
   // A freshly generated webhook secret, shown once. It cannot be read back, so
   // the manager must copy it now; rotating issues a new one.
   const [newSecret, setNewSecret] = useState<string | null>(null);
+  // `pending` is state, so it doesn't block a second tap in the same event
+  // loop tick before the button re-renders disabled. Two of these calls
+  // rotate a webhook secret server-side; a race can leave the UI showing a
+  // value the server didn't keep, silently breaking the connected integration.
+  const pendingRef = useRef(false);
 
   const saveConnection = async () => {
-    if (!venue?.id) return;
+    if (pendingRef.current || !venue?.id) return;
+    pendingRef.current = true;
     setPending('pos');
     setMessage(null);
     try {
@@ -86,12 +93,14 @@ function IntegrationsScreenInner() {
     } catch (e) {
       setMessage(errorMessage(e, t('integrations.messages.posSaveError')));
     } finally {
+      pendingRef.current = false;
       setPending(null);
     }
   };
 
   const saveReservationConnection = async () => {
-    if (!venue?.id) return;
+    if (pendingRef.current || !venue?.id) return;
+    pendingRef.current = true;
     setPending('reservation');
     setMessage(null);
     try {
@@ -106,12 +115,14 @@ function IntegrationsScreenInner() {
     } catch (e) {
       setMessage(errorMessage(e, t('integrations.messages.reservationSaveError')));
     } finally {
+      pendingRef.current = false;
       setPending(null);
     }
   };
 
   const rotateConnectionSecret = async (connectionId: string) => {
-    if (!venue?.id) return;
+    if (pendingRef.current || !venue?.id) return;
+    pendingRef.current = true;
     setPending(`pos-rotate:${connectionId}`);
     setMessage(null);
     try {
@@ -121,12 +132,14 @@ function IntegrationsScreenInner() {
     } catch (error) {
       setMessage(errorMessage(error, t('integrations.messages.posRotateError')));
     } finally {
+      pendingRef.current = false;
       setPending(null);
     }
   };
 
   const generateLeadsSecret = async () => {
-    if (!venue?.id) return;
+    if (pendingRef.current || !venue?.id) return;
+    pendingRef.current = true;
     setPending('leads');
     setMessage(null);
     try {
@@ -136,12 +149,13 @@ function IntegrationsScreenInner() {
     } catch (e) {
       setMessage(errorMessage(e, t('integrations.messages.leadsGenerateError')));
     } finally {
+      pendingRef.current = false;
       setPending(null);
     }
   };
 
   return (
-    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature="Integrations">
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature="Integrations">
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
@@ -327,4 +341,8 @@ function IntegrationsScreenInner() {
     </ScrollView>
     </ManagerGate>
   );
+}
+
+export default function IntegrationsScreenWrapper() {
+  return <ScreenErrorBoundary><IntegrationsScreen /></ScreenErrorBoundary>;
 }

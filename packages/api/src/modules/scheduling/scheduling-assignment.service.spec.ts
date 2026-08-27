@@ -494,13 +494,11 @@ describe('SchedulingAssignmentService', () => {
     expect(prisma.venue.update).toHaveBeenCalled();
   });
 
-  it('applies a template by optionally replacing the week and creating open shifts', async () => {
+  it('applies a template by optionally replacing the week and creating open shifts in one batch', async () => {
     const prisma: any = {
       scheduleShift: {
-        create: vi
-          .fn()
-          .mockResolvedValueOnce({ id: 'shift-11' })
-          .mockResolvedValueOnce({ id: 'shift-12' }),
+        create: vi.fn(),
+        createMany: vi.fn().mockResolvedValue({ count: 2 }),
         deleteMany: vi.fn().mockResolvedValue({ count: 4 }),
       },
       venue: {
@@ -536,37 +534,65 @@ describe('SchedulingAssignmentService', () => {
     });
 
     expect(result).toEqual({ added: 2 });
-    expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(1, {
-      data: {
-        venueId: 'venue-1',
-        weekStart: '2026-08-24',
-        dayIndex: 1,
-        startMinutes: 480,
-        endMinutes: 720,
-        jobTitle: 'Server',
-        station: 'Patio',
-        notes: 'opening',
-        status: 'open',
-      },
-    });
-    expect(prisma.scheduleShift.create).toHaveBeenNthCalledWith(2, {
-      data: {
-        venueId: 'venue-1',
-        weekStart: '2026-08-24',
-        dayIndex: 2,
-        startMinutes: 720,
-        endMinutes: 900,
-        jobTitle: 'Host',
-        station: 'Front',
-        notes: null,
-        status: 'open',
-      },
+    // A single createMany batch, not one create() round-trip per slot — a
+    // template can carry up to 1000 slots (@ArrayMaxSize) inside one locked
+    // transaction (see lockBulkSchedule above).
+    expect(prisma.scheduleShift.create).not.toHaveBeenCalled();
+    expect(prisma.scheduleShift.createMany).toHaveBeenCalledOnce();
+    expect(prisma.scheduleShift.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          venueId: 'venue-1',
+          weekStart: '2026-08-24',
+          dayIndex: 1,
+          startMinutes: 480,
+          endMinutes: 720,
+          jobTitle: 'Server',
+          station: 'Patio',
+          notes: 'opening',
+          status: 'open',
+        },
+        {
+          venueId: 'venue-1',
+          weekStart: '2026-08-24',
+          dayIndex: 2,
+          startMinutes: 720,
+          endMinutes: 900,
+          jobTitle: 'Host',
+          station: 'Front',
+          notes: null,
+          status: 'open',
+        },
+      ],
     });
     expect(prisma.scheduleShift.deleteMany).toHaveBeenCalledWith({
       where: { venueId: 'venue-1', weekStart: '2026-08-24' },
     });
     expect(prisma.$transaction).toHaveBeenCalled();
     expect(prisma.venue.update).toHaveBeenCalled();
+  });
+
+  it('skips the createMany batch entirely for an empty template', async () => {
+    const prisma: any = {
+      scheduleShift: {
+        createMany: vi.fn(),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      venue: { update: vi.fn().mockResolvedValue({}) },
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $transaction: vi.fn(async (callback: any) => callback(prisma)),
+    };
+    const service = new SchedulingAssignmentService(prisma as any);
+
+    const result = await service.applyTemplate({
+      venueId: 'venue-1',
+      weekStart: '2026-08-24',
+      replace: false,
+      slots: [],
+    });
+
+    expect(result).toEqual({ added: 0 });
+    expect(prisma.scheduleShift.createMany).not.toHaveBeenCalled();
   });
 
   it('proposes a swap after validating requester shift and teammate shift', async () => {

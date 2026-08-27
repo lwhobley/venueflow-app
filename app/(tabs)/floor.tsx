@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { Button, Card, Chip, Text } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
-import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { useMutation, useQuery, useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { colors, radius, spacing } from '../../lib/theme';
@@ -142,7 +142,11 @@ function FloorScreen() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'dirty' | 'reserved' | 'seated'>('all');
   const [focusMode, setFocusMode] = useState(false);
 
-  const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as FloorData | null | undefined;
+  const floorQuery = useQueryState(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip');
+  const floor = floorQuery.data as FloorData | null | undefined;
+  // Distinguishes "no floor plan built yet" from "the fetch failed" — these
+  // used to render the same "Build one" empty state either way.
+  const floorLoadFailed = isReady && Boolean(venue?.id) && !floorQuery.isLoading && floor === undefined && Boolean(floorQuery.error);
   const stats = useQuery(api.floor.getFloorStats, isReady && venue?.id ? { venueId: venue.id } : 'skip');
   const unassignedReservations = useQuery(api.floorBinding.getUnassignedReservations, isReady && venue?.id ? { venueId: venue.id, withinMinutes: 120 } : 'skip') as ReservationQueueItem[] | null | undefined;
   const openWaitlist = useQuery(api.floorBinding.getOpenWaitlist, isReady && venue?.id ? { venueId: venue.id } : 'skip') as WaitlistItem[] | null | undefined;
@@ -371,7 +375,19 @@ function FloorScreen() {
         ))}
       </View>
 
-      {!activeFloor ? (
+      {floorLoadFailed ? (
+        <Card style={{ backgroundColor: colors.surface }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <Text variant="titleMedium">Couldn't load the floor plan</Text>
+            <Text style={{ color: colors.muted }}>Check your connection and try again.</Text>
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <Button mode="outlined" onPress={() => floorQuery.refetch()}>
+                Retry
+              </Button>
+            </View>
+          </Card.Content>
+        </Card>
+      ) : !activeFloor ? (
         <Card style={{ backgroundColor: colors.surface }}>
           <Card.Content style={{ gap: spacing.sm }}>
             <Text variant="titleMedium">{t('floor.noFloorPlanTitle')}</Text>

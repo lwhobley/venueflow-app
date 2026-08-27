@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Alert, FlatList, SafeAreaView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { ActivityIndicator, Button, Text } from 'react-native-paper';
@@ -7,6 +7,7 @@ import { appApi } from '../lib/api-client';
 import { spacing, type, useDesignTheme } from '../lib/theme';
 import { AppCard } from '../components/AppCard';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
+import { useVenueAuth } from '../lib/useVenueAuth';
 import { useI18n } from '../lib/i18n';
 
 type JoinRequest = {
@@ -25,16 +26,28 @@ export default function JoinRequestsScreen() {
   const token = useAuthStore((s: AuthState) => s.token);
   const queryClient = useQueryClient();
   const palette = useDesignTheme();
+  // This screen is only linked to from staff.tsx when canManage is true, but
+  // Expo Router routes are directly reachable (deep link, back-navigation) —
+  // gate the fetch and the UI here too rather than relying solely on the
+  // backend's 403.
+  const { profileLoading, canManage } = useVenueAuth();
 
   const { data, isLoading, error, refetch } = useRQQuery({
     queryKey: ['manager-join-requests'],
     queryFn: () => appApi.listManagerJoinRequests(),
-    enabled: Boolean(token),
+    enabled: Boolean(token) && canManage,
   });
 
   const [processingId, setProcessingId] = useState<string | null>(null);
+  // The buttons are hidden via {!isProcessing && ...}, which only takes effect
+  // on the next render — so without this a double-tap fired two approvals and
+  // the second surfaced a spurious "Approve failed" for a request that in fact
+  // succeeded. Approving grants venue access, so it must fire exactly once.
+  const processingRef = useRef(false);
 
   const handleApprove = useCallback(async (req: JoinRequest) => {
+    if (processingRef.current) return;
+    processingRef.current = true;
     setProcessingId(req.id);
     try {
       await appApi.approveJoinRequest(req.id);
@@ -42,6 +55,7 @@ export default function JoinRequestsScreen() {
     } catch (e) {
       Alert.alert(t('joinRequests.approveError'), e instanceof Error ? e.message : t('joinRequests.tryAgain'));
     } finally {
+      processingRef.current = false;
       setProcessingId(null);
     }
   }, [queryClient, t]);
@@ -56,6 +70,8 @@ export default function JoinRequestsScreen() {
           text: t('joinRequests.decline'),
           style: 'destructive',
           onPress: async () => {
+            if (processingRef.current) return;
+            processingRef.current = true;
             setProcessingId(req.id);
             try {
               await appApi.rejectJoinRequest(req.id);
@@ -63,6 +79,7 @@ export default function JoinRequestsScreen() {
             } catch (e) {
               Alert.alert(t('joinRequests.declineError'), e instanceof Error ? e.message : t('joinRequests.tryAgain'));
             } finally {
+              processingRef.current = false;
               setProcessingId(null);
             }
           },
@@ -92,13 +109,27 @@ export default function JoinRequestsScreen() {
         </Button>
       </View>
 
-      {isLoading && (
+      {profileLoading && (
         <View style={styles.center}>
           <ActivityIndicator color={palette.primary} />
         </View>
       )}
 
-      {!isLoading && error && (
+      {!profileLoading && !canManage && (
+        <View style={styles.center}>
+          <Text style={{ color: palette.muted }}>
+            {t('joinRequests.title')} is available to managers and admins.
+          </Text>
+        </View>
+      )}
+
+      {!profileLoading && canManage && isLoading && (
+        <View style={styles.center}>
+          <ActivityIndicator color={palette.primary} />
+        </View>
+      )}
+
+      {!profileLoading && canManage && !isLoading && error && (
         <View style={styles.center}>
           <Text style={{ color: palette.danger }}>{t('joinRequests.failedToLoad')}</Text>
           <Button mode="text" textColor={palette.primary} onPress={() => void refetch()}>
@@ -107,7 +138,7 @@ export default function JoinRequestsScreen() {
         </View>
       )}
 
-      {!isLoading && !error && requests.length === 0 && (
+      {!profileLoading && canManage && !isLoading && !error && requests.length === 0 && (
         <View style={styles.center}>
           <Text style={{ ...type.heading, color: palette.charcoal }}>
             {t('joinRequests.noPendingTitle')}
@@ -118,7 +149,7 @@ export default function JoinRequestsScreen() {
         </View>
       )}
 
-      {!isLoading && requests.length > 0 && (
+      {!profileLoading && canManage && !isLoading && requests.length > 0 && (
         <FlatList
           data={requests}
           keyExtractor={(item) => item.id}

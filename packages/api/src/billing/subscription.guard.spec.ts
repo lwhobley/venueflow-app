@@ -18,6 +18,15 @@ function makeContext(venueScope: unknown, user?: unknown) {
   } as any;
 }
 
+function makeVerifiedContext(verifiedVenueProfile: unknown, user: unknown) {
+  const request = { verifiedVenueProfile, user };
+  return {
+    switchToHttp: () => ({ getRequest: () => request }),
+    getHandler: () => ({}),
+    getClass: () => ({}),
+  } as any;
+}
+
 function makeGuard(tier: string | undefined) {
   const reflector = { getAllAndOverride: vi.fn().mockReturnValue(tier) } as any;
   // Throws if any code path tries to hit the DB — proves these cases are pure.
@@ -115,6 +124,27 @@ describe('SubscriptionGuard', () => {
     });
   });
 
+  it('reuses AuthGuard verified membership without querying Profile again', async () => {
+    const { guard, prisma } = makeDbGuard('active', null);
+    const context = makeVerifiedContext({
+      id: 'verified-profile',
+      fullName: 'Verified User',
+      role: 'manager',
+      allAccess: false,
+      trialEndsAt: null,
+      venueId: 'verified-venue',
+      venue: { id: 'verified-venue', name: 'Verified Venue', subscriptionStatus: 'active' },
+    }, { sub: 'user-1', venueId: 'stale-venue' });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+    expect(context.switchToHttp().getRequest().venueScope).toMatchObject({
+      profileId: 'verified-profile',
+      venueId: 'verified-venue',
+      role: 'manager',
+    });
+  });
+
   it.each(['pending', 'rejected', 'revoked'])('denies %s memberships even when the venue is subscribed', async (membershipStatus) => {
     const { guard } = makeDbGuard('active', {
       id: 'p1',
@@ -128,5 +158,28 @@ describe('SubscriptionGuard', () => {
     });
 
     await expect(guard.canActivate(makeContext(undefined, { sub: 'user-1' }))).rejects.toBeInstanceOf(HttpException);
+  });
+
+  it('falls back to the JWT venueId instead of crashing on a duplicated X-Venue-Id header', async () => {
+    // Express parses a repeated header as string[]. resolveVenueScope used to
+    // cast it straight into a Prisma `where: { venueId }` filter, throwing a
+    // PrismaClientValidationError (surfaced as a 500) instead of a clean 402/403.
+    const { guard, prisma } = makeDbGuard('active', {
+      id: 'fresh-profile',
+      fullName: 'Fresh User',
+      role: 'staff',
+      allAccess: false,
+      membershipStatus: 'active',
+      trialEndsAt: null,
+      venueId: 'jwt-venue',
+      venue: { id: 'jwt-venue', name: 'JWT Venue', subscriptionStatus: 'active' },
+    });
+    const context = makeContext(undefined, { sub: 'user-1', venueId: 'jwt-venue' });
+    context.switchToHttp().getRequest().headers = { 'x-venue-id': ['venue-a', 'venue-b'] };
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ venueId: 'jwt-venue' }) }),
+    );
   });
 });

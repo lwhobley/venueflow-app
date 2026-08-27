@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
@@ -24,74 +25,130 @@ export type AuthState = SessionState & {
   setVenue: (venue: Venue) => void;
   setVenues: (venues: VenueSummary[]) => void;
   switchVenue: (venue: Venue) => void;
-  clearSession: () => void;
+  clearSession: () => Promise<void>;
 };
 
-const secureStorage = {
-  getItem: async (key: string) => SecureStore.getItemAsync(key),
-  setItem: async (key: string, value: string) => SecureStore.setItemAsync(key, value),
-  removeItem: async (key: string) => SecureStore.deleteItemAsync(key),
-};
+const AUTH_PERSIST_NAME = 'venuewrangler-auth';
+const TOKEN_KEY = 'venuewrangler-auth-token';
+const REST_FILENAME = 'venuewrangler-auth-rest.json';
 
-// On web the session must survive a page reload (a desktop user expects to
-// stay signed in across refreshes), so persist to localStorage. Fall back to an
-// in-memory Map when localStorage is unavailable (SSR, private-mode throws).
-const memoryStorage = new Map<string, string>();
-const hasLocalStorage = (() => {
-  try {
-    return typeof window !== 'undefined' && !!window.localStorage;
-  } catch {
-    return false;
-  }
-})();
-const webStorage = {
+const memoryStorage = {
   getItem: async (key: string) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        return window.localStorage.getItem(key);
-      } catch {
-        // Fall back to memoryStorage if localStorage is restricted
-      }
-    }
-    return memoryStorage.get(key) ?? null;
+    return memoryStorage.values.get(key) ?? null;
   },
   setItem: async (key: string, value: string) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        window.localStorage.setItem(key, value);
-        return;
-      } catch {
-        // Fall back to memoryStorage if localStorage is restricted
-      }
-    }
-    memoryStorage.set(key, value);
+    memoryStorage.values.set(key, value);
   },
   removeItem: async (key: string) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        window.localStorage.removeItem(key);
-        return;
-      } catch {
-        // Fall back to memoryStorage if localStorage is restricted
-      }
+    memoryStorage.values.delete(key);
+  },
+  values: new Map<string, string>(),
+};
+
+type PersistBlob = {
+  state?: Partial<SessionState> & Record<string, unknown>;
+  version?: number;
+};
+
+function parseBlob(raw: string | null): PersistBlob | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as PersistBlob;
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch {
+    // Ignore corrupt blobs and fall through to a fresh session.
+  }
+  return null;
+}
+
+function restFileUri(): string | null {
+  const dir = FileSystem.documentDirectory;
+  if (!dir) return null;
+  return `${dir}${REST_FILENAME}`;
+}
+
+async function readRestFile(): Promise<string | null> {
+  const uri = restFileUri();
+  if (!uri) return null;
+  try {
+    return await FileSystem.readAsStringAsync(uri);
+  } catch {
+    return null;
+  }
+}
+
+async function writeRestFile(value: string): Promise<void> {
+  const uri = restFileUri();
+  if (!uri) return;
+  await FileSystem.writeAsStringAsync(uri, value);
+}
+
+async function deleteRestFile(): Promise<void> {
+  const uri = restFileUri();
+  if (!uri) return;
+  await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+}
+
+/**
+ * Split the persisted session so the bearer token stays inside iOS Keychain
+ * (SecureStore's 2048-byte cap) while the larger user/venue JSON lives on disk.
+ * Existing combined blobs under `venuewrangler-auth` are migrated on first read.
+ */
+const splitNativeStorage = {
+  getItem: async (_key: string) => {
+    const restRaw = await readRestFile();
+    const token = await SecureStore.getItemAsync(TOKEN_KEY).catch(() => null);
+
+    if (restRaw || token) {
+      const blob = parseBlob(restRaw) ?? { state: {}, version: 0 };
+      blob.state = { ...(blob.state ?? {}), token: token ?? null };
+      return JSON.stringify(blob);
     }
-    memoryStorage.delete(key);
+
+    const legacy = await SecureStore.getItemAsync(AUTH_PERSIST_NAME).catch(() => null);
+    if (!legacy) return null;
+    const blob = parseBlob(legacy);
+    if (!blob?.state) {
+      await SecureStore.deleteItemAsync(AUTH_PERSIST_NAME).catch(() => {});
+      return legacy;
+    }
+    const migratedToken = typeof blob.state.token === 'string' ? blob.state.token : null;
+    const restState = { ...blob.state, token: null };
+    await writeRestFile(JSON.stringify({ ...blob, state: restState })).catch(() => {});
+    if (migratedToken) {
+      await SecureStore.setItemAsync(TOKEN_KEY, migratedToken).catch(() => {});
+    }
+    await SecureStore.deleteItemAsync(AUTH_PERSIST_NAME).catch(() => {});
+    return JSON.stringify({ ...blob, state: { ...restState, token: migratedToken } });
+  },
+  setItem: async (_key: string, value: string) => {
+    const blob = parseBlob(value) ?? { state: {}, version: 0 };
+    const token = typeof blob.state?.token === 'string' ? blob.state.token : null;
+    const restState = { ...(blob.state ?? {}), token: null };
+    await writeRestFile(JSON.stringify({ ...blob, state: restState }));
+    if (token) {
+      await SecureStore.setItemAsync(TOKEN_KEY, token);
+    } else {
+      await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+    }
+    await SecureStore.deleteItemAsync(AUTH_PERSIST_NAME).catch(() => {});
+  },
+  removeItem: async (_key: string) => {
+    await deleteRestFile();
+    await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+    await SecureStore.deleteItemAsync(AUTH_PERSIST_NAME).catch(() => {});
   },
 };
 
-const storage = Platform.OS === 'web' ? webStorage : secureStorage;
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  try {
+    window.localStorage?.removeItem(AUTH_PERSIST_NAME);
+  } catch {}
+}
 
-// Zustand's set: accepts either a partial object or an updater function (this
-// store uses both). Typed explicitly so the returned shapes stay checked.
-type SetAuthState = (
-  partial:
-    | AuthState
-    | Partial<AuthState>
-    | ((state: AuthState) => AuthState | Partial<AuthState>),
-  replace?: false,
-) => void;
+const storage = Platform.OS === 'web' ? memoryStorage : splitNativeStorage;
 
-const createAuthStore = (set: SetAuthState): AuthState => ({
+const createAuthStore = (set: any): AuthState => ({
   authEpoch: 0,
   hydrated: false,
   user: null,
@@ -100,33 +157,43 @@ const createAuthStore = (set: SetAuthState): AuthState => ({
   token: null,
   setHydrated: (hydrated: boolean) => set({ hydrated }),
   setSession: (session: { user: UserSummary; venue: Venue | null; venues?: VenueSummary[]; token?: string | null }) =>
-    set((state: AuthState) => ({
-      user: session.user,
-      venue: session.venue,
-      venues: session.venues ?? state.venues,
-      ...(session.token !== undefined ? { token: session.token } : {}),
-      authEpoch: session.token !== undefined ? state.authEpoch + 1 : state.authEpoch,
-    })),
-  setVenue: (venue: Venue) => set({ venue }),
+    set((state: AuthState) => {
+      // Attestation cache records are account-scoped and are synchronously
+      // rejected by attestation.ts when user ids differ. Do not launch a
+      // fire-and-forget delete here: it could race a new account's enrolment
+      // and erase the newly stored key after registration completes.
+      return {
+        user: session.user,
+        venue: session.venue,
+        venues: session.venues ?? state.venues,
+        ...(session.token !== undefined ? { token: session.token } : {}),
+        authEpoch: state.authEpoch + 1,
+      };
+    }),
+  setVenue: (venue: Venue) => set((state: AuthState) => ({ venue, authEpoch: state.authEpoch + 1 })),
   setVenues: (venues: VenueSummary[]) => set({ venues }),
   switchVenue: (venue: Venue) =>
     set((state: AuthState) => ({
       venue,
       authEpoch: state.authEpoch + 1,
     })),
-  clearSession: () =>
+  clearSession: async () => {
+    // Clear in-memory authorization synchronously, then let callers await the
+    // device-key removal before another account is established.
     set((state: AuthState) => ({
       user: null,
       venue: null,
       venues: [],
       token: null,
       authEpoch: state.authEpoch + 1,
-    })),
+    }));
+    await SecureStore.deleteItemAsync('venuewrangler.appattest.keyId').catch(() => {});
+  },
 });
 
 export const useAuthStore = create<AuthState>()(
   persist(createAuthStore, {
-    name: 'venuewrangler-auth',
+    name: AUTH_PERSIST_NAME,
     storage: createJSONStorage(() => storage),
     partialize: (state: AuthState): SessionState => ({
       user: state.user,
@@ -135,7 +202,8 @@ export const useAuthStore = create<AuthState>()(
       token: state.token,
     }),
     onRehydrateStorage: () => (state: AuthState | undefined) => {
-      state?.setHydrated(true);
+      if (state) state.setHydrated(true);
+      else useAuthStore.getState().setHydrated(true);
     },
   }),
 );

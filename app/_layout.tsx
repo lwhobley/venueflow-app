@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { PaperProvider } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Sentry from '@sentry/react-native';
 import { useFonts } from 'expo-font';
 import {
   Fraunces_500Medium,
@@ -17,10 +18,35 @@ import { makePaperTheme, useAppearanceStore, designPalettes } from '../lib/theme
 import { SubscriptionGate } from '../components/SubscriptionGate';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
-import { consumeWebHandoff } from '../lib/web-handoff';
 import { configurePurchases, logoutPurchases } from '../lib/purchases';
-import { DesktopWebStyles } from '../components/DesktopWebStyles';
 import { queryClient } from '../lib/query-client';
+import { setFatalErrorReporter } from '../lib/report-error';
+import { fontsReadyForPlatform } from '../lib/app-bootstrap';
+
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN?.trim();
+
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    enabled: !__DEV__,
+    sendDefaultPii: false,
+    tracesSampleRate: 0,
+    beforeSend(event) {
+      const strip = (value?: string) => value?.replace(/([?&])token=[^&]*/g, '$1token=redacted');
+      if (event.request?.url) event.request.url = strip(event.request.url);
+      return event;
+    },
+  });
+  setFatalErrorReporter((error, componentStack) => {
+    Sentry.captureException(error, {
+      contexts: componentStack
+        ? { react: { componentStack } }
+        : undefined,
+    });
+  });
+} else {
+  setFatalErrorReporter(null);
+}
 
 const shouldIgnoreWebError = (message: string) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||
@@ -29,7 +55,7 @@ const shouldIgnoreWebError = (message: string) =>
   message.includes('monaco-editor') ||
   message.includes('ts.worker');
 
-export default function RootLayout() {
+export function RootLayout() {
   const themeMode = useAppearanceStore((state) => state.mode);
   const palette = designPalettes[themeMode];
   // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
@@ -42,35 +68,18 @@ export default function RootLayout() {
     Fraunces_600SemiBold_Italic,
   });
 
-  // Only block the first paint on web (where an unloaded glyph font shows tofu
-  // squares). On native the icon font is bundled and renders fine, so never
-  // gate there — a gate could leave a blank screen if loading misbehaves.
-  const fontsReady = Platform.OS !== 'web' || fontsLoaded || !!fontError;
+  // Native bundles package these fonts locally, so never hold the complete
+  // navigation tree behind the asynchronous loader. Web waits to avoid a
+  // first paint containing missing glyphs.
+  const fontsReady = fontsReadyForPlatform(Platform.OS, fontsLoaded, fontError);
+  const debug = __DEV__;
+  const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
+  const userId = useAuthStore((state: AuthState) => state.user?.id ?? null);
+  const token = useAuthStore((state: AuthState) => state.token);
   const authScopeKey = useAuthStore(
     (state: AuthState) => `${state.authEpoch}:${state.user?.id ?? 'anon'}:${state.venue?.id ?? 'none'}`,
   );
-  const venueId = useAuthStore((state: AuthState) => state.venue?.id ?? null);
-  const token = useAuthStore((state: AuthState) => state.token);
-  const storeHydrated = useAuthStore((state: AuthState) => state.hydrated);
   const lastAuthScopeKey = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (lastAuthScopeKey.current === authScopeKey) return;
-    lastAuthScopeKey.current = authScopeKey;
-    void queryClient.cancelQueries();
-    queryClient.clear();
-  }, [authScopeKey]);
-
-  // Consume a session handed off from the marketing site (venuewrangler.com) so
-  // a user who just created a workspace lands signed in. Runs after the store
-  // rehydrates so persist can't race-overwrite the adopted token. Native skips.
-  const [handoffChecked, setHandoffChecked] = useState(Platform.OS !== 'web');
-  const handoffStartedRef = useRef(false);
-  useEffect(() => {
-    if (Platform.OS !== 'web' || handoffChecked || !storeHydrated || handoffStartedRef.current) return;
-    handoffStartedRef.current = true;
-    void consumeWebHandoff().finally(() => setHandoffChecked(true));
-  }, [handoffChecked, storeHydrated]);
 
   useEffect(() => {
     if (lastAuthScopeKey.current === authScopeKey) return;
@@ -84,31 +93,30 @@ export default function RootLayout() {
       void logoutPurchases();
       return;
     }
-    void configurePurchases(venueId ?? undefined);
-  }, [token, venueId]);
-  const debug = Boolean((globalThis as typeof globalThis & { __DEV__?: boolean }).__DEV__);
+    void configurePurchases(userId ?? undefined);
+  }, [token, userId]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web') return undefined;
+    if (Platform.OS !== 'web') return;
 
-    const globalObject = globalThis as typeof globalThis & {
-      addEventListener?: typeof globalThis.addEventListener;
-      removeEventListener?: typeof globalThis.removeEventListener;
+    const globalObject = globalThis as {
+      addEventListener?: (type: string, listener: (event: any) => void) => void;
+      removeEventListener?: (type: string, listener: (event: any) => void) => void;
     };
 
-    const handleError = (event: Event) => {
-      const errorEvent = event as ErrorEvent;
-      const message = errorEvent.message || errorEvent.error?.message || '';
+    const handleError = (event: any) => {
+      const message = String(event?.message ?? event?.error?.message ?? '');
       if (shouldIgnoreWebError(message)) {
-        errorEvent.preventDefault();
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
       }
     };
 
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      const reason = event.reason;
-      const message = typeof reason === 'string' ? reason : reason?.message ?? '';
+    const handleUnhandledRejection = (event: any) => {
+      const message = String(event?.reason?.message ?? event?.reason ?? '');
       if (shouldIgnoreWebError(message)) {
-        event.preventDefault();
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
       }
     };
 
@@ -121,7 +129,7 @@ export default function RootLayout() {
     };
   }, []);
 
-  if (!handoffChecked) {
+  if (!fontsReady) {
     return <View style={{ flex: 1, backgroundColor: palette.background }} />;
   }
 
@@ -130,8 +138,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <PaperProvider theme={makePaperTheme(themeMode)}>
-            <DesktopWebStyles />
-            <A0PurchaseProvider config={{ appUserId: venueId ?? undefined, debug }}>
+            <A0PurchaseProvider config={{ appUserId: userId ?? undefined, debug }}>
               {/* Top inset keeps content below the status bar / notch; the tab
                   bar and screens handle the bottom inset. */}
               <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={['top', 'left', 'right']}>
@@ -148,3 +155,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default Sentry.wrap(RootLayout);

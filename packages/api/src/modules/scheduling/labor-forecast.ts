@@ -1,6 +1,6 @@
 import { dayLabel } from '../../common/mappers';
 import { occupiedSlots } from '../../common/shift-overlap';
-import { zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
+import { normalizedShiftEnd, zonedDayOfWeek, zonedMinutesOfDay } from '../../common/venue-time';
 
 // Dayparts are venue-local minute windows. `late` wraps past midnight
 // (10pm–2am), so endMin < startMin; the matchers below handle the wrap. Without
@@ -42,6 +42,7 @@ export type ForecastEvent = { ts: number; expectedGuests: number | null };
 export type ForecastInput = {
   tz: string | null;
   now: Date;
+  weekStart?: string;
   shifts: ForecastShift[];
   reservations: ForecastReservation[];
   events: ForecastEvent[];
@@ -90,14 +91,18 @@ const REST_BETWEEN_SHIFTS_MINUTES = 10 * 60; // "clopening" risk: close-then-ope
  */
 export function buildLaborForecast(input: ForecastInput): LaborForecast {
   const { tz, now, shifts, reservations, events, nameById } = input;
+  const forecastWeekStart = input.weekStart ?? null;
 
   const scheduledByDay = new Map<number, { minutes: number; people: Set<string> }>();
   const weeklyMinutes = new Map<string, number>();
   const daypartStaff = new Map<number, Map<string, Set<string>>>();
 
   for (const shift of shifts) {
+    // Only allocate hours that land inside the selected calendar week. This
+    // admits the post-midnight slice of the prior Saturday while excluding the
+    // next-week slice of the selected Saturday.
     const slots = occupiedSlots(shift).filter((slot) =>
-      !shift.weekStart || !slot.weekStart || slot.weekStart === shift.weekStart,
+      !forecastWeekStart || !slot.weekStart || slot.weekStart === forecastWeekStart,
     );
     for (const slot of slots) {
       const minutes = Math.max(0, slot.end - slot.start);
@@ -105,6 +110,7 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
       row.minutes += minutes;
       if (shift.profileId) {
         row.people.add(shift.profileId);
+        weeklyMinutes.set(shift.profileId, (weeklyMinutes.get(shift.profileId) ?? 0) + minutes);
       }
       scheduledByDay.set(slot.dayIndex, row);
 
@@ -117,12 +123,6 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
         }
       }
       daypartStaff.set(slot.dayIndex, dpMap);
-    }
-    if (shift.profileId) {
-      weeklyMinutes.set(
-        shift.profileId,
-        (weeklyMinutes.get(shift.profileId) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes),
-      );
     }
   }
 
@@ -163,6 +163,7 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
   const longShiftsByProfile = new Map<string, number>();
   let unassignedLongShifts = 0;
   for (const shift of shifts) {
+    if (forecastWeekStart && shift.weekStart && shift.weekStart !== forecastWeekStart) continue;
     const durationMinutes = shift.endMinutes - shift.startMinutes;
     if (durationMinutes < BREAK_REQUIRED_MINUTES) continue;
     if (shift.profileId) {
@@ -195,31 +196,22 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
     shiftsByProfile.set(shift.profileId, rows);
   }
   for (const [profileId, profileShifts] of shiftsByProfile) {
-    const byDay = new Map<number, ForecastShift[]>();
-    for (const shift of profileShifts) {
-      const rows = byDay.get(shift.dayIndex) ?? [];
-      rows.push(shift);
-      byDay.set(shift.dayIndex, rows);
-    }
-    for (const [dayIndex, todayShifts] of byDay) {
-      // dayIndex is a day-of-week slot in the current weekly template, not a
-      // real calendar date, so `% 7` wraps Saturday (6) into Sunday (0) of the
-      // SAME stored week — correct only insofar as the template repeats
-      // identically week to week, same limitation the OT/understaffed checks
-      // above already have by operating on one week of shifts at a time.
-      const nextDayIndex = (dayIndex + 1) % 7;
-      const nextDayShifts = byDay.get(nextDayIndex);
-      if (!nextDayShifts) continue;
-      const latestEnd = Math.max(...todayShifts.map((s) => s.endMinutes));
-      const earliestStart = Math.min(...nextDayShifts.map((s) => s.startMinutes));
-      const restMinutes = (1440 - latestEnd) + earliestStart;
-      if (restMinutes < REST_BETWEEN_SHIFTS_MINUTES) {
+    const windows = profileShifts
+      .map((shift) => absoluteShiftWindow(shift, forecastWeekStart))
+      .filter((window): window is NonNullable<typeof window> => window !== null)
+      .sort((a, b) => a.start - b.start);
+    for (let index = 0; index < windows.length - 1; index += 1) {
+      const current = windows[index];
+      const next = windows[index + 1];
+      const restMinutes = next.start - current.end;
+      const startsOnLaterDay = Math.floor(next.start / 1440) > Math.floor(current.start / 1440);
+      if (startsOnLaterDay && restMinutes >= 0 && restMinutes < REST_BETWEEN_SHIFTS_MINUTES) {
         const name = nameById.get(profileId) ?? 'Staff member';
         complianceAlerts.push({
           kind: 'clopening_risk',
           severity: 'critical',
-          message: `${name} closes ${dayLabel(dayIndex)} and opens ${dayLabel(nextDayIndex)} with only ${round1(restMinutes / 60)}h off — under the ${REST_BETWEEN_SHIFTS_MINUTES / 60}h rest guideline.`,
-          dayLabel: dayLabel(nextDayIndex),
+          message: `${name} closes ${dayLabel(current.dayIndex)} and opens ${dayLabel(next.dayIndex)} with only ${round1(restMinutes / 60)}h off — under the ${REST_BETWEEN_SHIFTS_MINUTES / 60}h rest guideline.`,
+          dayLabel: dayLabel(next.dayIndex),
         });
       }
     }
@@ -314,5 +306,24 @@ export function buildLaborForecast(input: ForecastInput): LaborForecast {
     },
     alerts,
     otRisk,
+  };
+}
+
+function absoluteShiftWindow(shift: ForecastShift, defaultWeekStart: string | null) {
+  const weekStart = shift.weekStart ?? defaultWeekStart;
+  if (!weekStart) {
+    return {
+      start: shift.dayIndex * 1440 + shift.startMinutes,
+      end: shift.dayIndex * 1440 + normalizedShiftEnd(shift.startMinutes, shift.endMinutes),
+      dayIndex: shift.dayIndex,
+    };
+  }
+  const epoch = Date.parse(`${weekStart}T00:00:00.000Z`);
+  if (!Number.isFinite(epoch)) return null;
+  const weekMinutes = epoch / 60_000;
+  return {
+    start: weekMinutes + shift.dayIndex * 1440 + shift.startMinutes,
+    end: weekMinutes + shift.dayIndex * 1440 + normalizedShiftEnd(shift.startMinutes, shift.endMinutes),
+    dayIndex: shift.dayIndex,
   };
 }

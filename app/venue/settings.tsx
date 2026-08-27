@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, IconButton, Text, TextInput } from 'react-native-paper';
@@ -6,14 +6,16 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { colors, spacing, type } from '../../lib/theme';
 import { AppCard, SectionHeader } from '../../components/AppCard';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { VenueSwitcher } from '../../components/VenueSwitcher';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { getPreciseLocation } from '../../lib/location';
 import { canManageVenue } from '../../lib/permissions';
 import { useI18n } from '../../lib/i18n';
+import { venueFromApi } from '../../lib/session-from-auth';
 
-export default function VenueSettingsScreen() {
+function VenueSettingsScreen() {
   const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
   const setVenue = useAuthStore((state: AuthState) => state.setVenue);
@@ -29,8 +31,10 @@ export default function VenueSettingsScreen() {
   const [lat, setLat] = useState(venue ? String(venue.latitude) : '');
   const [lng, setLng] = useState(venue ? String(venue.longitude) : '');
   const [radius, setRadius] = useState(venue?.geofence_radius_m ?? 120);
+  const [timezone, setTimezone] = useState(venue?.timezone ?? '');
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [rotatingCode, setRotatingCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -41,9 +45,11 @@ export default function VenueSettingsScreen() {
     setLat(String(venue.latitude));
     setLng(String(venue.longitude));
     setRadius(venue.geofence_radius_m);
+    setTimezone(venue.timezone ?? '');
   }, [venue]);
 
   const useMyLocation = async () => {
+    if (locating) return;
     setError(null);
     setLocating(true);
     try {
@@ -58,6 +64,7 @@ export default function VenueSettingsScreen() {
   };
 
   const onSave = async () => {
+    if (savingRef.current) return;
     setError(null);
     setSaved(false);
     if (!venue?.id) {
@@ -70,21 +77,21 @@ export default function VenueSettingsScreen() {
       setError(t('venueSettings.invalidCoordinates'));
       return;
     }
+    if (latitude === 0 && longitude === 0) {
+      setError('Set a real venue location. 0,0 is not a valid geofence.');
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     try {
-      const updated = await updateVenue({ venueId: venue.id, name: name.trim() || undefined, latitude, longitude, geofenceRadiusM: radius });
-      setVenue({
-        id: updated._id,
-        name: updated.name,
-        latitude: updated.latitude,
-        longitude: updated.longitude,
-        geofence_radius_m: updated.geofenceRadiusM,
-      });
+      const updated = await updateVenue({ venueId: venue.id, name: name.trim() || undefined, latitude, longitude, geofenceRadiusM: radius, timezone: timezone.trim() || undefined });
+      setVenue(venueFromApi(updated));
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('venueSettings.couldNotSaveVenue'));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -149,9 +156,16 @@ export default function VenueSettingsScreen() {
 
       <VenueSwitcher />
 
+      {venue && venue.latitude === 0 && venue.longitude === 0 ? (
+        <Text style={{ color: colors.danger }}>
+          This venue has no map location yet. Clock-in is blocked until you set coordinates.
+        </Text>
+      ) : null}
+
       <AppCard>
           <SectionHeader title={t('venueSettings.detailsSection')} />
           <TextInput label={t('venueSettings.venueNameLabel')} value={name} onChangeText={setName} mode="outlined" style={{ backgroundColor: colors.surface }} />
+          <TextInput label="Timezone (IANA)" value={timezone} onChangeText={setTimezone} mode="outlined" autoCapitalize="none" placeholder="America/New_York" style={{ backgroundColor: colors.surface }} />
       </AppCard>
 
       <AppCard>
@@ -171,7 +185,7 @@ export default function VenueSettingsScreen() {
           <Text style={{ color: colors.muted }}>
             {t('venueSettings.geofenceNotice')}
           </Text>
-          <Button mode="contained" buttonColor={colors.primary} icon="crosshairs-gps" loading={locating} onPress={() => void useMyLocation()}>
+          <Button mode="contained" buttonColor={colors.primary} icon="crosshairs-gps" loading={locating} disabled={locating} onPress={() => void useMyLocation()}>
             {t('venueSettings.useMyLocation')}
           </Button>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
@@ -180,18 +194,22 @@ export default function VenueSettingsScreen() {
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ width: 110 }}>{t('venueSettings.geofenceRadius')}</Text>
-            <IconButton icon="minus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.max(20, r - 20))} />
+            <IconButton icon="minus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.max(20, r - 20))} accessibilityLabel={t('venueSettings.decreaseGeofenceRadius')} />
             <Text style={{ minWidth: 56, textAlign: 'center' }}>{radius} m</Text>
-            <IconButton icon="plus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.min(2000, r + 20))} />
+            <IconButton icon="plus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.min(2000, r + 20))} accessibilityLabel={t('venueSettings.increaseGeofenceRadius')} />
           </View>
           </View>
       </AppCard>
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
       {saved ? <Text style={{ color: colors.success, textAlign: 'center' }}>{t('venueSettings.saved')}</Text> : null}
-      <Button mode="contained" buttonColor={colors.primary} icon="content-save" loading={saving} onPress={() => void onSave()}>
+      <Button mode="contained" buttonColor={colors.primary} icon="content-save" loading={saving} disabled={saving} onPress={() => void onSave()}>
         {t('venueSettings.saveVenueLocation')}
       </Button>
     </ScrollView>
   );
+}
+
+export default function VenueSettingsScreenWrapper() {
+  return <ScreenErrorBoundary><VenueSettingsScreen /></ScreenErrorBoundary>;
 }

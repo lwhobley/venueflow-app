@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
+import { userFromProfile, venueFromAuth } from '../../lib/session-from-auth';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -31,6 +32,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const hasInvite = params.inviteFound === '1' && Boolean(params.email);
 
@@ -49,7 +51,12 @@ export default function RegisterScreen() {
   };
 
   const submit = async () => {
+    // Ref, not state: two taps in one tick both passed the state check, and the
+    // second hit an already-registered email — showing a "failed" alert over a
+    // signup that had in fact succeeded and was already navigating away.
+    if (submittingRef.current) return;
     if (!validate()) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       clearSession();
@@ -63,25 +70,8 @@ export default function RegisterScreen() {
       });
       const { profile, venue, token } = resp;
       setSession({
-        user: {
-          id: profile._id,
-          email: profile.email,
-          full_name: profile.fullName,
-          email_verified: profile.emailVerified === true,
-          role: profile.role,
-          job_title: profile.jobTitle,
-          venue_id: profile.venueId ?? null,
-          all_access: profile.allAccess === true,
-        },
-        venue: venue
-          ? {
-              id: venue._id,
-              name: venue.name,
-              latitude: venue.latitude,
-              longitude: venue.longitude,
-              geofence_radius_m: venue.geofenceRadiusM,
-            }
-          : null,
+        user: userFromProfile(profile),
+        venue: venueFromAuth(profile, venue),
         token,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -99,6 +89,7 @@ export default function RegisterScreen() {
       const msg = e instanceof Error ? e.message : t('register.genericError');
       Alert.alert(t('register.createAccountFailedTitle'), msg);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -254,6 +245,7 @@ export default function RegisterScreen() {
               buttonColor={colors.primary}
               textColor={colors.buttonText}
               loading={submitting}
+              disabled={submitting}
               onPress={() => void submit()}
               style={{ marginTop: spacing.sm }}
             >

@@ -1,10 +1,12 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -95,9 +97,9 @@ const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, g
 const addItemWideField = { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 136, backgroundColor: colors.surface };
 const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidth: 112, backgroundColor: colors.surface };
 
-export default function BarStockScreen() {
+function BarStockScreen() {
   const { t } = useI18n();
-  const { venue, isReady, canManage, profileLoading } = useVenueAuth();
+  const { venue, isReady, canManage, profileLoading, profileError, refetchProfile } = useVenueAuth();
   // Inventory (stock levels) is visible to every venue member; edits below stay
   // manager-only. The velocity/prep-board/report queries remain manager-gated.
   const stock = useQuery(api.barInventory.getBarStock, isReady && venue?.id ? { venueId: venue.id } : 'skip') as BarStock | null | undefined;
@@ -127,6 +129,7 @@ export default function BarStockScreen() {
   const [parsedItems, setParsedItems] = useState<ParsedItem[]>([]);
   const [parseNotes, setParseNotes] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'beverage' | 'food'>('beverage');
   const [historyItemId, setHistoryItemId] = useState<string | null>(null);
@@ -141,6 +144,7 @@ export default function BarStockScreen() {
   const [showScanner, setShowScanner] = useState(false);
   const [scannedItem, setScannedItem] = useState<BarItem | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
+  const scanBusyRef = useRef(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [costHistoryItemId, setCostHistoryItemId] = useState<string | null>(null);
   const [editCostItemId, setEditCostItemId] = useState<string | null>(null);
@@ -155,6 +159,14 @@ export default function BarStockScreen() {
   const [prepStation, setPrepStation] = useState('');
   const [prepNotes, setPrepNotes] = useState('');
   const [prepDueDate, setPrepDueDate] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setShowScanner(false);
+      };
+    }, []),
+  );
 
   const stockCsv = useQuery(api.barInventory.exportStockCsv, isReady && canManage && showStockCsv ? {} : 'skip') as string | null | undefined;
   const movementCsv = useQuery(api.barInventory.exportMovementsCsv, isReady && canManage && showMovementCsv ? {} : 'skip') as string | null | undefined;
@@ -196,7 +208,8 @@ export default function BarStockScreen() {
   }, [items]);
 
   const saveManualItem = async () => {
-    if (!venue?.id) return;
+    if (busyRef.current || !venue?.id) return;
+    busyRef.current = true;
     setBusy(true);
     setMessage(null);
     try {
@@ -210,10 +223,12 @@ export default function BarStockScreen() {
       setMessage(t('barStock.messages.itemSaved'));
     } catch (e) {
       setMessage(errorMessage(e, t('barStock.messages.errorSaveItem')));
-    } finally { setBusy(false); }
+    } finally { busyRef.current = false; setBusy(false); }
   };
 
-  const parseWithAi = async (image?: { base64: string; mimeType?: string }) => {
+  // Unguarded core so pickPhoto (which already holds busyRef) can chain into
+  // this without the guard below rejecting its own in-flight call.
+  const runParseWithAi = async (image?: { base64: string; mimeType?: string }) => {
     if (!venue?.id) return;
     setBusy(true); setMessage(null);
     try {
@@ -225,7 +240,19 @@ export default function BarStockScreen() {
     finally { setBusy(false); }
   };
 
+  const parseWithAi = async (image?: { base64: string; mimeType?: string }) => {
+    if (busyRef.current || !venue?.id) return;
+    busyRef.current = true;
+    try {
+      await runParseWithAi(image);
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
   const pickCsv = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setMessage(null);
     try {
       const doc = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'text/csv', 'application/csv'], copyToCacheDirectory: true });
@@ -234,30 +261,33 @@ export default function BarStockScreen() {
       setParseText(text);
       setMessage(t('barStock.messages.loadedForParsing', { name: doc.assets[0].name ?? t('barStock.messages.uploadFallback') }));
     } catch (e) { setMessage(errorMessage(e, t('barStock.messages.errorLoadCsv'))); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
 
   const pickPhoto = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setMessage(null);
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (permission.status !== 'granted') { setMessage(t('barStock.messages.photoPermissionRequired')); return; }
       const image = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, base64: true, quality: 0.8 });
       if (image.canceled || !image.assets[0]?.base64) return;
-      await parseWithAi({ base64: image.assets[0].base64, mimeType: image.assets[0].mimeType });
+      await runParseWithAi({ base64: image.assets[0].base64, mimeType: image.assets[0].mimeType });
     } catch (e) { setMessage(errorMessage(e, t('barStock.messages.errorLoadPhoto'))); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
 
   const importItems = async () => {
-    if (!venue?.id || parsedItems.length === 0) return;
+    if (busyRef.current || !venue?.id || parsedItems.length === 0) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const result = await importParsed({ venueId: venue.id, items: parsedItems });
       setParsedItems([]); setParseText('');
       setMessage(t('barStock.messages.importedItems', { count: result.imported }));
     } catch (e) { setMessage(errorMessage(e, t('barStock.messages.errorImportItems'))); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
 
   const recordInventoryMovement = async (itemId: Id<'barInventoryItems'>, movementType: MovementType, quantity: number) => {
@@ -296,7 +326,8 @@ export default function BarStockScreen() {
   };
 
   const onBarcodeScanned = useCallback(async ({ data }: { data: string }) => {
-    if (scanBusy || !data) return;
+    if (scanBusyRef.current || !data) return;
+    scanBusyRef.current = true;
     setScanBusy(true); setScanMsg(null);
     try {
       const item = await lookupSku({ sku: data });
@@ -305,8 +336,8 @@ export default function BarStockScreen() {
     } catch {
       setScanMsg(t('barStock.messages.barcodeNotFound', { code: data }));
       setShowScanner(false);
-    } finally { setScanBusy(false); }
-  }, [scanBusy, lookupSku, t]);
+    } finally { scanBusyRef.current = false; setScanBusy(false); }
+  }, [lookupSku, t]);
 
   const saveCostUpdate = async (itemId: string) => {
     const cents = Math.round(Number(editCostValue) * 100);
@@ -506,7 +537,7 @@ export default function BarStockScreen() {
   }
 
   return (
-    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('barStock.header.title')}>
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature={t('barStock.header.title')}>
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
@@ -756,7 +787,7 @@ export default function BarStockScreen() {
           <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('barStock.import.title')}</Text>
           <TextInput label={t('barStock.import.pasteLabel')} value={parseText} onChangeText={setParseText} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-            <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void parseWithAi()}>{t('barStock.import.parseText')}</Button>
+            <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void parseWithAi()}>{t('barStock.import.parseText')}</Button>
             <Button mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void pickCsv()}>{t('barStock.import.uploadCsv')}</Button>
             <Button mode="outlined" textColor={colors.primary} disabled={busy} onPress={() => void pickPhoto()}>{t('barStock.import.photoInvoice')}</Button>
           </View>
@@ -770,7 +801,7 @@ export default function BarStockScreen() {
                   <Text style={{ color: colors.muted }}>{t('barStock.import.parsedLine', { category: item.category, onHand: item.onHand ?? 0, unit: item.unit, parLevel: item.parLevel ?? 0 })}</Text>
                 </View>
               ))}
-              <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void importItems()}>{t('barStock.import.importParsedItems')}</Button>
+              <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void importItems()}>{t('barStock.import.importParsedItems')}</Button>
             </View>
           ) : null}
           <InlineMessage message={message} />
@@ -800,7 +831,7 @@ export default function BarStockScreen() {
           </View>
           <TextInput label={t('barStock.form.supplierLabel')} value={supplier} onChangeText={setSupplier} mode="outlined" style={{ backgroundColor: colors.surface }} />
           <TextInput label={t('barStock.form.notesLabel')} value={notes} onChangeText={setNotes} mode="outlined" style={{ backgroundColor: colors.surface }} />
-          <Button mode="contained" buttonColor={colors.primary} loading={busy} onPress={() => void saveManualItem()}>{t('barStock.form.saveItem')}</Button>
+          <Button mode="contained" buttonColor={colors.primary} loading={busy} disabled={busy} onPress={() => void saveManualItem()}>{t('barStock.form.saveItem')}</Button>
         </Card.Content>
       </Card>
 
@@ -913,4 +944,8 @@ export default function BarStockScreen() {
     </ScrollView>
     </ManagerGate>
   );
+}
+
+export default function BarStockScreenWrapper() {
+  return <ScreenErrorBoundary><BarStockScreen /></ScreenErrorBoundary>;
 }

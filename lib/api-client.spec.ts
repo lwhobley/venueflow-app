@@ -13,7 +13,7 @@ vi.mock('./auth-store', () => {
   return { useAuthStore: store };
 });
 
-import { ApiError, apiRequest, appApi } from './api-client';
+import { ApiError, apiRequest } from './api-client';
 
 function abortableFetch() {
   return vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -62,23 +62,18 @@ describe('apiRequest cancellation', () => {
   });
 });
 
-describe('appApi billing', () => {
+describe('apiRequest error bodies', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('sends the selected multi-venue plan to Stripe checkout', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ url: 'https://checkout.example.test' }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    ));
-    vi.stubGlobal('fetch', fetchMock);
+  it('preserves a non-JSON error body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Service temporarily unavailable', { status: 503 })));
 
-    await expect(appApi.createStripeCheckout({ plan: 'multi_venue' }))
-      .resolves.toEqual({ url: 'https://checkout.example.test' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.example.test/v1/app/billing/stripe/checkout',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ plan: 'multi_venue' }) }),
-    );
+    await expect(apiRequest('/unavailable')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 503,
+      message: 'Service temporarily unavailable',
+    });
   });
 });

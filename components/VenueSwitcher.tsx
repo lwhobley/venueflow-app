@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Button, Card, Chip, Dialog, Portal, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { ApiError } from '../lib/api-client';
+import { venueFromApi } from '../lib/session-from-auth';
+import { getPreciseLocation } from '../lib/location';
 import { useMutation } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import { colors, spacing, type } from '../lib/theme';
@@ -20,6 +22,11 @@ export function VenueSwitcher() {
   const registerVenueMutation = useMutation(api.app.registerVenue);
 
   const [switchingId, setSwitchingId] = useState<string | null>(null);
+  // State-based checks (switchingId !== null, registering) don't apply until
+  // the next render, so two taps in one tick both pass. handleSwitch races two
+  // venue-switch requests against each other; handleRegisterNewVenue creates a
+  // billed venue registration — both promoted to a synchronous ref guard.
+  const busyRef = useRef(false);
   const [registerVisible, setRegisterVisible] = useState(false);
   const [businessName, setBusinessName] = useState('');
   const [ownerName, setOwnerName] = useState(user?.full_name ?? '');
@@ -28,19 +35,14 @@ export function VenueSwitcher() {
   const [error, setError] = useState<string | null>(null);
 
   const handleSwitch = async (v: VenueSummary) => {
-    if (v.id === activeVenue?.id) return;
+    if (busyRef.current || v.id === activeVenue?.id) return;
+    busyRef.current = true;
     setSwitchingId(v.id);
     setError(null);
     try {
       const result = await switchVenueMutation({ venueId: v.id });
       if (result?.venue) {
-        switchVenueAction({
-          id: result.venue._id ?? result.venue.id,
-          name: result.venue.name,
-          latitude: result.venue.latitude,
-          longitude: result.venue.longitude,
-          geofence_radius_m: result.venue.geofenceRadiusM ?? result.venue.geofence_radius_m,
-        });
+        switchVenueAction(venueFromApi(result.venue));
         if (result.venues) {
           useAuthStore.getState().setVenues(result.venues);
         }
@@ -48,39 +50,40 @@ export function VenueSwitcher() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not switch venue.');
     } finally {
+      busyRef.current = false;
       setSwitchingId(null);
     }
   };
 
   const handleRegisterNewVenue = async () => {
+    if (busyRef.current) return;
     if (!businessName.trim()) {
       setError('Business name is required.');
       return;
     }
+    busyRef.current = true;
     setRegistering(true);
     setError(null);
     try {
+      const loc = await getPreciseLocation();
       const result = await registerVenueMutation({
         businessName: businessName.trim(),
         ownerName: ownerName.trim() || undefined,
         staffRange,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       if (result?.venue) {
-        const newVenue = {
-          id: result.venue._id ?? result.venue.id,
-          name: result.venue.name,
-          latitude: result.venue.latitude,
-          longitude: result.venue.longitude,
-          geofence_radius_m: result.venue.geofenceRadiusM ?? result.venue.geofence_radius_m,
-        };
-        switchVenueAction(newVenue);
+        switchVenueAction(venueFromApi(result.venue));
         if (result.venues) {
           useAuthStore.getState().setVenues(result.venues);
         }
       }
       setRegisterVisible(false);
       setBusinessName('');
-    } catch (e: any) {
+      router.push('/venue/settings');
+    } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 402) {
         setError('Multi-Venue Pro subscription ($399/mo) required to register additional venues.');
       } else {
@@ -88,6 +91,7 @@ export function VenueSwitcher() {
         setError(msg || 'Failed to register new venue.');
       }
     } finally {
+      busyRef.current = false;
       setRegistering(false);
     }
   };
@@ -142,7 +146,7 @@ export function VenueSwitcher() {
                   <Button
                     mode="contained-tonal"
                     compact
-                    disabled={isSwitching}
+                    disabled={switchingId !== null}
                     loading={isSwitching}
                     onPress={() => void handleSwitch(v)}
                     buttonColor={colors.primary}
@@ -175,7 +179,7 @@ export function VenueSwitcher() {
           <Dialog.Title>Add New Venue</Dialog.Title>
           <Dialog.Content style={styles.dialogContent}>
             <Text variant="bodyMedium" style={styles.dialogNotice}>
-              Registering a new venue will create an independent location with its own roster, schedule, and subscription.
+              Registering a new venue will create an independent location with its own roster, schedule, and subscription. Your current GPS fix is used as the clock-in geofence.
             </Text>
             <TextInput
               label="Venue / Business Name"

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, PanResponder, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Animated, Dimensions, PanResponder, Pressable, ScrollView, View } from 'react-native';
 import { Button, Chip, IconButton, Text, TextInput } from 'react-native-paper';
 import { router } from 'expo-router';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { colors, spacing, type } from '../../lib/theme';
 import { AppCard, SectionHeader } from '../../components/AppCard';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
@@ -387,7 +388,7 @@ function ChairNode({
   );
 }
 
-export default function FloorEditorScreen() {
+function FloorEditorScreen() {
   const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
@@ -409,6 +410,9 @@ export default function FloorEditorScreen() {
   const [clearMessage, setClearMessage] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [clearError, setClearError] = useState<string | null>(null);
+  // Synchronous re-entrancy guards; useState wouldn't apply until re-render.
+  const publishingRef = useRef(false);
+  const clearingRef = useRef(false);
   const counter = useRef(0);
   const chairCounter = useRef(0);
 
@@ -520,7 +524,8 @@ export default function FloorEditorScreen() {
   };
 
   const onPublish = async () => {
-    if (!venue?.id) return;
+    if (publishingRef.current || !venue?.id) return;
+    publishingRef.current = true;
     setPublishError(null);
     try {
       await saveFloorPlan({
@@ -550,6 +555,8 @@ export default function FloorEditorScreen() {
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
       setPublishError(errorMessage(e, t('floorEditor.publishFailed')));
+    } finally {
+      publishingRef.current = false;
     }
   };
 
@@ -565,25 +572,42 @@ export default function FloorEditorScreen() {
     setTimeout(() => setClearMessage(null), 4000);
   };
 
-  const onClearFloorPlan = async () => {
+  // Destructive and irreversible: this deletes every table and chair server-side.
+  // It previously ran on a single tap with no prompt, and because the local
+  // state is blanked optimistically first, a second concurrent call would
+  // "roll back" to the already-emptied arrays — making the rollback useless.
+  const onClearFloorPlan = () => {
     if (!venue?.id) return;
-    const previousTables = tables;
-    const previousChairs = chairs;
-    setTables([]);
-    setChairs([]);
-    setSelectedKey(null);
-    setSelectedChairKey(null);
-    setClearMessage(null);
-    setClearError(null);
-    try {
-      const result = await clearActiveFloorPlan({ venueId: venue.id });
-      setClearMessage(t('floorEditor.clearedMessage', { tables: result.deletedTables, chairs: result.deletedChairs }));
-      setTimeout(() => setClearMessage(null), 3000);
-    } catch (e) {
-      setTables(previousTables);
-      setChairs(previousChairs);
-      setClearError(errorMessage(e, t('floorEditor.clearFailed')));
-    }
+    Alert.alert(t('floorEditor.clearConfirmTitle'), t('floorEditor.clearConfirmMessage'), [
+      { text: t('floorEditor.clearCancel'), style: 'cancel' },
+      {
+        text: t('floorEditor.clearConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          if (clearingRef.current || !venue?.id) return;
+          clearingRef.current = true;
+          const previousTables = tables;
+          const previousChairs = chairs;
+          setTables([]);
+          setChairs([]);
+          setSelectedKey(null);
+          setSelectedChairKey(null);
+          setClearMessage(null);
+          setClearError(null);
+          try {
+            const result = await clearActiveFloorPlan({ venueId: venue.id });
+            setClearMessage(t('floorEditor.clearedMessage', { tables: result.deletedTables, chairs: result.deletedChairs }));
+            setTimeout(() => setClearMessage(null), 3000);
+          } catch (e) {
+            setTables(previousTables);
+            setChairs(previousChairs);
+            setClearError(errorMessage(e, t('floorEditor.clearFailed')));
+          } finally {
+            clearingRef.current = false;
+          }
+        },
+      },
+    ]);
   };
 
   if (!canEdit) {
@@ -799,4 +823,8 @@ export default function FloorEditorScreen() {
       {publishError ? <Text style={{ color: colors.danger, textAlign: 'center' }}>{publishError}</Text> : null}
     </ScrollView>
   );
+}
+
+export default function FloorEditorScreenWrapper() {
+  return <ScreenErrorBoundary><FloorEditorScreen /></ScreenErrorBoundary>;
 }

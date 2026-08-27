@@ -1,8 +1,9 @@
-import { memo, type ComponentProps, type ReactNode, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { memo, type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, HelperText, IconButton, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -120,7 +121,7 @@ function Section({ title, children, action }: { title: string; children: ReactNo
   );
 }
 
-export default function ChatScreen() {
+function ChatScreen() {
   const { t } = useI18n();
   const { venue, isReady, me, canManage } = useVenueAuth();
   const ensureSetup = useMutation(api.chat.ensureChatSetup);
@@ -135,6 +136,11 @@ export default function ChatScreen() {
   const [groupName, setGroupName] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // useState guards don't apply until the next render, so two taps in one tick
+  // both pass. These block re-entry synchronously.
+  const creatingRef = useRef(false);
+  const openingDmRef = useRef(false);
+  const deletingRef = useRef(false);
 
   useEffect(() => {
     if (!isReady || !venue?.id) return;
@@ -164,7 +170,8 @@ export default function ChatScreen() {
   }, [directory, t]);
 
   const startDm = async (otherId: string) => {
-    if (!venue?.id) return;
+    if (openingDmRef.current || !venue?.id) return;
+    openingDmRef.current = true;
     setError(null);
     try {
       const result = await openDm({ venueId: venue.id, targetProfileId: otherId as Id<'profiles'> });
@@ -173,11 +180,14 @@ export default function ChatScreen() {
       router.push(`/chat/${conversationId}`);
     } catch (e) {
       setError(errorMessage(e, t('chat.errorOpenDm')));
+    } finally {
+      openingDmRef.current = false;
     }
   };
 
   const onCreateGroup = async () => {
-    if (!venue?.id || !groupName.trim()) return;
+    if (creatingRef.current || !venue?.id || !groupName.trim()) return;
+    creatingRef.current = true;
     setCreating(true);
     setError(null);
     try {
@@ -190,17 +200,33 @@ export default function ChatScreen() {
     } catch (e) {
       setError(errorMessage(e, t('chat.errorCreateGroup')));
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   };
 
-  const onDeleteConversation = async (conversationId: string) => {
-    setError(null);
-    try {
-      await deleteConversation({ conversationId: conversationId as Id<'conversations'> });
-    } catch (e) {
-      setError(errorMessage(e, t('chat.errorDeleteChat')));
-    }
+  // Irreversible and previously one mis-tap away: the trash icon deleted the
+  // conversation for everyone with no prompt and no re-entrancy guard.
+  const onDeleteConversation = (conversationId: string) => {
+    Alert.alert(t('chat.deleteChatTitle'), t('chat.deleteChatMessage'), [
+      { text: t('chat.cancel'), style: 'cancel' },
+      {
+        text: t('chat.deleteChatConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          if (deletingRef.current) return;
+          deletingRef.current = true;
+          setError(null);
+          try {
+            await deleteConversation({ conversationId: conversationId as Id<'conversations'> });
+          } catch (e) {
+            setError(errorMessage(e, t('chat.errorDeleteChat')));
+          } finally {
+            deletingRef.current = false;
+          }
+        },
+      },
+    ]);
   };
 
   if (!venue?.id) {
@@ -376,4 +402,8 @@ export default function ChatScreen() {
       ) : null}
     </ScrollView>
   );
+}
+
+export default function ChatScreenWrapper() {
+  return <ScreenErrorBoundary><ChatScreen /></ScreenErrorBoundary>;
 }

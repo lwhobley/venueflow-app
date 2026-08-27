@@ -71,7 +71,7 @@ describe('e2e smoke: auth, billing, scheduling', () => {
         data: { tokenHash: createHash('sha256').update(unsubscribedToken).digest('hex') },
       }),
     ]);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     if (!prisma) return;

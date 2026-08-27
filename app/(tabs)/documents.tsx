@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Alert, Linking, ScrollView, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { ActivityIndicator, Button, Card, Chip, Searchbar, Text, TextInput } from 'react-native-paper';
@@ -92,6 +92,9 @@ function DocumentsScreenInner() {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<DocumentCategory>('sop');
   const [busy, setBusy] = useState<'upload' | string | null>(null);
+  // busy is state, so a double-tap can still fire twice in the same tick
+  // before the button re-renders disabled.
+  const busyRef = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const categoryLabel = (value: DocumentCategory) =>
@@ -130,6 +133,7 @@ function DocumentsScreenInner() {
   };
 
   const submitUpload = async () => {
+    if (busyRef.current) return;
     if (!selectedFile) {
       setMessage(t('documents.errors.fileRequired'));
       return;
@@ -138,6 +142,7 @@ function DocumentsScreenInner() {
       setMessage(t('documents.errors.titleRequired'));
       return;
     }
+    busyRef.current = true;
     setBusy('upload');
     setMessage(null);
     try {
@@ -156,6 +161,7 @@ function DocumentsScreenInner() {
     } catch (error) {
       setMessage(errorMessage(error, t('documents.errors.uploadFailed')));
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };
@@ -180,6 +186,8 @@ function DocumentsScreenInner() {
         text: t('documents.delete'),
         style: 'destructive',
         onPress: async () => {
+          if (busyRef.current) return;
+          busyRef.current = true;
           setBusy(`delete:${document.id}`);
           setMessage(null);
           try {
@@ -187,6 +195,7 @@ function DocumentsScreenInner() {
           } catch (error) {
             setMessage(errorMessage(error, t('documents.errors.deleteFailed')));
           } finally {
+            busyRef.current = false;
             setBusy(null);
           }
         },

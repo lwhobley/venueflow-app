@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, ScrollView, Share, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -8,7 +8,6 @@ import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
 import { accents, colors, radius, spacing } from '../../lib/theme';
-import { useDesktopContentStyle } from '../../lib/responsive';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { errorMessage } from '../../lib/format';
 import type { Role } from '../../lib/types';
@@ -136,7 +135,7 @@ export default function StaffScreenWrapper() {
 }
 
 function StaffScreen() {
-  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
+  const { venue, isReady, profileLoading, profileError, refetchProfile, canManage } = useVenueAuth();
   const { t } = useI18n();
   const ACCESS_LEVELS: Array<{ value: 'admin' | 'manager' | 'staff'; label: string }> = [
     { value: 'admin', label: t('staff.roleAdmin') },
@@ -190,9 +189,11 @@ function StaffScreen() {
   const [inviteLinkMsg, setInviteLinkMsg] = useState<string | null>(null);
   const [inviteLinkErr, setInviteLinkErr] = useState<string | null>(null);
   const [generatingLink, setGeneratingLink] = useState(false);
+  const generatingLinkRef = useRef(false);
 
   const onGenerateInviteLink = async () => {
-    if (!venue?.id) return;
+    if (generatingLinkRef.current || !venue?.id) return;
+    generatingLinkRef.current = true;
     setInviteLinkErr(null);
     setInviteLinkMsg(null);
     setGeneratingLink(true);
@@ -207,6 +208,7 @@ function StaffScreen() {
     } catch (e) {
       setInviteLinkErr(errorMessage(e, t('staff.inviteLinkError')));
     } finally {
+      generatingLinkRef.current = false;
       setGeneratingLink(false);
     }
   };
@@ -218,6 +220,9 @@ function StaffScreen() {
   const [importText, setImportText] = useState('');
   const [importRows, setImportRows] = useState<ParsedStaffImportRow[]>([]);
   const [importBusy, setImportBusy] = useState(false);
+  const importBusyRef = useRef(false);
+  const submitRef = useRef(false);
+  const deactivateRef = useRef(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [importErr, setImportErr] = useState<string | null>(null);
 
@@ -241,7 +246,8 @@ function StaffScreen() {
   };
 
   const onCommitStaffImport = async () => {
-    if (!venue?.id || importRows.length === 0) return;
+    if (importBusyRef.current || !venue?.id || importRows.length === 0) return;
+    importBusyRef.current = true;
     setImportErr(null);
     setImportMsg(null);
     setImportBusy(true);
@@ -257,6 +263,7 @@ function StaffScreen() {
     } catch (e) {
       setImportErr(errorMessage(e, t('staff.importCommitFailed')));
     } finally {
+      importBusyRef.current = false;
       setImportBusy(false);
     }
   };
@@ -329,7 +336,10 @@ function StaffScreen() {
   };
 
   const onSubmit = async () => {
-    if (!venue?.id || !canManage) return;
+    // Without a synchronous guard a double-tap created two profiles with the
+    // same name and email (staffId is undefined on the create path).
+    if (submitRef.current || !venue?.id || !canManage) return;
+    submitRef.current = true;
     try {
       await upsertStaff({
         venueId: venue.id,
@@ -347,6 +357,8 @@ function StaffScreen() {
       clearForm();
     } catch (e) {
       Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.saveFailed')));
+    } finally {
+      submitRef.current = false;
     }
   };
 
@@ -355,11 +367,15 @@ function StaffScreen() {
     Alert.alert(t('staff.deactivateConfirmTitle'), t('staff.deactivateConfirmMessage', { name: member.fullName }), [
       { text: t('staff.cancel'), style: 'cancel' },
       { text: t('staff.deactivate'), style: 'destructive', onPress: async () => {
+        if (deactivateRef.current) return;
+        deactivateRef.current = true;
         try {
           await deactivateStaff({ staffId: member._id as Id<'profiles'> });
           if (selectedStaffId === member._id) clearForm();
         } catch (e) {
           Alert.alert(t('staff.errorTitle'), errorMessage(e, t('staff.actionFailed')));
+        } finally {
+          deactivateRef.current = false;
         }
       }}
     ]);
@@ -373,12 +389,20 @@ function StaffScreen() {
     }
   };
 
-  const listContentStyle = useDesktopContentStyle({ flexGrow: 1, padding: spacing.lg, gap: spacing.md });
-
   if (profileLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' }}>
         <Text style={{ color: colors.muted }}>{t('staff.loading')}</Text>
+      </View>
+    );
+  }
+  if (profileError) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center', gap: spacing.sm }}>
+        <Text style={{ color: colors.muted }}>Couldn't load your profile. Check your connection and try again.</Text>
+        <Button mode="outlined" onPress={() => refetchProfile()}>
+          Retry
+        </Button>
       </View>
     );
   }
@@ -400,7 +424,7 @@ function StaffScreen() {
       data={staff}
       keyExtractor={(item) => item._id}
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={listContentStyle}
+      contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md }}
       removeClippedSubviews
       ListHeaderComponent={(
         <>
@@ -463,7 +487,7 @@ function StaffScreen() {
           />
           {inviteLinkErr ? <Text style={{ color: colors.danger }}>{inviteLinkErr}</Text> : null}
           {inviteLinkMsg ? <Text style={{ color: accents[2].fg }}>{inviteLinkMsg}</Text> : null}
-          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel={t('staff.generateShareLink')}>
+          <Button mode="contained" buttonColor={colors.primary} icon="link-variant" loading={generatingLink} disabled={generatingLink} onPress={() => void onGenerateInviteLink()} accessibilityLabel={t('staff.generateShareLink')}>
             {t('staff.generateShareLink')}
           </Button>
         </Card.Content>
@@ -569,7 +593,7 @@ function StaffScreen() {
                   </Button>
                 </View>
               ))}
-              <Button mode="contained" buttonColor={colors.primary} loading={importBusy} onPress={() => void onCommitStaffImport()}>
+              <Button mode="contained" buttonColor={colors.primary} loading={importBusy} disabled={importBusy} onPress={() => void onCommitStaffImport()}>
                 {t('staff.addStaffCount', { count: importRows.length, plural: importRows.length === 1 ? '' : 's' })}
               </Button>
             </View>

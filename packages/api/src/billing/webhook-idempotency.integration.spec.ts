@@ -34,7 +34,7 @@ describe('billing webhook idempotency (integration)', () => {
     // not by applyStripeSubscription/applyAppleSubscription — a stub is fine.
     const configStub = { get: () => undefined } as any;
     controller = new BillingController(prisma as unknown as PrismaService, configStub);
-  }, 60_000);
+  });
 
   beforeEach(async () => {
     const venue = await prisma.venue.create({

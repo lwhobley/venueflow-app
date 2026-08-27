@@ -331,14 +331,14 @@ export default function SalesScreenWrapper() {
 
 function SalesScreen() {
   const { t } = useI18n();
-  const { venue, isReady, profileLoading, canManage } = useVenueAuth();
+  const { venue, isReady, profileLoading, profileError, refetchProfile, canManage } = useVenueAuth();
 
   const [tab, setTab] = useState<'summary' | 'servers' | 'items' | 'labor'>('summary');
   const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
 
   if (!venue?.id) {
     return (
-      <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('sales.managerGate.feature')}>
+      <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature={t('sales.managerGate.feature')}>
         <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: spacing.lg }}>
           <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
             <Card.Content>
@@ -351,7 +351,7 @@ function SalesScreen() {
   }
 
   return (
-    <ManagerGate canManage={canManage} profileLoading={profileLoading} feature={t('sales.managerGate.feature')}>
+    <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature={t('sales.managerGate.feature')}>
     <PremiumFeatureGate feature="pos_analytics">
       <ScrollView
         style={{ flex: 1, backgroundColor: colors.background }}

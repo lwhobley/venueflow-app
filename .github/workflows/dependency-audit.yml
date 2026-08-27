@@ -27,65 +27,41 @@ jobs:
     name: API production dependency gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: Fail on high/critical API production vulnerabilities
         run: npm audit --omit=dev --workspace=@venue-wrangler/api --audit-level=high
+      - name: Verify the patched Prisma config override remains compatible
+        run: |
+          set -Eeuo pipefail
+          installed="$(node -p "require('./node_modules/deepmerge-ts/package.json').version")"
+          [[ "$installed" == "8.0.0" ]] || { echo "::error::Expected patched deepmerge-ts 8.0.0, found ${installed}"; exit 1; }
+          npm run build --workspace=@venue-wrangler/api
 
   mobile-toolchain:
     name: Mobile production dependency gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Fail on high/critical advisories outside the documented exception
-        run: |
-          set -Eeuo pipefail
-          # Documented exception (owner: repo maintainers; re-review monthly):
-          # image-size <=2.0.2 (GHSA-w3rx-r6r6-pgpr, GHSA-5p2g-fcmc-qvqq) has no
-          # patched release and runs only in Node build tooling (Metro) — it is
-          # not shipped in the mobile runtime or the NestJS API. Any OTHER
-          # high/critical advisory in the production graph fails this gate.
-          ALLOWED='["GHSA-w3rx-r6r6-pgpr","GHSA-5p2g-fcmc-qvqq"]'
-          npm audit --omit=dev --audit-level=high --json > audit.json || true
-          unexpected="$(jq -r --argjson allowed "$ALLOWED" '
-            [.vulnerabilities // {} | to_entries[] | .value
-             | select(.severity == "high" or .severity == "critical") | .via[]
-             | select(type == "object") | .url | sub("https://github.com/advisories/";"")]
-            | unique
-            | map(select(. as $id | ($allowed | index($id)) | not))
-            | .[]' audit.json)"
-          if [ -n "$unexpected" ]; then
-            echo "::error::High/critical production advisories outside the documented exception:"
-            echo "$unexpected"
-            exit 1
-          fi
-          echo "Only the documented image-size advisories are present; gate passes."
-      - name: Fail when the image-size exception becomes patchable
-        run: |
-          set -Eeuo pipefail
-          patched="$(npm view image-size version)"
-          if [ "$(printf '%s\n2.0.2\n' "$patched" | sort -V | tail -1)" != "2.0.2" ]; then
-            echo "::error::image-size $patched is newer than the excepted <=2.0.2 range — re-evaluate the exception and upgrade."
-            exit 1
-          fi
-          echo "image-size latest is $patched (still within the excepted range)."
+      - name: Fail on high/critical mobile production vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
 
   full-inventory:
     name: Full dependency inventory
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm

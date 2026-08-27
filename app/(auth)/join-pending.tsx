@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
+import { useQueryClient } from '@tanstack/react-query';
 import { appApi } from '../../lib/api-client';
+import { venueFromApi } from '../../lib/session-from-auth';
 import { authCardStyle, authColors as colors, spacing, type } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
@@ -12,11 +14,33 @@ type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'unknow
 export default function JoinPendingScreen() {
   const { t } = useI18n();
   const clearSession = useAuthStore((s: AuthState) => s.clearSession);
+  const setVenue = useAuthStore((s: AuthState) => s.setVenue);
+  const queryClient = useQueryClient();
   const { venueName } = useLocalSearchParams<{ venueName?: string }>();
 
   const [status, setStatus] = useState<RequestStatus>('pending');
   const [checkedVenueName, setCheckedVenueName] = useState<string>(venueName ?? '');
   const [checking, setChecking] = useState(false);
+  const [enteringApp, setEnteringApp] = useState(false);
+
+  // Approval flips the profile's venue server-side, but local auth state still
+  // thinks the user is venueless — the tab layout redirects straight back to
+  // team-choice unless we pull the fresh venue down and store it before
+  // navigating in.
+  const enterApp = useCallback(async () => {
+    if (enteringApp) return;
+    setEnteringApp(true);
+    try {
+      const me = await appApi.getMe();
+      if (me?.venue) {
+        setVenue(venueFromApi(me.venue));
+        await queryClient.invalidateQueries({ queryKey: ['app', 'getMe'] });
+      }
+      router.replace('/(tabs)/home');
+    } finally {
+      setEnteringApp(false);
+    }
+  }, [enteringApp, queryClient, setVenue]);
 
   const checkStatus = useCallback(async () => {
     setChecking(true);
@@ -30,15 +54,14 @@ export default function JoinPendingScreen() {
       setStatus(latest.status as RequestStatus);
       setCheckedVenueName(latest.venueName);
       if (latest.status === 'approved') {
-        // Force a session refresh so venue_id gets picked up.
-        router.replace('/(tabs)/home');
+        void enterApp();
       }
     } catch {
       // Ignore check failure; user can retry.
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [enterApp]);
 
   // Auto-check on mount.
   useEffect(() => {
@@ -84,6 +107,7 @@ export default function JoinPendingScreen() {
             buttonColor={colors.primary}
             textColor={colors.buttonText}
             loading={checking}
+            disabled={checking}
             onPress={() => void checkStatus()}
           >
             {t('joinPending.pending.checkStatusButton')}
@@ -91,7 +115,7 @@ export default function JoinPendingScreen() {
           <Button
             mode="outlined"
             textColor={colors.primary}
-            onPress={() => router.replace('/(auth)/workplace-search')}
+            onPress={() => router.replace('/(auth)/invite-check')}
           >
             {t('joinPending.pending.differentWorkplaceButton')}
           </Button>
@@ -115,7 +139,9 @@ export default function JoinPendingScreen() {
             mode="contained"
             buttonColor={colors.primary}
             textColor={colors.buttonText}
-            onPress={() => router.replace('/(tabs)/home')}
+            loading={enteringApp}
+            disabled={enteringApp}
+            onPress={() => void enterApp()}
           >
             {t('joinPending.approved.goToAppButton')}
           </Button>
@@ -139,7 +165,7 @@ export default function JoinPendingScreen() {
             mode="contained"
             buttonColor={colors.primary}
             textColor={colors.buttonText}
-            onPress={() => router.replace('/(auth)/workplace-search')}
+            onPress={() => router.replace('/(auth)/invite-check')}
           >
             {t('joinPending.rejected.searchAgainButton')}
           </Button>
@@ -160,7 +186,7 @@ export default function JoinPendingScreen() {
             mode="contained"
             buttonColor={colors.primary}
             textColor={colors.buttonText}
-            onPress={() => router.replace('/(auth)/workplace-search')}
+            onPress={() => router.replace('/(auth)/invite-check')}
           >
             {t('joinPending.none.findWorkplaceButton')}
           </Button>

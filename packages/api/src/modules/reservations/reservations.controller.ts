@@ -14,7 +14,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import type { Request } from 'express';
@@ -73,6 +73,7 @@ class SaveReservationDto {
   source?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   @IsOptional()
   tags?: string[];
@@ -82,12 +83,14 @@ class SaveReservationDto {
   specialRequests?: string;
 
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   @IsOptional()
   tableIds?: string[];
 
   /** Legacy clients sent floor-table labels under this name. */
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   @IsOptional()
   tableNumbers?: string[];
@@ -207,7 +210,11 @@ class ReservationIngestDto {
   @IsIn(SYNC_SOURCES)
   provider!: string;
 
+  // Mirrors the handler's existing MAX_INGEST_EVENTS check — enforcing it here
+  // too rejects an oversized batch before class-validator nests into every
+  // event, rather than after.
   @IsArray()
+  @ArrayMaxSize(MAX_INGEST_EVENTS)
   @ValidateNested({ each: true })
   @Type(() => ReservationSyncEventDto)
   events!: ReservationSyncEventDto[];

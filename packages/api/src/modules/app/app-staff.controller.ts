@@ -58,6 +58,7 @@ class StaffDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   certifications?: string[];
 }

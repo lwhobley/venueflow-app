@@ -58,6 +58,7 @@ export async function consumeWebHandoff(): Promise<boolean> {
             name: venue.name,
             latitude: venue.latitude,
             longitude: venue.longitude,
+            geofenceRadiusM: venue.geofenceRadiusM,
             geofence_radius_m: venue.geofenceRadiusM,
           }
         : null,

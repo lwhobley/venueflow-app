@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Checkbox, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
+import { userFromProfile, venueFromAuth } from '../../lib/session-from-auth';
 import { authCardStyle, authColors as colors, authInputProps as inputProps, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -35,6 +36,7 @@ export default function InviteAcceptScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const validate = (): string | null => {
@@ -47,9 +49,11 @@ export default function InviteAcceptScreen() {
   };
 
   const submit = async () => {
+    if (submittingRef.current) return;
     const err = validate();
     if (err) { setError(err); return; }
     setError(null);
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       clearSession();
@@ -64,25 +68,8 @@ export default function InviteAcceptScreen() {
       });
       const { profile, venue, token: authToken } = resp;
       setSession({
-        user: {
-          id: profile._id,
-          email: profile.email,
-          full_name: profile.fullName,
-          email_verified: profile.emailVerified === true,
-          role: profile.role,
-          job_title: profile.jobTitle,
-          venue_id: profile.venueId ?? null,
-          all_access: profile.allAccess === true,
-        },
-        venue: venue
-          ? {
-              id: venue._id,
-              name: venue.name,
-              latitude: venue.latitude,
-              longitude: venue.longitude,
-              geofence_radius_m: venue.geofenceRadiusM,
-            }
-          : null,
+        user: userFromProfile(profile),
+        venue: venueFromAuth(profile, venue),
         token: authToken,
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -98,6 +85,7 @@ export default function InviteAcceptScreen() {
       setError(msg);
       Alert.alert(t('inviteAccept.createAccountFailedTitle'), msg);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -189,6 +177,7 @@ export default function InviteAcceptScreen() {
               buttonColor={colors.primary}
               textColor={colors.buttonText}
               loading={submitting}
+              disabled={submitting}
               onPress={() => void submit()}
             >
               {t('inviteAccept.acceptButton')}

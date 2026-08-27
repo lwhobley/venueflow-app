@@ -1,7 +1,7 @@
 import { Redirect, Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ColorValue } from 'react-native';
-import { useQuery } from '../../lib/railway-hooks';
+import { useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { useDesignTheme } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -23,12 +23,23 @@ export default function TabsLayout() {
   // Server-authoritative role so a stale/incorrect persisted role can never
   // expose manager-only tabs. While loading, hide gated tabs.
   const { isReady } = useAuthenticatedSession();
-  const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
+  const { data: me } = useQueryState(api.app.getMe, isReady ? {} : 'skip');
   const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
+  // Render-gate the whole tab tree: an unauthenticated deep link must not
+  // mount tab screens at all (even one render) before auth redirects fire.
+  // <Redirect> is render-safe (no navigate-before-mount), unlike an
+  // imperative router.replace here.
+  if (hydrated && !localUser) {
+    return <Redirect href="/(auth)/welcome" />;
+  }
+
+  if (hydrated && localUser && !localUser.email_verified) {
+    return <Redirect href="/(auth)/verify-email" />;
+  }
+
   // Enforce venue membership: a signed-in user without a venue can't use the
-  // app and is sent to choose or join a team. <Redirect> is render-safe (no
-  // navigate-before-mount), unlike an imperative router.replace here.
+  // app and is sent to choose or join a team.
   if (hydrated && localUser && !venue) {
     return <Redirect href="/(auth)/team-choice" />;
   }

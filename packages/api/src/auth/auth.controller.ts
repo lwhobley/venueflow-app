@@ -458,33 +458,37 @@ export class AuthController {
       where: { email },
       select: { id: true, email: true, profiles: { select: { fullName: true }, take: 1 } },
     });
+    // Always generate/hash a code and always issue the same shaped UPDATE. For
+    // an unknown address the impossible id matches zero rows, preventing the
+    // account-existence timing oracle caused by skipping the database write.
+    const code = this.authService.generateOneTimeCode();
+    const sentAt = new Date();
+    await this.prisma.user.updateMany({
+      where: { id: account?.id ?? '__missing_password_reset_account__' },
+      data: {
+        passwordResetCodeHash: this.authService.hashOneTimeCode(code),
+        passwordResetExpiresAt: new Date(sentAt.getTime() + PASSWORD_RESET_TTL_MS),
+        passwordResetSentAt: sentAt,
+      },
+    });
     if (account?.email) {
-      const code = this.authService.generateOneTimeCode();
-      await this.prisma.user.update({
-        where: { id: account.id },
-        data: {
-          passwordResetCodeHash: this.authService.hashOneTimeCode(code),
-          passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
-          passwordResetSentAt: new Date(),
-        },
+      const accountEmail = account.email;
+      queueMicrotask(() => {
+        void this.email.send({
+          to: accountEmail,
+          subject: 'Reset Your Venue Wrangler Password',
+          text:
+            `Hi ${account.profiles?.[0]?.fullName ?? 'there'},\n\n` +
+            `We received a request to reset the password for your Venue Wrangler account.\n\n` +
+            `To complete your password reset, enter the following code when prompted in the app:\n\n` +
+            `   ${code}\n\n` +
+            `Note: This code is valid for 60 minutes. If you did not request a password reset, you can safely ignore this email — your account remains secure.\n\n` +
+            `Questions? support@venuewrangler.com\n\n` +
+            `— The Venue Wrangler Team`,
+        }).catch((error: any) => {
+          this.logger.error(`Password reset email failed for user ${account.id}: ${error?.message ?? String(error)}`);
+        });
       });
-      void this.email.send({
-        to: account.email,
-        subject: 'Reset Your Venue Wrangler Password',
-        text:
-          `Hi ${account.profiles?.[0]?.fullName ?? 'there'},\n\n` +
-          `We received a request to reset the password for your Venue Wrangler account.\n\n` +
-          `To complete your password reset, enter the following code when prompted in the app:\n\n` +
-          `   ${code}\n\n` +
-          `Note: This code is valid for 60 minutes. If you did not request a password reset, you can safely ignore this email — your account remains secure.\n\n` +
-          `Questions? support@venuewrangler.com\n\n` +
-          `— The Venue Wrangler Team`,
-      }).catch((error: any) => {
-        this.logger.error(`Password reset email failed for user ${account.id}: ${error?.message ?? String(error)}`);
-      });
-    } else {
-      // Perform identical hash work on the non-existent path to eliminate timing difference
-      this.authService.hashOneTimeCode('00000000');
     }
     return { ok: true };
   }

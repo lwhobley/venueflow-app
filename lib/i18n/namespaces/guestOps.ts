@@ -420,6 +420,10 @@ export const en = {
     errorOpenDm: 'Could not open direct message.',
     errorCreateGroup: 'Could not create group.',
     errorDeleteChat: 'Could not delete chat.',
+    deleteChatTitle: 'Delete conversation?',
+    deleteChatMessage: 'This permanently deletes the conversation and its messages for everyone. This cannot be undone.',
+    deleteChatConfirm: 'Delete',
+    cancel: 'Cancel',
   },
   barStock: {
     header: {
@@ -732,7 +736,9 @@ export const en = {
       description: 'Permanently delete your Venue Wrangler account, profile, unavailable-day requests, push tokens, and sign-in credentials. Assigned shifts are released back to the venue before deletion.',
       startButton: 'Start account deletion',
       confirmWarning: 'This cannot be undone. You will be signed out after deletion is complete.',
+      ownerWarning: 'If you are the final owner of a venue, confirming also permanently deletes that venue, its operational records, and stored media.',
       confirmButton: 'Permanently delete my account',
+      confirmVenueButton: 'Delete my account and the venues above',
       cancelButton: 'Cancel',
     },
     deleteError: {
@@ -1159,6 +1165,10 @@ export const es: GuestOpsDictionary = {
     errorOpenDm: 'No se pudo abrir el mensaje directo.',
     errorCreateGroup: 'No se pudo crear el grupo.',
     errorDeleteChat: 'No se pudo eliminar el chat.',
+    deleteChatTitle: '¿Eliminar la conversación?',
+    deleteChatMessage: 'Esto elimina permanentemente la conversación y sus mensajes para todos. No se puede deshacer.',
+    deleteChatConfirm: 'Eliminar',
+    cancel: 'Cancelar',
   },
   barStock: {
     header: {
@@ -1471,7 +1481,9 @@ export const es: GuestOpsDictionary = {
       description: 'Elimina permanentemente tu cuenta de Venue Wrangler, perfil, disponibilidad, tokens push y credenciales de acceso. Los turnos asignados se liberan al local antes de la eliminación.',
       startButton: 'Iniciar eliminación de cuenta',
       confirmWarning: 'Esta acción no se puede deshacer. Se cerrará tu sesión cuando finalice la eliminación.',
+      ownerWarning: 'Si eres el último propietario de un local, confirmar también elimina permanentemente ese local, sus registros operativos y los archivos almacenados.',
       confirmButton: 'Eliminar mi cuenta permanentemente',
+      confirmVenueButton: 'Eliminar mi cuenta y los locales indicados',
       cancelButton: 'Cancelar',
     },
     deleteError: {
@@ -1896,6 +1908,10 @@ export const fr: GuestOpsDictionary = {
     errorOpenDm: "Impossible d'ouvrir le message direct.",
     errorCreateGroup: 'Impossible de créer le groupe.',
     errorDeleteChat: 'Impossible de supprimer le chat.',
+    deleteChatTitle: 'Supprimer la conversation ?',
+    deleteChatMessage: 'Cela supprime définitivement la conversation et ses messages pour tout le monde. Cette action est irréversible.',
+    deleteChatConfirm: 'Supprimer',
+    cancel: 'Annuler',
   },
   barStock: {
     header: {
@@ -2208,7 +2224,9 @@ export const fr: GuestOpsDictionary = {
       description: "Supprimez définitivement votre compte Venue Wrangler, votre profil, vos disponibilités, vos jetons push et vos identifiants de connexion. Les services assignés sont libérés au profit du lieu avant la suppression.",
       startButton: 'Commencer la suppression du compte',
       confirmWarning: 'Cette action est irréversible. Vous serez déconnecté une fois la suppression terminée.',
+      ownerWarning: "Si vous êtes le dernier propriétaire d'un lieu, la confirmation supprime également définitivement ce lieu, ses données opérationnelles et ses médias stockés.",
       confirmButton: 'Supprimer définitivement mon compte',
+      confirmVenueButton: 'Supprimer mon compte et les lieux ci-dessus',
       cancelButton: 'Annuler',
     },
     deleteError: {

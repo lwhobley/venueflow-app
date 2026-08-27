@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, SegmentedButtons, Snackbar, Text } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
@@ -36,12 +36,24 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
   const swaps = useMemo(() => (swapsQuery ?? []) as SwapRow[], [swapsQuery]);
   const [toast, setToast] = useState<string | null>(null);
 
+  // react-native-paper's Button forwards `disabled` to the touchable but NOT
+  // `loading`, so a spinner alone never blocks a second press. A ref (not
+  // state) because the guard has to hold before the next render commits.
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+
   const safe = async (action: () => Promise<unknown>, ok?: string) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     try {
       await action();
       if (ok) setToast(ok);
     } catch (e) {
       setToast(errorMessage(e, t('schedule.actionFailed')));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   };
 
@@ -58,8 +70,8 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
               <Text>{sw.requesterName} → {sw.targetName}</Text>
               <Text style={{ color: colors.muted }}>{sw.requesterShift}{sw.targetShift ? ` ⇄ ${sw.targetShift}` : ` ${t('schedule.giveAway')}`} · {sw.status}</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: true }), t('schedule.swapApproved'))} accessibilityLabel={t('schedule.approveSwap')}>{t('schedule.approve')}</Button>
-                <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: false }), t('schedule.swapDenied'))}>{t('schedule.deny')}</Button>
+                <Button compact mode="contained" buttonColor={colors.primary} disabled={busy} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: true }), t('schedule.swapApproved'))} accessibilityLabel={t('schedule.approveSwap')}>{t('schedule.approve')}</Button>
+                <Button compact mode="outlined" textColor={colors.danger} disabled={busy} onPress={() => void safe(() => reviewSwap({ swapId: sw._id, approve: false }), t('schedule.swapDenied'))}>{t('schedule.deny')}</Button>
               </View>
             </View>
           ))
@@ -79,8 +91,8 @@ function RequestQueue({ venueId }: { venueId: Id<'venues'> }) {
               <Text>{request.details}</Text>
               {request.status === 'pending' ? (
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <Button compact mode="contained" buttonColor={colors.primary} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' }), t('schedule.requestApproved'))} accessibilityLabel={t('schedule.approveRequest')}>{t('schedule.approve')}</Button>
-                  <Button compact mode="outlined" textColor={colors.danger} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' }), t('schedule.requestDenied'))}>{t('schedule.deny')}</Button>
+                  <Button compact mode="contained" buttonColor={colors.primary} disabled={busy} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'approved' }), t('schedule.requestApproved'))} accessibilityLabel={t('schedule.approveRequest')}>{t('schedule.approve')}</Button>
+                  <Button compact mode="outlined" textColor={colors.danger} disabled={busy} onPress={() => void safe(() => reviewRequest({ requestId: request._id as Id<'staffRequests'>, status: 'denied' }), t('schedule.requestDenied'))}>{t('schedule.deny')}</Button>
                 </View>
               ) : null}
             </View>

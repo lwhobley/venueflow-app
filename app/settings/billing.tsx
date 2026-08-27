@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { Linking, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import { router } from 'expo-router';
@@ -5,6 +6,7 @@ import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { colors, spacing } from '../../lib/theme';
 import { AppCard, SectionHeader } from '../../components/AppCard';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling } from '../../lib/permissions';
@@ -14,7 +16,7 @@ import { appApi } from '../../lib/api-client';
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 const MONTHLY_PLAN_LABEL = '$99.99 / month';
 
-export default function BillingScreen() {
+function BillingScreen() {
   const { t } = useI18n();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -26,18 +28,34 @@ export default function BillingScreen() {
   // "never subscribed".
   const trialEndsAt: number | null = me?.profile?.trialEndsAt ?? null;
   const inTrial = trialEndsAt != null && trialEndsAt > Date.now();
-  const isPaid = billing?.status === 'active';
+  const isPaid = billing?.status === 'active' || billing?.status === 'trialing';
   const trialDaysLeft = inTrial ? Math.max(0, Math.ceil((trialEndsAt - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
   const upgradeLabel = inTrial ? t('settingsBilling.upgrade') : t('settingsBilling.subscribe');
   const canEditBilling = Boolean(me && canManageBilling(me.profile.role, me.profile.allAccess));
+  const [managingSubscription, setManagingSubscription] = useState(false);
+  const [manageError, setManageError] = useState<string | null>(null);
+  // Synchronous guard: a useState check doesn't apply until the next render,
+  // so a double-tap opened two Stripe portal sessions and two browser tabs.
+  const managingRef = useRef(false);
 
   const manageSubscription = async () => {
-    if (billing?.platform === 'stripe') {
-      const { url } = await appApi.createStripePortal();
-      await Linking.openURL(url);
-      return;
+    if (managingRef.current) return;
+    managingRef.current = true;
+    setManagingSubscription(true);
+    setManageError(null);
+    try {
+      if (billing?.platform === 'stripe') {
+        const { url } = await appApi.createStripePortal();
+        await Linking.openURL(url);
+        return;
+      }
+      await Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
+    } catch (e) {
+      setManageError(e instanceof Error ? e.message : t('settingsBilling.manageSubscriptionFailed'));
+    } finally {
+      managingRef.current = false;
+      setManagingSubscription(false);
     }
-    await Linking.openURL(APPLE_SUBSCRIPTIONS_URL);
   };
 
   if (me === undefined) {
@@ -73,7 +91,14 @@ export default function BillingScreen() {
               {upgradeLabel}
             </Button>
           ) : null}
-          <Button mode="outlined" textColor={colors.primary} onPress={() => void manageSubscription()}>
+          {manageError ? <Text style={{ color: colors.danger }}>{manageError}</Text> : null}
+          <Button
+            mode="outlined"
+            textColor={colors.primary}
+            loading={managingSubscription}
+            disabled={managingSubscription}
+            onPress={() => void manageSubscription()}
+          >
             {t('settingsBilling.manageSubscription')}
           </Button>
           <Button mode="text" textColor={colors.primary} onPress={() => router.push('/(tabs)/profile')}>
@@ -83,4 +108,8 @@ export default function BillingScreen() {
       </AppCard>
     </View>
   );
+}
+
+export default function BillingScreenWrapper() {
+  return <ScreenErrorBoundary><BillingScreen /></ScreenErrorBoundary>;
 }

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { Button, Card, Chip, IconButton, Menu, Text, TextInput } from 'react-native-paper';
 import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { router } from 'expo-router';
 import { useI18n } from '../lib/i18n';
-import { useMutation, useQuery } from '../lib/railway-hooks';
+import { useMutation, useQuery, useQueryState } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import type { Id } from '../lib/ids';
 import { accents, colors, spacing, radius, type } from '../lib/theme';
@@ -14,6 +14,7 @@ import { useAuthenticatedSession } from '../lib/auth-readiness';
 import { canManageVenue } from '../lib/permissions';
 import { formatTime, formatShortDate, formatWeekdayDate, pad2, dollarsToCents, splitTags, errorMessage } from '../lib/format';
 import { DateRangeBar, useDateRange } from '../components/DateRangeBar';
+import { overnightAwareRange, zonedDayIndex, zonedDateTimeMs } from '../lib/zoned-datetime';
 
 const reservationSources = ['direct', 'opentable', 'resy', 'phone', 'walk_in'] as const;
 type Source = (typeof reservationSources)[number];
@@ -32,6 +33,21 @@ function getMealsForDayOfWeek(dow: number) {
   return isWeekend
     ? [MEAL_TIMES.brunch, MEAL_TIMES.dinner]
     : [MEAL_TIMES.breakfast, MEAL_TIMES.lunch, MEAL_TIMES.dinner];
+}
+
+/** Today's YYYY-MM-DD in the venue's timezone (device-local fallback). */
+function zonedTodayIso(timeZone: string | null | undefined): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timeZone || undefined,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  } catch {
+    const n = new Date();
+    return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`;
+  }
 }
 
 type ReservationRow = {
@@ -88,7 +104,7 @@ function ReservationsScreen() {
   const me = useQuery(api.app.getMe, isReady ? {} : 'skip');
   const canManage = Boolean(me && canManageVenue(me.profile.role, me.profile.allAccess));
 
-  const page = useQuery(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
+  const { data: page, error: pageError, isLoading: pageLoading, refetch: refetchPage } = useQueryState(api.reservations.getReservationsPage, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const floor = useQuery(api.floorBinding.getActiveFloorPlan, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const waitlistData = useQuery(api.floorBinding.getOpenWaitlist, isReady && venue?.id ? { venueId: venue.id } : 'skip') as any;
   const unassignedData = useQuery(api.floorBinding.getUnassignedReservations, isReady && venue?.id ? { venueId: venue.id, withinMinutes: 120 } : 'skip') as any;
@@ -112,7 +128,8 @@ function ReservationsScreen() {
   const waitlist = useMemo(() => (waitlistData ?? []) as Array<{ id: string; guestName: string; partySize: number; requestedAt: number; readyAt: number | null; notes: string | null }>, [waitlistData]);
 
   const addWalkIn = async () => {
-    if (!venue?.id || !wlName.trim()) return;
+    if (walkInRef.current || !venue?.id || !wlName.trim()) return;
+    walkInRef.current = true;
     setWaitlistError(null);
     try {
       await addToWaitlist({
@@ -128,6 +145,8 @@ function ReservationsScreen() {
       setWlParty(2);
     } catch (e) {
       setWaitlistError(errorMessage(e, t('reservations.waitlist.errors.addFailed')));
+    } finally {
+      walkInRef.current = false;
     }
   };
 
@@ -201,6 +220,14 @@ function ReservationsScreen() {
   const [estimatedValue, setEstimatedValue] = useState('');
   const [depositDue, setDepositDue] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  // Synchronous guards. These create money-bearing records (reservations carry
+  // estimatedValueCents/depositDueCents for private events), so a double-tap
+  // duplicating one is a real booking problem, not just a UI blemish.
+  const creatingRef = useRef(false);
+  const walkInRef = useRef(false);
+  const holdRef = useRef(false);
+  const deletingResRef = useRef(false);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -235,18 +262,23 @@ function ReservationsScreen() {
   const [holdError, setHoldError] = useState<string | null>(null);
 
   const submitHold = async () => {
-    if (!venue?.id || !holdDate || !holdReason.trim()) {
-      setHoldError(t('reservations.holds.errors.required'));
+    if (holdRef.current || !venue?.id || !holdDate || !holdReason.trim()) {
+      if (!holdRef.current) setHoldError(t('reservations.holds.errors.required'));
       return;
     }
+    holdRef.current = true;
     try {
-      const startsAt = new Date(`${holdDate}T${holdStart}:00`).toISOString();
-      const endsAt = new Date(`${holdDate}T${holdEnd}:00`).toISOString();
+      const tz = me?.venue?.timezone ?? venue?.timezone;
+      const { start, end } = overnightAwareRange(holdDate, holdStart, holdEnd, tz);
+      const startsAt = new Date(start).toISOString();
+      const endsAt = new Date(end).toISOString();
       await createHold({ venueId: venue.id, startsAt, endsAt, reason: holdReason.trim() });
       setHoldReason('');
       setHoldError(null);
     } catch (err) {
       setHoldError(errorMessage(err, t('reservations.holds.errors.createFailed')));
+    } finally {
+      holdRef.current = false;
     }
   };
 
@@ -281,23 +313,35 @@ function ReservationsScreen() {
     [...openTables].filter((item) => item.table.seats >= party).sort((a, b) => (a.table.seats - party) - (b.table.seats - party))
   ), [openTables]);
 
-  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  // Anchor the date picker on the venue's business day — the device clock can
+  // already be on the venue's "tomorrow" (or yesterday) near midnight.
+  const venueTimezone = me?.venue?.timezone ?? venue?.timezone ?? null;
+  const todayStr = zonedTodayIso(venueTimezone);
   const dateOptions = useMemo(() => {
-    const today = new Date();
+    const [y, m, d] = todayStr.split('-').map(Number);
     return Array.from({ length: 14 }, (_, i) => {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      const value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      const label = i === 0 ? t('reservations.form.dateToday', { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }) : i === 1 ? t('reservations.form.dateTomorrow', { date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }) : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-      return { value, label, dayOfWeek: d.getDay() };
+      const utcMs = Date.UTC(y, m - 1, d + i);
+      const value = new Date(utcMs).toISOString().slice(0, 10);
+      const display = new Date(utcMs);
+      const label = i === 0 ? t('reservations.form.dateToday', { date: display.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) }) : i === 1 ? t('reservations.form.dateTomorrow', { date: display.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) }) : display.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+      return { value, label, dayOfWeek: display.getUTCDay() };
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayStr]);
 
   const selectedDateOption = dateOptions.find((o) => o.value === date) ?? dateOptions[0];
-  const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? new Date().getDay());
+  const availableMeals = getMealsForDayOfWeek(selectedDateOption?.dayOfWeek ?? zonedDayIndex(venueTimezone));
+
+  // Until the user picks a date themselves, follow the venue's business day —
+  // the mount-time default came from the device clock, which near midnight can
+  // disagree with the venue (or the venue timezone loads after mount).
+  const dateTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!dateTouchedRef.current) setDate(todayStr);
+  }, [todayStr]);
 
   const createReservation = async () => {
+    if (creatingRef.current) return;
     setError(null);
     const firstName = guestFirstName.trim();
     const lastName = guestLastName.trim();
@@ -306,11 +350,13 @@ function ReservationsScreen() {
       setError(t('reservations.form.errors.nameRequired'));
       return;
     }
-    const ts = new Date(`${date}T${time}:00`).getTime();
+    const ts = zonedDateTimeMs(date, time, me?.venue?.timezone ?? venue?.timezone);
     if (Number.isNaN(ts)) {
       setError(t('reservations.form.errors.invalidDateTime'));
       return;
     }
+    creatingRef.current = true;
+    setCreating(true);
     try {
       await saveReservation({
         venueId: venue.id,
@@ -357,13 +403,16 @@ function ReservationsScreen() {
       setEstimatedValue('');
       setDepositDue('');
       setPartySize(2);
-      const todayDow = new Date().getDay();
+      const todayDow = dateOptions[0]?.dayOfWeek ?? zonedDayIndex(venueTimezone);
       setSelectedMeal(todayDow === 0 || todayDow === 6 ? 'brunch' : 'dinner');
       setTime(todayDow === 0 || todayDow === 6 ? '10:00' : '18:00');
       setShowForm(false);
       setShowPrivateEventForm(false);
     } catch (e) {
       setError(errorMessage(e, t('reservations.form.errors.createFailed')));
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
     }
   };
 
@@ -388,12 +437,15 @@ function ReservationsScreen() {
   };
 
   const deleteReservation = async (res: ReservationRow) => {
-    if (!venue?.id) return;
+    if (deletingResRef.current || !venue?.id) return;
+    deletingResRef.current = true;
     setDeleteError(null);
     try {
       await removeReservation({ venueId: venue.id, reservationId: res.id as Id<'reservations'> });
     } catch (e) {
       setDeleteError(errorMessage(e, t('reservations.list.deleteFailed')));
+    } finally {
+      deletingResRef.current = false;
     }
   };
 
@@ -645,6 +697,7 @@ function ReservationsScreen() {
                         key={opt.value}
                         title={opt.label}
                         onPress={() => {
+                          dateTouchedRef.current = true;
                           setDate(opt.value);
                           setDateMenuOpen(false);
                           const meals = getMealsForDayOfWeek(opt.dayOfWeek);
@@ -721,7 +774,7 @@ function ReservationsScreen() {
                 ) : null}
                 <TextInput label={t('reservations.form.notesLabel')} value={notes} onChangeText={setNotes} mode="outlined" multiline style={{ backgroundColor: colors.surface }} />
                 {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-                <Button mode="contained" buttonColor={colors.primary} onPress={() => void createReservation()} accessibilityLabel={t('reservations.form.createButton')}>{t('reservations.form.createButton')}</Button>
+                <Button mode="contained" buttonColor={colors.primary} loading={creating} disabled={creating} onPress={() => void createReservation()} accessibilityLabel={t('reservations.form.createButton')}>{t('reservations.form.createButton')}</Button>
               </View>
             ) : null}
         </AppCard>
@@ -741,7 +794,12 @@ function ReservationsScreen() {
             ))}
           </View>
           {deleteError ? <Text style={{ color: colors.danger, marginTop: spacing.sm }}>{deleteError}</Text> : null}
-          {page === undefined ? (
+          {pageError ? (
+            <View style={{ gap: spacing.xs, marginTop: spacing.sm }}>
+              <Text style={{ color: colors.danger }}>Failed to load reservations</Text>
+              <Button compact mode="outlined" textColor={colors.primary} onPress={() => refetchPage()}>Retry</Button>
+            </View>
+          ) : pageLoading || page === undefined ? (
             <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.loading')}</Text>
           ) : visibleReservations.length === 0 ? (
             <Text style={{ color: colors.muted, marginTop: spacing.sm }}>{t('reservations.list.empty', { range: listDateRange.shortLabel.toLowerCase() })}</Text>

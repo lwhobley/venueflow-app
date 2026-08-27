@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Button, Card, Checkbox, Chip, SegmentedButtons, Text, TextInput } from 'react-native-paper';
 import { appApi } from '../../lib/api-client';
+import { userFromProfile, venueFromAuth } from '../../lib/session-from-auth';
 import { authCardStyle, authColors, spacing, type } from '../../lib/theme';
 import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
@@ -66,6 +67,7 @@ export default function SignInScreen() {
   const [password, setPassword] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const showError = (title: string, message: string) => {
@@ -86,32 +88,16 @@ export default function SignInScreen() {
 
     const { profile, venue, token } = last;
     setSession({
-      user: {
-        id: profile._id,
-        email: profile.email,
-        full_name: profile.fullName,
-        email_verified: profile.emailVerified === true,
-        role: profile.role,
-        job_title: profile.jobTitle,
-        venue_id: profile.venueId ?? null,
-        all_access: profile.allAccess === true,
-      },
-      venue: venue
-        ? {
-            id: venue._id,
-            name: venue.name,
-            latitude: venue.latitude,
-            longitude: venue.longitude,
-            geofence_radius_m: venue.geofenceRadiusM,
-          }
-        : null,
+      user: userFromProfile(profile),
+      venue: venueFromAuth(profile, venue),
       token,
     });
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // After signup, route to email verification first.
+    // Any unverified account must return to verification, including a user who
+    // closed the app midway through invited signup and signs in again later.
     // verify-email.tsx calls redeemInvite / redeemMyInvite after code entry
     // to finalize venue membership before taking the user into the app.
-    if (!profile.emailVerified && flow === 'signUp') {
+    if (!profile.emailVerified) {
       if (options?.inviteToken) {
         router.replace({ pathname: '/(auth)/verify-email', params: { invite: options.inviteToken } });
       } else {
@@ -127,6 +113,7 @@ export default function SignInScreen() {
   };
 
   const submit = async () => {
+    if (submittingRef.current) return;
     const trimmed = email.trim();
     const minPasswordLength = flow === 'signUp' ? 8 : 6;
     if (!trimmed.includes('@') || password.trim().length < minPasswordLength) {
@@ -141,6 +128,7 @@ export default function SignInScreen() {
       Alert.alert(t('signIn.invalidDetailsTitle'), t('register.errors.termsRequired'));
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -152,6 +140,7 @@ export default function SignInScreen() {
         e instanceof Error ? e.message : t('signIn.tryAgain'),
       );
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -214,7 +203,7 @@ export default function SignInScreen() {
               </Button>
             ) : null}
 
-            <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} onPress={() => void submit()}>
+            <Button mode="contained" buttonColor={authColors.primary} textColor={authColors.buttonText} loading={submitting} disabled={submitting} onPress={() => void submit()}>
               {flow === 'signUp'
                 ? (inviteToken && invitePreview && !invitePreview.expired ? t('signIn.joinVenueButton', { venueName: invitePreview.venueName ?? '' }) : t('signIn.createAccountButton'))
                 : t('signIn.signInButton')}

@@ -6,7 +6,10 @@ import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { config } from '../lib/config';
 import { hasAllAccess } from '../lib/permissions';
 import type { SubscriptionRequiredReason } from '../lib/subscription-types';
-import { useApiQuery } from '../lib/api-client';
+import { ApiError, type MeResponse } from '../lib/api-client';
+import { venueFromApi } from '../lib/session-from-auth';
+import { useQueryState } from '../lib/railway-hooks';
+import { api } from '../lib/railway-api';
 
 const blockedStatuses = new Set(['past_due', 'cancelled', 'expired', 'paused']);
 const allowedBlockedRoutes = ['/billing/locked', '/settings/billing', '/settings/account', '/venues'];
@@ -23,7 +26,11 @@ function isAllowedRoute(route: string) {
 }
 
 function isSubscriptionRequiredError(error: unknown): error is Error & { reason?: SubscriptionRequiredReason } {
-  return error instanceof Error && (error.name === 'SubscriptionRequiredError' || error.message.includes('Subscription required'));
+  if (error instanceof ApiError && error.status === 402) return true;
+  return error instanceof Error && (
+    error.name === 'SubscriptionRequiredError'
+    || /subscription/i.test(error.message)
+  );
 }
 
 export function SubscriptionGate({ children }: { children?: unknown }) {
@@ -34,8 +41,16 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   const token = useAuthStore((state: AuthState) => state.token);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
-  const { data: me, isLoading: meLoading } = useApiQuery<any | null>(['app', 'me'], '/v1/app/me', hydrated && Boolean(user) && Boolean(token));
-  const { data: billing, isLoading: billingLoading } = useApiQuery<any | null>(['app', 'billing'], '/v1/app/billing', Boolean(me?.venue?._id));
+  // Shares the ['app','getMe',...] cache key with useVenueAuth instead of a
+  // separate ['app','me',...] entry — see auth-readiness.ts for why.
+  const { data: me, isLoading: meLoading } = useQueryState<MeResponse | null>(
+    api.app.getMe,
+    hydrated && Boolean(user) && Boolean(token) ? {} : 'skip',
+  );
+  const { data: billing, isLoading: billingLoading } = useQueryState<any | null>(
+    api.app.getMyVenueBilling,
+    Boolean(me?.venue?._id) ? {} : 'skip',
+  );
   const route = `/${segments.join('/')}`;
   const navigationReady = Boolean(rootNavigationState?.key);
   const authRoute = route.startsWith('/(auth)/');
@@ -93,9 +108,7 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
         venue_id: p.venueId ?? null,
         all_access: p.allAccess === true,
       },
-      venue: me.venue
-        ? { id: me.venue._id, name: me.venue.name, latitude: me.venue.latitude, longitude: me.venue.longitude, geofence_radius_m: me.venue.geofenceRadiusM }
-        : null,
+      venue: me.venue ? venueFromApi(me.venue) : null,
     });
   }, [me, user, setSession]);
 
