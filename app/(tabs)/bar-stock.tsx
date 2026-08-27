@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { Button, Card, Chip, Text, TextInput } from 'react-native-paper';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -158,6 +159,14 @@ function BarStockScreen() {
   const [prepStation, setPrepStation] = useState('');
   const [prepNotes, setPrepNotes] = useState('');
   const [prepDueDate, setPrepDueDate] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setShowScanner(false);
+      };
+    }, []),
+  );
 
   const stockCsv = useQuery(api.barInventory.exportStockCsv, isReady && canManage && showStockCsv ? {} : 'skip') as string | null | undefined;
   const movementCsv = useQuery(api.barInventory.exportMovementsCsv, isReady && canManage && showMovementCsv ? {} : 'skip') as string | null | undefined;

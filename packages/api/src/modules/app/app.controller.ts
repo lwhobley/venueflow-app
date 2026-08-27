@@ -667,6 +667,7 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @RequireSubscription()
+  @Header('Deprecation', 'true')
   @Get('clock-board')
   async getClockBoard(@CurrentUser() user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
@@ -687,6 +688,7 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @RequireSubscription()
+  @Header('Deprecation', 'true')
   @Get('time-clock')
   async getMyTimeClock(@CurrentUser() user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
