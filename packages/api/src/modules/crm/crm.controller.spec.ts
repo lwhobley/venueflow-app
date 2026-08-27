@@ -583,6 +583,28 @@ describe('CrmController', () => {
       });
       expect(result).toEqual({ contractId: 'contract-1' });
     });
+
+    it('rejects editing content on a fully signed contract', async () => {
+      const { controller, prisma } = makeController();
+      prisma.crmContract.findFirst.mockResolvedValue({ id: 'contract-1', venueId: 'venue-1', status: 'fully_signed' });
+
+      await expect(
+        controller.saveContract(managerScope, { contractId: 'contract-1', fbMinimumCents: 50000 } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows cancelling a fully signed contract', async () => {
+      const { controller, prisma } = makeController();
+      prisma.crmContract.findFirst.mockResolvedValue({ id: 'contract-1', venueId: 'venue-1', status: 'fully_signed' });
+
+      const result = await controller.saveContract(managerScope, { contractId: 'contract-1', status: 'cancelled' } as any);
+
+      expect(prisma.crmContract.update).toHaveBeenCalledWith({
+        where: { id: 'contract-1' },
+        data: expect.objectContaining({ status: 'cancelled' }),
+      });
+      expect(result).toEqual({ contractId: 'contract-1' });
+    });
   });
 
   // ============================================================

@@ -817,6 +817,21 @@ export class CrmController {
       });
       if (!existing) throw new NotFoundException('Contract not found');
 
+      if (existing.status === 'fully_signed') {
+        const isCancellation = body.status === 'cancelled' || body.status === 'disputed';
+        const hasContentEdits =
+          body.eventName !== undefined ||
+          body.eventDate !== undefined ||
+          body.guestCount !== undefined ||
+          body.venueSpace !== undefined ||
+          body.fbMinimumCents !== undefined ||
+          body.customClauses !== undefined ||
+          body.cancellationPolicy !== undefined;
+        if (hasContentEdits || (body.status !== undefined && !isCancellation)) {
+          throw new BadRequestException('A fully signed contract cannot be modified. Issue an amendment or cancel the contract.');
+        }
+      }
+
       const patch: Record<string, any> = { updatedAt: now };
       if (body.eventName !== undefined) patch.eventName = body.eventName;
       if (body.eventDate !== undefined) patch.eventDate = new Date(body.eventDate);
