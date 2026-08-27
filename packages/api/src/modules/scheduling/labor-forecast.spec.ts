@@ -227,6 +227,32 @@ describe('buildLaborForecast — predictive compliance alerts', () => {
     );
     expect(result.alerts.filter((a) => a.kind === 'clopening_risk')).toHaveLength(0);
   });
+
+  it('does not treat Sunday and the following Saturday in one week as adjacent', () => {
+    const result = buildLaborForecast(baseInput({
+      weekStart: '2024-01-07',
+      shifts: [
+        { weekStart: '2024-01-07', dayIndex: 0, startMinutes: 360, endMinutes: 720, profileId: 'p1' },
+        { weekStart: '2024-01-07', dayIndex: 6, startMinutes: 1320, endMinutes: 1380, profileId: 'p1' },
+      ],
+      nameById: new Map([['p1', 'Alex']]),
+    }));
+
+    expect(result.alerts.filter((alert) => alert.kind === 'clopening_risk')).toHaveLength(0);
+  });
+
+  it('flags the real Saturday-to-next-Sunday clopening across week records', () => {
+    const result = buildLaborForecast(baseInput({
+      weekStart: '2024-01-07',
+      shifts: [
+        { weekStart: '2024-01-07', dayIndex: 6, startMinutes: 1320, endMinutes: 1380, profileId: 'p1' },
+        { weekStart: '2024-01-14', dayIndex: 0, startMinutes: 360, endMinutes: 720, profileId: 'p1' },
+      ],
+      nameById: new Map([['p1', 'Alex']]),
+    }));
+
+    expect(result.alerts.filter((alert) => alert.kind === 'clopening_risk')).toHaveLength(1);
+  });
 });
 
 describe('buildLaborForecast — totals and events', () => {
@@ -256,6 +282,26 @@ describe('buildLaborForecast — totals and events', () => {
     expect(sunday.scheduledHours).toBe(2);
     expect(monday.scheduledHours).toBe(2);
     expect(monday.dayparts.find((dp) => dp.key === 'late')?.scheduledPeople).toBe(1);
+  });
+
+  it('counts the prior Saturday overnight spill in the selected Sunday', () => {
+    const result = buildLaborForecast(baseInput({
+      weekStart: '2024-01-07',
+      shifts: [{ weekStart: '2023-12-31', dayIndex: 6, startMinutes: 1320, endMinutes: 1560, profileId: 'p1' }],
+    }));
+
+    expect(result.days.find((day) => day.dayIndex === 0)?.scheduledHours).toBe(2);
+    expect(result.totals.scheduledHours).toBe(2);
+  });
+
+  it('does not allocate the selected Saturday spill into the earlier Sunday', () => {
+    const result = buildLaborForecast(baseInput({
+      weekStart: '2024-01-07',
+      shifts: [{ weekStart: '2024-01-07', dayIndex: 6, startMinutes: 1320, endMinutes: 1560, profileId: 'p1' }],
+    }));
+
+    expect(result.days.find((day) => day.dayIndex === 0)?.scheduledHours).toBe(0);
+    expect(result.days.find((day) => day.dayIndex === 6)?.scheduledHours).toBe(2);
   });
 
   it('treats a venue event as a private-event labor block even with no covers', () => {

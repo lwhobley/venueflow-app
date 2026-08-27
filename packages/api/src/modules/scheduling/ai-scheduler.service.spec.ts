@@ -85,4 +85,22 @@ describe('AiSchedulerService.normalize', () => {
 
     expect(result.shifts).toHaveLength(60);
   });
+
+  it('leaves an overnight-conflicting assignment open instead of previewing an apply failure', () => {
+    const proposed = service.normalize({
+      shifts: [{ dayIndex: 0, startMinutes: 60, endMinutes: 180, profileId: 'staff-1' }],
+    }, validProfileIds).shifts;
+
+    const result = service.removeConflictingAssignments('2024-01-07', [{
+      weekStart: '2024-01-07',
+      dayIndex: 0,
+      startMinutes: 0,
+      endMinutes: 120,
+      jobTitle: 'Closer',
+      profileId: 'staff-1',
+    }], proposed);
+
+    expect(result[0].profileId).toBeNull();
+    expect(result[0].reason).toContain('conflicts with an existing shift');
+  });
 });

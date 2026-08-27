@@ -194,9 +194,9 @@ function VenueSettingsScreen() {
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ width: 110 }}>{t('venueSettings.geofenceRadius')}</Text>
-            <IconButton icon="minus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.max(20, r - 20))} />
+            <IconButton icon="minus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.max(20, r - 20))} accessibilityLabel={t('venueSettings.decreaseGeofenceRadius')} />
             <Text style={{ minWidth: 56, textAlign: 'center' }}>{radius} m</Text>
-            <IconButton icon="plus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.min(2000, r + 20))} />
+            <IconButton icon="plus" mode="outlined" size={16} onPress={() => setRadius((r) => Math.min(2000, r + 20))} accessibilityLabel={t('venueSettings.increaseGeofenceRadius')} />
           </View>
           </View>
       </AppCard>

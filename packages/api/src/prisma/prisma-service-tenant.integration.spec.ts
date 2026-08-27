@@ -38,7 +38,7 @@ describe('PrismaService cutover (integration)', () => {
       setup.prisma.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Item', normalizedName: 'a-item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
       setup.prisma.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Item', normalizedName: 'b-item', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     ]);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     delete process.env.TENANT_ISOLATION_ENFORCED;

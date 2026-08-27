@@ -516,9 +516,20 @@ export class SchedulingController {
     const tz = venue?.timezone ?? null;
     const selectedWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, requestedWeekStart);
     const now = new Date(zonedDateBounds(tz, selectedWeekStart).start);
-    const weekEnd = new Date(zonedDateBounds(tz, addDays(selectedWeekStart, 7)).start);
+    const nextWeekStart = addDays(selectedWeekStart, 7);
+    const weekEnd = new Date(zonedDateBounds(tz, nextWeekStart).start);
+    const previousSaturday = previousOvernightFilter(selectedWeekStart, 0);
     const [shifts, reservations, venueEvents, profiles] = await Promise.all([
-      this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId, weekStart: selectedWeekStart } }),
+      this.prisma.scheduleShift.findMany({
+        where: {
+          venueId: scope!.venueId,
+          OR: [
+            { weekStart: selectedWeekStart },
+            { weekStart: previousSaturday.weekStart, dayIndex: previousSaturday.dayIndex, endMinutes: { gt: 1440 } },
+            { weekStart: nextWeekStart, dayIndex: 0 },
+          ],
+        },
+      }),
       this.prisma.reservation.findMany({
         where: {
           venueId: scope!.venueId,
@@ -544,7 +555,8 @@ export class SchedulingController {
     const forecast = buildLaborForecast({
       tz,
       now,
-      shifts: shifts.map((s) => ({ dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, profileId: s.profileId })),
+      weekStart: selectedWeekStart,
+      shifts: shifts.map((s) => ({ weekStart: s.weekStart, dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, profileId: s.profileId })),
       reservations: reservations.map((r) => ({ ts: r.reservationTime.getTime(), partySize: r.partySize, isPrivateEvent: Boolean(r.isPrivateEvent) })),
       events: venueEvents.map((e) => ({ ts: e.startsAt.getTime(), expectedGuests: e.expectedGuests })),
       nameById: new Map(profiles.map((p) => [p.id, p.fullName])),
@@ -1215,9 +1227,18 @@ export class SchedulingController {
     const weekStartDayUtc = new Date(zonedDateBounds(timezone, availabilityWeekStart).start);
     const nextWeekStart = addDays(availabilityWeekStart, 7);
     const weekEndDayUtc = new Date(zonedDateBounds(timezone, nextWeekStart).start);
+    const previousSaturday = previousOvernightFilter(availabilityWeekStart, 0);
 
     const [shifts, staff, unavailableRequests, reservations, venueEvents, memoryNotes] = await Promise.all([
-      this.prisma.scheduleShift.findMany({ where: { venueId, weekStart: availabilityWeekStart } }),
+      this.prisma.scheduleShift.findMany({
+        where: {
+          venueId,
+          OR: [
+            { weekStart: availabilityWeekStart },
+            { weekStart: previousSaturday.weekStart, dayIndex: previousSaturday.dayIndex, endMinutes: { gt: 1440 } },
+          ],
+        },
+      }),
       this.prisma.profile.findMany({
         where: { venueId, OR: ACTIVE_MEMBERSHIP },
         orderBy: { fullName: 'asc' },
@@ -1246,11 +1267,24 @@ export class SchedulingController {
     const laborForecast = buildLaborForecast({
       tz: venue?.timezone ?? null,
       now: weekStartDayUtc,
-      shifts: shifts.map((s) => ({ dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, profileId: s.profileId })),
+      weekStart: availabilityWeekStart,
+      shifts: shifts.map((s) => ({ weekStart: s.weekStart, dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, profileId: s.profileId })),
       reservations: reservations.map((r) => ({ ts: r.reservationTime.getTime(), partySize: r.partySize, isPrivateEvent: Boolean(r.isPrivateEvent) })),
       events: venueEvents.map((e) => ({ ts: e.startsAt.getTime(), expectedGuests: e.expectedGuests })),
       nameById: new Map(staff.map((p) => [p.id, p.fullName])),
     });
+    const existingShiftSegments = shifts.flatMap((shift) =>
+      occupiedSlots(shift)
+        .filter((slot) => slot.weekStart === availabilityWeekStart)
+        .map((slot) => ({
+          weekStart: slot.weekStart ?? availabilityWeekStart,
+          dayIndex: slot.dayIndex,
+          startMinutes: slot.start,
+          endMinutes: slot.end,
+          jobTitle: shift.jobTitle,
+          profileId: shift.profileId,
+        })),
+    );
 
     const draft = await this.aiScheduler.generateDraft({
       weekStart: availabilityWeekStart,
@@ -1258,7 +1292,7 @@ export class SchedulingController {
       laborBudgetHours: venue?.weeklyLaborBudgetHours ?? null,
       staff: staff.map((p) => ({ id: p.id, fullName: p.fullName, jobTitle: p.jobTitle, role: p.role })),
       availabilityByProfile: this.unavailableByProfile(unavailableRequests, availabilityWeekStart),
-      existingShifts: shifts.map((s) => ({ dayIndex: s.dayIndex, startMinutes: s.startMinutes, endMinutes: s.endMinutes, jobTitle: s.jobTitle, profileId: s.profileId })),
+      existingShifts: existingShiftSegments,
       memoryNotes: memoryNotes.map((note) => ({ weekStart: note.weekStart, title: note.title, detail: note.detail })),
     });
 

@@ -18,6 +18,15 @@ function makeContext(venueScope: unknown, user?: unknown) {
   } as any;
 }
 
+function makeVerifiedContext(verifiedVenueProfile: unknown, user: unknown) {
+  const request = { verifiedVenueProfile, user };
+  return {
+    switchToHttp: () => ({ getRequest: () => request }),
+    getHandler: () => ({}),
+    getClass: () => ({}),
+  } as any;
+}
+
 function makeGuard(tier: string | undefined) {
   const reflector = { getAllAndOverride: vi.fn().mockReturnValue(tier) } as any;
   // Throws if any code path tries to hit the DB — proves these cases are pure.
@@ -112,6 +121,27 @@ describe('SubscriptionGuard', () => {
       venueId: 'fresh-venue',
       role: 'staff',
       allAccess: false,
+    });
+  });
+
+  it('reuses AuthGuard verified membership without querying Profile again', async () => {
+    const { guard, prisma } = makeDbGuard('active', null);
+    const context = makeVerifiedContext({
+      id: 'verified-profile',
+      fullName: 'Verified User',
+      role: 'manager',
+      allAccess: false,
+      trialEndsAt: null,
+      venueId: 'verified-venue',
+      venue: { id: 'verified-venue', name: 'Verified Venue', subscriptionStatus: 'active' },
+    }, { sub: 'user-1', venueId: 'stale-venue' });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+    expect(context.switchToHttp().getRequest().venueScope).toMatchObject({
+      profileId: 'verified-profile',
+      venueId: 'verified-venue',
+      role: 'manager',
     });
   });
 

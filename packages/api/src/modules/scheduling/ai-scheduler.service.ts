@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../common/ai-json-parse';
 import { dayLabel, minutesToTime } from '../../common/mappers';
+import { shiftsOverlap } from '../../common/shift-overlap';
 import type { LaborForecast } from './labor-forecast';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
@@ -8,7 +9,7 @@ const MAX_PROPOSED_SHIFTS = 60;
 
 export type AiStaffMember = { id: string; fullName: string; jobTitle: string; role: string };
 export type AiAvailabilityWindow = { dayIndex: number; startMinutes: number; endMinutes: number; available: boolean };
-export type AiExistingShift = { dayIndex: number; startMinutes: number; endMinutes: number; jobTitle: string; profileId: string | null };
+export type AiExistingShift = { weekStart?: string; dayIndex: number; startMinutes: number; endMinutes: number; jobTitle: string; profileId: string | null };
 export type AiMemoryNote = { weekStart: string; title: string; detail: string };
 
 export type ProposedShift = {
@@ -59,7 +60,25 @@ export class AiSchedulerService {
       userText,
     });
 
-    return this.normalize(parsed, new Set(input.staff.map((member) => member.id)));
+    const normalized = this.normalize(parsed, new Set(input.staff.map((member) => member.id)));
+    return { shifts: this.removeConflictingAssignments(input.weekStart, input.existingShifts, normalized.shifts) };
+  }
+
+  removeConflictingAssignments(weekStart: string, existingShifts: AiExistingShift[], proposedShifts: ProposedShift[]): ProposedShift[] {
+    const accepted: ProposedShift[] = [];
+    for (const shift of proposedShifts) {
+      const conflict = shift.profileId && [
+        ...existingShifts.filter((existing) => existing.profileId === shift.profileId),
+        ...accepted.filter((existing) => existing.profileId === shift.profileId),
+      ].some((existing) => shiftsOverlap(
+        { ...existing, weekStart: ('weekStart' in existing ? existing.weekStart : undefined) ?? weekStart },
+        { ...shift, weekStart },
+      ));
+      accepted.push(conflict
+        ? { ...shift, profileId: null, reason: `${shift.reason} Assignment left open because it conflicts with an existing shift.` }
+        : shift);
+    }
+    return accepted;
   }
 
   private buildContext(input: {

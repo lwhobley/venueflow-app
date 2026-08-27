@@ -410,7 +410,7 @@ describe('AuthController recovery and logout safety', () => {
           email: 'staff@example.com',
           profile: { fullName: 'Test Staff' },
         }),
-        update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
     const email = {
@@ -427,6 +427,34 @@ describe('AuthController recovery and logout safety', () => {
       { ip: '127.0.0.1' } as any,
       { email: 'staff@example.com' },
     )).resolves.toEqual({ ok: true });
+  });
+
+  it('uses the same reset-code work and update shape for an unknown email', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany,
+      },
+    };
+    const email = { send: vi.fn() };
+    const authService = {
+      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
+    };
+    const controller = new AuthController(prisma as any, {} as any, email as any, authService as any);
+
+    await expect(controller.forgotPassword(
+      { ip: '127.0.0.1' } as any,
+      { email: 'missing@example.com' },
+    )).resolves.toEqual({ ok: true });
+
+    expect(authService.generateOneTimeCode).toHaveBeenCalledOnce();
+    expect(authService.hashOneTimeCode).toHaveBeenCalledWith('12345678');
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: '__missing_password_reset_account__' },
+    }));
+    expect(email.send).not.toHaveBeenCalled();
   });
 
   it('consumes a password-reset code once across concurrent attempts', async () => {

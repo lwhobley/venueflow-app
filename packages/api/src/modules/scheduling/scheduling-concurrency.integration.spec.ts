@@ -56,7 +56,7 @@ beforeAll(async () => {
   const db = await setupTestDb();
   prisma = db.prisma;
   teardown = db.teardown;
-}, 60_000);
+});
 
 afterAll(async () => {
   await teardown();

@@ -1,6 +1,9 @@
 import { defineConfig, configDefaults } from 'vitest/config';
 
 export default defineConfig({
+  // Component tests use mocks; loading `.env.local` would couple them to
+  // production credentials and makes the suite unavailable in clean CI.
+  envDir: false,
   resolve: {
     // The React Native package ships Flow syntax that Vite does not transform
     // in Node. The web implementation exposes the same component contract for

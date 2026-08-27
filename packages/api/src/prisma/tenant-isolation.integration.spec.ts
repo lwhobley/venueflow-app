@@ -14,6 +14,7 @@ describe('tenant isolation extension (integration)', () => {
   let teardown: () => Promise<void> = async () => {};
   let venueA = '';
   let venueB = '';
+  let profileB = '';
 
   function makeExtended(client: PrismaClient) {
     return client.$extends(tenantIsolationExtension());
@@ -33,15 +34,27 @@ describe('tenant isolation extension (integration)', () => {
     ]);
     venueA = a.id;
     venueB = b.id;
+    profileB = (await base.profile.create({
+      data: {
+        venueId: venueB,
+        email: 'tenant-b@example.test',
+        fullName: 'Tenant B Staff',
+        role: 'staff',
+        jobTitle: 'Server',
+        membershipStatus: 'active',
+      },
+    })).id;
     await Promise.all([
       base.barInventoryItem.create({ data: { venueId: venueA, name: 'A-Gin', normalizedName: 'a-gin', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
       base.barInventoryItem.create({ data: { venueId: venueB, name: 'B-Rum', normalizedName: 'b-rum', category: 'spirit', unit: 'bottle', parLevel: 1, onHand: 1 } }),
     ]);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     if (!base) return;
     await base.barInventoryItem.deleteMany();
+    await base.scheduleShift.deleteMany();
+    await base.profile.deleteMany();
     await base.venue.deleteMany();
     await teardown();
   });
@@ -81,5 +94,21 @@ describe('tenant isolation extension (integration)', () => {
     );
     expect(created.venueId).toBe(venueA);
     await base.barInventoryItem.delete({ where: { id: created.id } });
+  });
+
+  it('database constraints reject a cross-tenant scheduling reference even without tenant context', async () => {
+    await expect(base.scheduleShift.create({
+      data: {
+        venueId: venueA,
+        profileId: profileB,
+        weekStart: '2026-08-23',
+        dayIndex: 0,
+        startMinutes: 600,
+        endMinutes: 900,
+        jobTitle: 'Server',
+        station: 'Floor',
+        status: 'scheduled',
+      },
+    })).rejects.toThrow();
   });
 });

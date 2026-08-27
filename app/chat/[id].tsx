@@ -529,12 +529,12 @@ function ConversationScreen() {
     <Portal.Host>
       <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: spacing.sm, paddingBottom: spacing.sm, paddingHorizontal: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.divider, backgroundColor: colors.surface }}>
-          <IconButton icon="arrow-left" iconColor={colors.charcoal} onPress={() => router.back()} />
+          <IconButton icon="arrow-left" iconColor={colors.charcoal} onPress={() => router.back()} accessibilityLabel={t('chatThread.backLabel')} />
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ color: colors.charcoal, fontSize: 18, fontWeight: '900' }} numberOfLines={1}>{data?.title ?? t('chatThread.headerFallback')}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>{t('chatThread.teamConversation')}</Text>
           </View>
-          <IconButton icon="delete-outline" iconColor={colors.danger} onPress={() => void onDeleteChat()} />
+          <IconButton icon="delete-outline" iconColor={colors.danger} onPress={() => void onDeleteChat()} accessibilityLabel={t('chatThread.deleteLabel')} />
         </View>
 
         {error ? <HelperText type="error" visible>{error}</HelperText> : null}

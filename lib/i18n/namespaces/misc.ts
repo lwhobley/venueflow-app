@@ -8,6 +8,8 @@
 export const en = {
   chatThread: {
     headerFallback: 'Chat',
+    backLabel: 'Back',
+    deleteLabel: 'Delete conversation',
     teamConversation: 'Team conversation',
     emptyTitle: 'No messages yet',
     emptySubtitle: 'Start the thread with a quick update.',
@@ -314,6 +316,8 @@ export type MiscDictionary = typeof en;
 export const es: MiscDictionary = {
   chatThread: {
     headerFallback: 'Chat',
+    backLabel: 'Atrás',
+    deleteLabel: 'Eliminar conversación',
     teamConversation: 'Conversación del equipo',
     emptyTitle: 'Aún no hay mensajes',
     emptySubtitle: 'Inicia la conversación con una actualización rápida.',
@@ -618,6 +622,8 @@ export const es: MiscDictionary = {
 export const fr: MiscDictionary = {
   chatThread: {
     headerFallback: 'Chat',
+    backLabel: 'Retour',
+    deleteLabel: 'Supprimer la conversation',
     teamConversation: 'Conversation d\'équipe',
     emptyTitle: 'Aucun message pour le moment',
     emptySubtitle: 'Démarrez la conversation avec une mise à jour rapide.',
