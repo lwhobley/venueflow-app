@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { DateRangeBar, useDateRange } from '../../components/DateRangeBar';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
 import { ManagerGate } from '../../components/ManagerGate';
@@ -44,7 +45,7 @@ type Insight = {
   pendingRequests: number;
 };
 
-export default function ReportsScreen() {
+function ReportsScreen() {
   const { t } = useI18n();
   const { venue, isReady, profileLoading, profileError, refetchProfile, canManage } = useVenueAuth();
   const [showTimeCsv, setShowTimeCsv] = useState(false);
@@ -274,4 +275,8 @@ export default function ReportsScreen() {
     </ScrollView>
     </ManagerGate>
   );
+}
+
+export default function ReportsScreenWrapper() {
+  return <ScreenErrorBoundary><ReportsScreen /></ScreenErrorBoundary>;
 }

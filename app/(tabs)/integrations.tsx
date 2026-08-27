@@ -6,6 +6,7 @@ import { api } from '../../lib/railway-api';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { formatMoney, formatShortDateTime, errorMessage } from '../../lib/format';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { PremiumFeatureGate } from '../../components/PremiumFeatureGate';
 import { ProviderDropdown } from '../../components/ProviderDropdown';
 import { InlineMessage } from '../../components/InlineMessage';
@@ -38,7 +39,7 @@ type ReservationProvider = (typeof reservationProviderOptions)[number]['value'];
 
 
 
-export default function IntegrationsScreen() {
+function IntegrationsScreen() {
   return (
     <PremiumFeatureGate feature="Integrations">
       <IntegrationsScreenInner />
@@ -340,4 +341,8 @@ function IntegrationsScreenInner() {
     </ScrollView>
     </ManagerGate>
   );
+}
+
+export default function IntegrationsScreenWrapper() {
+  return <ScreenErrorBoundary><IntegrationsScreen /></ScreenErrorBoundary>;
 }

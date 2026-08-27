@@ -20,11 +20,14 @@ export default defineConfig({
       // This ratchet covers every app and component file instead of hiding
       // untested screens. It starts at the measured repository-wide baseline;
       // new tests should raise it without narrowing the include set.
+      // Raised after adding the host-error-boundary regression spec (measured:
+      // statements 3.88, branches 2.77, functions 3.11, lines 4.18 — kept a
+      // small margin below each so the gate doesn't flake on minor variance).
       thresholds: {
-        statements: 3.7,
-        branches: 2.5,
-        functions: 2.8,
-        lines: 3.9,
+        statements: 3.8,
+        branches: 2.7,
+        functions: 3.0,
+        lines: 4.1,
       },
     } as any,
   },

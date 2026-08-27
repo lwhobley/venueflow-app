@@ -10,6 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -148,6 +149,7 @@ class CreateStaffRequestDto {
   requestedRangeEnd?: string;
 
   @IsArray()
+  @ArrayMaxSize(100)
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => AvailabilityBlockDto)

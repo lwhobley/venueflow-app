@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAction, useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -95,7 +96,7 @@ const addItemRow = { flexDirection: 'row' as const, flexWrap: 'wrap' as const, g
 const addItemWideField = { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 136, backgroundColor: colors.surface };
 const addItemNumberField = { flexGrow: 1, flexShrink: 1, flexBasis: 120, minWidth: 112, backgroundColor: colors.surface };
 
-export default function BarStockScreen() {
+function BarStockScreen() {
   const { t } = useI18n();
   const { venue, isReady, canManage, profileLoading, profileError, refetchProfile } = useVenueAuth();
   // Inventory (stock levels) is visible to every venue member; edits below stay
@@ -934,4 +935,8 @@ export default function BarStockScreen() {
     </ScrollView>
     </ManagerGate>
   );
+}
+
+export default function BarStockScreenWrapper() {
+  return <ScreenErrorBoundary><BarStockScreen /></ScreenErrorBoundary>;
 }

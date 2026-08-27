@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
 import { SUBSCRIPTION_TIER_KEY, SubscriptionTier } from './require-subscription.decorator';
 import { ACTIVE_MEMBERSHIP, isActiveMembership } from '../common/membership';
+import { venueIdHeader } from '../common/http';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveVenueSubscriptionStatus } from './subscription-status';
 
@@ -70,7 +71,7 @@ export class SubscriptionGuard implements CanActivate {
     const user = request.user;
     if (!user?.sub) return null;
 
-    const requestedVenueId = (request.headers?.['x-venue-id'] as string | undefined) || user.venueId || undefined;
+    const requestedVenueId = venueIdHeader(request.headers) || user.venueId || undefined;
     const profile = await this.prisma.profile.findFirst({
       where: {
         userId: user.sub,

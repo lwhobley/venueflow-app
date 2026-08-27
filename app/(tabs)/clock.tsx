@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, View, Linking, TextInput } from 'react-na
 import { Card, Text } from 'react-native-paper';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
@@ -53,7 +54,7 @@ function fmtDate(d: Date) {
   return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-export default function ClockScreen() {
+function ClockScreen() {
   const { t } = useI18n();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -579,4 +580,8 @@ export default function ClockScreen() {
       ) : null}
     </ScrollView>
   );
+}
+
+export default function ClockScreenWrapper() {
+  return <ScreenErrorBoundary><ClockScreen /></ScreenErrorBoundary>;
 }

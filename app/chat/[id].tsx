@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Dialog, HelperText, IconButton, Portal, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { apiRequest, resolveMediaUrl } from '../../lib/api-client';
@@ -176,7 +177,7 @@ function ActionCard({
   );
 }
 
-export default function ConversationScreen() {
+function ConversationScreen() {
   const { t } = useI18n();
   const params = useLocalSearchParams<{ id: string }>();
   const { isReady } = useAuthenticatedSession();
@@ -672,6 +673,10 @@ export default function ConversationScreen() {
       </KeyboardAvoidingView>
     </Portal.Host>
   );
+}
+
+export default function ConversationScreenWrapper() {
+  return <ScreenErrorBoundary><ConversationScreen /></ScreenErrorBoundary>;
 }
 
 function ShiftShareRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {

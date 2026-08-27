@@ -13,6 +13,7 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEmail,
   IsIn,
@@ -77,6 +78,7 @@ class SaveLeadDto {
   status?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   @IsOptional()
   tags?: string[];
@@ -217,6 +219,7 @@ class SaveContractDto {
   cancellationPolicy?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   @IsOptional()
   customClauses?: string[];

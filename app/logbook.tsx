@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import { colors, spacing, type } from '../lib/theme';
 import { AppCard } from '../components/AppCard';
+import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { errorMessage } from '../lib/format';
 import { useVenueAuth } from '../lib/useVenueAuth';
 import { useI18n } from '../lib/i18n';
@@ -25,7 +26,7 @@ function formatTimestamp(ms: number): string {
   return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 }
 
-export default function LogbookScreen() {
+function LogbookScreen() {
   const { t } = useI18n();
   const { venue, isReady, canManage, me } = useVenueAuth();
   const CATEGORIES: Array<{ value: string; label: string }> = [
@@ -143,4 +144,8 @@ export default function LogbookScreen() {
       )}
     </ScrollView>
   );
+}
+
+export default function LogbookScreenWrapper() {
+  return <ScreenErrorBoundary><LogbookScreen /></ScreenErrorBoundary>;
 }

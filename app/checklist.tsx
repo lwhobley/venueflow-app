@@ -8,6 +8,7 @@ import { api } from '../lib/railway-api';
 import { resolveMediaUrl } from '../lib/api-client';
 import { colors, spacing, radius, type } from '../lib/theme';
 import { AppCard, SectionHeader } from '../components/AppCard';
+import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { errorMessage } from '../lib/format';
 import { useVenueAuth } from '../lib/useVenueAuth';
 import { useI18n } from '../lib/i18n';
@@ -27,7 +28,7 @@ type ChecklistItem = {
 
 type ChecklistResponse = { date: string; kind: string; items: ChecklistItem[] };
 
-export default function ChecklistScreen() {
+function ChecklistScreen() {
   const { t } = useI18n();
   const { venue, isReady, canManage } = useVenueAuth();
   const [kind, setKind] = useState<'opening' | 'closing'>('opening');
@@ -197,4 +198,8 @@ export default function ChecklistScreen() {
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
     </ScrollView>
   );
+}
+
+export default function ChecklistScreenWrapper() {
+  return <ScreenErrorBoundary><ChecklistScreen /></ScreenErrorBoundary>;
 }

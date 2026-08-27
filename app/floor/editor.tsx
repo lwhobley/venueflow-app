@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { colors, spacing, type } from '../../lib/theme';
 import { AppCard, SectionHeader } from '../../components/AppCard';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageVenue } from '../../lib/permissions';
@@ -387,7 +388,7 @@ function ChairNode({
   );
 }
 
-export default function FloorEditorScreen() {
+function FloorEditorScreen() {
   const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
   const { isReady, user } = useAuthenticatedSession();
@@ -822,4 +823,8 @@ export default function FloorEditorScreen() {
       {publishError ? <Text style={{ color: colors.danger, textAlign: 'center' }}>{publishError}</Text> : null}
     </ScrollView>
   );
+}
+
+export default function FloorEditorScreenWrapper() {
+  return <ScreenErrorBoundary><FloorEditorScreen /></ScreenErrorBoundary>;
 }

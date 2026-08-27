@@ -2,6 +2,7 @@ import { Alert, Platform, ScrollView, View } from 'react-native';
 import { useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { Button, Card, Text } from 'react-native-paper';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { useAuthActions } from '../../lib/railway-hooks';
 import { ApiError } from '../../lib/api-client';
@@ -12,7 +13,7 @@ import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling, canManageVenue } from '../../lib/permissions';
 import { useI18n } from '../../lib/i18n';
 
-export default function ProfileScreen() {
+function ProfileScreen() {
   const { t } = useI18n();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -188,4 +189,8 @@ export default function ProfileScreen() {
       </Card>
     </ScrollView>
   );
+}
+
+export default function ProfileScreenWrapper() {
+  return <ScreenErrorBoundary><ProfileScreen /></ScreenErrorBoundary>;
 }

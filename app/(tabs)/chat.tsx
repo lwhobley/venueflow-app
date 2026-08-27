@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, HelperText, IconButton, Text, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
@@ -120,7 +121,7 @@ function Section({ title, children, action }: { title: string; children: ReactNo
   );
 }
 
-export default function ChatScreen() {
+function ChatScreen() {
   const { t } = useI18n();
   const { venue, isReady, me, canManage } = useVenueAuth();
   const ensureSetup = useMutation(api.chat.ensureChatSetup);
@@ -401,4 +402,8 @@ export default function ChatScreen() {
       ) : null}
     </ScrollView>
   );
+}
+
+export default function ChatScreenWrapper() {
+  return <ScreenErrorBoundary><ChatScreen /></ScreenErrorBoundary>;
 }

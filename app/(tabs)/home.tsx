@@ -6,6 +6,7 @@ import { TextInput } from 'react-native-paper';
 import { useMutation, useQuery, useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import type { Id } from '../../lib/ids';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { CommandButton, CommandText } from '../../components/FutureUI';
 import { HomeWranglerSurface } from '../../components/HomeWranglerSurface';
 import { Skeleton } from '../../components/Skeleton';
@@ -25,7 +26,7 @@ type NotificationItem = {
 
 const todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
-export default function HomeScreen() {
+function HomeScreen() {
   usePushNotifications();
   const venue = useAuthStore((state) => state.venue);
   const venues = useAuthStore((state) => state.venues);
@@ -240,3 +241,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#B8711B',
   },
 });
+
+export default function HomeScreenWrapper() {
+  return <ScreenErrorBoundary><HomeScreen /></ScreenErrorBoundary>;
+}

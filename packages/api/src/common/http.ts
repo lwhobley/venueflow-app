@@ -6,3 +6,14 @@ import type { Request } from 'express';
 export function getClientIp(request: Request) {
   return request.ip || 'unknown';
 }
+
+/**
+ * Normalizes the client-supplied venue-selection header. A duplicated header
+ * (`X-Venue-Id: a` sent twice) makes Express parse it as `string[]`, which
+ * this rejects rather than passing through to a Prisma `where: { venueId }`
+ * filter that expects a scalar.
+ */
+export function venueIdHeader(headers: Request['headers']): string | undefined {
+  const raw = headers?.['x-venue-id'];
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+}

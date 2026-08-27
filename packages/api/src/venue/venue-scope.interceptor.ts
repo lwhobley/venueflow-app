@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import type { AuthenticatedRequest } from '../auth/auth.guard';
 import { resolveVenueSubscriptionStatus } from '../billing/subscription-status';
 import { bindAiUsageContext } from '../common/ai-usage-context';
+import { venueIdHeader } from '../common/http';
 import { SKIP_VENUE_SCOPE_KEY } from './skip-venue-scope.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { runWithoutTenant, runWithTenant } from '../prisma/tenant-context';
@@ -46,10 +47,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
 
     const user = request.user;
     if (!user?.sub) return next.handle();
-    const rawVenueHeader = request.headers['x-venue-id'];
-    const requestedVenueId = typeof rawVenueHeader === 'string' && rawVenueHeader.trim()
-      ? rawVenueHeader.trim()
-      : undefined;
+    const requestedVenueId = venueIdHeader(request.headers);
 
     let profile: VenueScopedRequest['verifiedVenueProfile'] | null = request.verifiedVenueProfile;
     if (!profile && requestedVenueId) {

@@ -129,4 +129,27 @@ describe('SubscriptionGuard', () => {
 
     await expect(guard.canActivate(makeContext(undefined, { sub: 'user-1' }))).rejects.toBeInstanceOf(HttpException);
   });
+
+  it('falls back to the JWT venueId instead of crashing on a duplicated X-Venue-Id header', async () => {
+    // Express parses a repeated header as string[]. resolveVenueScope used to
+    // cast it straight into a Prisma `where: { venueId }` filter, throwing a
+    // PrismaClientValidationError (surfaced as a 500) instead of a clean 402/403.
+    const { guard, prisma } = makeDbGuard('active', {
+      id: 'fresh-profile',
+      fullName: 'Fresh User',
+      role: 'staff',
+      allAccess: false,
+      membershipStatus: 'active',
+      trialEndsAt: null,
+      venueId: 'jwt-venue',
+      venue: { id: 'jwt-venue', name: 'JWT Venue', subscriptionStatus: 'active' },
+    });
+    const context = makeContext(undefined, { sub: 'user-1', venueId: 'jwt-venue' });
+    context.switchToHttp().getRequest().headers = { 'x-venue-id': ['venue-a', 'venue-b'] };
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ venueId: 'jwt-venue' }) }),
+    );
+  });
 });

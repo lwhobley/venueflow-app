@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { TableShape, TableSection, TableStatus } from '@prisma/client';
+import { Prisma, TableShape, TableSection, TableStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { ReservationNotifierService } from '../reservations/reservation-notifier.service';
@@ -222,13 +222,67 @@ export class FloorService {
         if (activeAssignments) throw new ConflictException('Release active table assignments before removing tables from the floor plan');
         await tx.floorTable.deleteMany({ where: { id: { in: removedIds } } });
       }
-      for (const table of tables) {
-        const data = { label: table.label, shape: (table.shape as TableShape) ?? 'square', seats: table.capacity, seatLabelStyle: table.seatLabelStyle ?? null, x: table.x, y: table.y, width: table.width, height: table.height, rotation: table.rotation ?? 0, section: (table.section as TableSection) ?? 'main', minSpend: table.minSpend ?? 0, isReservable: table.isReservable ?? true };
-        if (table.id && existingIds.has(table.id)) await tx.floorTable.update({ where: { id: table.id }, data });
-        else {
-          const created = await tx.floorTable.create({ data: { ...data, floorPlanId: plan.id } });
-          await tx.tableState.create({ data: { venueId, tableId: created.id, status: 'available', lastActivityAt: new Date() } });
-        }
+      // Set-based writes instead of one round-trip per table: a floor plan can
+      // carry up to MAX_FLOOR_PLAN_TABLES (500) tables, and this whole block
+      // runs inside one advisory-locked transaction — a sequential loop here
+      // held the lock (and one of the pool's 3 connections) for as long as
+      // the largest submitted plan took to write, one row at a time.
+      const rows = tables.map((table) => ({
+        id: table.id && existingIds.has(table.id) ? table.id : randomUUID(),
+        isNew: !(table.id && existingIds.has(table.id)),
+        label: table.label,
+        shape: (table.shape as TableShape) ?? 'square',
+        seats: table.capacity,
+        seatLabelStyle: table.seatLabelStyle ?? null,
+        x: table.x,
+        y: table.y,
+        width: table.width,
+        height: table.height,
+        rotation: table.rotation ?? 0,
+        section: (table.section as TableSection) ?? 'main',
+        minSpend: table.minSpend ?? 0,
+        isReservable: table.isReservable ?? true,
+      }));
+      const creates = rows.filter((row) => row.isNew);
+      const updates = rows.filter((row) => !row.isNew);
+
+      if (creates.length > 0) {
+        await tx.floorTable.createMany({
+          data: creates.map(({ isNew: _isNew, ...data }) => ({ ...data, floorPlanId: plan.id })),
+        });
+        await tx.tableState.createMany({
+          data: creates.map((row) => ({ venueId, tableId: row.id, status: 'available', lastActivityAt: new Date() })),
+        });
+      }
+      if (updates.length > 0) {
+        const values = Prisma.join(
+          updates.map(
+            (row) => Prisma.sql`(${row.id}, ${row.label}, ${row.shape}::"TableShape", ${row.seats}, ${row.seatLabelStyle}, ${row.x}, ${row.y}, ${row.width}, ${row.height}, ${row.rotation}, ${row.section}::"TableSection", ${row.minSpend}, ${row.isReservable})`,
+          ),
+          ', ',
+        );
+        // Table-scoped by id AND floorPlanId, matching the tenant boundary the
+        // preceding loop-based UPDATE relied on (an id only ever reaches this
+        // branch when it's already a member of existingIds, which is itself
+        // scoped to this plan).
+        await tx.$executeRaw`
+          UPDATE "FloorTable" AS t
+          SET
+            label = v.label,
+            shape = v.shape,
+            seats = v.seats,
+            "seatLabelStyle" = v."seatLabelStyle",
+            x = v.x,
+            y = v.y,
+            width = v.width,
+            height = v.height,
+            rotation = v.rotation,
+            section = v.section,
+            "minSpend" = v."minSpend",
+            "isReservable" = v."isReservable"
+          FROM (VALUES ${values}) AS v(id, label, shape, seats, "seatLabelStyle", x, y, width, height, rotation, section, "minSpend", "isReservable")
+          WHERE t.id = v.id AND t."floorPlanId" = ${plan.id}
+        `;
       }
 
       await tx.floorChair.deleteMany({ where: { floorPlanId: plan.id } });

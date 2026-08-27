@@ -5,6 +5,7 @@ import type { Request } from 'express';
 import type { SubscriptionStatus } from '@prisma/client';
 import { createHash } from 'crypto';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import { venueIdHeader } from '../common/http';
 import { PrismaService } from '../prisma/prisma.service';
 import { enterTenant } from '../prisma/tenant-context';
 import { tenantIsolationEnforced } from '../prisma/tenant-isolation-config';
@@ -96,10 +97,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 
-    const rawVenueHeader = request.headers?.['x-venue-id'];
-    const headerVenueId = typeof rawVenueHeader === 'string' && rawVenueHeader.trim()
-      ? rawVenueHeader.trim()
-      : undefined;
+    const headerVenueId = venueIdHeader(request.headers);
     const requestedVenueId = headerVenueId || payload.venueId || undefined;
     // With no explicit venue requested, only match a profile that actually
     // carries a venue. A user can hold both a venueless profile (created at

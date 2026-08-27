@@ -204,6 +204,7 @@ class RestoreShiftsDto {
   weekStart?: string;
 
   @IsArray()
+  @ArrayMaxSize(1000)
   @ValidateNested({ each: true })
   @Type(() => RestoreShiftDto)
   shifts!: RestoreShiftDto[];
@@ -229,6 +230,7 @@ class ApplyAutoScheduleDto {
   weekStartDate?: string;
 
   @IsArray()
+  @ArrayMaxSize(1000)
   @ValidateNested({ each: true })
   @Type(() => AutoScheduleAssignmentDto)
   assignments!: AutoScheduleAssignmentDto[];
@@ -267,6 +269,7 @@ class CommitAiScheduleDto {
   weekStartDate?: string;
 
   @IsArray()
+  @ArrayMaxSize(1000)
   @ValidateNested({ each: true })
   @Type(() => AiProposedShiftDto)
   shifts!: AiProposedShiftDto[];

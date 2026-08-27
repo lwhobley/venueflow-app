@@ -5,10 +5,11 @@ import { useQuery } from '../lib/railway-hooks';
 import { api } from '../lib/railway-api';
 import { colors, spacing, type } from '../lib/theme';
 import { AppCard, SectionHeader } from '../components/AppCard';
+import { ScreenErrorBoundary } from '../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../lib/auth-store';
 import { useI18n } from '../lib/i18n';
 
-export default function HostStandScreen() {
+function HostStandScreen() {
   const router = useRouter();
   const { t } = useI18n();
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -55,4 +56,8 @@ export default function HostStandScreen() {
       </Button>
     </ScrollView>
   );
+}
+
+export default function HostStandScreenWrapper() {
+  return <ScreenErrorBoundary><HostStandScreen /></ScreenErrorBoundary>;
 }

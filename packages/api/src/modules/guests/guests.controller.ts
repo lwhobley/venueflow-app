@@ -6,13 +6,14 @@ import {
   ForbiddenException,
   Get,
   Headers,
+  NotFoundException,
   Param,
   Post,
   Query,
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
 import { canManageVenue } from '../../auth/roles';
@@ -78,6 +79,7 @@ class UpsertGuestDto {
   dietaryNotes?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   @IsOptional()
   tags?: string[];
@@ -104,6 +106,7 @@ class LeadDto {
   source?: string;
 
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   @IsOptional()
   tags?: string[];
@@ -111,6 +114,9 @@ class LeadDto {
 
 class IngestLeadsDto {
   @IsArray()
+  // Matches ingestLeadsForVenue's existing `.slice(0, 100)` — reject an
+  // oversized batch outright instead of silently discarding the tail.
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => LeadDto)
   leads!: LeadDto[];
@@ -178,29 +184,164 @@ export class GuestsController {
       }),
       this.prisma.guest.count({ where: where as any }),
     ]);
+
+    const guestIds = guests.map((g) => g.id);
+    const now = Date.now();
+    // Batched aggregates (groupBy/findMany over the whole page) instead of one
+    // query per guest — segmentation, VIP scoring, and lifetime-spend totals
+    // on this screen all read these fields, so they must be populated even at
+    // 200 guests per page.
+    const [checkAgg, reservationCounts, upcomingReservations] = guestIds.length
+      ? await Promise.all([
+          this.prisma.posCheck.groupBy({
+            by: ['guestId'],
+            where: { venueId: scope.venueId, guestId: { in: guestIds } },
+            _count: { _all: true },
+            _sum: { totalCents: true },
+            _max: { closedAt: true },
+          }),
+          this.prisma.reservation.groupBy({
+            by: ['guestId'],
+            where: { venueId: scope.venueId, guestId: { in: guestIds }, deletedAt: null, status: { not: 'cancelled' } },
+            _count: { _all: true },
+          }),
+          this.prisma.reservation.findMany({
+            where: {
+              venueId: scope.venueId,
+              guestId: { in: guestIds },
+              deletedAt: null,
+              reservationTime: { gte: new Date(now) },
+              status: { notIn: ['cancelled', 'no_show', 'completed'] },
+            },
+            select: { guestId: true, reservationTime: true },
+            orderBy: { reservationTime: 'asc' },
+          }),
+        ])
+      : [[], [], []];
+    const checkByGuest = new Map(checkAgg.filter((a) => a.guestId).map((a) => [a.guestId as string, a]));
+    const reservationCountByGuest = new Map(reservationCounts.filter((a) => a.guestId).map((a) => [a.guestId as string, a._count._all]));
+    const upcomingByGuest = new Map<string, number>();
+    for (const r of upcomingReservations) {
+      if (r.guestId && !upcomingByGuest.has(r.guestId)) upcomingByGuest.set(r.guestId, r.reservationTime.getTime());
+    }
+
     return {
-      guests: guests.map((g) => ({
-        id: g.id,
-        venueId: g.venueId,
-        fullName: g.fullName,
-        phone: g.phone ?? null,
-        email: g.email ?? null,
-        lifecycleStage: g.lifecycleStage ?? 'lead',
-        source: g.source ?? null,
-        birthday: g.birthday ?? null,
-        company: g.company ?? null,
-        marketingOptIn: g.marketingOptIn ?? false,
-        favoriteTable: g.favoriteTable ?? null,
-        preferredServer: g.preferredServer ?? null,
-        dietaryNotes: g.dietaryNotes ?? null,
-        tags: g.tags,
-        notes: g.notes ?? null,
-        createdAt: g.createdAt.getTime(),
-        updatedAt: g.updatedAt.getTime(),
-      })),
+      guests: guests.map((g) => {
+        const agg = checkByGuest.get(g.id);
+        const visitCount = agg?._count._all ?? 0;
+        const totalSpendCents = agg?._sum.totalCents ?? 0;
+        const lastVisitAt = agg?._max.closedAt ? agg._max.closedAt.getTime() : null;
+        return {
+          _id: g.id,
+          venueId: g.venueId,
+          fullName: g.fullName,
+          phone: g.phone ?? null,
+          email: g.email ?? null,
+          lifecycleStage: g.lifecycleStage ?? 'lead',
+          source: g.source ?? null,
+          birthday: g.birthday ?? null,
+          company: g.company ?? null,
+          marketingOptIn: g.marketingOptIn ?? false,
+          favoriteTable: g.favoriteTable ?? null,
+          preferredServer: g.preferredServer ?? null,
+          dietaryNotes: g.dietaryNotes ?? null,
+          tags: g.tags,
+          notes: g.notes ?? null,
+          createdAt: g.createdAt.getTime(),
+          updatedAt: g.updatedAt.getTime(),
+          reservationCount: reservationCountByGuest.get(g.id) ?? 0,
+          visitCount,
+          lastVisitAt,
+          upcomingReservationAt: upcomingByGuest.get(g.id) ?? null,
+          totalSpendCents,
+          averageSpendCents: visitCount > 0 ? Math.round(totalSpendCents / visitCount) : 0,
+          daysSinceLastVisit: lastVisitAt != null ? Math.floor((now - lastVisitAt) / 86_400_000) : null,
+        };
+      }),
       totalCount,
       page,
       limit,
+    };
+  }
+
+  @RequireSubscription('active')
+  @Get(':id')
+  async getGuestProfile(@VenueScope() scope: Scope, @Param('id') id: string) {
+    this.requireManager(scope);
+    const guest = await this.prisma.guest.findFirst({ where: { id, venueId: scope.venueId, deletedAt: null } });
+    if (!guest) throw new NotFoundException('Guest not found');
+
+    const [reservations, checks] = await Promise.all([
+      this.prisma.reservation.findMany({
+        where: { venueId: scope.venueId, guestId: guest.id, deletedAt: null },
+        orderBy: { reservationTime: 'desc' },
+        take: 50,
+      }),
+      this.prisma.posCheck.findMany({
+        where: { venueId: scope.venueId, guestId: guest.id },
+        orderBy: { openedAt: 'desc' },
+        take: 50,
+      }),
+    ]);
+
+    return {
+      guest: {
+        _id: guest.id,
+        venueId: guest.venueId,
+        fullName: guest.fullName,
+        phone: guest.phone ?? null,
+        email: guest.email ?? null,
+        lifecycleStage: guest.lifecycleStage ?? 'lead',
+        source: guest.source ?? null,
+        birthday: guest.birthday ?? null,
+        company: guest.company ?? null,
+        marketingOptIn: guest.marketingOptIn ?? false,
+        favoriteTable: guest.favoriteTable ?? null,
+        preferredServer: guest.preferredServer ?? null,
+        dietaryNotes: guest.dietaryNotes ?? null,
+        tags: guest.tags,
+        notes: guest.notes ?? null,
+        createdAt: guest.createdAt.getTime(),
+        updatedAt: guest.updatedAt.getTime(),
+      },
+      reservations: reservations.map((r) => ({
+        _id: r.id,
+        partySize: r.partySize,
+        reservationTime: r.reservationTime.getTime(),
+        status: r.status,
+        tags: r.tags,
+        notes: r.notes ?? null,
+        isPrivateEvent: r.isPrivateEvent ?? false,
+        eventName: r.eventName ?? null,
+        eventStatus: r.eventStatus ?? null,
+        eventSpace: r.eventSpace ?? null,
+        setupStyle: r.setupStyle ?? null,
+        menuNotes: r.menuNotes ?? null,
+        beverageNotes: r.beverageNotes ?? null,
+        billingNotes: r.billingNotes ?? null,
+        estimatedValueCents: r.estimatedValueCents ?? null,
+        depositDueCents: r.depositDueCents ?? null,
+      })),
+      checks: checks.map((c) => ({
+        _id: c.id,
+        provider: c.provider,
+        openedAt: c.openedAt.getTime(),
+        closedAt: c.closedAt ? c.closedAt.getTime() : null,
+        totalCents: c.totalCents,
+        tipCents: c.tipCents,
+        status: c.status,
+        revenueCenter: c.revenueCenter ?? null,
+        tenderType: c.tenderType ?? null,
+        guestCount: c.guestCount ?? null,
+        menuItems: c.menuItems
+          ? (c.menuItems as any[]).map((item) => ({
+              name: item.name,
+              category: item.category ?? null,
+              quantity: item.quantity,
+              priceCents: item.priceCents,
+            }))
+          : [],
+      })),
     };
   }
 

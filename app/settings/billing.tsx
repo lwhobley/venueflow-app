@@ -6,6 +6,7 @@ import { useQuery } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
 import { colors, spacing } from '../../lib/theme';
 import { AppCard, SectionHeader } from '../../components/AppCard';
+import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { canManageBilling } from '../../lib/permissions';
@@ -15,7 +16,7 @@ import { appApi } from '../../lib/api-client';
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 const MONTHLY_PLAN_LABEL = '$99.99 / month';
 
-export default function BillingScreen() {
+function BillingScreen() {
   const { t } = useI18n();
   const user = useAuthStore((state: AuthState) => state.user);
   const venue = useAuthStore((state: AuthState) => state.venue);
@@ -107,4 +108,8 @@ export default function BillingScreen() {
       </AppCard>
     </View>
   );
+}
+
+export default function BillingScreenWrapper() {
+  return <ScreenErrorBoundary><BillingScreen /></ScreenErrorBoundary>;
 }
