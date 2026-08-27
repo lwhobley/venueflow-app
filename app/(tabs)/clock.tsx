@@ -118,7 +118,15 @@ function ClockScreen() {
     };
   }, []);
 
-  const canClock = Boolean(activeVenue && location && isWithinGeofence(location, activeVenue));
+  const canClock = Boolean(
+    activeVenue &&
+      location &&
+      isWithinGeofence(location, {
+        latitude: activeVenue.latitude,
+        longitude: activeVenue.longitude,
+        geofenceRadiusM: activeVenue.geofenceRadiusM ?? 120,
+      })
+  );
 
   const onPunch = async () => {
     if (!activeVenue || busyRef.current) return;
@@ -127,7 +135,13 @@ function ClockScreen() {
     try {
       const fresh = await getPreciseLocation();
       setLocation(fresh);
-      if (!isWithinGeofence(fresh, activeVenue)) {
+      if (
+        !isWithinGeofence(fresh, {
+          latitude: activeVenue.latitude,
+          longitude: activeVenue.longitude,
+          geofenceRadiusM: activeVenue.geofenceRadiusM ?? 120,
+        })
+      ) {
         Alert.alert(
           t('clock.punchFailedTitle'),
           t('clock.mustBeWithin', { radius: activeVenue.geofenceRadiusM ?? 120, venue: activeVenue.name ?? t('common.yourVenue') }),
@@ -360,7 +374,7 @@ function ClockScreen() {
             </Text>
           ) : (
             <Text style={{ color: accents[2].fg, textAlign: 'center', marginTop: -4 }}>
-              {t('clock.insideGeofence')}{timeClock?.openSince ? t('clock.inSince', { time: formatTime(timeClock.openSince) }) : ''}{isOnBreak ? t('clock.onBreakSuffix', { type: breakType === 'paid' ? t('clock.paid') : t('clock.unpaid') }) : ''}
+              {t('clock.insideGeofence')}{timeClock?.openSince ? t('clock.inSince', { time: formatTime(timeClock.openSince) }) : ''}{isOnBreak ? t('clock.onBreakSuffix', { type: breakType === 'pa[...]
             </Text>
           )}
 
@@ -401,7 +415,7 @@ function ClockScreen() {
                 <Text style={{ color: colors.muted }}>{t('clock.noPunchesYet')}</Text>
               ) : (
                 punches.map((p, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < punches.length - 1 ? 1 : 0, borderBottomColor: colors.border }}>
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < punches.length - 1 ? 1 : 0, border[...]
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <MaterialCommunityIcons name={p.type === 'in' ? 'login' : 'logout'} size={18} color={p.type === 'in' ? accents[2].fg : colors.danger} />
                       <Text>{p.type === 'in' ? t('clock.clockIn') : t('clock.clockOut')}</Text>
