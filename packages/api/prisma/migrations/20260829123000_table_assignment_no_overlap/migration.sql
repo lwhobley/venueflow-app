@@ -24,6 +24,9 @@
 
 -- Installed into `extensions`, not `public` — see the identical comment in
 -- 20260829121500_time_entry_order_and_overlap, which installs this first.
+-- CREATE SCHEMA IF NOT EXISTS defensively repeated here too, in case these
+-- two migrations are ever applied out of the normal directory order.
+CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
 
 -- tsrange, not tstzrange: startsAt/endsAt are `timestamp without time zone`

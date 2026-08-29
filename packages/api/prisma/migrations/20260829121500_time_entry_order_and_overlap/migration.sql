@@ -43,6 +43,11 @@ ALTER TABLE "TimeEntry" VALIDATE CONSTRAINT "TimeEntry_clock_order_check";
 -- Installed into `extensions`, not `public` — Supabase's own convention,
 -- and its security linter flags an extension left in public (confirmed via
 -- get_advisors after this ran with the default schema on first deploy).
+-- CREATE SCHEMA IF NOT EXISTS first: Supabase provisions `extensions` by
+-- default, but a plain Postgres instance (e.g. CI's test container) does
+-- not — confirmed by CI failing on this exact line with "schema
+-- \"extensions\" does not exist" against a fresh, non-Supabase database.
+CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
 
 -- Only closed punches with a known profile participate. An open punch
