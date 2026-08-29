@@ -273,6 +273,46 @@ describe('BillingController applySubscription P2002 handling', () => {
     expect(updatedVenueIds).toEqual(['venue-a', 'venue-b']);
   });
 
+  it('ignores a RevenueCat app_user_id that happens to match another venue\'s id', async () => {
+    // Regression for F01: subscriberId must never be looked up as Venue.id.
+    // A forged app_user_id equal to a victim's venueId must fall through to
+    // profile resolution (and fail closed, since no profile has that userId)
+    // rather than resolving straight to the victim's venue.
+    const venueFindUnique = vi.fn();
+    const prisma = {
+      venue: { findUnique: venueFindUnique },
+      profile: { findMany: vi.fn().mockResolvedValue([]) },
+      $transaction: vi.fn(),
+    };
+    const config = {
+      get: vi.fn((key: string) => {
+        if (key === 'REVENUECAT_WEBHOOK_SECRET') return 'secret';
+        if (key === 'REVENUECAT_ALLOWED_PRODUCT_IDS') return 'com.venuewrangler.monthly';
+        return undefined;
+      }),
+    };
+    const controller = new BillingController(prisma as any, config as any);
+
+    const result = await controller.revenueCatWebhook(
+      { ip: '127.0.0.1' } as any,
+      'Bearer secret',
+      {
+        event: {
+          id: 'evt-forged',
+          type: 'INITIAL_PURCHASE',
+          app_user_id: 'victim-venue-id',
+          product_id: 'com.venuewrangler.monthly',
+          purchased_at_ms: Date.now(),
+          expiration_at_ms: Date.now() + 86400000,
+        },
+      } as any,
+    );
+
+    expect(venueFindUnique).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, ignored: true });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('does not resolve unknown Stripe references through coincidental profile user ids', async () => {
     const prisma = {
       subscription: { findFirst: vi.fn().mockResolvedValue(null) },

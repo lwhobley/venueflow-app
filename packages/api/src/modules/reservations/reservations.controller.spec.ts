@@ -313,7 +313,7 @@ describe('ReservationsController', () => {
 
     it('rejects staff from exportReservationsCsv', async () => {
       const { controller } = makeController();
-      await expect(controller.exportReservationsCsv(staffScope)).rejects.toThrow(ForbiddenException);
+      await expect(controller.exportReservationsCsv(staffScope, {} as any)).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -587,13 +587,36 @@ describe('ReservationsController', () => {
         },
       ]);
 
-      const csv = await controller.exportReservationsCsv(managerScope);
+      const csv = await controller.exportReservationsCsv(
+        managerScope,
+        { headers: {} } as any,
+        '2026-07-01',
+        '2026-07-31',
+      );
 
       expect(prisma.reservation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1', deletedAt: null }) }),
       );
       expect(csv).toContain('Alex Guest');
       expect(csv.split('\n')[0]).toBe('"Name","Party","Time","Status","Phone","Email","Notes"');
+    });
+
+    it('rejects an export with no date range', async () => {
+      // Regression for VW-20: this previously returned the entire booking
+      // history — including guest phone, email, and notes — unbounded.
+      const { controller } = makeController();
+
+      await expect(
+        controller.exportReservationsCsv(managerScope, { headers: {} } as any),
+      ).rejects.toThrow('Provide both startDate and endDate to export reservations.');
+    });
+
+    it('rejects an export range longer than the maximum', async () => {
+      const { controller } = makeController();
+
+      await expect(
+        controller.exportReservationsCsv(managerScope, { headers: {} } as any, '2020-01-01', '2026-01-01'),
+      ).rejects.toThrow('The export range cannot exceed 366 days.');
     });
   });
 });

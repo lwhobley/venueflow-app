@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ForbiddenException } from '@nestjs/common';
 import { PayrollController } from './payroll.controller';
 
-function makeController() {
+function makeController(timezone: string | null = null) {
   const prisma = {
+    venue: { findUnique: vi.fn().mockResolvedValue({ timezone }) },
     profile: { findMany: vi.fn().mockResolvedValue([]) },
     timeEntry: { findMany: vi.fn().mockResolvedValue([]) },
     payrollExport: { create: vi.fn().mockResolvedValue({ id: 'export-1' }) },
@@ -119,6 +120,57 @@ describe('PayrollController', () => {
       const expectedStart = new Date('2026-07-01T00:00:00.000Z').getTime();
       expect(result.totals.periodStart).toBe(expectedStart);
       expect(prisma.timeEntry.findMany).toHaveBeenCalled();
+    });
+
+    it('buckets a shift by the venue local day, not the server UTC day', async () => {
+      // Regression for VW-01: hardcoded UTC period bounds split a New York
+      // evening shift across two pay periods. A 2026-07-07 21:00-23:00 local
+      // shift is 2026-07-08 01:00-03:00 UTC — outside a UTC-bounded "ends
+      // 2026-07-07" period, but correctly inside the venue-local one.
+      const { controller, prisma } = makeController('America/New_York');
+      prisma.profile.findMany.mockResolvedValue([
+        { id: 'staff-1', fullName: 'Alex Server', role: 'staff', jobTitle: 'Server' },
+      ]);
+      prisma.timeEntry.findMany.mockResolvedValue([
+        {
+          profileId: 'staff-1',
+          profileFullName: 'Alex Server',
+          clockInAt: new Date('2026-07-08T01:00:00.000Z'),
+          clockOutAt: new Date('2026-07-08T03:00:00.000Z'),
+          breaks: [],
+        },
+      ]);
+
+      const result = await controller.getPayrollSummary(managerScope, '2026-07-01', '2026-07-07');
+
+      expect(prisma.venue.findUnique).toHaveBeenCalledWith({ where: { id: 'venue-1' }, select: { timezone: true } });
+      expect(result.byEmployee).toEqual([
+        expect.objectContaining({ profileId: 'staff-1', regularHours: 2, totalHours: 2 }),
+      ]);
+    });
+
+    it('excludes a shift that falls just past the venue-local period end', async () => {
+      const { controller, prisma } = makeController('America/New_York');
+      prisma.profile.findMany.mockResolvedValue([
+        { id: 'staff-1', fullName: 'Alex Server', role: 'staff', jobTitle: 'Server' },
+      ]);
+      // 2026-07-08 00:30 local (America/New_York, EDT, UTC-4) = 04:30 UTC —
+      // already the next local day, past a period ending "2026-07-07".
+      prisma.timeEntry.findMany.mockResolvedValue([
+        {
+          profileId: 'staff-1',
+          profileFullName: 'Alex Server',
+          clockInAt: new Date('2026-07-08T04:30:00.000Z'),
+          clockOutAt: new Date('2026-07-08T05:30:00.000Z'),
+          breaks: [],
+        },
+      ]);
+
+      const result = await controller.getPayrollSummary(managerScope, '2026-07-01', '2026-07-07');
+
+      expect(result.byEmployee).toEqual([
+        expect.objectContaining({ profileId: 'staff-1', regularHours: 0, totalHours: 0 }),
+      ]);
     });
   });
 

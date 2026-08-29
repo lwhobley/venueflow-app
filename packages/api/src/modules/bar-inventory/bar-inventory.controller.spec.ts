@@ -400,6 +400,38 @@ describe('BarInventoryController', () => {
       });
     });
 
+    it('rejects a waste movement with a positive quantity instead of increasing stock', async () => {
+      // Regression for VW-07: a waste movement with +10 previously increased
+      // onHand instead of reducing it.
+      const { controller, prisma } = makeController();
+      prisma.barInventoryItem.findFirst.mockResolvedValue(makeItem({ onHand: 5 }));
+
+      await expect(
+        controller.recordBarStockMovement(managerUser, 'item-1', { movementType: 'waste', quantity: 10 } as any),
+      ).rejects.toThrow('A waste movement must reduce stock. Use a negative quantity.');
+      expect(prisma.barInventoryItem.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a comp movement with a positive quantity', async () => {
+      const { controller, prisma } = makeController();
+      prisma.barInventoryItem.findFirst.mockResolvedValue(makeItem({ onHand: 5 }));
+
+      await expect(
+        controller.recordBarStockMovement(managerUser, 'item-1', { movementType: 'comp', quantity: 3 } as any),
+      ).rejects.toThrow('A comp movement must reduce stock. Use a negative quantity.');
+      expect(prisma.barInventoryItem.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a received movement with a negative quantity', async () => {
+      const { controller, prisma } = makeController();
+      prisma.barInventoryItem.findFirst.mockResolvedValue(makeItem({ onHand: 5 }));
+
+      await expect(
+        controller.recordBarStockMovement(managerUser, 'item-1', { movementType: 'received', quantity: -2 } as any),
+      ).rejects.toThrow('A received movement must be positive.');
+      expect(prisma.barInventoryItem.update).not.toHaveBeenCalled();
+    });
+
     it('persists previousOnHand/nextOnHand and the acting profile on the movement row', async () => {
       const { controller, prisma } = makeController();
       prisma.barInventoryItem.findFirst.mockResolvedValue(makeItem({ onHand: 10 }));

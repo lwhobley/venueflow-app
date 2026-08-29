@@ -39,6 +39,9 @@ const SYNC_SOURCES = ['opentable', 'resy', 'sevenrooms', 'tock', 'google', 'gene
 const MAX_INGEST_EVENTS = 500;
 const INGEST_RATE_LIMIT_MAX = 120;
 const INGEST_RATE_LIMIT_WINDOW_MS = 60_000;
+const EXPORT_RATE_LIMIT_MAX = 10;
+const EXPORT_RATE_LIMIT_WINDOW_MS = 60_000;
+const MAX_EXPORT_RANGE_DAYS = 366;
 
 class SaveReservationDto {
   @IsString()
@@ -684,28 +687,38 @@ export class ReservationsController {
   @Header('Content-Disposition', 'attachment; filename="reservations.csv"')
   async exportReservationsCsv(
     @VenueScope() scope: Scope,
+    @Req() request: Request,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
     this.requireManager(scope);
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `reservation-export:${scope.venueId}:${getClientIp(request)}`,
+      EXPORT_RATE_LIMIT_MAX,
+      EXPORT_RATE_LIMIT_WINDOW_MS,
+      'Too many export requests. Try again in a few minutes.',
+    );
+    // Regression for VW-20: with neither date bound, this previously
+    // returned the venue's entire booking history — including guest name,
+    // phone, email, and notes — in one unbounded, unrated response.
+    if (!startDate || !endDate) {
+      throw new BadRequestException('Provide both startDate and endDate to export reservations.');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new BadRequestException('Invalid start date');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new BadRequestException('Invalid end date');
+    const timezone = await this.getVenueTimezone(scope.venueId);
+    const startMs = zonedDateBounds(timezone, startDate).start;
+    const endMs = zonedDateBounds(timezone, endDate).end;
+    if (endMs <= startMs) throw new BadRequestException('endDate must be after startDate.');
+    if (endMs - startMs > MAX_EXPORT_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException(`The export range cannot exceed ${MAX_EXPORT_RANGE_DAYS} days.`);
+    }
     const where: Record<string, unknown> = {
       venueId: scope.venueId,
       deletedAt: null,
+      reservationTime: { gte: new Date(startMs), lt: new Date(endMs) },
     };
-    if (startDate || endDate) {
-      const timeFilter: Record<string, Date> = {};
-      if (startDate) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new BadRequestException('Invalid start date');
-        const timezone = await this.getVenueTimezone(scope.venueId);
-        timeFilter['gte'] = new Date(zonedDateBounds(timezone, startDate).start);
-      }
-      if (endDate) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new BadRequestException('Invalid end date');
-        const timezone = await this.getVenueTimezone(scope.venueId);
-        timeFilter['lt'] = new Date(zonedDateBounds(timezone, endDate).end);
-      }
-      where['reservationTime'] = timeFilter;
-    }
     const reservations = await this.prisma.reservation.findMany({
       where: where as any,
       orderBy: { reservationTime: 'asc' },

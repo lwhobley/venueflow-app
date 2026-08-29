@@ -283,6 +283,29 @@ describe('SchedulingController', () => {
       expect(assignments.createShift).not.toHaveBeenCalled();
     });
 
+    it('rejects a transposed start/end time as an oversized shift rather than accepting it as 23 hours overnight', async () => {
+      // Regression for VW-02: 22:00 (1320) -> 21:00 (1260) previously
+      // normalized to 2700 (a 1380-minute, 23-hour shift) because the client
+      // sends both times as raw clock minutes and inversion alone was read
+      // as "this crosses midnight". A genuine overnight shift like
+      // 22:00 -> 02:00 (1320 -> 120, 4 hours) must still be accepted.
+      const { controller, assignments } = makeController();
+
+      await expect(
+        controller.createShift(managerScope, { dayIndex: 1, startMinutes: 1320, endMinutes: 1260, jobTitle: 'Server', station: 'Floor' } as any),
+      ).rejects.toThrow('A shift cannot exceed 16 hours');
+      expect(assignments.createShift).not.toHaveBeenCalled();
+    });
+
+    it('still accepts a genuine overnight shift within the duration cap', async () => {
+      const { controller, assignments } = makeController();
+      assignments.createShift.mockResolvedValue({ id: 'shift-1' });
+
+      await controller.createShift(managerScope, { dayIndex: 1, startMinutes: 1320, endMinutes: 120, jobTitle: 'Server', station: 'Floor' } as any);
+
+      expect(assignments.createShift).toHaveBeenCalledWith(expect.objectContaining({ startMinutes: 1320, endMinutes: 1560 }));
+    });
+
     it('does not notify anyone when the shift is created unassigned', async () => {
       const { controller, assignments, notifications } = makeController();
       assignments.createShift.mockResolvedValue({ id: 'shift-1' });

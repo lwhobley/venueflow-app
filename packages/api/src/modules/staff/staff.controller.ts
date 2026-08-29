@@ -194,10 +194,17 @@ export class StaffController {
       await this.assertCanManageTarget(scope, staff, true, tx);
       const u = await tx.profile.update({
         where: { id: staff.id },
-        data: { venueId: null },
+        data: { membershipStatus: 'revoked' },
       });
       if (staff.userId) {
-        await tx.session.deleteMany({ where: { userId: staff.userId } });
+        const activeElsewhere = await tx.profile.count({
+          where: {
+            userId: staff.userId,
+            venueId: { not: scope.venueId },
+            OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+          },
+        });
+        if (activeElsewhere === 0) await tx.session.deleteMany({ where: { userId: staff.userId } });
       }
       await syncTeamMemberCount(tx, scope.venueId);
       return u;

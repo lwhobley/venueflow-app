@@ -496,9 +496,12 @@ export class BillingController {
   }
 
   private async resolveRevenueCatVenueIds(subscriberId: string, entitlementIds?: string[]): Promise<string[]> {
-    const asVenue = await this.prisma.venue.findUnique({ where: { id: subscriberId }, select: { id: true } });
-    if (asVenue) return [asVenue.id];
-
+    // subscriberId is RevenueCat's app_user_id, which this app sets to our
+    // internal userId (see lib/purchases.native.ts). Older clients briefly
+    // sent venueId instead, which made a Venue.id lookup here a live IDOR:
+    // any attacker who set app_user_id to a victim's venueId could trigger a
+    // purchase/cancel against that venue. Resolve only through Profile
+    // membership — never trust subscriberId as a Venue.id directly.
     const profiles = await this.prisma.profile.findMany({
       where: {
         userId: subscriberId,

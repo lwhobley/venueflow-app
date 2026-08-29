@@ -29,6 +29,10 @@ function makeController() {
     reservation: {
       groupBy: vi.fn().mockResolvedValue([]),
       findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    waitlist: {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     $transaction: vi.fn().mockImplementation((arg: any) => {
       if (Array.isArray(arg)) return Promise.all(arg);
@@ -393,6 +397,24 @@ describe('GuestsController', () => {
         data: { deletedAt: expect.any(Date) },
       });
       expect(result).toEqual({ ok: true });
+    });
+
+    it('scrubs denormalized contact details from that guest\'s bookings', async () => {
+      // Regression for VW-06: Reservation and Waitlist keep their own copies
+      // of guest contact info, which previously survived guest deletion.
+      const { controller, prisma } = makeController();
+      prisma.guest.findFirst.mockResolvedValue(makeGuestRow({ id: 'guest-1' }));
+
+      await controller.removeGuest(managerScope, 'guest-1');
+
+      expect(prisma.reservation.updateMany).toHaveBeenCalledWith({
+        where: { guestId: 'guest-1', venueId: 'venue-1' },
+        data: { guestPhone: null, guestEmail: null, guestCompany: null },
+      });
+      expect(prisma.waitlist.updateMany).toHaveBeenCalledWith({
+        where: { guestId: 'guest-1', venueId: 'venue-1' },
+        data: { guestPhone: null, guestEmail: null },
+      });
     });
   });
 

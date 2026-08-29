@@ -394,6 +394,17 @@ export class BarInventoryController {
   ) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
+    // Regression for VW-07: quantity had no sign constraint, so a 'waste'
+    // movement with a positive quantity silently increased stock instead of
+    // reducing it. The app itself already submits waste/comp as negative and
+    // received as positive (see app/(tabs)/bar-stock.tsx) — this just makes
+    // that convention a server-enforced invariant rather than a client habit.
+    if ((body.movementType === 'waste' || body.movementType === 'comp') && body.quantity > 0) {
+      throw new BadRequestException(`A ${body.movementType} movement must reduce stock. Use a negative quantity.`);
+    }
+    if (body.movementType === 'received' && body.quantity < 0) {
+      throw new BadRequestException('A received movement must be positive.');
+    }
     const { movement, item, previousOnHand, nextOnHand } = await this.prisma.$transaction(async (tx) => {
       const lockKey = `bar-inventory-${itemId}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;

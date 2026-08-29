@@ -248,7 +248,7 @@ export class FloorService {
 
       if (creates.length > 0) {
         await tx.floorTable.createMany({
-          data: creates.map(({ isNew: _isNew, ...data }) => ({ ...data, floorPlanId: plan.id })),
+          data: creates.map(({ isNew: _isNew, ...data }) => ({ ...data, venueId, floorPlanId: plan.id })),
         });
         await tx.tableState.createMany({
           data: creates.map((row) => ({ venueId, tableId: row.id, status: 'available', lastActivityAt: new Date() })),

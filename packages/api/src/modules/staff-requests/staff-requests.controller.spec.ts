@@ -169,6 +169,96 @@ describe('StaffRequestsController', () => {
     });
   });
 
+  it('rejects approving a correction whose clock-out is not after its clock-in', async () => {
+    // Regression for VW-03: submission validates order, but the manager can
+    // edit either field again on the approval screen. That path never
+    // re-checked order before this fix.
+    const now = new Date('2026-08-24T12:00:00.000Z');
+    const request = {
+      id: 'request-correction', venueId: 'venue-1', profileId: 'profile-1',
+      kind: 'time_correction', status: 'pending', title: 'Missing punch', details: '',
+      requestedForDate: null, requestedShiftId: null, requestedRangeStart: null,
+      requestedRangeEnd: null,
+      availability: {
+        clockInAt: '2026-08-24T22:00:00.000Z',
+        clockOutAt: '2026-08-24T14:00:00.000Z',
+      },
+      reviewerId: null, reviewedAt: null, responseNotes: null,
+      createdAt: now, updatedAt: now,
+    };
+    const create = vi.fn();
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      staffRequest: {
+        findUnique: vi.fn().mockResolvedValue(request),
+        update: vi.fn(),
+      },
+      profile: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'manager-1', fullName: 'Manager' }) },
+      venue: { findUnique: vi.fn().mockResolvedValue({ timezone: 'UTC' }) },
+      timeEntry: { findFirst: vi.fn().mockResolvedValue(null), create },
+    };
+    const controller = new StaffRequestsController(
+      { $transaction: vi.fn((callback) => callback(tx)) } as any,
+      { notifyProfile: vi.fn().mockResolvedValue(undefined) } as any,
+      { sendToProfile: vi.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    await expect(controller.reviewStaffRequest(
+      { venueId: 'venue-1', profileId: 'manager-1', role: 'manager' } as any,
+      request.id,
+      { status: 'approved' } as any,
+    )).rejects.toThrow('Clock-out time must be after clock-in time.');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('rejects approving a correction that overlaps another punch already on record', async () => {
+    // Regression for VW-03: no database constraint stops two closed punches
+    // from overlapping. This transaction-scoped check is the only backstop.
+    const now = new Date('2026-08-24T12:00:00.000Z');
+    const request = {
+      id: 'request-correction', venueId: 'venue-1', profileId: 'profile-1',
+      kind: 'time_correction', status: 'pending', title: 'Missing punch', details: '',
+      requestedForDate: null, requestedShiftId: null, requestedRangeStart: null,
+      requestedRangeEnd: null,
+      availability: {
+        clockInAt: '2026-08-24T14:00:00.000Z',
+        clockOutAt: '2026-08-24T22:00:00.000Z',
+      },
+      reviewerId: null, reviewedAt: null, responseNotes: null,
+      createdAt: now, updatedAt: now,
+    };
+    const create = vi.fn();
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      staffRequest: {
+        findUnique: vi.fn().mockResolvedValue(request),
+        update: vi.fn(),
+      },
+      profile: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'manager-1', fullName: 'Manager' }) },
+      venue: { findUnique: vi.fn().mockResolvedValue({ timezone: 'UTC' }) },
+      timeEntry: {
+        // First findFirst call: "existing entry for this day" lookup — none.
+        // Second: the new overlap check — an existing closed punch collides.
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 'entry-existing' }),
+        create,
+      },
+    };
+    const controller = new StaffRequestsController(
+      { $transaction: vi.fn((callback) => callback(tx)) } as any,
+      { notifyProfile: vi.fn().mockResolvedValue(undefined) } as any,
+      { sendToProfile: vi.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    await expect(controller.reviewStaffRequest(
+      { venueId: 'venue-1', profileId: 'manager-1', role: 'manager' } as any,
+      request.id,
+      { status: 'approved' } as any,
+    )).rejects.toThrow('This correction overlaps another punch on record for this employee.');
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('rejects a manager approving their own time correction', async () => {
     const now = new Date('2026-08-24T12:00:00.000Z');
     const request = {

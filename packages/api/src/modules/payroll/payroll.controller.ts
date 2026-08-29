@@ -12,6 +12,7 @@ import { IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
 import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell } from '../../common/csv';
+import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
@@ -37,16 +38,33 @@ class RecordPayrollExportDto {
   totalHours?: number;
 }
 
-function parseDateParam(value: string | undefined, fallback: Date): Date {
-  if (!value) return fallback;
-  const d = new Date(`${value}T00:00:00.000Z`);
-  return isNaN(d.getTime()) ? fallback : d;
-}
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function parsePeriodEndParam(value: string | undefined, fallback: Date): Date {
-  if (!value) return fallback;
-  const d = new Date(`${value}T23:59:59.999Z`);
-  return isNaN(d.getTime()) ? fallback : d;
+/**
+ * Resolve the [periodStart, periodEnd) instant range for a payroll period in
+ * the venue's own local calendar, not the server's UTC day. Hardcoding
+ * `T00:00:00.000Z` / `T23:59:59.999Z` here previously bucketed shifts near
+ * midnight into the wrong pay period for any venue not on UTC (e.g. a
+ * "2026-07-07" period end fell at 19:59:59 local in America/New_York).
+ * periodEnd is an exclusive upper bound (the venue-local start of the day
+ * after endIso), matching zonedDateBounds' convention.
+ */
+async function resolvePayrollPeriod(
+  prisma: PrismaService,
+  venueId: string,
+  startDate: string | undefined,
+  endDate: string | undefined,
+): Promise<{ periodStart: Date; periodEnd: Date; startIso: string; endIso: string }> {
+  const venue = await prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } });
+  const tz = venue?.timezone ?? null;
+  const now = Date.now();
+  const defaultStartIso = zonedIsoDate(tz, now - 14 * 24 * 60 * 60 * 1000);
+  const defaultEndIso = zonedIsoDate(tz, now);
+  const startIso = startDate && ISO_DATE.test(startDate) ? startDate : defaultStartIso;
+  const endIso = endDate && ISO_DATE.test(endDate) ? endDate : defaultEndIso;
+  const periodStart = new Date(zonedDateBounds(tz, startIso).start);
+  const periodEnd = new Date(zonedDateBounds(tz, endIso).end);
+  return { periodStart, periodEnd, startIso, endIso };
 }
 
 async function buildPayrollRows(
@@ -73,7 +91,7 @@ async function buildPayrollRows(
   const inPeriod = (e: (typeof entries)[number]) => {
     if (!e.clockOutAt) return false;
     const end = e.clockOutAt.getTime();
-    return end >= periodStart.getTime() && e.clockInAt.getTime() <= periodEnd.getTime();
+    return end > periodStart.getTime() && e.clockInAt.getTime() < periodEnd.getTime();
   };
   const hoursOf = (rows: typeof entries) =>
     rows.reduce((sum, e) => {
@@ -152,10 +170,7 @@ export class PayrollController {
     @Query('endDate') endDate?: string,
   ) {
     this.requireManager(scope);
-    const now = new Date();
-    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-    const periodStart = parseDateParam(startDate, twoWeeksAgo);
-    const periodEnd = parsePeriodEndParam(endDate, now);
+    const { periodStart, periodEnd } = await resolvePayrollPeriod(this.prisma, scope.venueId, startDate, endDate);
 
     const rows = await buildPayrollRows(this.prisma, scope.venueId, periodStart, periodEnd);
     const totalHours = Math.round(rows.reduce((sum, r) => sum + r.totalHours, 0) * 100) / 100;
@@ -181,10 +196,7 @@ export class PayrollController {
     @Query('endDate') endDate?: string,
   ) {
     this.requireManager(scope);
-    const now = new Date();
-    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-    const periodStart = parseDateParam(startDate, twoWeeksAgo);
-    const periodEnd = parsePeriodEndParam(endDate, now);
+    const { periodStart, periodEnd, startIso, endIso } = await resolvePayrollPeriod(this.prisma, scope.venueId, startDate, endDate);
 
     const rows = await buildPayrollRows(this.prisma, scope.venueId, periodStart, periodEnd);
     const headers = ['Employee', 'Role', 'Regular Hours', 'Total Hours', 'Start Date', 'End Date'];
@@ -195,8 +207,8 @@ export class PayrollController {
         csvCell(row.role),
         csvCell((row as { regularHours?: number }).regularHours ?? row.totalHours),
         csvCell(row.totalHours),
-        csvCell(periodStart.toISOString().slice(0, 10)),
-        csvCell(periodEnd.toISOString().slice(0, 10)),
+        csvCell(startIso),
+        csvCell(endIso),
       ].join(','));
     }
     return csvRows.join('\n');

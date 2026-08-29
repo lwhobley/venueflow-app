@@ -133,6 +133,14 @@ export class WorkforceController {
         return null;
       }
 
+      // Regression for VW-25: the `redeemable` check above only excludes
+      // an UNEXPIRED prior invite. An old expired-but-still-unused invite
+      // for this exact (venue, email) pair would otherwise collide with the
+      // new one-pending-invite-per-venue-per-email database constraint.
+      await tx.invite.deleteMany({
+        where: { venueId: unclaimedProfile.venueId!, email, usedBy: null },
+      });
+
       const created = await tx.invite.create({
         data: {
           venueId: unclaimedProfile.venueId!,

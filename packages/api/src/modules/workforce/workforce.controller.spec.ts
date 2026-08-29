@@ -15,6 +15,7 @@ describe('WorkforceController invite check email', () => {
   // the advisory-locked transaction.
   const txFindInvite = vi.fn();
   const txCreateInvite = vi.fn();
+  const txDeleteManyInvite = vi.fn().mockResolvedValue({ count: 0 });
   const txFindProfile = vi.fn();
   const executeLock = vi.fn();
   const sendOrThrow = vi.fn().mockResolvedValue(undefined);
@@ -24,7 +25,7 @@ describe('WorkforceController invite check email', () => {
     profile: { findFirst: outerFindProfile },
     $transaction: vi.fn((callback: any) => callback({
       $executeRaw: executeLock,
-      invite: { findFirst: txFindInvite, create: txCreateInvite },
+      invite: { findFirst: txFindInvite, create: txCreateInvite, deleteMany: txDeleteManyInvite },
       profile: { findFirst: txFindProfile },
     })),
   };
@@ -129,6 +130,34 @@ describe('WorkforceController invite check email', () => {
     await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
       .resolves.toEqual({ status: 'ok' });
     expect(txCreateInvite).toHaveBeenCalledOnce();
+  });
+
+  it('supersedes a stale unused invite for the same email before minting a fresh one', async () => {
+    // Regression for VW-25: the redeemable-only lookup ignores an EXPIRED
+    // invite, but a stale expired-and-unused row would otherwise collide
+    // with the new one-pending-invite-per-venue-per-email constraint.
+    txFindInvite.mockResolvedValue(null);
+    txFindProfile.mockResolvedValue({
+      id: 'profile-1',
+      venueId: 'venue-1',
+      role: 'staff',
+      jobTitle: 'Bartender',
+      venue: { name: 'Legacy Venue' },
+    });
+    txCreateInvite.mockImplementation(async ({ data }: any) => ({
+      ...data,
+      id: 'invite-4',
+      usedBy: null,
+      venue: { name: 'Legacy Venue' },
+    }));
+    const controller = new WorkforceController(prisma as any, email as any, config as any);
+
+    await expect((controller as any).inviteCheck(request, { email: 'legacy@example.com' }))
+      .resolves.toEqual({ status: 'ok' });
+    expect(txDeleteManyInvite).toHaveBeenCalledWith({
+      where: { venueId: 'venue-1', email: 'legacy@example.com', usedBy: null },
+    });
+    expect(txDeleteManyInvite.mock.invocationCallOrder[0]).toBeLessThan(txCreateInvite.mock.invocationCallOrder[0]);
   });
 
   it('reports "not_found" when a used invite exists and there is no roster fallback', async () => {

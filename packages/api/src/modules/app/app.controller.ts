@@ -418,7 +418,13 @@ export class AppController {
           latitude,
           longitude,
           geofenceRadiusM: 150,
-          timezone: parseVenueTimeZone(body.timezone) ?? null,
+          // Regression for VW-24: timezone is now required at the database
+          // layer (see the schema comment). A caller that omits it — the
+          // marketing site now sends one, but this is the backstop for any
+          // caller that doesn't — gets UTC rather than a constraint
+          // violation, matching the fallback every zonedDateBounds()-style
+          // helper already used for a null timezone.
+          timezone: parseVenueTimeZone(body.timezone) ?? 'UTC',
           phone: body.phone?.trim() || null,
           address: body.address?.trim() || null,
           venueType: body.venueType?.trim() || null,
@@ -498,6 +504,10 @@ export class AppController {
         throw new BadRequestException('Venue coordinates cannot be 0,0. Use a real location for the time-clock geofence.');
       }
     }
+    // timezone can no longer be null (VW-24), so an empty/whitespace value is
+    // treated as "no change" rather than "clear it" — there is no unset
+    // state to clear it to anymore.
+    const nextTimezone = parseVenueTimeZone(body.timezone);
     const venue = await this.prisma.venue.update({
       where: { id: profile.venueId },
       data: {
@@ -505,7 +515,7 @@ export class AppController {
         ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
         ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
         ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(25, Math.min(2000, body.geofenceRadiusM)) } : {}),
-        ...(body.timezone !== undefined ? { timezone: parseVenueTimeZone(body.timezone) ?? null } : {}),
+        ...(nextTimezone ? { timezone: nextTimezone } : {}),
       },
     });
     return mapVenue(venue);
@@ -770,10 +780,24 @@ export class AppController {
       where: { venueId: profile.venueId!, name: { equals: name, mode: 'insensitive' } },
     });
     if (existing) return { _id: existing.id, id: existing.id, name: existing.name };
-    const role = await this.prisma.venueRole.create({
-      data: { venueId: profile.venueId!, name },
-    });
-    return { _id: role.id, id: role.id, name: role.name };
+    try {
+      const role = await this.prisma.venueRole.create({
+        data: { venueId: profile.venueId!, name },
+      });
+      return { _id: role.id, id: role.id, name: role.name };
+    } catch (error: any) {
+      // Regression for VW-28: the check above and this create race under
+      // concurrent requests. A case-insensitive unique index now catches
+      // what the check alone could not — surface it the same way a
+      // legitimate duplicate would look, rather than a raw 500.
+      if (error?.code === 'P2002') {
+        const race = await this.prisma.venueRole.findFirst({
+          where: { venueId: profile.venueId!, name: { equals: name, mode: 'insensitive' } },
+        });
+        if (race) return { _id: race.id, id: race.id, name: race.name };
+      }
+      throw error;
+    }
   }
 
   @UseGuards(AuthGuard)
@@ -807,17 +831,29 @@ export class AppController {
     const token = randomBytes(18).toString('base64url');
     const tokenHash = hashInviteToken(token);
     const code = await this.uniqueInviteCode();
-    const invite = await this.prisma.invite.create({
-      data: {
-        venueId: profile.venueId!,
-        email,
-        tokenHash,
-        code,
-        role: inviteRole,
-        jobTitle: body.jobTitle?.trim() || 'Team Member',
-        createdBy: profile.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
+    const invite = await this.prisma.$transaction(async (tx) => {
+      if (email) {
+        // Regression for VW-25: nothing stopped a manager from creating
+        // multiple simultaneous pending invites for the same email at this
+        // venue. A fresh invite supersedes any prior unused one for the
+        // same address rather than leaving an ambiguous set of valid links
+        // (only one of which the recipient should actually use).
+        await tx.invite.deleteMany({
+          where: { venueId: profile.venueId!, email, usedBy: null },
+        });
+      }
+      return tx.invite.create({
+        data: {
+          venueId: profile.venueId!,
+          email,
+          tokenHash,
+          code,
+          role: inviteRole,
+          jobTitle: body.jobTitle?.trim() || 'Team Member',
+          createdBy: profile.id,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
     });
     const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(token)}`;
     const venueName = sanitizeForEmail(profile.venue?.name ?? 'your Venue Wrangler team');

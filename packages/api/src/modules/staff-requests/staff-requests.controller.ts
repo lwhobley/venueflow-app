@@ -322,16 +322,19 @@ export class StaffRequestsController {
       if (body.status === 'approved') {
         if (request.kind === 'sick_leave') {
           const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
+          // venueId included even though request.profileId is already confirmed
+          // scoped above ($executeRaw bypasses the tenant-isolation extension,
+          // so this predicate is the only backstop this write has).
           await tx.$executeRaw`
             UPDATE "Profile"
             SET "sickHoursAccrued" = GREATEST(0, "sickHoursAccrued" - ${hours})
-            WHERE id = ${request.profileId}`;
+            WHERE id = ${request.profileId} AND "venueId" = ${scope.venueId}`;
         } else if (request.kind === 'time_off') {
           const hours = calculateRequestHours(request.requestedRangeStart || request.requestedForDate, request.requestedRangeEnd || request.requestedForDate);
           await tx.$executeRaw`
             UPDATE "Profile"
             SET "ptoHoursAccrued" = GREATEST(0, "ptoHoursAccrued" - ${hours})
-            WHERE id = ${request.profileId}`;
+            WHERE id = ${request.profileId} AND "venueId" = ${scope.venueId}`;
         }
         
         if ((request.kind === 'time_off' || request.kind === 'sick_leave') && tx.scheduleShift?.findMany) {
@@ -389,6 +392,14 @@ export class StaffRequestsController {
           if (correction.clockOutAt && (!correctedClockOut || isNaN(correctedClockOut.getTime()))) {
             throw new BadRequestException('Invalid correction clock-out time');
           }
+          // Regression for VW-03: submission validates clockOutAt > clockInAt
+          // (see the time_correction branch above, line ~229), but that only
+          // covers the employee's initial request. The manager can edit
+          // either field again on the approval screen, and this path never
+          // re-checked order before writing.
+          if (correctedClockOut && correctedClockOut.getTime() <= correctedClockIn.getTime()) {
+            throw new BadRequestException('Clock-out time must be after clock-in time.');
+          }
           const willBeOpen = !correctedClockOut;
 
           const applyCorrection = async (targetId: string) => {
@@ -405,6 +416,27 @@ export class StaffRequestsController {
               if (otherOpen) {
                 throw new BadRequestException(
                   'Cannot leave this correction open — staff already has an open clock-in.',
+                );
+              }
+            }
+            if (correctedClockOut) {
+              // No database exclusion constraint covers closed punches (see
+              // the audit's VW-03/VW-04) — this transaction-scoped check is
+              // the only thing stopping a correction from overlapping an
+              // adjacent closed entry, which would double-count paid hours.
+              const overlapping = await tx.timeEntry.findFirst({
+                where: {
+                  profileId: request.profileId,
+                  venueId: request.venueId,
+                  id: { not: targetId },
+                  clockOutAt: { not: null, gt: correctedClockIn },
+                  clockInAt: { lt: correctedClockOut },
+                },
+                select: { id: true },
+              });
+              if (overlapping) {
+                throw new BadRequestException(
+                  'This correction overlaps another punch on record for this employee.',
                 );
               }
             }
@@ -462,6 +494,20 @@ export class StaffRequestsController {
               if (!correctedClockOut) {
                 throw new BadRequestException(
                   'This correction has no clock-out time. Ask the employee to resubmit with both times before approving.',
+                );
+              }
+              const overlapping = await tx.timeEntry.findFirst({
+                where: {
+                  profileId: request.profileId,
+                  venueId: request.venueId,
+                  clockOutAt: { not: null, gt: correctedClockIn },
+                  clockInAt: { lt: correctedClockOut },
+                },
+                select: { id: true },
+              });
+              if (overlapping) {
+                throw new BadRequestException(
+                  'This correction overlaps another punch on record for this employee.',
                 );
               }
               await tx.timeEntry.create({

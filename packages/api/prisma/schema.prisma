@@ -329,9 +329,13 @@ model Venue {
   latitude                      Float
   longitude                     Float
   geofenceRadiusM               Float
-  // IANA timezone (e.g. "America/New_York"). Null falls back to UTC; used to
-  // bucket daily reports in the venue's business day rather than server time.
-  timezone                      String?
+  // IANA timezone (e.g. "America/New_York"), required (VW-24). Every venue
+  // creation path now resolves a concrete value (defaulting to "UTC" if the
+  // caller sends none) before writing, so this can no longer silently be
+  // absent — a null timezone previously let payroll and schedule
+  // day-boundary math desync between server UTC and the venue's actual
+  // business day for any venue that never set one explicitly.
+  timezone                      String                    @default("UTC")
   code                          String                    @unique
   phone                         String?
   address                       String?
@@ -368,10 +372,12 @@ model Venue {
   guests                        Guest[]
   reservations                  Reservation[]
   floorPlans                    FloorPlan[]
+  floorTables                   FloorTable[]
   tables                        TableState[]
   subscriptions                 Subscription[]
   subscriptionEvents            SubscriptionEvent[]
   crmLeads                      CrmLead[]
+  crmNotes                      CrmNote[]
   posChecks                     PosCheck[]
   scheduleTemplates             ScheduleTemplate[]
   notificationReads             NotificationRead[]
@@ -441,7 +447,8 @@ model Profile {
   availability               Availability[]
   pushTokens                 PushToken[]
   timeEntries                TimeEntry[]
-  staffRequests              StaffRequest[]
+  staffRequests              StaffRequest[]       @relation("StaffRequestProfile")
+  reviewedStaffRequests      StaffRequest[]       @relation("StaffRequestReviewer")
   sentMessages               Message[]
   conversationReads          ConversationRead[]
   notificationEvents         NotificationEvent[]
@@ -456,6 +463,8 @@ model Profile {
   createdScheduleMemoryNotes ScheduleMemoryNote[] @relation("ScheduleMemoryCreatedBy")
   uploadedDocuments          VenueDocument[]      @relation("DocumentUploader")
   aiUsageEvents              AiUsageEvent[]
+  scheduleEmailEvents        ScheduleEmailEvent[]
+  staffOnboardingTasks       StaffOnboardingTask[]
 
   @@unique([userId, venueId])
   @@index([userId])
@@ -484,6 +493,7 @@ model ScheduleShift {
   requesterSwaps ShiftSwap[] @relation("ShiftSwapRequesterShift")
   targetSwaps    ShiftSwap[] @relation("ShiftSwapTargetShift")
   messages       Message[]
+  staffRequests  StaffRequest[]
 
   @@index([venueId])
   @@index([profileId])
@@ -542,6 +552,9 @@ model Availability {
   startMinutes Int
   endMinutes   Int
   available    Boolean
+  // VW-27: had updatedAt but no createdAt, so first-set time was
+  // unrecoverable. Existing rows backfill to the migration run time.
+  createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   venue        Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
   profile      Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
@@ -574,7 +587,10 @@ model StaffRequest {
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
   venue               Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  profile             Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile             Profile       @relation("StaffRequestProfile", fields: [profileId], references: [id], onDelete: Cascade)
+  // VW-12: requestedShiftId and reviewerId carried no FK.
+  requestedShift      ScheduleShift? @relation(fields: [requestedShiftId], references: [id], onDelete: SetNull)
+  reviewer            Profile?      @relation("StaffRequestReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
 
   @@index([venueId])
   @@index([profileId])
@@ -594,6 +610,12 @@ model Conversation {
   lastMessageText String?
   roleName        String?
   shiftDate       String?
+  // VW-26: previously absent, so a conversation could not be ordered by
+  // creation or audited independent of lastMessageAt (null until the first
+  // message is sent). Existing rows backfill to the migration run time —
+  // the true creation time was never recorded and cannot be recovered.
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
   venue           Venue              @relation(fields: [venueId], references: [id], onDelete: Cascade)
   messages        Message[]
   reads           ConversationRead[]
@@ -826,7 +848,9 @@ model TimeEntry {
   @@index([venueId, clockInAt])
   @@index([profileId])
   @@index([profileId, isOpen])
-  @@index([isOpen])
+  // VW-35: a standalone boolean index removed. Every real query filters
+  // isOpen alongside venueId or profileId (never alone), and both are
+  // already served by the composite indexes above.
 }
 
 model ShiftSwap {
@@ -877,10 +901,17 @@ model Guest {
   venue           Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
   reservations    Reservation[]
   waitlistEntries Waitlist[]
+  crmLeads        CrmLead[]
 
   @@index([venueId])
-  @@index([phone])
-  @@index([email])
+  // VW-14: every guest lookup is already tenant-scoped, so a global
+  // single-column index made Postgres filter a cross-tenant result set
+  // instead of seeking directly. Composite indexes replace the old ones.
+  // Deliberately not a unique constraint: two genuinely different guests
+  // sharing a household or company phone number is a real, legitimate case
+  // (this is a product decision, not an oversight — see VW-14 in the audit).
+  @@index([venueId, phone])
+  @@index([venueId, email])
   @@index([venueId, nameLower])
 }
 
@@ -1010,6 +1041,13 @@ model FloorPlan {
 
 model FloorTable {
   id               String              @id @default(cuid())
+  // VW-09: the only floor model without its own venueId — FloorPlan and
+  // FloorChair both have one, which made this an inconsistency rather than
+  // a considered choice. Every current call site already scopes through
+  // floorPlan.venueId or an active-plan allowlist before touching a table
+  // (see floor.service.ts), so this was not a live cross-tenant read; it
+  // closes the gap for whatever handler gets written next.
+  venueId          String
   floorPlanId      String
   label            String
   shape            TableShape
@@ -1025,11 +1063,13 @@ model FloorTable {
   // everywhere else; the field name predates that convention.
   minSpend         Int
   isReservable     Boolean
+  venue            Venue               @relation(fields: [venueId], references: [id], onDelete: Cascade)
   floorPlan        FloorPlan           @relation(fields: [floorPlanId], references: [id], onDelete: Cascade)
   tableStates      TableState[]
   tableAssignments TableAssignment[]
   stateHistory     TableStateHistory[]
 
+  @@index([venueId])
   @@index([floorPlanId])
   @@index([floorPlanId, section])
 }
@@ -1193,6 +1233,9 @@ model CrmLead {
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
   venue               Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  // VW-12: guestId carried no FK. SetNull matches Reservation.guestId and
+  // Waitlist.guestId — deleting a guest must not delete the lead record.
+  guest               Guest?           @relation(fields: [guestId], references: [id], onDelete: SetNull)
   assignedTo          Profile?         @relation("AssignedLeads", fields: [assignedToId], references: [id], onDelete: SetNull)
   notes               CrmNote[]
   beos                CrmBeo[]
@@ -1212,6 +1255,12 @@ model CrmNote {
   authorId  String?
   text      String
   createdAt DateTime @default(now())
+  // VW-11: venueId carried no FK — nothing at the database level enforced
+  // that it pointed at a real venue, or cleaned these rows up when one was
+  // deleted. The tenant-isolation extension already scoped queries
+  // correctly (this was an orphan-row/integrity gap, not a cross-tenant
+  // read), but the relation itself was simply missing.
+  venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
   lead      CrmLead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
   author    Profile? @relation(fields: [authorId], references: [id], onDelete: SetNull)
 
@@ -1245,6 +1294,7 @@ model CrmBeo {
   updatedAt           DateTime  @updatedAt
   venue               Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
   lead                CrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  contracts           CrmContract[]
 
   @@index([venueId])
   @@index([leadId])
@@ -1275,6 +1325,9 @@ model CrmContract {
   updatedAt           DateTime       @updatedAt
   venue               Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
   lead                CrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  // VW-12: beoId carried no FK despite being validated tenant-scoped at
+  // every write site (crm.controller.ts).
+  beo                 CrmBeo?        @relation(fields: [beoId], references: [id], onDelete: SetNull)
 
   @@unique([contractNumber])
   @@index([venueId])
@@ -1381,7 +1434,14 @@ model PaymentMethod {
 
 model Invoice {
   id               String    @id @default(cuid())
-  venueId          String
+  // Nullable + SetNull (VW-17): financial records are retained for tax and
+  // accounting purposes past tenant offboarding, the same policy already
+  // applied to AuditLog (VW-16) and wage records (RetainedTimeEntry). A
+  // null-venueId invoice is simply unreachable through any tenant-scoped
+  // query going forward — it is not migrated to a separate table because,
+  // unlike TimeEntry, it carries no other tenant's data to protect from a
+  // blanket Cascade.
+  venueId          String?
   // Unique so retried Stripe invoice webhooks upsert one row per invoice.
   stripeInvoiceId  String    @unique
   amountCents      Int
@@ -1393,7 +1453,7 @@ model Invoice {
   periodEnd        DateTime
   createdAt        DateTime  @default(now())
   paidAt           DateTime?
-  venue            Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  venue            Venue?    @relation(fields: [venueId], references: [id], onDelete: SetNull)
 
   @@index([venueId, createdAt])
 }
@@ -1408,6 +1468,12 @@ model CosmicInsight {
   @@index([batchAt])
 }
 
+// NOTE: a SQL-only functional unique index (VenueRole_venue_name_key) exists
+// on top of this schema — VW-28: duplicate role names were insertable
+// despite the check-then-create in app.controller.ts already treating them
+// as case-insensitively identical. Prisma can't represent a functional
+// index; if `prisma migrate dev` ever generates a DROP for it, delete that
+// statement before applying.
 model VenueRole {
   id      String @id @default(cuid())
   venueId String
@@ -1417,6 +1483,12 @@ model VenueRole {
   @@index([venueId])
 }
 
+// VW-38: @@unique([venueId]) permits exactly one Team per venue, making
+// `name` vestigial (there is nothing to distinguish it from) and this
+// effectively a denormalized member-count counter for the venue, maintained
+// by syncTeamMemberCount (common/team-sync.ts). Documented rather than
+// changed: introducing real multi-team support is a product decision, not a
+// schema defect to silently fix.
 model Team {
   id          String @id @default(cuid())
   venueId     String
@@ -1437,6 +1509,12 @@ model ScheduleEmailEvent {
   subject   String
   sentAt    DateTime
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  // VW-12: profileId carried no FK. Cascade matches StaffRequest.profileId —
+  // a profile is only ever hard-deleted alongside its venue (see
+  // app.controller.ts's account-deletion flow), which already cascades this
+  // row via venueId, so this only changes behavior for a data-integrity
+  // edge case, not a real deletion path.
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([venueId, sentAt])
   @@index([profileId, sentAt])
@@ -1576,6 +1654,8 @@ model StaffOnboardingTask {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   venue       Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  // VW-12: same reasoning as ScheduleEmailEvent.profileId above.
+  profile     Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@unique([profileId, title])
   @@index([venueId, profileId])
@@ -1649,7 +1729,12 @@ model AuditLog {
   userAgent       String?
   metadata        Json?
   createdAt       DateTime @default(now())
-  venue           Venue?   @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  // SetNull, not Cascade: this is the SOC2 audit trail. venueId is already
+  // nullable (see VW-16) — a Cascade meant deleting a venue destroyed its own
+  // audit history at exactly the moment (account/venue deletion) that
+  // history matters most. The row survives with venueId null, the same
+  // pattern RetainedTimeEntry uses for wage records.
+  venue           Venue?   @relation(fields: [venueId], references: [id], onDelete: SetNull)
 
   @@index([venueId, createdAt])
   @@index([venueId, action])
@@ -1850,9 +1935,13 @@ model Invite {
   createdAt DateTime @default(now())
   venue     Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
-  // NOTE: a partial SQL-only index (Invite_phone_idx) exists on top of this
-  // schema. Prisma can't represent partial indexes; if `prisma migrate dev`
-  // ever generates a DROP for it, delete that statement before applying.
+  // NOTE: two partial SQL-only indexes exist on top of this schema —
+  // Invite_phone_idx, and Invite_pending_email_key (VW-25: one pending
+  // invite per venue per email; superseded by application code in
+  // app.controller.ts's createInvite and workforce.controller.ts's
+  // inviteCheck before every insert). Prisma can't represent partial
+  // indexes; if `prisma migrate dev` ever generates a DROP for either,
+  // delete that statement before applying.
   @@index([email])
   @@index([venueId])
 }

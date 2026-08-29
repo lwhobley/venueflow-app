@@ -301,6 +301,16 @@ class ReviewSwapDto {
   approve!: boolean;
 }
 
+// The client always submits both times as raw clock minutes in [0, 1439] (an
+// HTML time input has no way to say "this is tomorrow"), so an overnight
+// shift and a transposed pair of times are submitted in exactly the same
+// shape: end < start. There is no signal in the request that distinguishes
+// "22:00 to 02:00, crossing midnight" from "22:00 to 21:00, meant to be
+// 21:00 to 22:00". A flat 24h cap accepted both, silently turning the second
+// case into a 23-hour shift. 16 hours comfortably covers a legitimate double
+// shift while rejecting a transposition.
+const MAX_SHIFT_MINUTES = 16 * 60;
+
 function ensureValidShiftWindow(dayIndex: number, startMinutes: number, endMinutes: number) {
   if (!Number.isInteger(dayIndex) || dayIndex < 0 || dayIndex > 6) {
     throw new BadRequestException('dayIndex must be between 0 and 6');
@@ -312,8 +322,11 @@ function ensureValidShiftWindow(dayIndex: number, startMinutes: number, endMinut
     throw new BadRequestException('End time must be after start time');
   }
   const normalized = endMinutes < startMinutes && endMinutes <= 1440 ? endMinutes + 1440 : endMinutes;
-  if (normalized <= startMinutes || normalized - startMinutes > 1440) {
+  if (normalized <= startMinutes) {
     throw new BadRequestException('End time must be after start time');
+  }
+  if (normalized - startMinutes > MAX_SHIFT_MINUTES) {
+    throw new BadRequestException(`A shift cannot exceed ${MAX_SHIFT_MINUTES / 60} hours. Check the start and end times.`);
   }
   return normalized;
 }

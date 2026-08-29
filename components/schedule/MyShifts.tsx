@@ -9,7 +9,7 @@ import { accents, colors, spacing } from '../../lib/theme';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useAuthenticatedSession } from '../../lib/auth-readiness';
 import { ScheduleSkeleton } from './ScheduleSkeleton';
-import { zonedDayIndex, zonedMinutesNow } from '../../lib/zoned-datetime';
+import { zonedDayIndex, zonedMinutesNow, zonedWeekDates } from '../../lib/zoned-datetime';
 
 type Shift = {
   _id: Id<'scheduleShifts'>;
@@ -125,21 +125,14 @@ export function MyShifts() {
   );
   const selectedSwapTarget = coworkerShiftOptions.find((shift) => shift.shiftId === swapTargetShiftId) ?? null;
 
-  const weekDates = useMemo(() => {
-    const today = new Date();
-    const todayIndex = zonedDayIndex(venue?.timezone, today);
-    const sunday = new Date(today);
-    sunday.setDate(today.getDate() - todayIndex);
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(sunday);
-      d.setDate(sunday.getDate() + i);
-      return d;
-    });
-  }, [venue?.timezone]);
+  // zonedWeekDates returns UTC-midnight-anchored date-only values for the
+  // venue's own calendar week — read them back with timeZone: 'UTC' below,
+  // never toLocaleDateString()'s device-local default (see VW-21).
+  const weekDates = useMemo(() => zonedWeekDates(venue?.timezone), [venue?.timezone]);
   const todayDayIndex = zonedDayIndex(venue?.timezone);
 
   const shiftDate = (dayIndex: number) =>
-    weekDates[dayIndex]?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) ?? '';
+    weekDates[dayIndex]?.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) ?? '';
   const nextShift = useMemo(() => {
     const today = todayDayIndex;
     const minutesNow = zonedMinutesNow(venue?.timezone);

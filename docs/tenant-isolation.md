@@ -11,6 +11,17 @@ The API-level controls are:
 
 Before enabling any direct Supabase client access, add narrowly scoped SQL policies and tests that prove users can only read and mutate rows for their active venue. Do not grant broad table access or disable the fail-closed RLS backstop.
 
+### Trust boundary decision (VW-23)
+
+RLS is enabled on every public table, but no `CREATE POLICY` exists and no table has `FORCE ROW LEVEL SECURITY`. Postgres exempts a table's owner from RLS by default, and the Cloud Run API connects as that owning role — so RLS here does real work against the Supabase Data API path (which authenticates as `anon`/`authenticated`, both privilege-revoked) but does **not** constrain the API's own connection. **The NestJS API is the entire tenant-isolation trust boundary.** A leaked `DATABASE_URL` reads and writes every tenant; nothing at the database layer stops it.
+
+This is a deliberate choice, not an oversight, made explicit here so it is revisited on purpose rather than discovered by accident:
+
+- Adding `FORCE ROW LEVEL SECURITY` with per-tenant policies would make the database independently enforce isolation even against the API's own credential, at the cost of real engineering effort (a policy per venue-scoped table, a session variable carrying the current tenant, and tests proving the policies match `VENUE_SCOPED_MODELS` exactly) and a new failure mode (a policy bug either leaks data or blocks legitimate queries with no apparent bug in the calling code).
+- The alternative — the one in effect today — is treating the API as the sole trust boundary and investing in credential hygiene instead: rotate `DATABASE_URL` on any suspected exposure, keep `DATABASE_DIRECT_URL` off every serving instance (already true — see `assert-database-target.mjs`), and monitor for anomalous direct-connection egress.
+
+Revisit this if a second service, an analytics pipeline, or any other consumer ever needs its own direct database connection — at that point the API is no longer the only thing RLS would need to constrain, and the calculus above changes.
+
 ## Database-layer backstop (enforced by default)
 
 As defense-in-depth for the manual `where: { venueId }` controls above, a Prisma

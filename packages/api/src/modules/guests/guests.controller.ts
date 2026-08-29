@@ -390,9 +390,24 @@ export class GuestsController {
     this.requireManager(scope);
     const guest = await this.prisma.guest.findFirst({ where: { id, venueId: scope.venueId } });
     if (!guest) throw new BadRequestException('Guest not found');
-    await this.prisma.guest.update({
-      where: { id: guest.id },
-      data: { deletedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.guest.update({
+        where: { id: guest.id },
+        data: { deletedAt: new Date() },
+      });
+      // Regression for VW-06: Reservation and Waitlist denormalize guest
+      // contact details for display without a live Guest row. Deleting the
+      // guest previously severed the link (Guest -> SetNull) but left this
+      // PII sitting on every historical booking. guestName is kept — an
+      // operational booking record with no name at all is unusable.
+      await tx.reservation.updateMany({
+        where: { guestId: guest.id, venueId: scope.venueId },
+        data: { guestPhone: null, guestEmail: null, guestCompany: null },
+      });
+      await tx.waitlist.updateMany({
+        where: { guestId: guest.id, venueId: scope.venueId },
+        data: { guestPhone: null, guestEmail: null },
+      });
     });
     return { ok: true };
   }

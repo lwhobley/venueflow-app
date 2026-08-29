@@ -424,12 +424,20 @@ describe('StaffController', () => {
     it('deactivates a staff member, clears sessions, and syncs the team count', async () => {
       const { controller, prisma } = makeController();
       prisma.profile.findUnique.mockResolvedValue({ id: 'staff-2', venueId: 'venue-1', role: 'staff', userId: 'user-2' });
+      prisma.profile.count.mockResolvedValue(0);
 
       const result = await controller.deactivateVenueStaff(managerScope, 'staff-2');
 
       expect(prisma.profile.update).toHaveBeenCalledWith({
         where: { id: 'staff-2' },
-        data: { venueId: null },
+        data: { membershipStatus: 'revoked' },
+      });
+      expect(prisma.profile.count).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-2',
+          venueId: { not: 'venue-1' },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
       });
       expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-2' } });
       expect(prisma.team.upsert).toHaveBeenCalledWith({
@@ -437,7 +445,21 @@ describe('StaffController', () => {
         create: expect.objectContaining({ venueId: 'venue-1', memberCount: expect.any(Number) }),
         update: { memberCount: expect.any(Number) },
       });
-      expect(result).toEqual(expect.objectContaining({ venueId: null }));
+      expect(result).toEqual(expect.objectContaining({ _id: 'staff-2' }));
+    });
+
+    it('keeps sessions alive when the staff member is still active at another venue', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findUnique.mockResolvedValue({ id: 'staff-2', venueId: 'venue-1', role: 'staff', userId: 'user-2' });
+      prisma.profile.count.mockResolvedValue(1);
+
+      await controller.deactivateVenueStaff(managerScope, 'staff-2');
+
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: 'staff-2' },
+        data: { membershipStatus: 'revoked' },
+      });
+      expect(prisma.session.deleteMany).not.toHaveBeenCalled();
     });
   });
 });

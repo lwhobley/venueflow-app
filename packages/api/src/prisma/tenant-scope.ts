@@ -14,7 +14,7 @@ export const VENUE_SCOPED_MODELS: ReadonlySet<string> = new Set([
   'AiBudgetReservation', 'AiUsageEvent', 'AuditLog', 'Availability', 'BarInventoryItem', 'BarInventoryMovement', 'BlackoutDate',
   'ChatImage', 'ChecklistCompletion', 'ChecklistTemplateItem', 'Conversation', 'ConversationRead',
   'CrmActivityLog', 'CrmBeo', 'CrmContract', 'CrmLead', 'CrmNote', 'EmailTemplate', 'FloorChair',
-  'FloorPlan', 'Guest', 'Invite', 'Invoice', 'LogbookEntry', 'ManagerGoal', 'Message', 'NotificationEvent',
+  'FloorPlan', 'FloorTable', 'Guest', 'Invite', 'Invoice', 'LogbookEntry', 'ManagerGoal', 'Message', 'NotificationEvent',
   'NotificationRead', 'PaymentMethod', 'PayrollExport', 'PosCheck', 'PosConnection',
   'PosLaborPunch', 'PrepBoardItem', 'Profile', 'PushToken', 'Reservation', 'ReservationConnection',
   'ReservationHold', 'ReservationSetting', 'ReservationSyncEvent', 'ScheduleEmailEvent',
@@ -69,13 +69,25 @@ export function scopeArgs<T extends Record<string, any> | undefined>(
 
   if (FILTERABLE_OPERATIONS.has(operation)) {
     next.where = mergeVenueWhere(next.where, venueId);
+    // updateMany's `where` is already scoped above, so it can only ever reach
+    // this tenant's rows — but without this, `data.venueId` could still move
+    // one of those rows into another tenant. Force it, same as create.
+    if (operation === 'updateMany' && next.data) {
+      next.data = forceVenue(next.data, venueId);
+    }
     return next as T;
   }
 
   if (UNIQUE_KEYED_OPERATIONS.has(operation)) {
     next.where = mergeUniqueVenueWhere(next.where, venueId);
-    if (operation === 'upsert' && next.create) {
-      next.create = forceVenue(next.create, venueId);
+    // Same reasoning as updateMany above: the where-clause scoping only
+    // guarantees which row is reachable, not what it can be rewritten to.
+    if (operation === 'update' && next.data) {
+      next.data = forceVenue(next.data, venueId);
+    }
+    if (operation === 'upsert') {
+      if (next.create) next.create = forceVenue(next.create, venueId);
+      if (next.update) next.update = forceVenue(next.update, venueId);
     }
     return next as T;
   }
