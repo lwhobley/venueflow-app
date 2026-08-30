@@ -5,6 +5,11 @@ import { describe, expect, it } from 'vitest';
 const readSite = (path: string) => readFileSync(join(__dirname, path), 'utf8');
 
 describe('website onboarding routes', () => {
+  it('does not load the retired Create analytics script', () => {
+    expect(readSite('index.html')).not.toContain('createcdn.com');
+    expect(readSite('_headers')).not.toContain('createcdn.com');
+  });
+
   it('verifies an owner email before registering a workspace', () => {
     const source = readSite('index.html');
     expect(source).toContain('id="verificationStep"');
