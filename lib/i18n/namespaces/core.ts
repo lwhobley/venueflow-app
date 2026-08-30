@@ -2,6 +2,15 @@
 // only relocated here so lib/i18n/index.ts can merge it with the per-screen
 // namespace files added alongside it.
 export const en = {
+  queryBoundary: {
+    thisFeature: 'this feature',
+    upgradeRequired: '{feature} is on the paid plan. Subscribe to unlock it.',
+    viewPlans: 'View plans',
+    error: 'Could not load this section.',
+    retry: 'Try again',
+    empty: 'Nothing here yet.',
+    stale: 'Showing the last data we loaded — refresh failed.',
+  },
   nav: {
     home: 'Home',
     clock: 'Clock IN/OUT',
@@ -118,6 +127,15 @@ export type CoreDictionary = typeof en;
 
 export const es: CoreDictionary = {
   ...en,
+  queryBoundary: {
+    thisFeature: 'esta función',
+    upgradeRequired: '{feature} está en el plan de pago. Suscríbete para desbloquearla.',
+    viewPlans: 'Ver planes',
+    error: 'No se pudo cargar esta sección.',
+    retry: 'Reintentar',
+    empty: 'Aquí no hay nada todavía.',
+    stale: 'Mostrando los últimos datos cargados — la actualización falló.',
+  },
   nav: {
     ...en.nav,
     home: 'Inicio',
@@ -236,6 +254,15 @@ export const es: CoreDictionary = {
 
 export const fr: CoreDictionary = {
   ...en,
+  queryBoundary: {
+    thisFeature: 'cette fonctionnalité',
+    upgradeRequired: "{feature} fait partie de l'offre payante. Abonnez-vous pour y accéder.",
+    viewPlans: 'Voir les offres',
+    error: 'Impossible de charger cette section.',
+    retry: 'Réessayer',
+    empty: 'Rien ici pour le moment.',
+    stale: "Affichage des dernières données chargées — l'actualisation a échoué.",
+  },
   nav: {
     ...en.nav,
     home: 'Accueil',

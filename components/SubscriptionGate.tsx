@@ -123,7 +123,15 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   // and could momentarily fire a false "trial expired" redirect for a venue
   // whose subscription is actually active (e.g. on a slow cold start).
   const trialBlocked = config.billingEnabled && !allAccess && trialExpired && !venueActive && !billingLoading && !isPremiumLoading && !isPremium;
-  const blocked = venueBlocked || trialBlocked;
+  // A venue with no subscription row AND no trial cannot satisfy
+  // SubscriptionGuard on any gated route, so every screen 402s forever. That
+  // 402 is only rescued by the web listeners below, which leaves native users
+  // staring at permanent skeletons. Treat it as blocked so they land somewhere
+  // actionable on every platform. `billing === null` (not undefined) means the
+  // fetch completed and found nothing.
+  const noPlanAtAll = config.billingEnabled && !allAccess && billing === null && trialEndsAt == null
+    && !billingLoading && !meLoading && !isPremiumLoading && !isPremium && Boolean(me?.venue?._id);
+  const blocked = venueBlocked || trialBlocked || noPlanAtAll;
   const reason = trialBlocked ? 'trial_expired' : reasonFromStatus(billing?.status ?? null);
 
   useEffect(() => {
@@ -144,6 +152,10 @@ export function SubscriptionGate({ children }: { children?: unknown }) {
   }, [billingLoading, blocked, hydrated, meLoading, navigationReady, route, safeReplace, user]);
 
 
+  // Web-only last resort. React Native has no global `unhandledrejection`
+  // event, so native cannot be rescued this way — native screens surface a 402
+  // inline via useQueryState's `subscriptionRequired`, and venue-level blocking
+  // is handled by the cross-platform effect above.
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;
     const globalObject = globalThis as typeof globalThis & {

@@ -23,14 +23,16 @@ export default defineConfig({
       // This ratchet covers every app and component file instead of hiding
       // untested screens. It starts at the measured repository-wide baseline;
       // new tests should raise it without narrowing the include set.
-      // Raised after adding the host-error-boundary regression spec (measured:
-      // statements 3.88, branches 2.77, functions 3.11, lines 4.18 — kept a
-      // small margin below each so the gate doesn't flake on minor variance).
+      // Raised after adding the clock and reports screen specs — the time clock
+      // drives payroll and the reports screen shipped two contract bugs, and
+      // neither had any coverage (measured: statements 6.07, branches 5.55,
+      // functions 4.63, lines 6.53 — kept a small margin below each so the gate
+      // doesn't flake on minor variance).
       thresholds: {
-        statements: 3.8,
-        branches: 2.7,
-        functions: 3.0,
-        lines: 4.1,
+        statements: 5.9,
+        branches: 5.4,
+        functions: 4.5,
+        lines: 6.3,
       },
     } as any,
   },

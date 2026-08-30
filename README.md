@@ -5,7 +5,13 @@ Venue Wrangler is a native iOS/Android venue ops app built with Expo Router, Nes
 ## Role model
 
 - Admin/owner/manager: full visibility and edit access for schedule, floor plan, staff, requests, and live operations
-- Staff: read-only floor/schedule visibility, personal time clock punching, own hours, and request flows
+- Staff/server: personal time clock punching, own hours, request flows, read-only schedule visibility, and **operating** the floor during service — seating and clearing the waitlist and changing table status. They cannot **design** the floor: plan edits, table merges/splits, and reservation/waitlist table assignments stay manager-only.
+
+The floor split is deliberate: a host seating guests is not a manager. The
+enforced matrix is pinned by `floor.controller.spec.ts` ("FloorController role
+matrix") so this description and the code cannot drift apart — the two
+destructive actions available to the lowest-privilege role (removing a waitlist
+party, changing table status) are recorded in the audit log.
 
 ## What works now
 

@@ -51,7 +51,11 @@ import { MediaCleanupModule } from './modules/media-cleanup/media-cleanup.module
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env.local', '.env'],
+      // The repository root's `.env.local` is a deliberate mirror of the
+      // production Cloud Run configuration and belongs to the Expo app, not the
+      // API. Reading it here meant a plain `npm run api:dev` inherited every
+      // production secret the API workspace did not itself define.
+      envFilePath: ['packages/api/.env.local', 'packages/api/.env', '.env'],
       validate: validateEnv,
     }),
     // default: higher ceiling for authenticated dashboard polling

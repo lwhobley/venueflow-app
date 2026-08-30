@@ -502,6 +502,75 @@ describe('GuestsController', () => {
       expect(result).toEqual({ created: 1, updated: 0, skipped: 1, guestIds: ['guest-new'] });
     });
 
+    it('does not merge two different people who share a name', async () => {
+      // The name fallback used to graft a stranger's email onto an existing
+      // guest and collapse their histories together. This runs from a public
+      // webhook, where common names and sparse contact details are the norm.
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([
+        { id: 'guest-1', email: null, phone: '5551234567', nameLower: 'john smith', tags: [], lifecycleStage: 'regular', source: 'walkin' },
+      ]);
+      prisma.guest.create.mockResolvedValue({ id: 'guest-2', email: 'other.john@x.com', phone: null, nameLower: 'john smith' });
+
+      const result = await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'John Smith', email: 'other.john@x.com' }],
+      } as any);
+
+      expect(prisma.guest.update).not.toHaveBeenCalled();
+      expect(prisma.guest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          fullName: 'John Smith',
+          email: 'other.john@x.com',
+          tags: expect.arrayContaining(['possible-duplicate']),
+        }),
+      });
+      expect(result).toEqual({ created: 1, updated: 0, skipped: 0, guestIds: ['guest-2'] });
+    });
+
+    it('still merges on a matching phone number', async () => {
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([
+        { id: 'guest-1', email: null, phone: '5551234567', nameLower: 'john smith', tags: [], lifecycleStage: 'regular', source: 'walkin' },
+      ]);
+
+      const result = await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'John Smith', phone: '5551234567' }],
+      } as any);
+
+      expect(prisma.guest.create).not.toHaveBeenCalled();
+      expect(result).toEqual({ created: 0, updated: 1, skipped: 0, guestIds: ['guest-1'] });
+    });
+
+    it('never overwrites a contact value the guest already has', async () => {
+      // Matched on phone, so the incoming email must not replace a stored one.
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([
+        { id: 'guest-1', email: 'real@x.com', phone: '5551234567', nameLower: 'john smith', tags: [], lifecycleStage: 'regular', source: 'walkin' },
+      ]);
+
+      await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'John Smith', phone: '5551234567', email: 'someone.else@x.com' }],
+      } as any);
+
+      expect(prisma.guest.update).toHaveBeenCalledWith({
+        where: { id: 'guest-1' },
+        data: expect.objectContaining({ email: 'real@x.com', phone: '5551234567' }),
+      });
+    });
+
+    it('does not tag a genuinely new name as a possible duplicate', async () => {
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([]);
+      prisma.guest.create.mockResolvedValue({ id: 'guest-new', email: null, phone: null, nameLower: 'nobody else' });
+
+      await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'Nobody Else' }],
+      } as any);
+
+      const created = prisma.guest.create.mock.calls[0][0].data;
+      expect(created.tags).not.toContain('possible-duplicate');
+    });
+
     it('returns zero counts for an empty leads batch', async () => {
       const { controller } = makeController();
 

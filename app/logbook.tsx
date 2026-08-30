@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { View } from 'react-native';
+import { FormScreen } from '../components/FormScreen';
 import { router } from 'expo-router';
 import { Button, Chip, IconButton, Text, TextInput as PaperTextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../lib/railway-hooks';
@@ -75,11 +76,7 @@ function LogbookScreen() {
   };
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
-      showsVerticalScrollIndicator={false}
-    >
+    <FormScreen contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
@@ -142,7 +139,7 @@ function LogbookScreen() {
           );
         })
       )}
-    </ScrollView>
+    </FormScreen>
   );
 }
 

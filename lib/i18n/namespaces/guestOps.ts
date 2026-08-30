@@ -709,9 +709,16 @@ export const en = {
     },
     payroll: {
       title: 'Payroll integration',
-      summary: '{hours}h · {count} open entries{period}',
+      // {count} is the number of employees with hours in the period, which is
+      // what the summary endpoint reports — it was previously labelled "open
+      // entries", a figure the endpoint has never returned.
+      summary: '{hours}h · {count} employees{period}',
       loadingSummary: 'Loading payroll summary...',
+      unavailable: 'Payroll summary is unavailable right now. Pull down to retry.',
+      upgradeRequired: 'Payroll export is on the paid plan. Subscribe to unlock it.',
       recordExport: 'Record export',
+      recordExportOk: 'Export recorded.',
+      recordExportFailed: 'Could not record the export. Try again.',
       providerLabel: 'Payroll provider',
       hidePayrollExport: 'Hide payroll export',
       loadPayrollExport: 'Load payroll export',
@@ -1454,9 +1461,13 @@ export const es: GuestOpsDictionary = {
     },
     payroll: {
       title: 'Integración de nómina',
-      summary: '{hours}h · {count} entradas abiertas{period}',
+      summary: '{hours}h · {count} empleados{period}',
       loadingSummary: 'Cargando resumen de nómina...',
+      unavailable: 'El resumen de nómina no está disponible ahora. Desliza para reintentar.',
+      upgradeRequired: 'La exportación de nómina está en el plan de pago. Suscríbete para desbloquearla.',
       recordExport: 'Registrar exportación',
+      recordExportOk: 'Exportación registrada.',
+      recordExportFailed: 'No se pudo registrar la exportación. Inténtalo de nuevo.',
       providerLabel: 'Proveedor de nómina',
       hidePayrollExport: 'Ocultar exportación de nómina',
       loadPayrollExport: 'Cargar exportación de nómina',
@@ -2197,9 +2208,13 @@ export const fr: GuestOpsDictionary = {
     },
     payroll: {
       title: 'Intégration de la paie',
-      summary: '{hours}h · {count} entrées ouvertes{period}',
+      summary: '{hours}h · {count} employés{period}',
       loadingSummary: 'Chargement du résumé de la paie...',
+      unavailable: 'Le résumé de la paie est indisponible pour le moment. Tirez pour réessayer.',
+      upgradeRequired: "L'export de paie fait partie de l'offre payante. Abonnez-vous pour y accéder.",
       recordExport: "Enregistrer l'export",
+      recordExportOk: 'Export enregistré.',
+      recordExportFailed: "Impossible d'enregistrer l'export. Réessayez.",
       providerLabel: 'Prestataire de paie',
       hidePayrollExport: "Masquer l'export de paie",
       loadPayrollExport: "Charger l'export de paie",

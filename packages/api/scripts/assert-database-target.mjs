@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { assertAllowedHost, assertNotProduction } from './database-target.mjs';
 
 function localDatabaseValue(key) {
   try {
@@ -37,11 +38,6 @@ for (const [key, value] of [
   ['DATABASE_DIRECT_URL', directUrl],
 ]) {
   if (!value) continue;
-  const hostname = new URL(value).hostname.toLowerCase();
-  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
-  const isSupabase = hostname.endsWith('.supabase.co') || hostname.endsWith('.supabase.com');
-
-  if (!isLocal && !isSupabase) {
-    throw new Error(`Refusing database command: ${key} targets ${hostname}; expected Supabase or local Postgres.`);
-  }
+  assertAllowedHost(key, value);
+  assertNotProduction(key, value);
 }

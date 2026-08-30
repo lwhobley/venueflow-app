@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Text } from 'react-native-paper';
 import { router } from 'expo-router';
-import { useMutation, useQuery } from '../../lib/railway-hooks';
+import { useMutation, useQuery, useQueryState } from '../../lib/railway-hooks';
 import { api } from '../../lib/railway-api';
+import { errorMessage } from '../../lib/format';
 import { accents, colors, radius, spacing } from '../../lib/theme';
 import { useVenueAuth } from '../../lib/useVenueAuth';
 import { ScreenErrorBoundary } from '../../components/ErrorBoundary';
@@ -35,7 +36,14 @@ const payrollProviderOptions = [
 ] as const;
 type PayrollProvider = (typeof payrollProviderOptions)[number]['value'];
 
+/**
+ * Mirrors the object returned by GET /v1/app/manager-insights
+ * (app.controller.ts getManagerInsights). Keep the two in step — the
+ * response-shape parity spec fails the build if this declares a field the
+ * controller does not return.
+ */
 type Insight = {
+  laborHours: number;
   scheduledShifts: number;
   openShifts: number;
   activeClocks: number;
@@ -43,6 +51,12 @@ type Insight = {
   activeReservations: number;
   upcomingReservations: number;
   pendingRequests: number;
+};
+
+/** Mirrors GET /v1/payroll/summary (payroll.controller.ts getPayrollSummary). */
+type PayrollSummary = {
+  byEmployee: Array<{ profileId: string | null; employeeName: string; role: string; jobTitle: string; regularHours: number; totalHours: number }>;
+  totals: { totalHours: number; employeeCount: number; periodStart: number; periodEnd: number };
 };
 
 function ReportsScreen() {
@@ -58,11 +72,20 @@ function ReportsScreen() {
   const laborForecast = useQuery(api.scheduling.getLaborForecast, isReady && canManage ? {} : 'skip') as any;
   const timeCsv = useQuery(api.app.exportTimeEntriesCsv, isReady && canManage && showTimeCsv ? {} : 'skip') as string | null | undefined;
   const reservationCsv = useQuery(api.reservations.exportReservationsCsv, isReady && canManage && showReservationCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
-  const payroll = useQuery(api.payroll.getPayrollSummary, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip') as any;
-  const payrollCsv = useQuery(api.payroll.exportPayrollCsv, isReady && canManage && showPayrollCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  // Payroll is a 'paid'-tier route, so a venue on its trial gets 402 here.
+  // useQueryState reports that separately from loading; the data-only useQuery
+  // could not, which left this card on "Loading…" for the whole trial.
+  const {
+    data: payroll,
+    isLoading: payrollLoading,
+    subscriptionRequired: payrollLocked,
+  } = useQueryState<PayrollSummary>(api.payroll.getPayrollSummary, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip');
+  const { data: payrollCsv, subscriptionRequired: payrollCsvLocked } = useQueryState<string>(
+    api.payroll.exportPayrollCsv,
+    isReady && canManage && showPayrollCsv && venue?.id ? { venueId: venue.id } : 'skip',
+  );
   const recordPayrollExport = useMutation(api.payroll.recordPayrollExport);
-
-
+  const [exportNotice, setExportNotice] = useState<{ tone: 'ok' | 'error'; message: string } | null>(null);
 
   const metrics = [
     { label: t('reports.metrics.scheduledShifts'), value: insights?.scheduledShifts ?? 0, accent: accents[0] },
@@ -74,9 +97,29 @@ function ReportsScreen() {
     { label: t('reports.metrics.pendingRequests'), value: insights?.pendingRequests ?? 0, accent: accents[1] },
   ];
 
-  const periodLabel = payroll?.periodStart && payroll?.periodEnd
-    ? `${new Date(payroll.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(payroll.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+  // The summary nests everything under `totals`; reading these off the root
+  // yielded undefined and rendered "undefinedh · undefined open entries".
+  const totals = payroll?.totals;
+  const periodLabel = totals?.periodStart && totals?.periodEnd
+    ? `${new Date(totals.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(totals.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
     : null;
+
+  const onRecordExport = () => {
+    if (!venue?.id || !totals || !payroll) return;
+    setExportNotice(null);
+    // periodStart/periodEnd are epoch milliseconds; the endpoint's DTO requires
+    // strings, and the global ValidationPipe rejects anything else with a 400.
+    recordPayrollExport({
+      venueId: venue.id,
+      provider: payrollProvider,
+      periodStart: new Date(totals.periodStart).toISOString(),
+      periodEnd: new Date(totals.periodEnd).toISOString(),
+      rowCount: payroll.byEmployee.length,
+      totalHours: totals.totalHours,
+    })
+      .then(() => setExportNotice({ tone: 'ok', message: t('reports.payroll.recordExportOk') }))
+      .catch((error: unknown) => setExportNotice({ tone: 'error', message: errorMessage(error, t('reports.payroll.recordExportFailed')) }));
+  };
 
   return (
     <ManagerGate canManage={canManage} profileLoading={profileLoading} profileError={profileError} onRetry={refetchProfile} feature={t('reports.header.title')}>
@@ -223,22 +266,30 @@ function ReportsScreen() {
             <View style={{ flex: 1 }}>
               <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('reports.payroll.title')}</Text>
               <Text style={{ color: colors.muted }}>
-                {payroll ? t('reports.payroll.summary', { hours: payroll.totalHours, count: payroll.openEntryCount, period: periodLabel ? ` · ${periodLabel}` : '' }) : t('reports.payroll.loadingSummary')}
+                {payrollLocked
+                  ? t('reports.payroll.upgradeRequired')
+                  : totals
+                    ? t('reports.payroll.summary', { hours: totals.totalHours, count: totals.employeeCount, period: periodLabel ? ` · ${periodLabel}` : '' })
+                    : payrollLoading
+                      ? t('reports.payroll.loadingSummary')
+                      : t('reports.payroll.unavailable')}
               </Text>
             </View>
             <Button
               compact
               mode="outlined"
+              disabled={!totals}
               textColor={colors.primary}
-              onPress={() => {
-                if (venue?.id && payroll) {
-                  void recordPayrollExport({ venueId: venue.id, provider: payrollProvider, periodStart: payroll.periodStart, periodEnd: payroll.periodEnd });
-                }
-              }}
+              onPress={onRecordExport}
             >
               {t('reports.payroll.recordExport')}
             </Button>
           </View>
+          {exportNotice ? (
+            <Text style={{ color: exportNotice.tone === 'ok' ? colors.primary : colors.danger, fontSize: 13 }}>
+              {exportNotice.message}
+            </Text>
+          ) : null}
           <ProviderDropdown
             label={t('reports.payroll.providerLabel')}
             value={payrollProvider}
@@ -250,7 +301,9 @@ function ReportsScreen() {
           </Button>
           {showPayrollCsv ? (
             <Text selectable style={{ color: colors.charcoal, fontFamily: 'monospace', fontSize: 12 }}>
-              {payrollCsv ?? t('reports.payroll.loadingPayrollExport')}
+              {payrollCsvLocked
+                ? t('reports.payroll.upgradeRequired')
+                : payrollCsv ?? t('reports.payroll.loadingPayrollExport')}
             </Text>
           ) : null}
         </Card.Content>

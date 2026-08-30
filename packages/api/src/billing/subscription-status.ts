@@ -8,6 +8,12 @@ export async function resolveVenueSubscriptionStatus(
   input: {
     venueId: string;
     venueStatus?: SubscriptionStatus | null;
+    /**
+     * venue.subscriptionPlatform. Null means no external billing provider owns
+     * this venue yet, which is what makes the app-native trial fast path below
+     * safe. Omit it and the fast path simply does not apply.
+     */
+    venuePlatform?: string | null;
     trialEndsAt?: Date | null;
   },
 ): Promise<SubscriptionStatus | null> {
@@ -16,6 +22,30 @@ export async function resolveVenueSubscriptionStatus(
   // require consulting the latest Subscription row.
   if (input.venueStatus && input.venueStatus !== 'trialing' && !TERMINAL_STATUSES.has(input.venueStatus)) {
     return input.venueStatus;
+  }
+
+  // Second fast path: an app-native trial that has not yet expired.
+  //
+  // 'trialing' is where every new customer spends their first 14 days, and
+  // without this every subscription-gated request in that window paid for a
+  // third serial database round trip against a pool of 3.
+  //
+  // Deliberately restricted to venues with no billing platform recorded. Once
+  // Stripe or Apple owns the subscription, two things below can legitimately
+  // disagree with `venue.subscriptionStatus`: the Subscription row may carry a
+  // different status, and its `trialEndsAt` (the provider's, which wins) may be
+  // earlier than the profile's 14-day mark. Skipping the read in that case
+  // would keep serving a venue whose provider trial has already ended.
+  // `=== null` deliberately, not falsy: an omitted venuePlatform means the
+  // caller does not know, and an unknown platform must fall through to the
+  // authoritative read rather than silently taking the optimistic path.
+  if (
+    input.venueStatus === 'trialing'
+    && input.venuePlatform === null
+    && input.trialEndsAt
+    && input.trialEndsAt.getTime() > Date.now()
+  ) {
+    return 'trialing';
   }
 
   const subscription = await prisma.subscription.findFirst({

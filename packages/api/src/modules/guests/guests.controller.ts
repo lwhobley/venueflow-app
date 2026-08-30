@@ -30,6 +30,13 @@ type Scope = VenueScopedRequest['venueScope'];
 const LEADS_WEBHOOK_RATE_LIMIT_MAX = 120;
 const LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
 
+/**
+ * Applied to a lead that shares a name with an existing guest but carries no
+ * matching email or phone. The importer creates a separate record and leaves
+ * the merge decision to a human.
+ */
+export const POSSIBLE_DUPLICATE_TAG = 'possible-duplicate';
+
 class UpsertGuestDto {
   @IsString()
   @IsOptional()
@@ -492,11 +499,17 @@ export class GuestsController {
         if (seen.has(lead.key)) { skipped++; continue; }
         seen.add(lead.key);
 
+        // Merge only on an identifier that actually identifies a person.
+        // Matching on a shared name grafted one guest's contact details and
+        // history onto another's: two different "John Smith"s collapsed into
+        // one record, and a stranger's email was written onto an existing
+        // guest that happened to have none. This runs from a public webhook,
+        // where common names and sparse contact details are the norm.
         const existing =
           (email ? byEmail.get(email) : null) ??
           (phone ? byPhone.get(phone) : null) ??
-          byName.get(lead.nameLower) ??
           null;
+        const nameOnlyMatch = !existing && byName.has(lead.nameLower);
 
         if (existing) {
           await tx.guest.update({
@@ -504,8 +517,10 @@ export class GuestsController {
             data: {
               fullName,
               nameLower: fullName.toLowerCase(),
-              phone: phone ?? existing.phone,
-              email: email ?? existing.email,
+              // Never overwrite a contact value we already hold: a lead matched
+              // on phone alone must not replace the stored email, and vice versa.
+              phone: existing.phone ?? phone ?? null,
+              email: existing.email ?? email ?? null,
               lifecycleStage: existing.lifecycleStage ?? 'lead',
               source: source ?? existing.source,
               tags: mergeTags(existing.tags, incomingTags),
@@ -524,7 +539,9 @@ export class GuestsController {
               lifecycleStage: 'lead',
               source,
               marketingOptIn: false,
-              tags: incomingTags,
+              // Flag rather than merge, so a human resolves genuine duplicates
+              // on the guests screen instead of the importer guessing.
+              tags: nameOnlyMatch ? mergeTags(incomingTags, [POSSIBLE_DUPLICATE_TAG]) : incomingTags,
             },
           });
           if (newGuest.email) byEmail.set(newGuest.email.toLowerCase(), newGuest);

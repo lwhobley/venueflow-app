@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { csvCell } from './csv';
+import { csvCell, csvDocument } from './csv';
 
 describe('csvCell', () => {
   it('quotes plain strings', () => {
@@ -25,5 +25,29 @@ describe('csvCell', () => {
   it('renders null/undefined as an empty cell', () => {
     expect(csvCell(null)).toBe('""');
     expect(csvCell(undefined)).toBe('""');
+  });
+});
+
+describe('csvDocument', () => {
+  it('prefixes the UTF-8 BOM so Excel on Windows decodes as UTF-8', () => {
+    // Without it, "Renée Söderberg" arrives as "RenÃ©e SÃ¶derberg" on a payroll
+    // export, because Excel ignores the charset content-type parameter.
+    const doc = csvDocument(['Employee', '"Renée Söderberg"']);
+    expect(doc.charCodeAt(0)).toBe(0xfeff);
+    expect(Buffer.from(doc, 'utf8').subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+  });
+
+  it('separates rows with CRLF per RFC 4180 and ends with one', () => {
+    expect(csvDocument(['a', 'b'])).toBe('\ufeffa\r\nb\r\n');
+  });
+
+  it('round-trips non-ASCII names through UTF-8 intact', () => {
+    const doc = csvDocument([csvCell('Renée Söderberg')]);
+    const decoded = Buffer.from(doc, 'utf8').toString('utf8');
+    expect(decoded).toContain('Renée Söderberg');
+  });
+
+  it('handles a single-row document', () => {
+    expect(csvDocument(['only'])).toBe('\ufeffonly\r\n');
   });
 });

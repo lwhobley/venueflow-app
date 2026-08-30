@@ -839,6 +839,10 @@ model TimeEntry {
   clockOutMocked    Boolean?
   isOpen            Boolean
   breaks            Json?
+  // Set when a punch reused an earlier day's exact coordinates from a coarse
+  // (Wi-Fi/cell) fix. Recorded for manager review rather than blocking the
+  // punch — see common/geofence.ts fixReplayVerdict.
+  locationAnomaly   String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   venue             Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
