@@ -57,7 +57,7 @@ export class VenueScopeInterceptor implements NestInterceptor {
           venueId: requestedVenueId,
           OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
         },
-        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
+        include: { venue: { select: { id: true, name: true, subscriptionStatus: true, subscriptionPlatform: true } } },
       });
       if (!profile) {
         throw new ForbiddenException('You do not have an active membership at the requested venue.');
@@ -70,13 +70,13 @@ export class VenueScopeInterceptor implements NestInterceptor {
           venueId: { not: null },
           OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
         },
-        include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
+        include: { venue: { select: { id: true, name: true, subscriptionStatus: true, subscriptionPlatform: true } } },
         orderBy: { createdAt: 'asc' },
       });
     }
     if (!profile?.venueId || !profile.venue) return next.handle();
 
-    const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, { venueId: profile.venueId, venueStatus: profile.venue.subscriptionStatus, trialEndsAt: profile.trialEndsAt });
+    const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, { venueId: profile.venueId, venueStatus: profile.venue.subscriptionStatus, venuePlatform: profile.venue.subscriptionPlatform, trialEndsAt: profile.trialEndsAt });
     request.venueScope = { profileId: profile.id, fullName: profile.fullName, venueId: profile.venueId, venueName: profile.venue.name, role: profile.role, allAccess: profile.allAccess, subscriptionStatus, trialEndsAt: profile.trialEndsAt ?? null };
 
     return this.bindRequestContexts(request.venueScope, next);

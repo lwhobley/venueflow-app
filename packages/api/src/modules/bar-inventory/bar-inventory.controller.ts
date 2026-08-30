@@ -20,7 +20,7 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { csvCell } from '../../common/csv';
+import { csvCell, csvDocument } from '../../common/csv';
 import { htmlEscape } from '../../common/html-escape';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -591,7 +591,7 @@ export class BarInventoryController {
         csvCell(item.lastCountedAt ? item.lastCountedAt.toISOString().slice(0, 10) : ''),
       ].join(','));
     }
-    return rows.join('\n');
+    return csvDocument(rows);
   }
 
   // ── Movement log CSV export ──────────────────────────────────────────
@@ -628,7 +628,7 @@ export class BarInventoryController {
         csvCell(m.notes),
       ].join(','));
     }
-    return rows.join('\n');
+    return csvDocument(rows);
   }
 
   // ── Shrinkage / variance report ──────────────────────────────────────

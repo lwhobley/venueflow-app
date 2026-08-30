@@ -598,7 +598,10 @@ describe('ReservationsController', () => {
         expect.objectContaining({ where: expect.objectContaining({ venueId: 'venue-1', deletedAt: null }) }),
       );
       expect(csv).toContain('Alex Guest');
-      expect(csv.split('\n')[0]).toBe('"Name","Party","Time","Status","Phone","Email","Notes"');
+      // BOM + CRLF, so Excel on Windows opens the export as UTF-8.
+      expect(csv.charCodeAt(0)).toBe(0xfeff);
+      expect(csv.replace(/^\ufeff/, '').split('\r\n')[0])
+        .toBe('"Name","Party","Time","Status","Phone","Email","Notes"');
     });
 
     it('rejects an export with no date range', async () => {

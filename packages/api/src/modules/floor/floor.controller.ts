@@ -225,6 +225,11 @@ class MergeTablesDto {
   partySize?: number;
 }
 
+/** Attribution for the two destructive floor actions any member can perform. */
+function actorOf(scope: NonNullable<Scope>) {
+  return { profileId: scope.profileId, fullName: scope.fullName, role: scope.role };
+}
+
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
   if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
 }
@@ -286,7 +291,7 @@ export class FloorController {
   @Delete('waitlist/:id')
   async removeFromWaitlist(@VenueScope() scope: Scope, @Param('id') id: string) {
     if (!scope) throw new ForbiddenException('No venue profile found');
-    return this.floor.removeFromWaitlist(scope.venueId, id);
+    return this.floor.removeFromWaitlist(scope.venueId, id, actorOf(scope));
   }
 
   @RequireSubscription('active')
@@ -300,7 +305,7 @@ export class FloorController {
   @Patch('tables/:id/status')
   async updateTableStatus(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: TableStatusDto) {
     if (!scope) throw new ForbiddenException('No venue profile found');
-    return this.floor.updateTableStatus(scope.venueId, id, body.status);
+    return this.floor.updateTableStatus(scope.venueId, id, body.status, actorOf(scope));
   }
 
   @RequireSubscription('active')

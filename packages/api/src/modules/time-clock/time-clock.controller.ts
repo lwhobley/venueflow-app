@@ -12,6 +12,7 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { assertFixNotReplayed, assertWithinGeofence, type PriorFix } from '../../common/geofence';
+import { buildClockAlerts, clockAlertShiftWindow, type ClockAlert } from '../../common/clock-alerts';
 import { closeOpenBreaks, parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
 import { mapClockEntry, minutesToTime } from '../../common/mappers';
@@ -23,6 +24,16 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { endBreakForProfile, startBreakForProfile } from './break-transitions';
 
 type Scope = VenueScopedRequest['venueScope'];
+
+/**
+ * How many earlier-day fixes to compare a punch against. One is not enough: a
+ * device alternating between two nearby access points would never repeat the
+ * single most recent fix.
+ */
+const PRIOR_FIX_LOOKBACK = 10;
+
+/** Value stored in TimeEntry.locationAnomaly for a repeated coarse fix. */
+const REPEATED_FIX_ANOMALY = 'repeated_fix';
 
 /**
  * The exact fields the device signs. Only the location values are included:
@@ -105,69 +116,19 @@ export class TimeClockController {
         ? [myOpenEntry]
         : [];
 
-    const managerAlerts: Array<{
-      kind: 'late_clock_in' | 'missed_clock_out';
-      severity: 'warning' | 'danger';
-      profileId: string;
-      memberName: string;
-      detail: string;
-    }> = [];
+    // The alert rule itself lives in common/clock-alerts so the Reports KPI
+    // tile (app.controller getManagerInsights) counts exactly what this board
+    // lists — the two used to drift because each implemented it separately.
+    let managerAlerts: ClockAlert[] = [];
 
     if (canManageVenue(scope.role, scope.allAccess)) {
       const now = Date.now();
       const tz = venue.timezone ?? null;
-      const today = zonedDayOfWeek(tz, now);
-      const minutesNow = zonedMinutesOfDay(tz, now);
-      const todayDate = todayInZone(tz);
-      const weekStart = weekStartFor(todayDate);
-      const yesterdayDate = addDays(todayDate, -1);
-      const yesterdayWeekStart = weekStartFor(yesterdayDate);
-      const yesterday = (today + 6) % 7;
-      const openByProfile = new Set(
-        entries.filter((entry) => entry.isOpen).map((entry) => entry.profileId),
-      );
       const shifts = await this.prisma.scheduleShift.findMany({
-        where: {
-          venueId: venue.id,
-          OR: [
-            { weekStart, dayIndex: today },
-            { weekStart: yesterdayWeekStart, dayIndex: yesterday },
-          ],
-        },
+        where: { venueId: venue.id, OR: clockAlertShiftWindow(tz, now).where },
         include: { profile: true },
       });
-      for (const shift of shifts) {
-        const isToday = shift.weekStart === weekStart && shift.dayIndex === today;
-        const isOvernightYesterday = shift.weekStart === yesterdayWeekStart
-          && shift.dayIndex === yesterday
-          && normalizedShiftEnd(shift.startMinutes, shift.endMinutes) > 1440;
-        if ((!isToday && !isOvernightYesterday) || !shift.profileId || shift.status === 'open') continue;
-        if (
-          isWithinShiftWindow(minutesNow, shift.startMinutes + 15, shift.endMinutes) &&
-          !openByProfile.has(shift.profileId) &&
-          shift.profile
-        ) {
-          managerAlerts.push({
-            kind: 'late_clock_in',
-            severity: 'warning',
-            profileId: shift.profile.id,
-            memberName: shift.profile.fullName,
-            detail: `${shift.jobTitle} was scheduled at ${minutesToTime(shift.startMinutes)} and is not clocked in.`,
-          });
-        }
-      }
-      for (const entry of entries) {
-        if (!entry.isOpen || now - entry.clockInAt.getTime() < 10 * 60 * 60 * 1000) continue;
-        if (entry.profile) {
-          managerAlerts.push({
-            kind: 'missed_clock_out',
-            severity: 'danger',
-            profileId: entry.profile.id,
-            memberName: entry.profile.fullName,
-            detail: `Clocked in since ${entry.clockInAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz || 'UTC' })}.`,
-          });
-        }
-      }
+      managerAlerts = buildClockAlerts({ timezone: tz, nowMs: now, shifts, entries });
     }
 
     return {
@@ -249,14 +210,17 @@ export class TimeClockController {
   }
 
   /**
-   * Coordinates from this profile's most recent punch on an *earlier* day.
-   * Used to catch a replayed (hardcoded) GPS fix — see assertFixNotReplayed.
-   * Same-day punches are excluded because a clock-out shortly after a clock-in
-   * can legitimately reuse the OS's cached fix and repeat exactly.
+   * Coordinates from this profile's punches on *earlier* days — see
+   * assertFixNotReplayed. Same-day punches are excluded because a clock-out
+   * shortly after a clock-in can legitimately reuse the OS's cached fix.
+   *
+   * Several prior fixes rather than one: an employee whose device alternates
+   * between two nearby access points would otherwise never repeat the single
+   * most recent fix, and the signal would be lost.
    */
-  private async priorDayFix(profileId: string, timezone: string | null | undefined): Promise<PriorFix | null> {
+  private async priorDayFixes(profileId: string, timezone: string | null | undefined): Promise<PriorFix[]> {
     const startOfToday = zonedDayBounds(timezone, 0).start;
-    const previous = await this.prisma.timeEntry.findFirst({
+    const previous = await this.prisma.timeEntry.findMany({
       where: {
         profileId,
         clockInAt: { lt: new Date(startOfToday) },
@@ -264,10 +228,14 @@ export class TimeClockController {
         clockInLng: { not: null },
       },
       orderBy: { clockInAt: 'desc' },
+      take: PRIOR_FIX_LOOKBACK,
       select: { clockInLat: true, clockInLng: true },
     });
-    if (!previous || previous.clockInLat == null || previous.clockInLng == null) return null;
-    return { lat: previous.clockInLat, lng: previous.clockInLng };
+    return previous.flatMap((entry) =>
+      entry.clockInLat == null || entry.clockInLng == null
+        ? []
+        : [{ lat: entry.clockInLat, lng: entry.clockInLng }],
+    );
   }
 
   @RequireSubscription()
@@ -281,7 +249,9 @@ export class TimeClockController {
     // request came from a genuine, unmodified build on real Apple hardware.
     await this.attestation.verifyRequest(user.sub, punchPayload(body), body.attestation);
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
-    assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
+    const locationAnomaly = assertFixNotReplayed(body.lat, body.lng, body.accuracy, await this.priorDayFixes(scope.profileId, venue.timezone)) === 'flag'
+      ? REPEATED_FIX_ANOMALY
+      : null;
 
     const active = await this.prisma.timeEntry.findFirst({
       where: { profileId: scope.profileId, isOpen: true },
@@ -339,6 +309,7 @@ export class TimeClockController {
           clockInLng: body.lng,
           clockInAccuracyM: body.accuracy,
           clockInMocked: body.mocked,
+          locationAnomaly,
           isOpen: true,
         },
       });
@@ -359,7 +330,9 @@ export class TimeClockController {
     if (!venue) throw new BadRequestException('Assigned venue not found');
     await this.attestation.verifyRequest(user.sub, punchPayload(body), body.attestation);
     assertWithinGeofence(body.lat, body.lng, body.accuracy, body.mocked, venue);
-    assertFixNotReplayed(body.lat, body.lng, await this.priorDayFix(scope.profileId, venue.timezone));
+    const locationAnomaly = assertFixNotReplayed(body.lat, body.lng, body.accuracy, await this.priorDayFixes(scope.profileId, venue.timezone)) === 'flag'
+      ? REPEATED_FIX_ANOMALY
+      : null;
 
     const active = await this.prisma.timeEntry.findFirst({
       where: { profileId: scope.profileId, isOpen: true },
@@ -376,6 +349,8 @@ export class TimeClockController {
         clockOutLng: body.lng,
         clockOutAccuracyM: body.accuracy,
         clockOutMocked: body.mocked,
+        // Preserve an anomaly already recorded at clock-in; only escalate.
+        ...(locationAnomaly ? { locationAnomaly } : {}),
         isOpen: false,
         breaks: closeOpenBreaks(active.breaks, clockOutAt.getTime()),
       },

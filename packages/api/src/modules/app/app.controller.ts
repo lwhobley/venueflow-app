@@ -1,6 +1,6 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, Logger, NotFoundException, Optional, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
-import { Prisma, Role } from '@prisma/client';
+import { Prisma, ReservationStatus, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
 import type { Request } from 'express';
 import { AuthGuard } from '../../auth/auth.guard';
@@ -10,11 +10,12 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { closeOpenBreaks, unpaidBreakMs } from '../../common/break-duration';
-import { csvCell } from '../../common/csv';
+import { csvCell, csvDocument } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
+import { buildClockAlerts, clockAlertShiftWindow } from '../../common/clock-alerts';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { isIanaTimeZone, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
@@ -580,19 +581,72 @@ export class AppController {
     const profile = await this.requireVenueProfile(user);
     if (!profile?.venueId || !canManageVenue(profile.role, profile.allAccess)) return null;
     const venueId = profile.venueId;
-    const weekStart = weekStartFor(todayInZone(profile.venue?.timezone));
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [completedEntries, scheduledShifts, openRequests] = await Promise.all([
+    const timezone = profile.venue?.timezone ?? null;
+    const weekStart = weekStartFor(todayInZone(timezone));
+    const now = Date.now();
+    const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const nowDate = new Date(now);
+    const in24h = new Date(now + 24 * 60 * 60 * 1000);
+    // A reservation that is cancelled or a no-show is not "active" for any
+    // operational purpose, so both counts exclude them.
+    const liveReservation = {
+      venueId,
+      status: { notIn: [ReservationStatus.cancelled, ReservationStatus.no_show] },
+    };
+    const [
+      completedEntries,
+      scheduledShifts,
+      openShifts,
+      pendingRequests,
+      openEntries,
+      alertShifts,
+      activeReservations,
+      upcomingReservations,
+    ] = await Promise.all([
       this.prisma.timeEntry.findMany({
         where: { venueId, isOpen: false, clockOutAt: { gte: weekAgo } },
         select: { clockInAt: true, clockOutAt: true },
       }),
       this.prisma.scheduleShift.count({ where: { venueId, weekStart, status: 'scheduled' } }),
+      this.prisma.scheduleShift.count({ where: { venueId, weekStart, status: 'open' } }),
       this.prisma.staffRequest.count({ where: { venueId, status: 'pending' } }),
+      this.prisma.timeEntry.findMany({
+        where: { venueId, isOpen: true },
+        select: { isOpen: true, clockInAt: true, profileId: true, profile: { select: { id: true, fullName: true } } },
+      }),
+      this.prisma.scheduleShift.findMany({
+        where: { venueId, OR: clockAlertShiftWindow(timezone, now).where },
+        include: { profile: true },
+      }),
+      this.prisma.reservation.count({ where: { ...liveReservation, reservationTime: { gte: nowDate } } }),
+      this.prisma.reservation.count({
+        where: { ...liveReservation, reservationTime: { gte: nowDate, lt: in24h } },
+      }),
     ]);
     const laborMs = completedEntries.reduce((sum, e) => sum + (e.clockOutAt!.getTime() - e.clockInAt.getTime()), 0);
     const laborHours = Math.round((laborMs / 3600000) * 10) / 10;
-    return { laborHours, scheduledShifts, openRequests };
+    // Same rule the manager clock board renders, so the tile and the board
+    // can never disagree.
+    const lateOrMissedAlerts = buildClockAlerts({
+      timezone,
+      nowMs: now,
+      shifts: alertShifts,
+      entries: openEntries,
+    }).length;
+    return {
+      laborHours,
+      scheduledShifts,
+      openShifts,
+      activeClocks: openEntries.length,
+      lateOrMissedAlerts,
+      activeReservations,
+      upcomingReservations,
+      pendingRequests,
+      // Retained under its original name: existing clients read `openRequests`,
+      // and dropping it here would break them the way the missing fields broke
+      // the Reports screen.
+      openRequests: pendingRequests,
+    };
   }
 
   @UseGuards(AuthGuard)
@@ -623,8 +677,10 @@ export class AppController {
           csvCell(hours),
         ].join(',');
       })
-      .join('\n');
-    return header + rows;
+      .join('\r\n');
+    // csvDocument supplies the UTF-8 BOM and trailing CRLF; `header`
+    // carries its own trailing newline, so emit it as its own row.
+    return csvDocument([header.replace(/\r?\n$/, ''), rows]);
   }
 
   @UseGuards(AuthGuard)

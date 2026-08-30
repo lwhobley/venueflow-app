@@ -33,13 +33,31 @@ export type AuthenticatedRequest = Request & {
     allAccess: boolean;
     trialEndsAt: Date | null;
     venueId: string | null;
-    venue: { id: string; name: string; subscriptionStatus: SubscriptionStatus | null } | null;
+    venue: { id: string; name: string; subscriptionStatus: SubscriptionStatus | null; subscriptionPlatform: string | null } | null;
   };
 };
 
 // Session lookup queries the database directly to ensure instant revocation
 // across all replicas when a session is invalidated (e.g. logout).
 // The Supabase Postgres pooler handles this efficiently.
+
+/** Shared by the primary and fallback profile lookups so they cannot drift. */
+const PROFILE_SELECT = {
+  id: true,
+  email: true,
+  fullName: true,
+  role: true,
+  allAccess: true,
+  trialEndsAt: true,
+  venueId: true,
+  venue: {
+    select: {
+      name: true,
+      subscriptionStatus: true,
+      subscriptionPlatform: true,
+    },
+  },
+} as const;
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -82,10 +100,39 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
     const now = Date.now();
-    const row = await this.prisma.session.findUnique({
-      where: { id: payload.sid },
-      select: { userId: true, expiresAt: true, tokenHash: true },
-    });
+    const headerVenueId = venueIdHeader(request.headers);
+    const requestedVenueId = headerVenueId || payload.venueId || undefined;
+
+    // The session lookup and the profile lookup depend only on the JWT and the
+    // request headers, never on each other, so issue them together. Run
+    // serially they added two round trips to the front of every authenticated
+    // request against a production pool of 3 connections. The session is still
+    // validated before anything from the profile is trusted; on an invalid
+    // session the profile read is simply discarded (and the throttler guard
+    // has already run, so this cannot be used to amplify load).
+    const [row, profileRow] = await Promise.all([
+      this.prisma.session.findUnique({
+        where: { id: payload.sid },
+        select: { userId: true, expiresAt: true, tokenHash: true },
+      }),
+      this.prisma.profile.findFirst({
+        // With no explicit venue requested, only match a profile that actually
+        // carries a venue. A user can hold both a venueless profile (created at
+        // signup, before any venue exists) and a venued one (created afterward);
+        // without this filter `orderBy: createdAt asc` picks the older venueless
+        // row, which desyncs from VenueScopeInterceptor's resolution (that one
+        // already requires venueId) and leaves tenant isolation unbound for a
+        // request that is really operating on a real venue.
+        where: {
+          userId: payload.sub,
+          ...(requestedVenueId ? { venueId: requestedVenueId } : { venueId: { not: null } }),
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+        select: PROFILE_SELECT,
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
     const session = row
       ? { userId: row.userId, expiresAt: row.expiresAt.getTime(), tokenHash: row.tokenHash }
       : null;
@@ -97,38 +144,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
 
-    const headerVenueId = venueIdHeader(request.headers);
-    const requestedVenueId = headerVenueId || payload.venueId || undefined;
-    // With no explicit venue requested, only match a profile that actually
-    // carries a venue. A user can hold both a venueless profile (created at
-    // signup, before any venue exists) and a venued one (created afterward);
-    // without this filter `orderBy: createdAt asc` picks the older venueless
-    // row, which desyncs from VenueScopeInterceptor's resolution (that one
-    // already requires venueId) and leaves tenant isolation unbound for a
-    // request that is really operating on a real venue.
-    let liveProfile = await this.prisma.profile.findFirst({
-      where: {
-        userId: payload.sub,
-        ...(requestedVenueId ? { venueId: requestedVenueId } : { venueId: { not: null } }),
-        OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        allAccess: true,
-        trialEndsAt: true,
-        venueId: true,
-        venue: {
-          select: {
-            name: true,
-            subscriptionStatus: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    let liveProfile = profileRow;
     if (!liveProfile && headerVenueId) {
       throw new ForbiddenException('You do not have an active membership at the requested venue.');
     }
@@ -142,16 +158,7 @@ export class AuthGuard implements CanActivate {
           venueId: { not: null },
           OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
         },
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-          allAccess: true,
-          trialEndsAt: true,
-          venueId: true,
-          venue: { select: { name: true, subscriptionStatus: true } },
-        },
+        select: PROFILE_SELECT,
         orderBy: { createdAt: 'asc' },
       });
     }
@@ -184,6 +191,7 @@ export class AuthGuard implements CanActivate {
             id: liveProfile.venueId,
             name: liveProfile.venue.name,
             subscriptionStatus: liveProfile.venue.subscriptionStatus,
+            subscriptionPlatform: liveProfile.venue.subscriptionPlatform,
           },
         }
       : undefined;

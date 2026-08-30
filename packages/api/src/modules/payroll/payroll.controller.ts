@@ -11,7 +11,7 @@ import {
 import { IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
 import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { csvCell } from '../../common/csv';
+import { csvCell, csvDocument } from '../../common/csv';
 import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
@@ -211,7 +211,7 @@ export class PayrollController {
         csvCell(endIso),
       ].join(','));
     }
-    return csvRows.join('\n');
+    return csvDocument(csvRows);
   }
 
   @RequireSubscription('paid')

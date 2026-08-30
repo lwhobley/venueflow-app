@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { Image, ScrollView, View } from 'react-native';
+import { Image, View } from 'react-native';
+import { FormScreen } from '../components/FormScreen';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Button, Chip, IconButton, Text, TextInput as PaperTextInput } from 'react-native-paper';
@@ -115,11 +116,7 @@ function ChecklistScreen() {
   const doneCount = items.filter((i) => i.status === 'done').length;
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
-      showsVerticalScrollIndicator={false}
-    >
+    <FormScreen contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
@@ -196,7 +193,7 @@ function ChecklistScreen() {
       ) : null}
 
       {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-    </ScrollView>
+    </FormScreen>
   );
 }
 

@@ -561,9 +561,15 @@ export function useQueryState<T = any>(ref: RailwayFunctionRef, args?: QueryArgs
     enabled,
     queryFn: ({ signal }) => requestRoute<T>(route, args, signal),
   });
+  // A 402 is not a failure to show as an error — it means the venue's plan does
+  // not cover this route (see SubscriptionGuard). Screens that render a
+  // paid-only panel need to tell it apart from "still loading", otherwise the
+  // panel sits on a skeleton for the whole trial.
+  const subscriptionRequired = query.error instanceof ApiError && query.error.status === 402;
   return {
     data: query.data,
-    error: query.error,
+    error: subscriptionRequired ? null : query.error,
+    subscriptionRequired,
     isLoading: enabled && query.isLoading,
     refetch: query.refetch,
   };

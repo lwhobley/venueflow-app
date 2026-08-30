@@ -181,10 +181,16 @@ describe('FloorController', () => {
       );
     });
 
-    it('updates the table status scoped by venueId', async () => {
+    it('updates the table status scoped by venueId, attributed to the actor', async () => {
       const { controller, floor } = makeController();
       await controller.updateTableStatus(staffScope, 'table-1', { status: 'dirty' });
-      expect(floor.updateTableStatus).toHaveBeenCalledWith('venue-1', 'table-1', 'dirty');
+      // Any member can change table status, so the audit trail needs to say who.
+      expect(floor.updateTableStatus).toHaveBeenCalledWith(
+        'venue-1',
+        'table-1',
+        'dirty',
+        expect.objectContaining({ profileId: 'staff-1', role: 'staff' }),
+      );
     });
   });
 
@@ -220,5 +226,65 @@ describe('FloorController', () => {
       await controller.releaseAssignment(managerScope, 'assign-1');
       expect(floor.releaseAssignment).toHaveBeenCalledWith('venue-1', 'assign-1');
     });
+  });
+});
+
+/**
+ * The enforced role model, pinned so it cannot drift from the README again.
+ *
+ * The README described staff as having read-only floor access while four
+ * routes were open to any active member. The code is right — a host seating
+ * guests is not a manager — so the documentation was corrected and this table
+ * is now the single statement of the rule.
+ */
+describe('FloorController role matrix', () => {
+  const scopeFor = (role: string) => ({ venueId: 'venue-1', profileId: `${role}-1`, fullName: `${role} user`, role, allAccess: false }) as any;
+  const ROLES = ['staff', 'server', 'manager', 'owner'];
+
+  // Operating the floor: available to every active member.
+  const OPERATE: Array<[string, (c: FloorController, s: any) => Promise<unknown>]> = [
+    ['addToWaitlist', (c, s) => c.addToWaitlist(s, { guestName: 'A', partySize: 2 } as any)],
+    ['removeFromWaitlist', (c, s) => c.removeFromWaitlist(s, 'wl-1')],
+    ['markWaitlistReady', (c, s) => c.markWaitlistReady(s, 'wl-1')],
+    ['updateTableStatus', (c, s) => c.updateTableStatus(s, 'table-1', { status: 'dirty' } as any)],
+  ];
+
+  // Designing the floor: managers and above only.
+  const DESIGN: Array<[string, (c: FloorController, s: any) => Promise<unknown>]> = [
+    ['saveFloorPlan', (c, s) => c.saveFloorPlan(s, { tables: [] } as any)],
+    ['clearActiveFloorPlan', (c, s) => c.clearActiveFloorPlan(s)],
+    ['mergeTablesForParty', (c, s) => c.mergeTablesForParty(s, { tableIds: ['a', 'b'], partySize: 4 } as any)],
+    ['splitMergedTables', (c, s) => c.splitMergedTables(s, 'merge-1')],
+    ['assignReservationToTables', (c, s) => c.assignReservationToTables(s, { reservationId: 'r1', tableIds: ['a'] } as any)],
+    ['assignWaitlistToTables', (c, s) => c.assignWaitlistToTables(s, { waitlistId: 'wl-1', tableIds: ['a'] } as any)],
+    ['releaseAssignment', (c, s) => c.releaseAssignment(s, 'assignment-1')],
+  ];
+
+  it.each(OPERATE)('allows every active member to %s', async (_name, call) => {
+    for (const role of ROLES) {
+      const { controller } = makeController();
+      await expect(call(controller, scopeFor(role))).resolves.toBeDefined();
+    }
+  });
+
+  it.each(DESIGN)('restricts %s to managers and above', async (_name, call) => {
+    for (const role of ['staff', 'server']) {
+      const { controller } = makeController();
+      await expect(call(controller, scopeFor(role))).rejects.toThrow(ForbiddenException);
+    }
+    for (const role of ['manager', 'owner']) {
+      const { controller } = makeController();
+      await expect(call(controller, scopeFor(role))).resolves.toBeDefined();
+    }
+  });
+
+  it('attributes a waitlist removal to the member who performed it', async () => {
+    const { controller, floor } = makeController();
+    await controller.removeFromWaitlist(scopeFor('staff'), 'wl-1');
+    expect(floor.removeFromWaitlist).toHaveBeenCalledWith(
+      'venue-1',
+      'wl-1',
+      expect.objectContaining({ profileId: 'staff-1', role: 'staff' }),
+    );
   });
 });

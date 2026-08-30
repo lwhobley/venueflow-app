@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
+import { FormScreen } from '../../components/FormScreen';
 import { router } from 'expo-router';
 import { Button, IconButton, Text, TextInput } from 'react-native-paper';
 import { useMutation, useQuery } from '../../lib/railway-hooks';
@@ -141,11 +142,7 @@ function VenueSettingsScreen() {
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}
-      showsVerticalScrollIndicator={false}
-    >
+    <FormScreen contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconButton icon="arrow-left" onPress={() => router.back()} />
         <View>
@@ -206,7 +203,7 @@ function VenueSettingsScreen() {
       <Button mode="contained" buttonColor={colors.primary} icon="content-save" loading={saving} disabled={saving} onPress={() => void onSave()}>
         {t('venueSettings.saveVenueLocation')}
       </Button>
-    </ScrollView>
+    </FormScreen>
   );
 }
 

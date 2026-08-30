@@ -191,7 +191,12 @@ describe('PayrollController', () => {
       ]);
 
       const csv = await controller.exportPayrollCsv(managerScope, '2026-07-01', '2026-07-07');
-      const lines = csv.split('\n');
+
+      // A UTF-8 BOM and CRLF row endings: without the BOM, Excel on Windows
+      // decodes the file as the system codepage and mangles accented names.
+      expect(csv.charCodeAt(0)).toBe(0xfeff);
+      expect(csv).toContain('\r\n');
+      const lines = csv.replace(/^\ufeff/, '').split('\r\n');
 
       expect(lines[0]).toBe('"Employee","Role","Regular Hours","Total Hours","Start Date","End Date"');
       expect(lines[1]).toContain('"Alex Server"');

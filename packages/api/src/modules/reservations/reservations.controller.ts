@@ -21,7 +21,7 @@ import type { Request } from 'express';
 import { canManageVenue } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { csvCell } from '../../common/csv';
+import { csvCell, csvDocument } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { zonedDateBounds } from '../../common/venue-time';
@@ -736,7 +736,7 @@ export class ReservationsController {
         csvCell(r.notes),
       ].join(','));
     }
-    return rows.join('\n');
+    return csvDocument(rows);
   }
 
   private async getVenueTimezone(venueId: string): Promise<string | null> {

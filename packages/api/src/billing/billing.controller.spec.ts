@@ -325,3 +325,78 @@ describe('BillingController applySubscription P2002 handling', () => {
     expect(prisma.profile.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe('BillingController Stripe invoice subscription reference', () => {
+  function makeController() {
+    const subscriptionFindFirst = vi.fn().mockResolvedValue(null);
+    const prisma = {
+      venue: { findUnique: vi.fn().mockResolvedValue(null) },
+      subscription: { findFirst: subscriptionFindFirst },
+      $transaction: vi.fn().mockResolvedValue(undefined),
+    };
+    const config = { get: vi.fn() };
+    const controller = new BillingController(prisma as any, config as any);
+    return { controller, prisma, subscriptionFindFirst };
+  }
+
+  const invoiceBase = { id: 'in_123', customer: null, currency: 'usd', status: 'paid' };
+
+  it('reads the subscription id from parent.subscription_details (Stripe 2025-03-31+)', async () => {
+    const { controller, subscriptionFindFirst } = makeController();
+    subscriptionFindFirst.mockResolvedValue({ venueId: 'venue-1' });
+
+    await (controller as any).recordStripeInvoice(
+      { ...invoiceBase, parent: { subscription_details: { subscription: 'sub_new' } } },
+      { id: 'evt-1', type: 'invoice.payment_succeeded' },
+      new Date(),
+    );
+
+    // The venue must be resolvable from the nested field alone; before this the
+    // handler read only the removed top-level `invoice.subscription`.
+    const where = subscriptionFindFirst.mock.calls[0][0].where;
+    expect(JSON.stringify(where)).toContain('sub_new');
+  });
+
+  it('still reads the legacy top-level field for older API versions', async () => {
+    const { controller, subscriptionFindFirst } = makeController();
+    subscriptionFindFirst.mockResolvedValue({ venueId: 'venue-1' });
+
+    await (controller as any).recordStripeInvoice(
+      { ...invoiceBase, subscription: 'sub_legacy' },
+      { id: 'evt-2', type: 'invoice.payment_succeeded' },
+      new Date(),
+    );
+
+    const where = subscriptionFindFirst.mock.calls[0][0].where;
+    expect(JSON.stringify(where)).toContain('sub_legacy');
+  });
+
+  it('prefers the nested field when both are present', async () => {
+    const { controller, subscriptionFindFirst } = makeController();
+    subscriptionFindFirst.mockResolvedValue({ venueId: 'venue-1' });
+
+    await (controller as any).recordStripeInvoice(
+      { ...invoiceBase, subscription: 'sub_legacy', parent: { subscription_details: { subscription: 'sub_new' } } },
+      { id: 'evt-3', type: 'invoice.payment_succeeded' },
+      new Date(),
+    );
+
+    const where = JSON.stringify(subscriptionFindFirst.mock.calls[0][0].where);
+    expect(where).toContain('sub_new');
+    expect(where).not.toContain('sub_legacy');
+  });
+
+  it('logs instead of silently dropping an invoice it cannot match to a venue', async () => {
+    const { controller, prisma } = makeController();
+    const warn = vi.spyOn((controller as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await (controller as any).recordStripeInvoice(
+      { ...invoiceBase },
+      { id: 'evt-4', type: 'invoice.payment_succeeded' },
+      new Date(),
+    );
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('in_123'));
+  });
+});

@@ -66,3 +66,77 @@ describe('resolveVenueSubscriptionStatus', () => {
     expect(result).toBe('expired');
   });
 });
+
+describe('app-native trial fast path', () => {
+  const future = () => new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+  const past = () => new Date(Date.now() - 1000);
+
+  it('skips the subscription read for a live trial with no billing platform', async () => {
+    // 'trialing' is where every new customer spends their first 14 days, so
+    // this read sat in front of every gated request during that window.
+    const findFirst = vi.fn();
+    const prisma = { subscription: { findFirst } } as unknown as PrismaService;
+
+    const result = await resolveVenueSubscriptionStatus(prisma, {
+      venueId: 'v1',
+      venueStatus: 'trialing',
+      venuePlatform: null,
+      trialEndsAt: future(),
+    });
+
+    expect(result).toBe('trialing');
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('still reads the subscription once an external provider owns the venue', async () => {
+    // The provider's status and trial end are authoritative and can disagree
+    // with venue.subscriptionStatus, so the fast path must not apply here.
+    const findFirst = vi.fn().mockResolvedValue({ id: 'sub_1', status: 'cancelled', trialEndsAt: null });
+    const prisma = {
+      subscription: { findFirst, updateMany: async () => ({ count: 0 }) },
+      venue: { updateMany: async () => ({ count: 0 }) },
+    } as unknown as PrismaService;
+
+    const result = await resolveVenueSubscriptionStatus(prisma, {
+      venueId: 'v1',
+      venueStatus: 'trialing',
+      venuePlatform: 'stripe',
+      trialEndsAt: future(),
+    });
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(result).toBe('cancelled');
+  });
+
+  it('does not fast-path an expired trial', async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const prisma = {
+      subscription: { findFirst, updateMany: async () => ({ count: 0 }) },
+      venue: { updateMany: async () => ({ count: 0 }) },
+    } as unknown as PrismaService;
+
+    const result = await resolveVenueSubscriptionStatus(prisma, {
+      venueId: 'v1',
+      venueStatus: 'trialing',
+      venuePlatform: null,
+      trialEndsAt: past(),
+    });
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(result).toBe('expired');
+  });
+
+  it('does not fast-path when the platform is unknown to the caller', async () => {
+    // Omitting venuePlatform must be safe by default rather than optimistic.
+    const findFirst = vi.fn().mockResolvedValue({ id: 'sub_1', status: 'trialing', trialEndsAt: future() });
+    const prisma = { subscription: { findFirst } } as unknown as PrismaService;
+
+    await resolveVenueSubscriptionStatus(prisma, {
+      venueId: 'v1',
+      venueStatus: 'trialing',
+      trialEndsAt: future(),
+    });
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+  });
+});
