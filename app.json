@@ -37,7 +37,8 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "output": "static"
     },
     "scheme": "venuewrangler",
     "description": "Venue Wrangler restaurant operations and venue management.",
