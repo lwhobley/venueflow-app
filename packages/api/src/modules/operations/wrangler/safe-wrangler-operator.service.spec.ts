@@ -1,7 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { SafeWranglerOperatorService } from './safe-wrangler-operator.service';
-import { WranglerOperatorService } from './wrangler-operator.service';
+import { SafeWranglerOperatorService, SAFE_TOOL_ROUTING } from './safe-wrangler-operator.service';
+import { WranglerOperatorService, ALLOWED_TOOLS } from './wrangler-operator.service';
 
 describe('SafeWranglerOperatorService', () => {
   it('normalizes and delegates an overnight CREATE_SHIFT to the scheduling service', async () => {
@@ -277,5 +277,57 @@ describe('SafeWranglerOperatorService', () => {
       expect(args.where.floorPlan?.venueId).toBe('venue-1');
     }
     expect(prisma.tableState.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('SafeWranglerOperatorService tool routing', () => {
+  /**
+   * The routing map replaced an inline allowlist whose default pointed the
+   * wrong way: any tool not in the list fell through to the less-validated
+   * parser path silently. Nothing was exploitable — the parser re-checks
+   * ALLOWED_TOOLS and guards ADD_STAFF/REMOVE_STAFF individually — but a tool
+   * added to ALLOWED_TOOLS was downgraded without anyone deciding to.
+   */
+  it('classifies every tool in ALLOWED_TOOLS', () => {
+    // The Record<OperatorTool, ...> type already makes an unclassified tool a
+    // compile error. This asserts it at runtime too, so the guarantee survives
+    // someone widening the type or reaching for a cast.
+    const unclassified = ALLOWED_TOOLS.filter((tool) => SAFE_TOOL_ROUTING[tool] === undefined);
+    expect(unclassified).toEqual([]);
+  });
+
+  it('routes every tool the service reimplements through the strict path', () => {
+    // These six are re-validated and re-executed here rather than in the
+    // parser, so they must never be marked 'parser'.
+    for (const tool of ['CREATE_RESERVATION', 'UPDATE_RESERVATION', 'CREATE_SHIFT', 'UPDATE_SHIFT', 'ASSIGN_SHIFT', 'CORRECT_PUNCH'] as const) {
+      expect(SAFE_TOOL_ROUTING[tool]).toBe('strict');
+    }
+  });
+
+  it('sends an unrecognised tool to the parser, which rejects it', async () => {
+    const parserExecute = vi
+      .spyOn(WranglerOperatorService.prototype, 'execute')
+      .mockResolvedValue({ ok: false } as never);
+    const service = new SafeWranglerOperatorService({} as never, {} as never, {} as never);
+
+    await service.execute({
+      venueId: 'venue-1',
+      actor: { profileId: 'manager-1', fullName: 'Manager', role: 'manager', allAccess: false },
+      plan: { tool: 'TOTALLY_MADE_UP', args: {} },
+    });
+
+    // Unknown tools must not silently take the strict branch's write path; the
+    // parser is where ALLOWED_TOOLS is enforced.
+    expect(parserExecute).toHaveBeenCalledTimes(1);
+    parserExecute.mockRestore();
+  });
+
+  it('still refuses a non-manager before routing anywhere', async () => {
+    const service = new SafeWranglerOperatorService({} as never, {} as never, {} as never);
+    await expect(service.execute({
+      venueId: 'venue-1',
+      actor: { profileId: 'staff-1', fullName: 'Staff', role: 'staff', allAccess: false },
+      plan: { tool: 'CREATE_RESERVATION', args: {} },
+    })).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
