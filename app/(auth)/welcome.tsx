@@ -46,14 +46,18 @@ function AnimatedSlide({
   scrollX,
   title,
   description,
+  slideWidth,
 }: {
   item: Slide;
   index: number;
   scrollX: Animated.Value;
   title: string;
   description: string;
+  slideWidth: number;
 }) {
-  const inputRange = [(index - 1) * SCREEN_WIDTH, index * SCREEN_WIDTH, (index + 1) * SCREEN_WIDTH];
+  // Keyed to the same width the pages are laid out at, or the scale/opacity
+  // interpolation drifts out of step with the scroll position.
+  const inputRange = [(index - 1) * slideWidth, index * slideWidth, (index + 1) * slideWidth];
 
   const iconScale = scrollX.interpolate({
     inputRange,
@@ -77,7 +81,7 @@ function AnimatedSlide({
   });
 
   return (
-    <View style={[styles.slide, { width: SCREEN_WIDTH }]}>
+    <View style={[styles.slide, { width: slideWidth }]}>
       <Animated.View style={[styles.iconContainer, { transform: [{ scale: iconScale }], opacity: iconOpacity }]}>
         <View style={styles.iconCircle}>
           <MaterialCommunityIcons name={item.icon} size={80} color={colors.primary} />
@@ -104,6 +108,10 @@ export default function WelcomeScreen() {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<Animated.FlatList>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  // Measured rather than read from the window: on desktop web this screen
+  // sits inside the content column, so the window width overshoots the list
+  // viewport and every page lands off-centre.
+  const [slideWidth, setSlideWidth] = useState(SCREEN_WIDTH);
   const autoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -140,7 +148,13 @@ export default function WelcomeScreen() {
         <Text style={styles.logo}>{t('welcome.brand')}</Text>
       </View>
 
-      <View style={{ flex: 1 }}>
+      <View
+        style={{ flex: 1 }}
+        onLayout={(event) => {
+          const next = Math.round(event.nativeEvent.layout.width);
+          if (next > 0 && next !== slideWidth) setSlideWidth(next);
+        }}
+      >
         <Animated.FlatList
           ref={flatListRef}
           data={slides}
@@ -158,12 +172,13 @@ export default function WelcomeScreen() {
               item={item}
               index={index}
               scrollX={scrollX}
+              slideWidth={slideWidth}
               title={t(`welcome.slides.${item.key}.title` as const)}
               description={t(`welcome.slides.${item.key}.description` as const)}
             />
           )}
           keyExtractor={(item) => item.key}
-          getItemLayout={(_, index) => ({ length: SCREEN_WIDTH, offset: SCREEN_WIDTH * index, index })}
+          getItemLayout={(_, index) => ({ length: slideWidth, offset: slideWidth * index, index })}
         />
       </View>
 
