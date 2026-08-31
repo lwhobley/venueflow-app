@@ -22,3 +22,12 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Apple fetches this through its CDN and requires application/json. The file
+# is deliberately extensionless (Apple mandates the exact name), so Pages has
+# nothing to infer a type from and would otherwise serve it as a generic
+# binary stream, which the CDN rejects — Universal Links then silently fall
+# back to opening Safari with no error anywhere.
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600
