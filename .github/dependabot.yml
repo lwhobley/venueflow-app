@@ -11,6 +11,27 @@ updates:
       expo:
         patterns: ["expo", "expo-*"]
 
+    # Expo SDK pins the versions of React, React Native, and the native
+    # modules that ship with it; `expo-doctor` fails the Mobile CI job when
+    # any of them drifts off the SDK-supported range. Dependabot has no view
+    # of that constraint, so a major bump here is never mergeable on its own
+    # — it is only correct as part of an Expo SDK upgrade, which moves all of
+    # them together. react-native-gesture-handler 2.32.0 -> 3.2.1 landed this
+    # way and left Mobile CI red across six runs.
+    #
+    # Minor and patch updates still come through; only majors are held.
+    ignore:
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-native-*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@sentry/react-native"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
