@@ -1928,7 +1928,7 @@ model Invite {
   // email/deep-link.
   tokenHash String   @unique
   // Short, human-typeable join code (e.g. "VW-7K2Q9"); employees enter this to
-  // join a team. The long token (hashed above) backs the venuewrangler://join
+  // join a team. The long token (hashed above) backs the /join universal
   // deep link.
   code      String?  @unique
   role      Role

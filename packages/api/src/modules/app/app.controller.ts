@@ -911,7 +911,23 @@ export class AppController {
         },
       });
     });
-    const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(token)}`;
+    // Universal Link, not the venuewrangler:// custom scheme it replaced.
+    // Mail clients do not linkify an unknown scheme - Gmail's web client and
+    // Outlook render it as plain text - so the "tap this link" instruction
+    // below was unfollowable for most recipients, and on a device without the
+    // app installed a custom-scheme tap fails silently with no store or web
+    // fallback. https resolves for everyone: iOS opens the app directly via
+    // the AASA at site/.well-known/apple-app-site-association, and anyone
+    // else lands on site/join/index.html, which completes the same signup.
+    //
+    // The token rides in the query rather than the fragment that
+    // site/join/index.html prefers, because a fragment never reaches the
+    // native app: there is no window.location off the web, so expo-router's
+    // useLocalSearchParams is the only channel and it parses the query only.
+    // Referrer-Policy: strict-origin-when-cross-origin in site/_headers keeps
+    // the query off any cross-origin Referer, and the token is single-use,
+    // stored only as a hash, and expires in 7 days.
+    const inviteUrl = `https://venuewrangler.com/join?invite=${encodeURIComponent(token)}`;
     const venueName = sanitizeForEmail(profile.venue?.name ?? 'your Venue Wrangler team');
     if (email) {
       void this.email.send({
@@ -924,7 +940,7 @@ export class AppController {
           `1. Open the Venue Wrangler app on your phone and choose "Join a team"\n` +
           `2. Enter the following invite code when prompted:\n\n` +
           `   ${code}\n\n` +
-          `Alternatively, you can tap this link directly on your mobile device:\n` +
+          `Or just tap this link on your phone:\n` +
           `${inviteUrl}\n\n` +
           `Note: This invitation is valid for 7 days.\n\n` +
           `Questions? support@venuewrangler.com\n\n` +
