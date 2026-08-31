@@ -1090,8 +1090,6 @@
         method: "POST",
         body: JSON.stringify(pendingWorkspace),
       }, pendingSession.token);
-      window.localStorage.setItem("venuewrangler_token", pendingSession.token);
-      window.localStorage.setItem("venuewrangler_workspace", JSON.stringify(result.venue));
       statusEl.className = "status success";
       statusEl.textContent = `Workspace created for ${result.venue?.name || pendingWorkspace.businessName}. Opening your workspace...`;
       form.reset();
@@ -1142,6 +1140,11 @@
           address: String(data.address || "").trim() || undefined,
           venueType: String(data.venueType || "restaurant"),
           staffRange: String(data.staffRange || "1-15"),
+          // VW-24: without this, a venue created through the marketing site
+          // (unlike the in-app "add venue" flow) got no timezone at all,
+          // which desynced payroll/schedule day-boundary math from the
+          // venue's actual business day.
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         };
         if (session.profile?.emailVerified) {
           await createWorkspace();
