@@ -21,15 +21,10 @@ jobs:
           set -euo pipefail
 
           api='https://api.cloudflare.com/client/v4'
-          zone_name='venuewrangler.org'
+          zone_id='d48a7c7b6837965f598d8c02e2422eb8'
           pages_project='venueflow-desktop-web'
           pages_target='venueflow-desktop-web.pages.dev'
           auth_header="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-
-          zone_json="$(curl --fail-with-body --silent --show-error \
-            --header "${auth_header}" \
-            "${api}/zones?name=${zone_name}")"
-          zone_id="$(jq -er '.result | if length == 1 then .[0].id else error("expected exactly one zone") end' <<<"${zone_json}")"
 
           for domain in 'venuewrangler.org' 'www.venuewrangler.org'; do
             records_json="$(curl --fail-with-body --silent --show-error \
