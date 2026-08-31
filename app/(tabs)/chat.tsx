@@ -68,6 +68,7 @@ const ConversationListRow = memo(function ConversationListRow({
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
       <Pressable
+        accessibilityRole="button"
         onPress={onPress}
         style={({ pressed }) => ({
           flex: 1,
@@ -266,6 +267,7 @@ function ChatScreen() {
           const active = activeFilter === filter.key;
           return (
             <Pressable
+              accessibilityRole="button"
               key={filter.key}
               onPress={() => setActiveFilter(filter.key)}
               style={{

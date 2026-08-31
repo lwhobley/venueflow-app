@@ -391,6 +391,11 @@ export const en = {
     },
   },
   chat: {
+    a11y: {
+      // Reactions are long-press only, which is invisible to a screen reader
+      // without an explicit hint.
+      longPressToReact: 'Long press to react to this message',
+    },
     unlockTitle: 'Chat unlocks after you join a venue',
     unlockSubtitle: 'Ask an admin or manager to add your email to their team.',
     headerKicker: 'Team',
@@ -1148,6 +1153,9 @@ export const es: GuestOpsDictionary = {
     },
   },
   chat: {
+    a11y: {
+      longPressToReact: 'Mantén pulsado para reaccionar a este mensaje',
+    },
     unlockTitle: 'El chat se desbloquea al unirte a un local',
     unlockSubtitle: 'Pide a un administrador o gerente que añada tu correo a su equipo.',
     headerKicker: 'Equipo',
@@ -1900,6 +1908,9 @@ export const fr: GuestOpsDictionary = {
     },
   },
   chat: {
+    a11y: {
+      longPressToReact: 'Appui long pour réagir à ce message',
+    },
     unlockTitle: 'Le chat se débloque une fois que vous rejoignez un établissement',
     unlockSubtitle: "Demandez à un administrateur ou un manager d'ajouter votre e-mail à son équipe.",
     headerKicker: 'Équipe',

@@ -117,6 +117,37 @@ describe('UI migration guards', () => {
   });
 });
 
+describe('Accessibility guards', () => {
+  it('gives every interactive control a role', () => {
+    // Pressable carries no implicit role on either platform, so without this a
+    // control is announced by VoiceOver/TalkBack as plain text — reachable, but
+    // not identifiable as actionable. This is workforce software employees are
+    // required to use to record paid time, so the bar is higher than usual.
+    const offenders = clientFiles()
+      .map((file) => {
+        const source = readFileSync(file, 'utf8');
+        return {
+          file: normalize(file),
+          controls: (source.match(/<Pressable/g) ?? []).length,
+          roles: (source.match(/accessibilityRole/g) ?? []).length,
+        };
+      })
+      .filter((row) => row.controls > 0 && row.roles < row.controls)
+      .map((row) => `${row.file}: only ${row.roles} of ${row.controls} controls have a role`);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('announces the disabled state of the punch control', () => {
+    // The clock's primary action is disabled outside the geofence. Greying it
+    // out conveys nothing to a screen reader; the state and the reason both
+    // have to be exposed or the screen is unusable non-visually.
+    const source = readFileSync('app/(tabs)/clock.tsx', 'utf8');
+    expect(source).toMatch(/accessibilityState=\{\{[^}]*disabled: !canClock/);
+    expect(source).toContain('accessibilityHint');
+  });
+});
+
 function clientFiles(): string[] {
   return CLIENT_ROOTS.flatMap((root) => walk(root)).filter((file) => !file.includes('.spec.'));
 }

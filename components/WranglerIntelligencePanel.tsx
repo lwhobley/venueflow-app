@@ -149,7 +149,8 @@ export function WranglerIntelligencePanel({
         <CommandText palette={palette} variant="caption">Tell Wrangler what to find or change. Operational commands run and perform tasks immediately. Sensitive roster and timecard actions are previewed before execution.</CommandText>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
           {['Clear table 3', 'Add Jose to schedule Monday Aug 3 3pm - 12 am', '86 Tuna Tartare', 'Who is working tonight?'].map((preset) => (
-            <Pressable key={preset} onPress={() => void runOperator(preset)} style={{ borderWidth: 1, borderColor: palette.border, paddingHorizontal: spacing.sm, paddingVertical: 7 }}>
+            <Pressable
+              accessibilityRole="button" key={preset} onPress={() => void runOperator(preset)} style={{ borderWidth: 1, borderColor: palette.border, paddingHorizontal: spacing.sm, paddingVertical: 7 }}>
               <CommandText palette={palette} variant="caption">{preset}</CommandText>
             </Pressable>
           ))}
@@ -163,11 +164,12 @@ export function WranglerIntelligencePanel({
             style={{ flex: 1, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, color: palette.muted }}
             onSubmitEditing={() => void runOperator()}
           />
-          <Pressable onPress={() => void runOperator()} style={{ backgroundColor: '#7A5A35', justifyContent: 'center', paddingHorizontal: spacing.md }}>
+          <Pressable
+            accessibilityRole="button" onPress={() => void runOperator()} style={{ backgroundColor: '#7A5A35', justifyContent: 'center', paddingHorizontal: spacing.md }}>
             <CommandText palette={palette} variant="label" style={{ color: '#FFFFFF' }}>{operatorPlan.isPending ? 'THINKING…' : 'RUN'}</CommandText>
           </Pressable>
         </View>
-        {operatorAnswer ? <View style={{ backgroundColor: '#F8F3EA', padding: spacing.md, gap: spacing.sm }}><CommandText palette={palette} variant="body">{operatorAnswer}</CommandText>{pendingPreview.map((line) => <CommandText key={line} palette={palette} variant="caption">• {line}</CommandText>)}{pendingPlan ? <Pressable onPress={confirmOperator} style={{ backgroundColor: pendingPlan.risk === 'sensitive_write' ? palette.warning : '#7A5A35', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, alignSelf: 'flex-start' }}><CommandText palette={palette} variant="label" style={{ color: '#FFFFFF' }}>{operatorExecute.isPending ? 'WORKING…' : pendingPlan.risk === 'sensitive_write' ? 'REVIEW & CONFIRM' : 'CONFIRM ACTION'}</CommandText></Pressable> : null}</View> : null}
+        {operatorAnswer ? <View style={{ backgroundColor: '#F8F3EA', padding: spacing.md, gap: spacing.sm }}><CommandText palette={palette} variant="body">{operatorAnswer}</CommandText>{pendingPreview.map((line) => <CommandText key={line} palette={palette} variant="caption">• {line}</CommandText>)}{pendingPlan ? <Pressable accessibilityRole="button" onPress={confirmOperator} style={{ backgroundColor: pendingPlan.risk === 'sensitive_write' ? palette.warning : '#7A5A35', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, alignSelf: 'flex-start' }}><CommandText palette={palette} variant="label" style={{ color: '#FFFFFF' }}>{operatorExecute.isPending ? 'WORKING…' : pendingPlan.risk === 'sensitive_write' ? 'REVIEW & CONFIRM' : 'CONFIRM ACTION'}</CommandText></Pressable> : null}</View> : null}
       </View>
 
       <View style={{ gap: spacing.sm }}>
@@ -175,14 +177,16 @@ export function WranglerIntelligencePanel({
         <CommandText palette={palette} variant="caption">Ask for analysis of the live operating picture across all 9 venue domains.</CommandText>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
           {['What needs attention?', 'How is staffing?', 'How are sales today?'].map((preset) => (
-            <Pressable key={preset} onPress={() => void submit(preset)} style={{ borderWidth: 1, borderColor: palette.border, paddingHorizontal: spacing.sm, paddingVertical: 7 }}>
+            <Pressable
+              accessibilityRole="button" key={preset} onPress={() => void submit(preset)} style={{ borderWidth: 1, borderColor: palette.border, paddingHorizontal: spacing.sm, paddingVertical: 7 }}>
               <CommandText palette={palette} variant="caption">{preset}</CommandText>
             </Pressable>
           ))}
         </View>
         <View style={{ flexDirection: 'row', gap: spacing.sm }}>
           <TextInput value={question} onChangeText={setQuestion} placeholder="Ask about tonight's service…" placeholderTextColor={palette.muted} style={{ flex: 1, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, color: palette.muted }} onSubmitEditing={() => void submit()} />
-          <Pressable onPress={() => void submit()} style={{ backgroundColor: '#7A5A35', justifyContent: 'center', paddingHorizontal: spacing.md }}>
+          <Pressable
+            accessibilityRole="button" onPress={() => void submit()} style={{ backgroundColor: '#7A5A35', justifyContent: 'center', paddingHorizontal: spacing.md }}>
             <CommandText palette={palette} variant="label" style={{ color: '#FFFFFF' }}>{ask.isPending ? 'ASKING…' : 'ASK'}</CommandText>
           </Pressable>
         </View>

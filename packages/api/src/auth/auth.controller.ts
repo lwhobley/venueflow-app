@@ -310,7 +310,11 @@ export class AuthController {
       try {
         await this.sendVerificationEmail(nextUserId, email, sessionResult.profile.fullName);
       } catch (err: any) {
-        this.logger.error(`Verification email failed for ${email}: ${err?.message ?? String(err)}`);
+        // Identify by user id, never the address. Cloud Run logs are retained
+        // and fan out to downstream sinks, so an email here is PII at rest for
+        // the life of the log. The reset path below and the invite-check path
+        // in workforce.controller already log this way.
+        this.logger.error(`Verification email failed for user ${nextUserId}: ${err?.message ?? String(err)}`);
       }
     }
     return sessionResult;

@@ -576,7 +576,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                     const active = day === dayIndex;
                     return (
                       <View key={label} style={{ flexDirection: 'row', minHeight: 96 }}>
-                        <Pressable onPress={() => setDay(dayIndex)} style={{ width: 56, paddingTop: spacing.sm }}>
+                        <Pressable
+                          accessibilityRole="button" onPress={() => setDay(dayIndex)} style={{ width: 56, paddingTop: spacing.sm }}>
                           <Text style={{ color: active ? colors.primary : today ? colors.secondary : colors.charcoal, fontWeight: '800' }}>{label}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <Text style={{
@@ -597,6 +598,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                           <View style={{ position: 'absolute', inset: 0 as any, flexDirection: 'row' }}>
                             {hourTicks.map((hour) => (
                               <Pressable
+                                accessibilityRole="button"
                                 key={hour}
                                 onPress={() => openCreatePanel(dayIndex, hour * 60)}
                                 {...({
@@ -617,6 +619,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                             const width = `${Math.max(2, ((Math.min(gridEnd, shift.renderEnd) - Math.max(gridStart, shift.renderStart)) / gridMinutes) * 100)}%`;
                             return (
                               <Pressable
+                                accessibilityRole="button"
                                 key={shift.segmentKey}
                                 onPress={() => setSelectedShiftId(shift._id)}
                                 {...({
@@ -865,6 +868,7 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
                   const selected = pickedStaff === row._id;
                   return (
                     <Pressable
+                      accessibilityRole="button"
                       key={row._id}
                       onPress={() => setPickedStaff(selected ? null : row._id)}
                       style={{
@@ -903,7 +907,8 @@ export function ManagerCalendar({ venueId }: { venueId: Id<'venues'> }) {
               <Text variant="titleMedium" style={{ fontWeight: '800' }}>Open Shifts</Text>
               {openShifts.length === 0 ? <Text style={{ color: colors.muted }}>No open shifts.</Text> : null}
               {openShifts.slice(0, 5).map((shift) => (
-                <Pressable key={shift._id} onPress={() => setSelectedShiftId(shift._id)} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: accents[4].bg }}>
+                <Pressable
+                  accessibilityRole="button" key={shift._id} onPress={() => setSelectedShiftId(shift._id)} style={{ padding: spacing.sm, borderRadius: 8, backgroundColor: accents[4].bg }}>
                   <Text style={{ color: accents[4].fg, fontWeight: '800' }}>{dayLabels[shift.dayIndex]} {formatDayDate(shift.dayIndex)} {shift.startTime}</Text>
                   <Text style={{ color: colors.charcoal }}>{shift.jobTitle} | {shift.station}</Text>
                 </Pressable>

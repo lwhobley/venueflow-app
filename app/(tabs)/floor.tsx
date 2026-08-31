@@ -431,6 +431,7 @@ function FloorScreen() {
                 const currentAssignment = activeAssignments?.[0] ?? null;
                 return (
                   <Pressable
+                    accessibilityRole="button"
                     key={table._id}
                     onPress={() => setSelectedTableId(table._id)}
                     style={{

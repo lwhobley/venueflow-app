@@ -90,7 +90,8 @@ function HomeScreen() {
       <View style={{ backgroundColor: '#074426', paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.lg, gap: spacing.md }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md }}>
           <View style={{ flex: 1 }}>
-            <Pressable onPress={() => router.push('/venue/settings')} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, flexDirection: 'row', alignItems: 'center', gap: 4 })}>
+            <Pressable
+              accessibilityRole="button" onPress={() => router.push('/venue/settings')} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, flexDirection: 'row', alignItems: 'center', gap: 4 })}>
               <CommandText palette={palette} variant="label" style={{ color: '#B6D6BE' }}>{venueName}</CommandText>
               {venues.length > 1 ? <MaterialCommunityIcons name="swap-horizontal" size={16} color="#B6D6BE" /> : null}
             </Pressable>
@@ -149,7 +150,8 @@ function HomeScreen() {
               {unreadCount ? <CommandButton palette={palette} onPress={() => void markAllRead()}>Mark all read</CommandButton> : null}
             </View>
             {notificationsList.length ? notificationsList.slice(0, 4).map((item) => (
-              <Pressable key={item._id} onPress={() => !item.read && void markNotificationRead({ notificationId: item._id })} style={{ paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderColor: palette.divider }}>
+              <Pressable
+                accessibilityRole="button" key={item._id} onPress={() => !item.read && void markNotificationRead({ notificationId: item._id })} style={{ paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderColor: palette.divider }}>
                 <CommandText palette={palette} variant="body" style={{ fontWeight: item.read ? '500' : '800' }}>{item.title}</CommandText>
                 <CommandText palette={palette} variant="caption">{item.body}</CommandText>
               </Pressable>
@@ -174,7 +176,8 @@ function HomeScreen() {
               const state = value >= 100 ? 'Clear' : value > 0 ? `${value}% watch` : 'Pending';
               const color = value >= 100 ? palette.success : value > 0 ? palette.warning : palette.muted;
               return (
-                <Pressable key={label} onPress={() => router.push(label === 'Staffing' ? '/staff' : label === 'Floor' ? '/floor' : '/checklist')} style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider })}>
+                <Pressable
+                  accessibilityRole="button" key={label} onPress={() => router.push(label === 'Staffing' ? '/staff' : label === 'Floor' ? '/floor' : '/checklist')} style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: palette.divider })}>
                   <CommandText palette={palette} variant="body" style={{ flex: 1 }}>{label}</CommandText>
                   <View style={{ width: 88, flexDirection: 'row', alignItems: 'center', gap: 6 }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} /><CommandText palette={palette} variant="caption" style={{ color, fontWeight: '700' }}>{state}</CommandText></View>
                   <CommandText palette={palette} variant="caption" style={{ width: 80, textAlign: 'right' }}>{label === 'Staffing' ? 'Manager' : 'Team'}</CommandText>
@@ -191,7 +194,8 @@ function HomeScreen() {
           </View>
           <View style={{ borderLeftWidth: 1, borderColor: palette.divider, marginLeft: 10, gap: 0 }}>
             {(events.length ? events : managerDashboard?.goals?.slice(0, 3) ?? []).map((item: any, index: number) => (
-              <Pressable key={item._id ?? `${item.title}-${index}`} onPress={() => item._id && 'startsAt' in item ? router.push({ pathname: '/event-command-center', params: { eventId: item._id } }) : router.push('/schedule')} style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, marginLeft: -6, paddingLeft: spacing.lg, paddingBottom: spacing.lg, position: 'relative' })}>
+              <Pressable
+                accessibilityRole="button" key={item._id ?? `${item.title}-${index}`} onPress={() => item._id && 'startsAt' in item ? router.push({ pathname: '/event-command-center', params: { eventId: item._id } }) : router.push('/schedule')} style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1, marginLeft: -6, paddingLeft: spacing.lg, paddingBottom: spacing.lg, position: 'relative' })}>
                 <View style={{ position: 'absolute', top: 4, left: -5, width: 9, height: 9, borderRadius: 5, backgroundColor: index === 0 ? palette.primary : '#A9B0AA' }} />
                 <CommandText palette={palette} variant="caption">{'startsAt' in item ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(item.startsAt)) : item.targetDate ?? 'Today'}</CommandText>
                 <CommandText palette={palette} variant="body" style={{ fontWeight: '700', marginTop: 2 }}>{item.title}</CommandText>

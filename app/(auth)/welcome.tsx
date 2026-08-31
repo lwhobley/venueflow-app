@@ -185,6 +185,7 @@ export default function WelcomeScreen() {
       <View style={styles.dotRow}>
         {slides.map((_, i) => (
           <Pressable
+            accessibilityRole="button"
             key={i}
             onPress={() => {
               stopAutoPlay();

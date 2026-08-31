@@ -29,7 +29,6 @@ jobs:
     env:
       GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SA_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      GCP_CREDENTIALS_JSON: ${{ secrets.GCP_SA_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.PROWLER_AWS_ACCESS_KEY_ID || secrets.BACKUP_AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.PROWLER_AWS_SECRET_ACCESS_KEY || secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.PROWLER_AWS_REGION || secrets.BACKUP_AWS_REGION || 'us-east-1' }}
@@ -57,7 +56,7 @@ jobs:
         run: mkdir -p prowler_output
 
       # =========================================================================
-      # GCP SCAN (Keyless Workload Identity Federation or Service Account Key)
+      # GCP SCAN (keyless — Workload Identity Federation only)
       # =========================================================================
       - name: Authenticate to GCP via Workload Identity Federation
         id: gcp-wif-auth
@@ -68,16 +67,23 @@ jobs:
           service_account: ${{ env.GCP_SA_EMAIL }}
           create_credentials_file: true
 
-      - name: Authenticate to GCP via Service Account Key (Fallback)
-        id: gcp-sa-auth
-        if: (env.GCP_WIF_PROVIDER == '' || env.GCP_SA_EMAIL == '') && env.GCP_CREDENTIALS_JSON != ''
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        with:
-          credentials_json: ${{ env.GCP_CREDENTIALS_JSON }}
-          create_credentials_file: true
+      # The exported-key fallback was removed. It was never reached while the
+      # WIF secrets were set, which made it worse than useless: a long-lived
+      # service-account key sat in repository secrets earning nothing, and if
+      # the WIF secrets were ever unset the scan would have silently downgraded
+      # to it rather than telling anyone. Static service-account keys are also
+      # a finding in the CIS GCP benchmark this very job runs.
+      #
+      # Fail loudly instead, so a broken WIF binding is fixed rather than
+      # quietly worked around.
+      - name: Require keyless GCP authentication
+        if: env.GCP_WIF_PROVIDER == '' || env.GCP_SA_EMAIL == ''
+        run: |
+          echo "::error::GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT must both be set. This job authenticates keyless via Workload Identity Federation, matching deploy-api and retention-cleanup. Bind the Prowler service account to the workload identity pool rather than reintroducing an exported key."
+          exit 1
 
       - name: Run Prowler GCP Compliance Scan
-        if: env.GCP_WIF_PROVIDER != '' || env.GCP_CREDENTIALS_JSON != ''
+        if: env.GCP_WIF_PROVIDER != ''
         shell: bash
         run: |
           set -e

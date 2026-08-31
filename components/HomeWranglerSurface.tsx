@@ -257,6 +257,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
           </CommandText>
           <View style={{ flexDirection: 'row', gap: spacing.xs }}>
             <Pressable
+              accessibilityRole="button"
               onPress={() => setMode('ask')}
               style={{
                 paddingHorizontal: 8,
@@ -270,6 +271,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
               </CommandText>
             </Pressable>
             <Pressable
+              accessibilityRole="button"
               onPress={() => setMode('command')}
               style={{
                 paddingHorizontal: 8,
@@ -291,6 +293,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
             : ['Clear table 3', 'Add Jose to schedule Monday Aug 3 3pm - 12 am', '86 Tuna Tartare']
           ).map((preset) => (
             <Pressable
+              accessibilityRole="button"
               key={preset}
               onPress={() => {
                 setPrompt(preset);
@@ -331,6 +334,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
             onSubmitEditing={() => handleSubmit()}
           />
           <Pressable
+            accessibilityRole="button"
             onPress={() => handleSubmit()}
             style={{
               backgroundColor: '#7A5A35',
@@ -374,6 +378,7 @@ export function HomeWranglerSurface({ enabled }: Props) {
             ))}
             {pendingPlan ? (
               <Pressable
+                accessibilityRole="button"
                 onPress={confirmPendingPlan}
                 style={{
                   backgroundColor: pendingPlan.risk === 'sensitive_write' ? palette.warning : '#7A5A35',

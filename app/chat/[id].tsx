@@ -104,6 +104,7 @@ const ReactionPill = memo(function ReactionPill({
 }) {
   return (
     <Pressable
+      accessibilityRole="button"
       onPress={onPress}
       style={{
         flexDirection: 'row',
@@ -403,6 +404,7 @@ function ConversationScreen() {
           const label = line.slice(3).trim();
           return (
             <Pressable
+              accessibilityRole="button"
               key={`${messageId}-${index}`}
               onPress={() => {
                 const current = messagesRef.current.find((msg) => msg.id === messageId || msg._id === messageId);
@@ -468,7 +470,11 @@ function ConversationScreen() {
         }}
       >
         {item.showSender ? <Text style={{ color: colors.muted, fontSize: 11, marginLeft: spacing.sm, marginBottom: 2 }}>{message.senderName}</Text> : null}
-        <Pressable onLongPress={() => setReactMsgId(message.id)}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityHint={t('chat.a11y.longPressToReact')}
+          onLongPress={() => setReactMsgId(message.id)}
+        >
           <View
             style={{
               backgroundColor: bubbleColor,
@@ -682,6 +688,7 @@ export default function ConversationScreenWrapper() {
 function ShiftShareRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {
   return (
     <Pressable
+      accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => ({
         minHeight: 52,

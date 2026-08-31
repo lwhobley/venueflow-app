@@ -28,6 +28,14 @@ party, changing table status) are recorded in the audit log.
 
 ## Local setup
 
+> **Do not keep the working copy inside OneDrive (or another sync client).**
+> OneDrive's Files On-Demand converts `node_modules` entries into reparse
+> points. Metro's file crawler treats those as symlinks and skips them, so a
+> bundle fails with `Unable to resolve module expo-router/entry` for a file
+> that plainly exists on disk — both `expo start --web` and `expo export` break.
+> Re-syncing ~87k files after `npm ci` also stretches a warm 45-second test run
+> to well over an hour. Clone to a local path such as `C:\dev\`.
+
 1. `npm install --legacy-peer-deps` (the `--legacy-peer-deps` flag is required; see `.npmrc`).
 2. Copy `.env.example` to `.env` and set `EXPO_PUBLIC_API_URL` to your local NestJS server endpoint (e.g. `http://localhost:4000/api`).
 3. Set up the local NestJS server inside `packages/api` (see `packages/api/README.md`).

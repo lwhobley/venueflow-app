@@ -12,7 +12,16 @@ const mocks = vi.hoisted(() => ({
   logoutPurchases: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('react-native', () => ({ Platform: mocks.platform, View: 'View' }));
+// Enumerating exports here means any new import into the layout tree breaks
+// collection rather than an assertion — SportsBrandIntro calling
+// StyleSheet.create at module scope took this whole suite to zero tests, and a
+// suite contributing nothing looks the same as a suite passing. Spread the real
+// module and override only what the test actually pins.
+vi.mock('react-native', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-native')>()),
+  Platform: mocks.platform,
+  View: 'View',
+}));
 vi.mock('expo-router', () => ({ Stack: 'Stack' }));
 vi.mock('react-native-gesture-handler', () => ({ GestureHandlerRootView: 'GestureHandlerRootView' }));
 vi.mock('@tanstack/react-query', () => ({ QueryClientProvider: 'QueryClientProvider' }));

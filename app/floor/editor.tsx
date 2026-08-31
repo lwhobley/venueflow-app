@@ -694,7 +694,8 @@ function FloorEditorScreen() {
               overflow: 'hidden',
             }}
           >
-            <Pressable style={{ width: '100%', height: '100%' }} onPress={clearSelection}>
+            <Pressable
+              accessibilityRole="button" style={{ width: '100%', height: '100%' }} onPress={clearSelection}>
               {tables.map((t) => (
                 <TableNode
                   key={t.key}
