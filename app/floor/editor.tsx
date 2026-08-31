@@ -826,5 +826,6 @@ function FloorEditorScreen() {
 }
 
 export default function FloorEditorScreenWrapper() {
-  return <ScreenErrorBoundary><FloorEditorScreen /></ScreenErrorBoundary>;
+  // Drag-and-drop table layout needs the whole window, not a column.
+  return <ScreenErrorBoundary fullBleed><FloorEditorScreen /></ScreenErrorBoundary>;
 }

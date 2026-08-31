@@ -198,5 +198,5 @@ function ChecklistScreen() {
 }
 
 export default function ChecklistScreenWrapper() {
-  return <ScreenErrorBoundary><ChecklistScreen /></ScreenErrorBoundary>;
+  return <ScreenErrorBoundary withNavRail={false}><ChecklistScreen /></ScreenErrorBoundary>;
 }

@@ -676,7 +676,7 @@ function ConversationScreen() {
 }
 
 export default function ConversationScreenWrapper() {
-  return <ScreenErrorBoundary><ConversationScreen /></ScreenErrorBoundary>;
+  return <ScreenErrorBoundary withNavRail={false}><ConversationScreen /></ScreenErrorBoundary>;
 }
 
 function ShiftShareRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {

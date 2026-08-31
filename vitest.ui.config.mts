@@ -28,11 +28,13 @@ export default defineConfig({
       // neither had any coverage (measured: statements 6.07, branches 5.55,
       // functions 4.63, lines 6.53 — kept a small margin below each so the gate
       // doesn't flake on minor variance).
+      // Raised again after the desktop-web layout specs (measured: statements
+      // 6.44, branches 6.03, functions 4.98, lines 6.94).
       thresholds: {
-        statements: 5.9,
-        branches: 5.4,
-        functions: 4.5,
-        lines: 6.3,
+        statements: 6.3,
+        branches: 5.9,
+        functions: 4.8,
+        lines: 6.8,
       },
     } as any,
   },

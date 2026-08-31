@@ -131,7 +131,8 @@ type StatCard = { label: string; value: number | string };
 
 
 export default function FloorScreenWrapper() {
-  return <ScreenErrorBoundary><FloorScreen /></ScreenErrorBoundary>;
+  // The floor plan is a spatial canvas — a reading column makes it worse.
+  return <ScreenErrorBoundary fullBleed><FloorScreen /></ScreenErrorBoundary>;
 }
 
 function FloorScreen() {

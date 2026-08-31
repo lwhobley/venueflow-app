@@ -21,6 +21,10 @@ vi.mock('expo-router', () => ({
   router: { replace: vi.fn() },
 }));
 vi.mock('react-native', () => ({
+  // ScreenErrorBoundary now renders DesktopFrame, which needs these.
+  // Phone-sized so these specs keep exercising the mobile layout.
+  Platform: { OS: 'ios' },
+  useWindowDimensions: () => ({ width: 390, height: 844 }),
   ScrollView: 'ScrollView',
   View: 'View',
 }));

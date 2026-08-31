@@ -6,6 +6,7 @@ import { colors, spacing, radius } from '../lib/theme';
 import { queryClient } from '../lib/query-client';
 import { reportFatalError } from '../lib/report-error';
 import { useAuthStore } from '../lib/auth-store';
+import { DesktopFrame } from './DesktopFrame';
 
 type Props = { children: ReactNode };
 type State = { error: Error | null; componentStack: string | null };
@@ -14,8 +15,29 @@ type State = { error: Error | null; componentStack: string | null };
 // whole tree, which is a hard
 // crash in a release build. This catches it and shows a recoverable screen
 // instead, so a single screen's data error never takes down the app.
-export function ScreenErrorBoundary({ children }: { children: ReactNode }) {
-  return <ErrorBoundary>{children}</ErrorBoundary>;
+//
+// It also carries the desktop-web frame. Nearly every screen already routes
+// through here, which makes it the one place the content column can be applied
+// consistently — the previous per-screen approach reached three files out of
+// forty and then stopped. DesktopFrame is inert on native and narrow web.
+export function ScreenErrorBoundary({
+  children,
+  fullBleed = false,
+  withNavRail = true,
+}: {
+  children: ReactNode;
+  /** Spatial canvases (floor plan, editor) keep the full window width. */
+  fullBleed?: boolean;
+  /** False for screens rendered outside the tab navigator. */
+  withNavRail?: boolean;
+}) {
+  return (
+    <ErrorBoundary>
+      <DesktopFrame fullBleed={fullBleed} withNavRail={withNavRail}>
+        {children}
+      </DesktopFrame>
+    </ErrorBoundary>
+  );
 }
 
 export class ErrorBoundary extends Component<Props, State> {

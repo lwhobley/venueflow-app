@@ -59,5 +59,5 @@ function HostStandScreen() {
 }
 
 export default function HostStandScreenWrapper() {
-  return <ScreenErrorBoundary><HostStandScreen /></ScreenErrorBoundary>;
+  return <ScreenErrorBoundary withNavRail={false}><HostStandScreen /></ScreenErrorBoundary>;
 }

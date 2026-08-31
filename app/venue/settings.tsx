@@ -208,5 +208,5 @@ function VenueSettingsScreen() {
 }
 
 export default function VenueSettingsScreenWrapper() {
-  return <ScreenErrorBoundary><VenueSettingsScreen /></ScreenErrorBoundary>;
+  return <ScreenErrorBoundary withNavRail={false}><VenueSettingsScreen /></ScreenErrorBoundary>;
 }
