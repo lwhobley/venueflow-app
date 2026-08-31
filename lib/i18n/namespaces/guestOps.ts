@@ -444,6 +444,7 @@ export const en = {
     actions: {
       startCount: 'Start count',
       scanBarcode: 'Scan barcode',
+      lookUpSku: 'Look up SKU',
       shrinkageReport: 'Shrinkage report',
       hideShrinkage: 'Hide shrinkage',
       purchaseOrder: 'Purchase order',
@@ -484,6 +485,10 @@ export const en = {
       plusOneReceived: '+1 received',
       minusOneWaste: '-1 waste',
       dismiss: 'Dismiss',
+      skuEntryTitle: 'Look up an item',
+      skuEntryHint: 'Camera scanning needs the mobile app. Type the barcode or SKU to reach the same item.',
+      skuLabel: 'Barcode or SKU',
+      skuLookUp: 'Look up',
     },
     csv: {
       stockSnapshotTitle: 'Stock snapshot CSV',
@@ -1196,6 +1201,7 @@ export const es: GuestOpsDictionary = {
     actions: {
       startCount: 'Iniciar recuento',
       scanBarcode: 'Escanear código',
+      lookUpSku: 'Buscar SKU',
       shrinkageReport: 'Informe de mermas',
       hideShrinkage: 'Ocultar mermas',
       purchaseOrder: 'Orden de compra',
@@ -1236,6 +1242,10 @@ export const es: GuestOpsDictionary = {
       plusOneReceived: '+1 recibido',
       minusOneWaste: '-1 merma',
       dismiss: 'Descartar',
+      skuEntryTitle: 'Buscar un artículo',
+      skuEntryHint: 'El escaneo con cámara requiere la app móvil. Escribe el código de barras o SKU para llegar al mismo artículo.',
+      skuLabel: 'Código de barras o SKU',
+      skuLookUp: 'Buscar',
     },
     csv: {
       stockSnapshotTitle: 'CSV de instantánea de stock',
@@ -1943,6 +1953,7 @@ export const fr: GuestOpsDictionary = {
     actions: {
       startCount: 'Démarrer le comptage',
       scanBarcode: 'Scanner un code-barres',
+      lookUpSku: 'Rechercher un SKU',
       shrinkageReport: 'Rapport de pertes',
       hideShrinkage: 'Masquer les pertes',
       purchaseOrder: 'Bon de commande',
@@ -1983,6 +1994,10 @@ export const fr: GuestOpsDictionary = {
       plusOneReceived: '+1 reçu',
       minusOneWaste: '-1 perte',
       dismiss: 'Ignorer',
+      skuEntryTitle: 'Rechercher un article',
+      skuEntryHint: "Le scan par caméra nécessite l'app mobile. Saisissez le code-barres ou le SKU pour atteindre le même article.",
+      skuLabel: 'Code-barres ou SKU',
+      skuLookUp: 'Rechercher',
     },
     csv: {
       stockSnapshotTitle: "CSV d'instantané de stock",

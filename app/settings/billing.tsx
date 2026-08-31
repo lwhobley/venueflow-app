@@ -111,5 +111,5 @@ function BillingScreen() {
 }
 
 export default function BillingScreenWrapper() {
-  return <ScreenErrorBoundary><BillingScreen /></ScreenErrorBoundary>;
+  return <ScreenErrorBoundary withNavRail={false}><BillingScreen /></ScreenErrorBoundary>;
 }

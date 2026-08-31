@@ -94,7 +94,7 @@ const statusColor: Record<string, { bg: string; fg: string }> = {
 
 
 export default function ReservationsScreenWrapper() {
-  return <ScreenErrorBoundary><ReservationsScreen /></ScreenErrorBoundary>;
+  return <ScreenErrorBoundary withNavRail={false}><ReservationsScreen /></ScreenErrorBoundary>;
 }
 
 function ReservationsScreen() {

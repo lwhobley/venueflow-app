@@ -146,6 +146,10 @@ function BarStockScreen() {
   const [scanBusy, setScanBusy] = useState(false);
   const scanBusyRef = useRef(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
+  // Web has no camera barcode path, so the same lookup is reachable by typing
+  // the SKU. Parity of outcome rather than a dead end.
+  const [showSkuEntry, setShowSkuEntry] = useState(false);
+  const [skuValue, setSkuValue] = useState('');
   const [costHistoryItemId, setCostHistoryItemId] = useState<string | null>(null);
   const [editCostItemId, setEditCostItemId] = useState<string | null>(null);
   const [editCostValue, setEditCostValue] = useState('');
@@ -317,7 +321,12 @@ function BarStockScreen() {
 
   const openScanner = async () => {
     setScanMsg(null); setScannedItem(null);
-    if (Platform.OS === 'web') { setScanMsg(t('barStock.messages.scanningNotAvailableWeb')); return; }
+    if (Platform.OS === 'web') {
+      // Camera barcode capture needs BarcodeDetector, which is Chromium-only.
+      // Rather than dead-end, offer the same SKU lookup the scanner performs.
+      setShowSkuEntry(true);
+      return;
+    }
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
       if (!result.granted) { setScanMsg(t('barStock.messages.cameraPermissionRequired')); return; }
@@ -338,6 +347,14 @@ function BarStockScreen() {
       setShowScanner(false);
     } finally { scanBusyRef.current = false; setScanBusy(false); }
   }, [lookupSku, t]);
+
+  const submitSku = useCallback(async () => {
+    const sku = skuValue.trim();
+    if (!sku) return;
+    setShowSkuEntry(false);
+    setSkuValue('');
+    await onBarcodeScanned({ data: sku });
+  }, [skuValue, onBarcodeScanned]);
 
   const saveCostUpdate = async (itemId: string) => {
     const cents = Math.round(Number(editCostValue) * 100);
@@ -599,7 +616,7 @@ function BarStockScreen() {
           {t('barStock.actions.startCount')}
         </Button>
         <Button compact mode="outlined" textColor={colors.primary} icon="barcode-scan" onPress={() => void openScanner()}>
-          {t('barStock.actions.scanBarcode')}
+          {Platform.OS === 'web' ? t('barStock.actions.lookUpSku') : t('barStock.actions.scanBarcode')}
         </Button>
         <Button compact mode="outlined" textColor={colors.primary} onPress={() => setShowShrinkage((v) => !v)}>
           {showShrinkage ? t('barStock.actions.hideShrinkage') : t('barStock.actions.shrinkageReport')}
@@ -711,6 +728,34 @@ function BarStockScreen() {
           </View>
         </Card.Content>
       </Card>
+
+      {/* Web: type the SKU the camera would have read. */}
+      {showSkuEntry && (
+        <Card style={{ backgroundColor: colors.surface, borderRadius: radius.sharp }}>
+          <Card.Content style={{ gap: spacing.sm }}>
+            <Text variant="titleMedium" style={{ fontWeight: '700' }}>{t('barStock.scan.skuEntryTitle')}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{t('barStock.scan.skuEntryHint')}</Text>
+            <TextInput
+              label={t('barStock.scan.skuLabel')}
+              value={skuValue}
+              onChangeText={setSkuValue}
+              mode="outlined"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              onSubmitEditing={() => { void submitSku(); }}
+              style={{ backgroundColor: colors.surface }}
+            />
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <Button compact mode="contained" buttonColor={colors.primary} disabled={!skuValue.trim() || scanBusy} onPress={() => { void submitSku(); }}>
+                {t('barStock.scan.skuLookUp')}
+              </Button>
+              <Button compact mode="outlined" textColor={colors.muted} onPress={() => { setShowSkuEntry(false); setSkuValue(''); }}>
+                {t('barStock.scan.dismiss')}
+              </Button>
+            </View>
+          </Card.Content>
+        </Card>
+      )}
 
       {/* Scanned item result */}
       {scannedItem && (

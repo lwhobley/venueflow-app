@@ -144,5 +144,5 @@ function LogbookScreen() {
 }
 
 export default function LogbookScreenWrapper() {
-  return <ScreenErrorBoundary><LogbookScreen /></ScreenErrorBoundary>;
+  return <ScreenErrorBoundary withNavRail={false}><LogbookScreen /></ScreenErrorBoundary>;
 }

@@ -28,6 +28,9 @@ vi.mock('../../lib/api-client', () => ({
 vi.mock('react-native', () => ({
   Alert: { alert: vi.fn() },
   Platform: { OS: 'ios' },
+  // ScreenErrorBoundary now renders DesktopFrame, which needs these.
+  // Phone-sized so these specs keep exercising the mobile layout.
+  useWindowDimensions: () => ({ width: 390, height: 844 }),
   ScrollView: 'ScrollView',
   View: 'View',
 }));
