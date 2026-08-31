@@ -21,6 +21,7 @@ import { consumeWebHandoff } from '../lib/web-handoff';
 import { configurePurchases, logoutPurchases } from '../lib/purchases';
 import { DesktopWebStyles } from '../components/DesktopWebStyles';
 import { queryClient } from '../lib/query-client';
+import { SportsBrandIntro } from '../components/SportsBrandIntro';
 
 const shouldIgnoreWebError = (message: string) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||
@@ -30,6 +31,7 @@ const shouldIgnoreWebError = (message: string) =>
   message.includes('ts.worker');
 
 export default function RootLayout() {
+  const [showSportsIntro, setShowSportsIntro] = useState(Platform.OS === 'web');
   const themeMode = useAppearanceStore((state) => state.mode);
   const palette = designPalettes[themeMode];
   // Preload the MaterialCommunityIcons glyph font so icons render on web (Paper
@@ -145,6 +147,7 @@ export default function RootLayout() {
           </PaperProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
+      {showSportsIntro ? <SportsBrandIntro onComplete={() => setShowSportsIntro(false)} /> : null}
     </GestureHandlerRootView>
   );
 }
