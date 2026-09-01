@@ -19,7 +19,7 @@ describe('AppController invite preview', () => {
     expect(assertWithinSharedRateLimit).toHaveBeenCalled();
   });
 
-  it('returns only the intended public invite metadata', async () => {
+  it('returns only the team name for a valid public invite', async () => {
     const expiresAt = new Date(Date.now() + 60_000);
     const prisma = {
       invite: {
@@ -38,9 +38,6 @@ describe('AppController invite preview', () => {
     await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'VW-ABC123')).resolves.toEqual({
       valid: true,
       venueName: 'Test Venue',
-      role: 'staff',
-      jobTitle: 'Server',
-      expiresAt: expiresAt.getTime(),
     });
   });
 });
