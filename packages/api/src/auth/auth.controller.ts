@@ -90,7 +90,7 @@ class ChangePasswordDto {
 
 class VerifyEmailDto {
   @IsString()
-  @Matches(/^\d{8}$/)
+  @Matches(/^\d{10}$/)
   code!: string;
 }
 
@@ -114,7 +114,7 @@ class ResetPasswordDto {
   email!: string;
 
   @IsString()
-  @Matches(/^\d{8}$/)
+  @Matches(/^\d{10}$/)
   code!: string;
 
   @IsString()
