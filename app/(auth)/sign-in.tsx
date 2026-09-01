@@ -10,7 +10,7 @@ import { Kicker } from '../../components/AppCard';
 import { useAuthStore, type AuthState } from '../../lib/auth-store';
 import { useI18n } from '../../lib/i18n';
 
-type InvitePreview = { expired?: boolean; venueName?: string; jobTitle?: string };
+type InvitePreview = { expired?: boolean; venueName?: string };
 
 const logoSource = require('../../assets/venue-wrangler-logo.jpg');
 
@@ -50,7 +50,7 @@ export default function SignInScreen() {
     appApi.previewInvite(inviteToken)
       .then((result) => {
         if (cancelled) return;
-        setInvitePreview({ venueName: result.venueName, jobTitle: result.jobTitle });
+        setInvitePreview({ venueName: result.venueName });
       })
       .catch(() => {
         if (cancelled) return;
@@ -153,7 +153,6 @@ export default function SignInScreen() {
       <Text variant="titleLarge" style={{ fontWeight: '800', textAlign: 'center', color: authColors.text }}>
         {invitePreview.venueName}
       </Text>
-      <Chip compact>{invitePreview.jobTitle}</Chip>
     </View>
   ) : null;
 
