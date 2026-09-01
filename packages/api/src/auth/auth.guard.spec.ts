@@ -48,6 +48,7 @@ function makeGuard(options?: {
         options?.session ?? {
           userId: 'user-1',
           expiresAt: new Date(Date.now() + 60_000),
+          createdAt: new Date(),
           tokenHash: DEFAULT_TOKEN_HASH,
         },
       ),
@@ -139,6 +140,7 @@ describe('AuthGuard', () => {
       session: {
         userId: 'user-1',
         expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
         tokenHash: 'wrong-hash',
       },
     });
@@ -151,7 +153,21 @@ describe('AuthGuard', () => {
       session: {
         userId: 'user-1',
         expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
         tokenHash: null,
+      },
+    });
+
+    await expect(guard.canActivate(makeContext(DEFAULT_TOKEN))).rejects.toThrow('Session is no longer valid. Please sign in again.');
+  });
+
+  it('rejects a session created more than seven days ago even if its stored expiry is later', async () => {
+    const { guard } = makeGuard({
+      session: {
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 - 1),
+        tokenHash: DEFAULT_TOKEN_HASH,
       },
     });
 
