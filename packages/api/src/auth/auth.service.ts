@@ -8,7 +8,7 @@ import { hashInviteToken } from '../common/invite-token';
 
 const pbkdf2Async = promisify(pbkdf2);
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
-const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+export const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 600_000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
