@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
 import type { SubscriptionStatus } from '@prisma/client';
 import { createHash } from 'crypto';
-import { IS_PUBLIC_KEY } from './public.decorator';
+import { ALLOW_UNVERIFIED_EMAIL_KEY, IS_PUBLIC_KEY } from './public.decorator';
 import { venueIdHeader } from '../common/http';
 import { PrismaService } from '../prisma/prisma.service';
 import { enterTenant } from '../prisma/tenant-context';
@@ -23,6 +23,7 @@ export type AuthUser = {
   allAccess?: boolean;
   trialEndsAt?: string | null;
   venueStatus?: string | null;
+  emailVerified?: boolean;
 };
 
 export type AuthenticatedRequest = Request & {
@@ -76,6 +77,10 @@ export class AuthGuard implements CanActivate {
     if (isPublic) {
       return true;
     }
+    const allowUnverifiedEmail = this.reflector.getAllAndOverride<boolean>(ALLOW_UNVERIFIED_EMAIL_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const token = this.getBearerToken(request);
@@ -114,7 +119,13 @@ export class AuthGuard implements CanActivate {
     const [row, profileRow] = await Promise.all([
       this.prisma.session.findUnique({
         where: { id: payload.sid },
-        select: { userId: true, expiresAt: true, createdAt: true, tokenHash: true },
+        select: {
+          userId: true,
+          expiresAt: true,
+          createdAt: true,
+          tokenHash: true,
+          user: { select: { emailVerifiedAt: true } },
+        },
       }),
       this.prisma.profile.findFirst({
         // With no explicit venue requested, only match a profile that actually
@@ -135,7 +146,13 @@ export class AuthGuard implements CanActivate {
     ]);
 
     const session = row
-      ? { userId: row.userId, expiresAt: row.expiresAt.getTime(), createdAt: row.createdAt.getTime(), tokenHash: row.tokenHash }
+      ? {
+          userId: row.userId,
+          expiresAt: row.expiresAt.getTime(),
+          createdAt: row.createdAt.getTime(),
+          tokenHash: row.tokenHash,
+          emailVerified: Boolean(row.user?.emailVerifiedAt),
+        }
       : null;
 
     if (!session || session.userId !== payload.sub || session.expiresAt <= now || session.createdAt + SESSION_DURATION_MS <= now) {
@@ -143,6 +160,9 @@ export class AuthGuard implements CanActivate {
     }
     if (!session.tokenHash || session.tokenHash !== createHash('sha256').update(token).digest('hex')) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
+    }
+    if (!session.emailVerified && !allowUnverifiedEmail) {
+      throw new ForbiddenException('Verify your email address before continuing.');
     }
 
     let liveProfile = profileRow;
@@ -177,6 +197,7 @@ export class AuthGuard implements CanActivate {
       venueId: liveProfile?.venueId ?? null,
       venueName: liveProfile?.venue?.name ?? null,
       venueStatus: liveProfile?.venue?.subscriptionStatus ?? null,
+      emailVerified: session.emailVerified,
     };
 
     request.user = resolvedUser;

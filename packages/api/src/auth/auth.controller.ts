@@ -9,7 +9,7 @@ import { promisify } from 'util';
 import { hashInviteToken } from '../common/invite-token';
 
 const pbkdf2Async = promisify(pbkdf2);
-import { Public } from './public.decorator';
+import { AllowUnverifiedEmail, Public } from './public.decorator';
 import { CurrentUser } from './current-user.decorator';
 import type { AuthUser } from './auth.guard';
 import { getClientIp } from '../common/http';
@@ -373,6 +373,7 @@ export class AuthController {
     return { ok: true };
   }
 
+  @AllowUnverifiedEmail()
   @Post('verify-email/send')
   async resendVerification(@CurrentUser() user: AuthUser) {
     const account = await this.prisma.user.findUnique({
@@ -386,6 +387,7 @@ export class AuthController {
     return { ok: true };
   }
 
+  @AllowUnverifiedEmail()
   @Post('verify-email')
   async verifyEmail(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: VerifyEmailDto) {
     await assertWithinSharedRateLimit(this.prisma, `verify-email:ip:${getClientIp(request)}`, VERIFY_EMAIL_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
@@ -576,6 +578,7 @@ export class AuthController {
 
   // Revoke the current session (this device). The bearer token stops working
   // immediately on the next request.
+  @AllowUnverifiedEmail()
   @Post('logout')
   async logout(@CurrentUser() user: AuthUser, @Body() body?: LogoutDto, @Req() request?: Request) {
     if (user.sid) {
@@ -609,6 +612,7 @@ export class AuthController {
   }
 
   // Revoke every session for the account (all devices).
+  @AllowUnverifiedEmail()
   @Post('logout-all')
   async logoutAll(@CurrentUser() user: AuthUser) {
     await this.prisma.$transaction([

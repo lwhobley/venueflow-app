@@ -11,8 +11,8 @@ describe('AuthService one-time codes', () => {
 });
 
 describe('AuthService session lifetime', () => {
-  it('limits sessions to seven days', () => {
-    expect(SESSION_DURATION_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  it('limits sessions to one day', () => {
+    expect(SESSION_DURATION_MS).toBe(24 * 60 * 60 * 1000);
   });
 });
 
