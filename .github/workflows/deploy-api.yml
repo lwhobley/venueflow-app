@@ -33,6 +33,16 @@ on:
         description: Apple Developer Team ID used to verify App Attest assertions
         required: true
         type: string
+      supported_production_platforms:
+        description: Production client platforms protected by device attestation
+        required: true
+        type: choice
+        options:
+          - ios
+      clamav_host:
+        description: Private hostname or IP of the production ClamAV daemon
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -67,6 +77,8 @@ jobs:
           BILLING_SECRETS_VERIFIED: ${{ inputs.billing_secrets_verified }}
           ATTESTATION_ROLLOUT_VERIFIED: ${{ inputs.attestation_rollout_verified }}
           ATTESTATION_MODE: ${{ inputs.attestation_mode }}
+          SUPPORTED_PRODUCTION_PLATFORMS: ${{ inputs.supported_production_platforms }}
+          CLAMAV_HOST: ${{ inputs.clamav_host }}
         run: |
           set -Eeuo pipefail
           [[ "$IMAGE_URI" == *@sha256:* ]] || {
@@ -78,6 +90,8 @@ jobs:
           [[ "$BILLING_SECRETS_VERIFIED" == "true" ]] || { echo "::error::Billing configuration must be verified"; exit 1; }
           [[ "$ATTESTATION_ROLLOUT_VERIFIED" == "true" ]] || { echo "::error::Device-attestation rollout must be verified"; exit 1; }
           [[ "$ATTESTATION_MODE" == "enforce" ]] || { echo "::error::Production deploys require enforced device attestation"; exit 1; }
+          [[ "$SUPPORTED_PRODUCTION_PLATFORMS" == "ios" ]] || { echo "::error::Android production support requires Play Integrity verification first"; exit 1; }
+          [[ "$CLAMAV_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::clamav_host must be a hostname or IP address"; exit 1; }
           [[ "$APP_ATTEST_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::app_attest_team_id must be a 10-character Apple Developer Team ID"; exit 1; }
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -165,6 +179,7 @@ jobs:
           IMAGE_URI: ${{ inputs.image_uri }}
           ATTESTATION_MODE: ${{ inputs.attestation_mode }}
           APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
+          CLAMAV_HOST: ${{ inputs.clamav_host }}
         run: |
           set -Eeuo pipefail
           release_tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -173,22 +188,27 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
             --image "$IMAGE_URI" \
-            --update-env-vars "TRUST_PROXY_HOPS=1,DEVICE_ATTESTATION_MODE=${ATTESTATION_MODE},APP_ATTEST_TEAM_ID=${APP_ATTEST_TEAM_ID}" \
+            --update-env-vars "TRUST_PROXY_HOPS=1,DEVICE_ATTESTATION_MODE=${ATTESTATION_MODE},APP_ATTEST_TEAM_ID=${APP_ATTEST_TEAM_ID},SUPPORTED_PRODUCTION_PLATFORMS=ios,CLAMAV_HOST=${CLAMAV_HOST},CLAMAV_PORT=3310" \
             --no-traffic \
             --tag "$release_tag" \
             --quiet
 
-      - name: Verify live attestation configuration
+      - name: Verify live security configuration
         env:
           EXPECTED_ATTESTATION_MODE: ${{ inputs.attestation_mode }}
           EXPECTED_APP_ATTEST_TEAM_ID: ${{ inputs.app_attest_team_id }}
+          EXPECTED_CLAMAV_HOST: ${{ inputs.clamav_host }}
         run: |
           set -Eeuo pipefail
           service_json="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_REGION" --format=json)"
           actual_mode="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "DEVICE_ATTESTATION_MODE") | .value' <<<"$service_json")"
           actual_team_id="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "APP_ATTEST_TEAM_ID") | .value' <<<"$service_json")"
+          actual_platforms="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "SUPPORTED_PRODUCTION_PLATFORMS") | .value' <<<"$service_json")"
+          actual_clamav_host="$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "CLAMAV_HOST") | .value' <<<"$service_json")"
           [[ "$actual_mode" == "$EXPECTED_ATTESTATION_MODE" ]] || { echo "::error::Live DEVICE_ATTESTATION_MODE does not match the approved mode"; exit 1; }
           [[ "$actual_team_id" == "$EXPECTED_APP_ATTEST_TEAM_ID" ]] || { echo "::error::Live APP_ATTEST_TEAM_ID does not match the approved Team ID"; exit 1; }
+          [[ "$actual_platforms" == "ios" ]] || { echo "::error::Live platform declaration is not iOS-only"; exit 1; }
+          [[ "$actual_clamav_host" == "$EXPECTED_CLAMAV_HOST" ]] || { echo "::error::Live CLAMAV_HOST does not match the approved scanner"; exit 1; }
 
       - name: Verify the candidate revision health endpoint
         run: |

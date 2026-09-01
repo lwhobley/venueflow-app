@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { validateEnv } from './validate-env';
 
 const REQUIRED = {
-  DATABASE_URL: 'postgres://localhost/test',
+  DATABASE_URL: 'postgres://localhost/test?sslmode=require',
   JWT_SECRET: 'test-jwt-secret-not-used-in-prod!!',
   AWS_ACCESS_KEY_ID: 'key',
   AWS_SECRET_ACCESS_KEY: 'secret',
   AWS_S3_BUCKET: 'bucket',
+  TRUST_PROXY_HOPS: '1',
+  SUPPORTED_PRODUCTION_PLATFORMS: 'ios',
+  CLAMAV_HOST: 'clamav.internal',
 };
 
 describe('validateEnv', () => {
@@ -51,6 +54,34 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...REQUIRED, NODE_ENV: 'production' })).toThrow(
       'Production requires an explicit DEVICE_ATTESTATION_MODE=observe|enforce',
     );
+  });
+
+  it('requires explicit proxy, platform, and malware-scanner production settings', () => {
+    const production = {
+      ...REQUIRED,
+      NODE_ENV: 'production',
+      DEVICE_ATTESTATION_MODE: 'enforce',
+      APP_ATTEST_TEAM_ID: 'TEAM123456',
+    };
+    expect(() => validateEnv({ ...production, TRUST_PROXY_HOPS: undefined }))
+      .toThrow(/TRUST_PROXY_HOPS/);
+    expect(() => validateEnv({ ...production, SUPPORTED_PRODUCTION_PLATFORMS: 'ios,android' }))
+      .toThrow(/Play Integrity/);
+    expect(() => validateEnv({ ...production, CLAMAV_HOST: undefined }))
+      .toThrow(/CLAMAV_HOST/);
+  });
+
+  it('keeps migration credentials out of serving processes and requires database TLS', () => {
+    const production = {
+      ...REQUIRED,
+      NODE_ENV: 'production',
+      DEVICE_ATTESTATION_MODE: 'enforce',
+      APP_ATTEST_TEAM_ID: 'TEAM123456',
+    };
+    expect(() => validateEnv({ ...production, DATABASE_DIRECT_URL: production.DATABASE_URL }))
+      .toThrow(/DATABASE_DIRECT_URL/);
+    expect(() => validateEnv({ ...production, DATABASE_URL: 'postgres://localhost/test' }))
+      .toThrow(/sslmode=require/);
   });
 
   it('requires the Apple Team ID in observe mode so submitted proofs can be verified', () => {
