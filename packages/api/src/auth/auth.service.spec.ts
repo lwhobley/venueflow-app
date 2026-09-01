@@ -3,6 +3,13 @@ import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { hashInviteToken } from '../common/invite-token';
 
+describe('AuthService one-time codes', () => {
+  it('generates ten-digit numeric codes', () => {
+    const service = new AuthService({} as never);
+    expect(service.generateOneTimeCode()).toMatch(/^\d{10}$/);
+  });
+});
+
 describe('AuthService invited signup lifecycle', () => {
   it('reserves a valid invite and creates an inactive venue membership until email verification', async () => {
     const invite = {
