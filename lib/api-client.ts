@@ -292,7 +292,7 @@ export const appApi = {
     apiRequest<{ ok: true }>('/v1/auth/reset-password', { method: 'POST', body }),
   // Public: preview which team an invite code belongs to before signing up.
   previewInvite: (code: string) =>
-    apiRequest<{ valid: boolean; venueName: string; role: string; jobTitle: string; expiresAt: number }>(
+    apiRequest<{ valid: boolean; venueName: string }>(
       '/v1/app/invite/' + encodeURIComponent(code.trim()),
     ),
   // Solo user joins an existing team later by code.
