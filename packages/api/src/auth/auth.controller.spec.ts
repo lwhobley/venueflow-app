@@ -285,7 +285,7 @@ describe('AuthController email invite signup', () => {
     const authService = {
       hashPassword: vi.fn().mockResolvedValue({ salt: 'salt', hash: 'hash' }),
       issueSession: vi.fn().mockResolvedValue({ session: { id: 'session-1' }, profile: { id: 'profile-1', venueId: 'venue-1', role: 'staff', emailVerified: true, venue: { id: 'venue-1', name: 'Test Venue' } } }),
-      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const email = { send: vi.fn(), sendOrThrow: vi.fn().mockResolvedValue(undefined) };
@@ -386,7 +386,7 @@ describe('AuthController recovery and logout safety', () => {
     await expect(controller.verifyEmail(
       { ip: '127.0.0.1' } as never,
       { sub: 'user-1' } as never,
-      { code: '12345678' },
+      { code: '1234567890' },
     )).resolves.toEqual({ ok: true });
 
     expect(tx.user.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'user-1' } }));
@@ -420,7 +420,7 @@ describe('AuthController recovery and logout safety', () => {
       sendOrThrow: vi.fn().mockRejectedValue(new Error('provider down')),
     };
     const authService = {
-      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const controller = new AuthController(prisma as any, {} as any, email as any, authService as any);
@@ -441,7 +441,7 @@ describe('AuthController recovery and logout safety', () => {
     };
     const email = { send: vi.fn() };
     const authService = {
-      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const controller = new AuthController(prisma as any, {} as any, email as any, authService as any);
@@ -452,7 +452,7 @@ describe('AuthController recovery and logout safety', () => {
     )).resolves.toEqual({ ok: true });
 
     expect(authService.generateOneTimeCode).toHaveBeenCalledOnce();
-    expect(authService.hashOneTimeCode).toHaveBeenCalledWith('12345678');
+    expect(authService.hashOneTimeCode).toHaveBeenCalledWith('1234567890');
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: '__missing_password_reset_account__' },
     }));
@@ -504,7 +504,7 @@ describe('AuthController recovery and logout safety', () => {
     };
     const controller = new AuthController(prisma as any, {} as any, {} as any, authService as any);
     const request = { ip: '127.0.0.1' } as any;
-    const body = { email: 'staff@example.com', code: '12345678', newPassword: 'password123' };
+    const body = { email: 'staff@example.com', code: '1234567890', newPassword: 'password123' };
 
     const results = await Promise.allSettled([
       controller.resetPassword(request, body),
@@ -620,7 +620,7 @@ describe('AuthController log hygiene', () => {
         session: { id: 'session-1' },
         profile: { id: 'profile-1', venueId: 'venue-1', role: 'staff', emailVerified: false, fullName: 'Renee', venue },
       }),
-      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const email = { send: vi.fn(), sendOrThrow: vi.fn().mockRejectedValue(new Error('provider down')) };
