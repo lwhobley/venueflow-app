@@ -9,6 +9,7 @@ import { venueIdHeader } from '../common/http';
 import { PrismaService } from '../prisma/prisma.service';
 import { enterTenant } from '../prisma/tenant-context';
 import { tenantIsolationEnforced } from '../prisma/tenant-isolation-config';
+import { SESSION_DURATION_MS } from './auth.service';
 
 export type AuthUser = {
   sub: string;
@@ -113,7 +114,7 @@ export class AuthGuard implements CanActivate {
     const [row, profileRow] = await Promise.all([
       this.prisma.session.findUnique({
         where: { id: payload.sid },
-        select: { userId: true, expiresAt: true, tokenHash: true },
+        select: { userId: true, expiresAt: true, createdAt: true, tokenHash: true },
       }),
       this.prisma.profile.findFirst({
         // With no explicit venue requested, only match a profile that actually
@@ -134,10 +135,10 @@ export class AuthGuard implements CanActivate {
     ]);
 
     const session = row
-      ? { userId: row.userId, expiresAt: row.expiresAt.getTime(), tokenHash: row.tokenHash }
+      ? { userId: row.userId, expiresAt: row.expiresAt.getTime(), createdAt: row.createdAt.getTime(), tokenHash: row.tokenHash }
       : null;
 
-    if (!session || session.userId !== payload.sub || session.expiresAt <= now) {
+    if (!session || session.userId !== payload.sub || session.expiresAt <= now || session.createdAt + SESSION_DURATION_MS <= now) {
       throw new UnauthorizedException('Session is no longer valid. Please sign in again.');
     }
     if (!session.tokenHash || session.tokenHash !== createHash('sha256').update(token).digest('hex')) {
