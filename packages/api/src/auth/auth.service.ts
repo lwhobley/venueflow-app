@@ -8,7 +8,9 @@ import { hashInviteToken } from '../common/invite-token';
 
 const pbkdf2Async = promisify(pbkdf2);
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
-export const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+// A stolen mobile bearer token must not remain useful for a full week. The
+// server-side Session row still supports immediate logout/revocation.
+export const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 600_000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';

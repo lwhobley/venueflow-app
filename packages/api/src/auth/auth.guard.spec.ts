@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { getTenantVenueId, runWithoutTenant } from '../prisma/tenant-context';
 import { AuthGuard } from './auth.guard';
+import { ALLOW_UNVERIFIED_EMAIL_KEY, IS_PUBLIC_KEY } from './public.decorator';
 
 // Every case below authenticates with this token; the default session fixture
 // carries its hash so the guard's token-binding check passes.
@@ -24,6 +25,7 @@ function makeGuard(options?: {
   session?: any;
   profile?: any;
   isPublic?: boolean;
+  allowUnverifiedEmail?: boolean;
 }) {
   const jwt = {
     verifyAsync: vi.fn().mockResolvedValue(
@@ -40,7 +42,11 @@ function makeGuard(options?: {
     ),
   } as any;
   const reflector = {
-    getAllAndOverride: vi.fn().mockReturnValue(options?.isPublic ?? false),
+    getAllAndOverride: vi.fn().mockImplementation((key: string) => {
+      if (key === IS_PUBLIC_KEY) return options?.isPublic ?? false;
+      if (key === ALLOW_UNVERIFIED_EMAIL_KEY) return options?.allowUnverifiedEmail ?? false;
+      return false;
+    }),
   } as any;
   const prisma = {
     session: {
@@ -50,6 +56,7 @@ function makeGuard(options?: {
           expiresAt: new Date(Date.now() + 60_000),
           createdAt: new Date(),
           tokenHash: DEFAULT_TOKEN_HASH,
+          user: { emailVerifiedAt: new Date() },
         },
       ),
     },
@@ -161,16 +168,43 @@ describe('AuthGuard', () => {
     await expect(guard.canActivate(makeContext(DEFAULT_TOKEN))).rejects.toThrow('Session is no longer valid. Please sign in again.');
   });
 
-  it('rejects a session created more than seven days ago even if its stored expiry is later', async () => {
+  it('rejects a session created more than one day ago even if its stored expiry is later', async () => {
     const { guard } = makeGuard({
       session: {
         userId: 'user-1',
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 - 1),
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000 - 1),
         tokenHash: DEFAULT_TOKEN_HASH,
       },
     });
 
     await expect(guard.canActivate(makeContext(DEFAULT_TOKEN))).rejects.toThrow('Session is no longer valid. Please sign in again.');
+  });
+
+  it('blocks unverified accounts from protected application routes', async () => {
+    const { guard } = makeGuard({
+      session: {
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
+        tokenHash: DEFAULT_TOKEN_HASH,
+        user: { emailVerifiedAt: null },
+      },
+    });
+    await expect(guard.canActivate(makeContext(DEFAULT_TOKEN))).rejects.toThrow(/Verify your email/);
+  });
+
+  it('allows an unverified account only on explicitly exempted auth routes', async () => {
+    const { guard } = makeGuard({
+      allowUnverifiedEmail: true,
+      session: {
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
+        tokenHash: DEFAULT_TOKEN_HASH,
+        user: { emailVerifiedAt: null },
+      },
+    });
+    await expect(guard.canActivate(makeContext(DEFAULT_TOKEN))).resolves.toBe(true);
   });
 });
