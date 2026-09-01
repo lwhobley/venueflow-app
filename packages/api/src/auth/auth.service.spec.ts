@@ -1,12 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
-import { AuthService } from './auth.service';
+import { AuthService, SESSION_DURATION_MS } from './auth.service';
 import { hashInviteToken } from '../common/invite-token';
 
 describe('AuthService one-time codes', () => {
   it('generates ten-digit numeric codes', () => {
     const service = new AuthService({} as never);
     expect(service.generateOneTimeCode()).toMatch(/^\d{10}$/);
+  });
+});
+
+describe('AuthService session lifetime', () => {
+  it('limits sessions to seven days', () => {
+    expect(SESSION_DURATION_MS).toBe(7 * 24 * 60 * 60 * 1000);
   });
 });
 
