@@ -17,6 +17,13 @@ describe('document byte validation', () => {
     expect(() => assertAllowedDocumentBytes(Buffer.from('not a pdf'), 'application/pdf', 'manual.pdf')).toThrow(BadRequestException);
   });
 
+  it('rejects legacy macro-capable Office containers', () => {
+    const ole = Buffer.from('d0cf11e0a1b11ae1', 'hex');
+    expect(() => assertAllowedDocumentBytes(ole, 'application/msword', 'legacy.doc')).toThrow(BadRequestException);
+    expect(() => assertAllowedDocumentBytes(ole, 'application/vnd.ms-excel', 'legacy.xls')).toThrow(BadRequestException);
+    expect(() => assertAllowedDocumentBytes(ole, 'application/vnd.ms-powerpoint', 'legacy.ppt')).toThrow(BadRequestException);
+  });
+
   it('removes path components and unsafe header characters from names', () => {
     expect(safeDocumentFileName('../menu?.pdf')).toBe('menu_.pdf');
   });

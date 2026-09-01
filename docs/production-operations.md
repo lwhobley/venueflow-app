@@ -36,6 +36,20 @@ Secret Manager references (`--update-secrets` / `--set-secrets`), never literal
 `--set-env-vars` values. The deployment workflow rejects literal database, JWT,
 AWS, billing, email, and Gemini credentials before it changes production.
 
+Serving revisions must not contain `DATABASE_DIRECT_URL`; that owner/direct
+credential belongs only on the single-run migration job. Production startup
+also requires TLS (`sslmode=require`) on `DATABASE_URL`.
+
+## Document malware scanning
+
+Production document uploads stream every validated file through a private
+ClamAV daemon before S3 upload. Configure `CLAMAV_HOST` and ensure Cloud Run can
+reach TCP port `3310`; the deployment workflow records the approved host on the
+candidate revision. Uploads fail closed if the scanner is absent, times out, or
+returns an indeterminate result. Do not expose the ClamAV daemon to the public
+internet. Legacy OLE Office formats (`.doc`, `.xls`, `.ppt`) are intentionally
+blocked; use modern `.docx`, `.xlsx`, or `.pptx` files.
+
 ## Retention cleanup
 
 `.github/workflows/retention-cleanup.yml` executes the preconfigured `venue-wrangler-api-retention` Cloud Run Job daily. Provision it with the same database secrets and network access as the migration job. GitHub must use a dedicated `GCP_RETENTION_SERVICE_ACCOUNT` identity that can execute only this job; do not reuse the production deployment identity. Grant that identity permission to invoke the job and to read its execution result (`run.jobs.run` and `run.executions.get`; the predefined `roles/run.invoker` plus `roles/run.viewer` roles provide these permissions). Without the read permission, `gcloud run jobs execute --wait` can start retention but cannot report whether it succeeded. Deployment preflights the job before migrations, updates it to the same immutable API image, verifies a no-traffic candidate revision, and only then promotes that revision to production. Treat a missed or failed run as an operational alert: audit logs, expired attestation challenges, and statutory wage records are purged only by this external job.
