@@ -24,6 +24,7 @@ import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { S3DocumentService } from './s3-document.service';
+import { DocumentMalwareScannerService } from './document-malware-scanner.service';
 
 const DOCUMENT_CATEGORIES = ['sop', 'manual', 'recipe', 'menu', 'training', 'form', 'other'] as const;
 type DocumentCategoryValue = (typeof DOCUMENT_CATEGORIES)[number];
@@ -65,6 +66,7 @@ export class DocumentsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: S3DocumentService,
+    private readonly malwareScanner: DocumentMalwareScannerService,
     private readonly mediaCleanup: MediaCleanupService,
   ) {}
 
@@ -114,6 +116,7 @@ export class DocumentsController {
     if (data.length === 0) throw new BadRequestException('Document is empty');
     if (data.length > MAX_DOCUMENT_BYTES) throw new BadRequestException('Document is too large (max 10MB)');
     const mimeType = assertAllowedDocumentBytes(data, body.mimeType, fileName);
+    await this.malwareScanner.assertClean(data);
 
     let s3Key: string;
     try {

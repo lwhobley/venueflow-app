@@ -4,10 +4,11 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { MediaCleanupModule } from '../media-cleanup/media-cleanup.module';
 import { DocumentsController } from './documents.controller';
 import { S3DocumentService } from './s3-document.service';
+import { DocumentMalwareScannerService } from './document-malware-scanner.service';
 
 @Module({
   imports: [PrismaModule, BillingModule, MediaCleanupModule],
   controllers: [DocumentsController],
-  providers: [S3DocumentService],
+  providers: [S3DocumentService, DocumentMalwareScannerService],
 })
 export class DocumentsModule {}
