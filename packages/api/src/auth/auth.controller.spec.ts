@@ -240,6 +240,14 @@ describe('AuthController email invite signup', () => {
     expect(result.profile.venueId).toBe('venue-1');
     expect(result.token).toBe('jwt-token');
     expect(result.venue.name).toBe('Test Venue');
+    expect(jwt.signAsync).toHaveBeenCalledWith({
+      sub: 'user-1',
+      email: 'staff@example.com',
+      name: 'Test Staff',
+      sid: 'session-1',
+      profileId: 'profile-1',
+      venueId: 'venue-1',
+    });
     expect(email.sendOrThrow).not.toHaveBeenCalled();
   });
 
