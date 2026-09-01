@@ -22,8 +22,6 @@ import { AuthService } from './auth.service';
 import { AuditService } from '../modules/audit/audit.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
-// Matches the JWT's 30-day expiry so a session and its token expire together.
-const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const EMAIL_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 600_000;
@@ -636,11 +634,6 @@ export class AuthController {
       sid: session.id,
       profileId: profile.id,
       venueId: profile.venueId,
-      venueName: profile.venue?.name ?? null,
-      role: profile.role,
-      allAccess: profile.allAccess,
-      trialEndsAt: profile.trialEndsAt?.toISOString() ?? null,
-      venueStatus: profile.venue?.subscriptionStatus ?? null,
     });
     await this.prisma.session.update({
       where: { id: session.id },
