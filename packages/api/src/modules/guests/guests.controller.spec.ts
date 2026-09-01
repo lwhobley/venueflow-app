@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { GuestsController } from './guests.controller';
+import { GuestsController, validateLeadWebhookReplayHeaders } from './guests.controller';
 import { generateWebhookSecret, hashWebhookSecret } from '../../common/webhook-auth';
 
 vi.mock('../../common/rate-limit', () => ({
@@ -33,6 +33,9 @@ function makeController() {
     },
     waitlist: {
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    rateLimitBucket: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     $transaction: vi.fn().mockImplementation((arg: any) => {
       if (Array.isArray(arg)) return Promise.all(arg);
@@ -71,6 +74,10 @@ function makeGuestRow(overrides: Partial<Record<string, any>> = {}) {
 
 function makeRequest(ip = '203.0.113.5') {
   return { ip } as any;
+}
+
+function webhookHeaders(eventId = 'event-1') {
+  return [eventId, String(Math.floor(Date.now() / 1000))] as const;
 }
 
 afterEach(() => {
@@ -586,7 +593,7 @@ describe('GuestsController', () => {
       prisma.venue.findUnique.mockResolvedValue(null);
 
       await expect(
-        controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', { leads: [] } as any),
+        controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', undefined, undefined, { leads: [] } as any),
       ).rejects.toThrow(UnauthorizedException);
 
       // An unauthenticated spray of random venueIds must not churn buckets.
@@ -597,7 +604,7 @@ describe('GuestsController', () => {
       const { controller, prisma } = makeController();
       prisma.venue.findUnique.mockResolvedValue({ leadsWebhookSecret: hashWebhookSecret('secret') });
 
-      await controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', { leads: [] } as any);
+      await controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', ...webhookHeaders(), { leads: [] } as any);
 
       expect(assertWithinSharedRateLimit).toHaveBeenCalledWith(
         prisma,
@@ -613,7 +620,7 @@ describe('GuestsController', () => {
       prisma.venue.findUnique.mockResolvedValue({ leadsWebhookSecret: null });
 
       await expect(
-        controller.leadsWebhook(makeRequest(), 'venue-1', 'any-secret', { leads: [] } as any),
+        controller.leadsWebhook(makeRequest(), 'venue-1', 'any-secret', undefined, undefined, { leads: [] } as any),
       ).rejects.toThrow('Invalid webhook secret');
     });
 
@@ -623,7 +630,7 @@ describe('GuestsController', () => {
       prisma.venue.findUnique.mockResolvedValue({ leadsWebhookSecret: hashedSecret });
 
       await expect(
-        controller.leadsWebhook(makeRequest(), 'venue-1', 'wrong-secret', { leads: [] } as any),
+        controller.leadsWebhook(makeRequest(), 'venue-1', 'wrong-secret', undefined, undefined, { leads: [] } as any),
       ).rejects.toThrow('Invalid webhook secret');
     });
 
@@ -634,7 +641,7 @@ describe('GuestsController', () => {
       prisma.guest.findMany.mockResolvedValue([]);
       prisma.guest.create.mockResolvedValue({ id: 'guest-new', email: 'lead@x.com', phone: null, nameLower: 'web lead' });
 
-      const result = await controller.leadsWebhook(makeRequest(), 'venue-1', secret, {
+      const result = await controller.leadsWebhook(makeRequest(), 'venue-1', secret, ...webhookHeaders(), {
         leads: [{ fullName: 'Web Lead', email: 'lead@x.com' }],
       } as any);
 
@@ -642,6 +649,23 @@ describe('GuestsController', () => {
         expect.objectContaining({ data: expect.objectContaining({ venueId: 'venue-1' }) }),
       );
       expect(result).toEqual({ created: 1, updated: 0, skipped: 0, guestIds: ['guest-new'] });
+    });
+  });
+
+  describe('lead webhook replay headers', () => {
+    it('accepts a recent unique event identifier', () => {
+      const now = Date.now();
+      expect(validateLeadWebhookReplayHeaders('provider:event-1', String(Math.floor(now / 1000)), now))
+        .toBe('provider:event-1');
+    });
+
+    it('rejects missing, malformed, and stale replay headers', () => {
+      const now = Date.now();
+      expect(() => validateLeadWebhookReplayHeaders(undefined, String(Math.floor(now / 1000)), now)).toThrow(/x-webhook-id/);
+      expect(() => validateLeadWebhookReplayHeaders('event 1', String(Math.floor(now / 1000)), now)).toThrow(/x-webhook-id/);
+      expect(() => validateLeadWebhookReplayHeaders('event-1', 'not-a-time', now)).toThrow(/x-webhook-timestamp/);
+      expect(() => validateLeadWebhookReplayHeaders('event-1', String(Math.floor((now - 6 * 60_000) / 1000)), now))
+        .toThrow(/outside the allowed window/);
     });
   });
 

@@ -631,7 +631,7 @@ export const en = {
     },
     leads: {
       title: 'CRM lead capture',
-      body: 'Pipe website forms, email, or CSV uploads into your guest CRM. Generate a per-venue secret, then POST to /api/v1/guests/leads-webhook/:venueId with the x-webhook-secret header.',
+      body: 'Pipe website forms, email, or CSV uploads into your guest CRM. Generate a per-venue secret, then POST to /api/v1/guests/leads-webhook/:venueId with x-webhook-secret, a unique x-webhook-id, and the current Unix timestamp in x-webhook-timestamp.',
       generate: 'Generate lead webhook secret',
     },
     connections: {
@@ -1391,7 +1391,7 @@ export const es: GuestOpsDictionary = {
     },
     leads: {
       title: 'Captación de leads para CRM',
-      body: 'Envía formularios web, correos o cargas CSV a tu CRM de huéspedes. Genera un secreto por establecimiento y luego haz POST a /api/v1/guests/leads-webhook/:venueId con el encabezado x-webhook-secret.',
+      body: 'Envía formularios web, correos o cargas CSV a tu CRM de huéspedes. Genera un secreto por establecimiento y luego haz POST a /api/v1/guests/leads-webhook/:venueId con x-webhook-secret, un x-webhook-id único y la marca de tiempo Unix actual en x-webhook-timestamp.',
       generate: 'Generar secreto de webhook de leads',
     },
     connections: {
@@ -2146,7 +2146,7 @@ export const fr: GuestOpsDictionary = {
     },
     leads: {
       title: 'Capture de leads CRM',
-      body: "Envoyez les formulaires du site, les e-mails ou les imports CSV vers votre CRM d'invités. Générez un secret par établissement, puis envoyez un POST à /api/v1/guests/leads-webhook/:venueId avec l'en-tête x-webhook-secret.",
+      body: "Envoyez les formulaires du site, les e-mails ou les imports CSV vers votre CRM d'invités. Générez un secret par établissement, puis envoyez un POST à /api/v1/guests/leads-webhook/:venueId avec x-webhook-secret, un x-webhook-id unique et l'horodatage Unix actuel dans x-webhook-timestamp.",
       generate: 'Générer le secret du webhook de leads',
     },
     connections: {

@@ -16,6 +16,7 @@ import {
 import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
+import { createHash } from 'crypto';
 import { canManageVenue } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
@@ -29,6 +30,28 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 type Scope = VenueScopedRequest['venueScope'];
 const LEADS_WEBHOOK_RATE_LIMIT_MAX = 120;
 const LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
+const LEADS_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
+const LEADS_WEBHOOK_EVENT_TTL_MS = 24 * 60 * 60_000;
+
+export function validateLeadWebhookReplayHeaders(
+  eventId: string | undefined,
+  timestamp: string | undefined,
+  now = Date.now(),
+): string {
+  const normalizedEventId = eventId?.trim();
+  if (!normalizedEventId || normalizedEventId.length > 200 || !/^[A-Za-z0-9._:-]+$/.test(normalizedEventId)) {
+    throw new BadRequestException('A valid x-webhook-id header is required.');
+  }
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) {
+    throw new BadRequestException('A valid x-webhook-timestamp header is required.');
+  }
+  const timestampMs = timestampSeconds * 1000;
+  if (Math.abs(now - timestampMs) > LEADS_WEBHOOK_TIMESTAMP_TOLERANCE_MS) {
+    throw new UnauthorizedException('Webhook timestamp is outside the allowed window.');
+  }
+  return normalizedEventId;
+}
 
 /**
  * Applied to a lead that shares a name with an existing guest but carries no
@@ -434,6 +457,8 @@ export class GuestsController {
     @Req() request: Request,
     @Param('venueId') venueId: string,
     @Headers('x-webhook-secret') secret: string | undefined,
+    @Headers('x-webhook-id') eventId: string | undefined,
+    @Headers('x-webhook-timestamp') timestamp: string | undefined,
     @Body() body: IngestLeadsDto,
   ) {
     // Verify the webhook secret before touching the rate limiter so an
@@ -442,8 +467,26 @@ export class GuestsController {
     if (!venue?.leadsWebhookSecret || !secretsMatch(secret, venue.leadsWebhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
     }
-    await assertWithinSharedRateLimit(this.prisma, `leads-webhook:${venueId}:${getClientIp(request)}`, LEADS_WEBHOOK_RATE_LIMIT_MAX, LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
-    return this.ingestLeadsForVenue(venueId, body.leads);
+    const validatedEventId = validateLeadWebhookReplayHeaders(eventId, timestamp);
+    const eventHash = createHash('sha256').update(validatedEventId).digest('hex');
+    const replayKey = `leads-webhook-event:${venueId}:${eventHash}`;
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      replayKey,
+      1,
+      LEADS_WEBHOOK_EVENT_TTL_MS,
+      'Duplicate webhook event.',
+    );
+    try {
+      await assertWithinSharedRateLimit(this.prisma, `leads-webhook:${venueId}:${getClientIp(request)}`, LEADS_WEBHOOK_RATE_LIMIT_MAX, LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
+      return await this.ingestLeadsForVenue(venueId, body.leads);
+    } catch (error) {
+      // The event claim blocks concurrent/replayed delivery. Release only our
+      // claim if processing fails so the provider may safely retry the same
+      // event id; the lead mutation itself is transactional.
+      await this.prisma.rateLimitBucket.deleteMany({ where: { key: replayKey } }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async ingestLeadsForVenue(venueId: string, rawLeads: LeadDto[]) {
