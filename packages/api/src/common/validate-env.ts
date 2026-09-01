@@ -63,6 +63,18 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   }
 
   if (config.NODE_ENV === 'production') {
+    if (String(config.DATABASE_DIRECT_URL ?? '').trim()) {
+      throw new Error('DATABASE_DIRECT_URL must not be present in a production serving process.');
+    }
+    let databaseUrl: URL;
+    try {
+      databaseUrl = new URL(String(config.DATABASE_URL));
+    } catch {
+      throw new Error('DATABASE_URL must be a valid PostgreSQL URL.');
+    }
+    if (!['postgres:', 'postgresql:'].includes(databaseUrl.protocol) || databaseUrl.searchParams.get('sslmode') !== 'require') {
+      throw new Error('Production DATABASE_URL must use PostgreSQL with sslmode=require.');
+    }
     const jwtSecret = String(config.JWT_SECRET ?? '').trim();
     if (jwtSecret.length < 32) {
       throw new Error('JWT_SECRET must be at least 32 characters in production.');
@@ -72,6 +84,19 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     }
     if (!appAttestTeamId) {
       throw new Error('APP_ATTEST_TEAM_ID must be set for production attestation.');
+    }
+    const trustProxyHops = String(config.TRUST_PROXY_HOPS ?? '').trim();
+    if (!/^\d+$/.test(trustProxyHops)) {
+      throw new Error('Production requires an explicit non-negative integer TRUST_PROXY_HOPS.');
+    }
+    const supportedPlatforms = String(config.SUPPORTED_PRODUCTION_PLATFORMS ?? '').trim().toLowerCase();
+    if (supportedPlatforms !== 'ios') {
+      throw new Error(
+        'SUPPORTED_PRODUCTION_PLATFORMS must be ios until Android Play Integrity verification is implemented.',
+      );
+    }
+    if (!String(config.CLAMAV_HOST ?? '').trim()) {
+      throw new Error('CLAMAV_HOST is required in production so document uploads fail closed through malware scanning.');
     }
     if (rawAttestationMode === 'observe') {
       logger.warn(
