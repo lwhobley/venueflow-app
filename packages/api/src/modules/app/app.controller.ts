@@ -956,8 +956,8 @@ export class AppController {
   }
 
   // Public: lets the join screen show which team a code belongs to before the
-  // employee creates an account. Returns nothing identifying beyond the team
-  // name and the role they'd get.
+  // employee creates an account. Role and job title stay private until the
+  // invite is redeemed by an authenticated account.
   @Public()
   @Get('invite/:code')
   async previewInvite(@Req() request: Request, @Param('code') rawCode: string) {
@@ -973,9 +973,6 @@ export class AppController {
     return {
       valid: true,
       venueName: venue?.name ?? 'a Venue Wrangler team',
-      role: invite.role,
-      jobTitle: invite.jobTitle,
-      expiresAt: invite.expiresAt.getTime(),
     };
   }
 
