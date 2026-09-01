@@ -109,7 +109,7 @@ export default function VerifyEmailScreen() {
               keyboardType="number-pad"
               autoCapitalize="none"
               mode="outlined"
-              maxLength={8}
+              maxLength={10}
               returnKeyType="go"
               onSubmitEditing={() => void verify()}
             />
