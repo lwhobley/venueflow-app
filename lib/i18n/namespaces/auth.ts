@@ -108,7 +108,7 @@ export const en = {
   verifyEmail: {
     kicker: 'One more step',
     title: 'Verify your email',
-    subtitle: 'Enter the 8-digit code we sent to {email}.',
+    subtitle: 'Enter the 10-digit code we sent to {email}.',
     defaultEmail: 'your email',
     codeLabel: 'Verification code',
     verifyButton: 'Verify email',
@@ -562,7 +562,7 @@ export const fr: AuthDictionary = {
   verifyEmail: {
     kicker: 'Encore une étape',
     title: 'Vérifiez votre e-mail',
-    subtitle: 'Saisissez le code à 8 chiffres que nous avons envoyé à {email}.',
+    subtitle: 'Saisissez le code à 10 chiffres que nous avons envoyé à {email}.',
     defaultEmail: 'votre e-mail',
     codeLabel: 'Code de vérification',
     verifyButton: 'Vérifier l\'e-mail',
