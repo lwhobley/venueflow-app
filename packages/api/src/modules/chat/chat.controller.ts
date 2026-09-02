@@ -25,15 +25,17 @@ import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-
 import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
 import { occupiedSlots, previousOvernightFilter } from '../../common/shift-overlap';
 import { tryAcquireSharedLease, releaseSharedLease } from '../../common/shared-lease';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { MediaAccessService } from './media-access.service';
 import { S3ImageService } from './s3-image.service';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
+import { DocumentMalwareScannerService } from '../documents/document-malware-scanner.service';
 
 // Chat photo uploads. Kept small — images are picker-compressed (quality 0.5)
-// before they reach us; reject anything larger so the DB store stays lean.
+// and clamped at 1280px on the device, typically ~300KB–1MB.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 type Scope = VenueScopedRequest['venueScope'];
@@ -48,33 +50,40 @@ const ACTIVE_MEMBERSHIP: Array<{ membershipStatus: null | 'active' }> = [
 
 class OpenDmDto {
   @IsString()
+  @MaxLength(64)
   targetProfileId!: string;
 }
 
 class CreateGroupDto {
   @IsString()
+  @MaxLength(100)
   name!: string;
 
   @IsArray()
   @ArrayMaxSize(500)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   memberIds!: string[];
 }
 
 class SendMessageDto {
   @IsString()
+  @MaxLength(4000)
   text!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   shiftId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   swapId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2048)
   imageUrl?: string;
 }
 
@@ -86,12 +95,14 @@ class ReactDto {
 
 class EditMessageDto {
   @IsString()
+  @MaxLength(4000)
   text!: string;
 }
 
 class UploadImageDto {
   // Base64-encoded image bytes (no data: prefix), as produced by expo-image-picker.
   @IsString()
+  @MaxLength(10_000_000)
   dataBase64!: string;
 
   @IsString()
@@ -113,6 +124,7 @@ export class ChatController {
     private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
     private readonly mediaCleanup: MediaCleanupService,
+    private readonly malwareScanner: DocumentMalwareScannerService,
   ) {}
 
   private async ensureContextualConversationsThrottled(venueId: string) {
@@ -619,6 +631,14 @@ export class ChatController {
   async sendMessage(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: SendMessageDto) {
     if (!scope) throw new ForbiddenException('No venue profile found');
 
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `chat-send:profile:${scope.profileId}`,
+      60,
+      60_000,
+      'Too many chat messages. Please wait a moment before sending again.',
+    );
+
     const conv = await this.prisma.conversation.findFirst({
       where: { id, venueId: scope.venueId },
     });
@@ -792,6 +812,9 @@ export class ChatController {
     if (data.length === 0) throw new BadRequestException('Image is empty');
     if (data.length > MAX_IMAGE_BYTES) throw new BadRequestException('Image is too large (max 5MB)');
     const mime = assertAllowedImageBytes(data, body.mimeType);
+    if (this.malwareScanner) {
+      await this.malwareScanner.assertClean(data);
+    }
 
     const s3Key = await this.s3ImageService.upload(data, mime, scope.venueId);
 

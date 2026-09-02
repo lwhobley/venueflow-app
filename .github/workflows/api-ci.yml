@@ -155,13 +155,33 @@ jobs:
               fi
               echo "✓ ${database}: ${index}"
             done
-            found_check="$(psql -h localhost -U postgres -d "$database" -Atc \
-              "SELECT 1 FROM pg_constraint WHERE conname = 'TimeEntry_open_state_check'")"
-            if [[ "$found_check" != "1" ]]; then
-              echo "::error::Missing TimeEntry_open_state_check constraint in ${database}"
+            # VW-A16: Guard against proconfig being silently lost on public RPCs via CREATE OR REPLACE
+            unpinned_funcs="$(psql -h localhost -U postgres -d "$database" -Atc \
+              "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proconfig IS NULL")"
+            if [[ -n "$unpinned_funcs" ]]; then
+              echo "::error::Functions missing search_path pin in ${database}: ${unpinned_funcs}"
               exit 1
             fi
-            echo "✓ ${database}: TimeEntry_open_state_check"
+            echo "✓ ${database}: all public functions have search_path pinned"
+
+            required_checks=(
+              TimeEntry_open_state_check
+              Message_text_len_check
+              LogbookEntry_body_len_check
+              EmailTemplate_body_len_check
+              EmailTemplate_subject_len_check
+              StaffRequest_title_len_check
+              StaffRequest_details_len_check
+            )
+            for check in "${required_checks[@]}"; do
+              found_check="$(psql -h localhost -U postgres -d "$database" -Atc \
+                "SELECT 1 FROM pg_constraint WHERE conname = '${check}'")"
+              if [[ "$found_check" != "1" ]]; then
+                echo "::error::Missing ${check} constraint in ${database}"
+                exit 1
+              fi
+              echo "✓ ${database}: ${check}"
+            done
           done
 
       - name: Smoke-test health endpoint

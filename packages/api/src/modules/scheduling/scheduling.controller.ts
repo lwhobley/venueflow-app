@@ -23,6 +23,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
   Min,
   Max,
@@ -60,31 +61,38 @@ const AI_SCHEDULE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 class BlackoutDto {
   @IsString()
+  @MaxLength(32)
   startDate!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   endDate?: string;
 
   @IsString()
+  @MaxLength(500)
   reason!: string;
 }
 
 class ScheduleMemoryNoteDto {
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsString()
+  @MaxLength(2000)
   detail!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStart?: string;
 }
 
 class ShiftDto {
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStart?: string;
 
   @IsInt()
@@ -101,23 +109,28 @@ class ShiftDto {
   endMinutes!: number;
 
   @IsString()
+  @MaxLength(100)
   jobTitle!: string;
 
   @IsString()
+  @MaxLength(100)
   station!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   profileId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
 class AssignShiftDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   profileId?: string;
 }
 
@@ -130,10 +143,12 @@ class LaborBudgetDto {
 
 class TemplateDto {
   @IsString()
+  @MaxLength(100)
   name!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStart?: string;
 }
 
@@ -154,13 +169,16 @@ class TemplateShiftDto {
   endMinutes!: number;
 
   @IsString()
+  @MaxLength(100)
   jobTitle!: string;
 
   @IsString()
+  @MaxLength(100)
   station!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
@@ -170,12 +188,14 @@ class ApplyTemplateDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStart?: string;
 }
 
 class CopyDayDto {
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStart?: string;
 
   @IsInt()
@@ -201,6 +221,7 @@ class RestoreShiftDto extends ShiftDto {
 class RestoreShiftsDto {
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStart?: string;
 
   @IsArray()
@@ -213,20 +234,24 @@ class RestoreShiftsDto {
 class WeekDto {
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStart?: string;
 }
 
 class AutoScheduleAssignmentDto {
   @IsString()
+  @MaxLength(64)
   shiftId!: string;
 
   @IsString()
+  @MaxLength(64)
   profileId!: string;
 }
 
 class ApplyAutoScheduleDto {
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStartDate?: string;
 
   @IsArray()
@@ -253,19 +278,23 @@ class AiProposedShiftDto {
   endMinutes!: number;
 
   @IsString()
+  @MaxLength(100)
   jobTitle!: string;
 
   @IsString()
+  @MaxLength(100)
   station!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   profileId?: string;
 }
 
 class CommitAiScheduleDto {
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   weekStartDate?: string;
 
   @IsArray()
@@ -277,17 +306,21 @@ class CommitAiScheduleDto {
 
 class ProposeSwapDto {
   @IsString()
+  @MaxLength(64)
   myShiftId!: string;
 
   @IsString()
+  @MaxLength(64)
   targetProfileId!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   targetShiftId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   note?: string;
 }
 
@@ -400,11 +433,23 @@ export class SchedulingController {
 
   @RequireSubscription()
   @Get('blackouts')
-  async listBlackouts(@VenueScope() scope: Scope) {
+  async listBlackouts(
+    @VenueScope() scope: Scope,
+    @Query('startDate') startDateParam?: string,
+    @Query('endDate') endDateParam?: string,
+  ) {
     if (!scope) return [];
+    const where: Prisma.BlackoutDateWhereInput = { venueId: scope.venueId };
+    if (startDateParam && isIsoDate(startDateParam)) {
+      where.endDate = { gte: new Date(startDateParam + 'T00:00:00.000Z') };
+    }
+    if (endDateParam && isIsoDate(endDateParam)) {
+      where.startDate = { lte: new Date(endDateParam + 'T23:59:59.999Z') };
+    }
     const rows = await this.prisma.blackoutDate.findMany({
-      where: { venueId: scope.venueId },
+      where,
       orderBy: { startDate: 'asc' },
+      take: 500,
     });
     return rows.map((row) => ({
       _id: row.id,

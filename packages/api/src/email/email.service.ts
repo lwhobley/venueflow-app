@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { sanitizeForEmail } from '../common/sanitize-email-text';
 
 type EmailArgs = {
+  from?: string;
   to: string | string[];
   subject: string;
   text: string;
@@ -64,7 +65,7 @@ export class EmailService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>',
+        from: args.from ?? this.config.get<string>('EMAIL_FROM') ?? this.config.get<string>('MAIL_FROM') ?? 'Venue Wrangler <no-reply@venuewrangler.com>',
         to,
         ...(bcc.length ? { bcc } : {}),
         subject,

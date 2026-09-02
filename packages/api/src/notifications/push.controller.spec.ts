@@ -10,11 +10,10 @@ describe('PushController', () => {
   });
 
   it('binds a registered token to the authenticated profile and venue', async () => {
-    const update = vi.fn().mockResolvedValue({ id: 'push-1' });
-    const create = vi.fn();
+    const upsert = vi.fn().mockResolvedValue({ id: 'push-1' });
     const findUnique = vi.fn().mockResolvedValue({ profileId: 'profile-1', venueId: 'venue-1' });
     const controller = new PushController({
-      $transaction: (callback: any) => callback({ $executeRaw: vi.fn(), pushToken: { findUnique, update, create } }),
+      $transaction: (callback: any) => callback({ $executeRaw: vi.fn(), pushToken: { findUnique, upsert } }),
     } as any);
 
     await expect(controller.registerPushToken(
@@ -22,9 +21,9 @@ describe('PushController', () => {
       { token: 'ExponentPushToken[test]', platform: 'android' },
     )).resolves.toEqual({ id: 'push-1', ok: true });
 
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: { token: 'ExponentPushToken[test]' },
-      data: expect.objectContaining({ profileId: 'profile-1', venueId: 'venue-1', enabled: true }),
+      update: expect.objectContaining({ profileId: 'profile-1', venueId: 'venue-1', enabled: true }),
     }));
   });
 

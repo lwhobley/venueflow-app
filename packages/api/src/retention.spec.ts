@@ -8,18 +8,22 @@ const initSentry = vi.fn();
 const captureException = vi.fn();
 const flushSentry = vi.fn().mockResolvedValue(true);
 
-vi.mock('@nestjs/core', () => ({
-  NestFactory: {
-    createApplicationContext: vi.fn(async () => ({
-      get: (token: unknown) => {
-        if (token === AuditServiceToken) return { cleanupOldAuditLogs, cleanupExpiredRetainedTimeEntries };
-        if (token === AttestationServiceToken) return { cleanupExpiredChallenges };
-        throw new Error(`Unexpected token in test double: ${String(token)}`);
-      },
-      close: closeApp,
-    })),
-  },
-}));
+vi.mock('@nestjs/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nestjs/core')>();
+  return {
+    ...actual,
+    NestFactory: {
+      createApplicationContext: vi.fn(async () => ({
+        get: (token: unknown) => {
+          if (token === AuditServiceToken) return { cleanupOldAuditLogs, cleanupExpiredRetainedTimeEntries };
+          if (token === AttestationServiceToken) return { cleanupExpiredChallenges };
+          throw new Error(`Unexpected token in test double: ${String(token)}`);
+        },
+        close: closeApp,
+      })),
+    },
+  };
+});
 
 vi.mock('./observability/sentry', () => ({ initSentry, captureException, flushSentry }));
 

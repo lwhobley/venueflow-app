@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ArrayMaxSize,
@@ -101,6 +102,7 @@ class AvailabilityBlockDto {
 class TimeCorrectionDto {
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   timeEntryId?: string | null;
 
   @IsNumber()
@@ -124,9 +126,11 @@ class CreateStaffRequestDto {
   kind!: string;
 
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsString()
+  @MaxLength(4000)
   details!: string;
 
   @IsString()
@@ -136,6 +140,7 @@ class CreateStaffRequestDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   requestedShiftId?: string;
 
   @IsString()
@@ -168,6 +173,7 @@ class ReviewStaffRequestDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   responseNotes?: string;
 }
 
@@ -181,14 +187,21 @@ export class StaffRequestsController {
 
   @RequireSubscription()
   @Get()
-  async listStaffRequests(@VenueScope() scope: Scope) {
+  async listStaffRequests(
+    @VenueScope() scope: Scope,
+    @Query('before') before?: string,
+    @Query('limit') limitQuery?: string,
+  ) {
     if (!scope) return [];
+    const limit = limitQuery ? Math.min(Math.max(1, parseInt(limitQuery, 10) || 50), 500) : 500;
     const requests = await this.prisma.staffRequest.findMany({
       where: {
         venueId: scope.venueId,
         ...(canManageVenue(scope.role, scope.allAccess) ? {} : { profileId: scope.profileId }),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      ...(before ? { cursor: { id: before }, skip: 1 } : {}),
     });
     return requests.map(mapStaffRequest);
   }
@@ -204,7 +217,11 @@ export class StaffRequestsController {
       const reqEnd = body.requestedRangeEnd || body.requestedForDate || reqStart;
       if (reqStart && reqEnd) {
         const blackouts = await this.prisma.blackoutDate.findMany({
-          where: { venueId: scope.venueId },
+          where: {
+            venueId: scope.venueId,
+            startDate: { lte: new Date(reqEnd + 'T23:59:59.999Z') },
+            endDate: { gte: new Date(reqStart + 'T00:00:00.000Z') },
+          },
         });
         const hit = blackouts.find((b) => {
           const bStart = b.startDate.toISOString().split('T')[0];

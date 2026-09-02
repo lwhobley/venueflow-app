@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Logger, Optional, Post, Req, Una
 import { JwtService } from '@nestjs/jwt';
 import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import type { Request } from 'express';
 import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
@@ -46,10 +46,12 @@ class PasswordAuthDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   password!: string;
 
   @IsIn(['signIn', 'signUp'])
@@ -57,18 +59,22 @@ class PasswordAuthDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   fullName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(60)
   firstName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(60)
   lastName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(128)
   inviteToken?: string;
 
   @IsBoolean()
@@ -79,10 +85,12 @@ class PasswordAuthDto {
 class ChangePasswordDto {
   @IsString()
   @IsOptional()
+  @MaxLength(128)
   currentPassword?: string;
 
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   newPassword!: string;
 }
 
@@ -104,6 +112,7 @@ class LogoutDto {
   // nothing rather than something belonging to another profile.
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   pushToken?: string;
 }
 
@@ -117,6 +126,7 @@ class ResetPasswordDto {
 
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   newPassword!: string;
 }
 

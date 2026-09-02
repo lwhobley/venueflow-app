@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post, Query, Req, UnauthorizedException } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, PosProvider, PosCheckStatus } from '@prisma/client';
 import type { Request } from 'express';
@@ -13,6 +13,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { Audited } from '../audit/audited.decorator';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -66,6 +67,7 @@ class UpsertPosConnectionDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   externalLocationId?: string;
 
   @IsIn(['connected', 'paused', 'error'])
@@ -74,10 +76,12 @@ class UpsertPosConnectionDto {
 
 class IngestMenuItemDto {
   @IsString()
+  @MaxLength(200)
   name!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   category?: string;
 
   @IsNumber()
@@ -89,6 +93,7 @@ class IngestMenuItemDto {
 
 class IngestCheckDto {
   @IsString()
+  @MaxLength(128)
   externalCheckId!: string;
 
   @IsNumber()
@@ -112,11 +117,11 @@ class IngestCheckDto {
   @IsInt() @IsOptional() promoCents?: number;
   @IsInt() @IsOptional() guestCount?: number;
 
-  @IsString() @IsOptional() tableLabel?: string;
-  @IsString() @IsOptional() serverName?: string;
-  @IsString() @IsOptional() guestName?: string;
-  @IsString() @IsOptional() revenueCenter?: string;
-  @IsString() @IsOptional() tenderType?: string;
+  @IsString() @IsOptional() @MaxLength(100) tableLabel?: string;
+  @IsString() @IsOptional() @MaxLength(200) serverName?: string;
+  @IsString() @IsOptional() @MaxLength(200) guestName?: string;
+  @IsString() @IsOptional() @MaxLength(100) revenueCenter?: string;
+  @IsString() @IsOptional() @MaxLength(100) tenderType?: string;
 
   @IsArray()
   @IsOptional()
@@ -127,9 +132,9 @@ class IngestCheckDto {
 }
 
 class IngestLaborPunchDto {
-  @IsString() externalEmployeeId!: string;
-  @IsString() employeeName!: string;
-  @IsString() @IsOptional() jobTitle?: string;
+  @IsString() @MaxLength(128) externalEmployeeId!: string;
+  @IsString() @MaxLength(200) employeeName!: string;
+  @IsString() @IsOptional() @MaxLength(100) jobTitle?: string;
 
   @IsNumber() clockInAt!: number;
   @IsNumber() @IsOptional() clockOutAt?: number;
@@ -142,7 +147,7 @@ class IngestLaborPunchDto {
   @IsInt() @IsOptional() overtimePayCents?: number;
   @IsInt() @IsOptional() totalPayCents?: number;
 
-  @IsString() businessDate!: string;
+  @IsString() @MaxLength(32) businessDate!: string;
 }
 
 class PosIngestDto {
@@ -593,6 +598,7 @@ export class PosController {
   }
 
   @RequireSubscription('active')
+  @Audited('webhook_secret.rotate_pos', { entityType: 'pos_connection', summary: 'Rotated POS connection secret' })
   @Post('connections/:id/rotate-secret')
   async rotatePosConnectionSecret(@VenueScope() scope: Scope, @Param('id') id: string) {
     this.requireManager(scope);

@@ -10,5 +10,6 @@ import { DocumentMalwareScannerService } from './document-malware-scanner.servic
   imports: [PrismaModule, BillingModule, MediaCleanupModule],
   controllers: [DocumentsController],
   providers: [S3DocumentService, DocumentMalwareScannerService],
+  exports: [DocumentMalwareScannerService],
 })
 export class DocumentsModule {}

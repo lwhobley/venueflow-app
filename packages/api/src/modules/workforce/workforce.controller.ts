@@ -44,18 +44,22 @@ function normalisedPhone(raw: string): string {
 class InviteCheckDto {
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 }
 
 class JoinRequestDto {
   @IsString()
+  @MaxLength(64)
   venueId!: string;
 
   @IsString()
+  @MaxLength(32)
   code!: string;
 }
 

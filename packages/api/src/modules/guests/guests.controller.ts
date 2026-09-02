@@ -13,7 +13,7 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
 import { createHash } from 'crypto';
@@ -26,6 +26,7 @@ import { generateWebhookSecret, secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { Audited } from '../audit/audited.decorator';
 
 type Scope = VenueScopedRequest['venueScope'];
 const LEADS_WEBHOOK_RATE_LIMIT_MAX = 120;
@@ -63,33 +64,41 @@ export const POSSIBLE_DUPLICATE_TAG = 'possible-duplicate';
 class UpsertGuestDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   guestId?: string;
 
   @IsString()
+  @MaxLength(200)
   fullName!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   lifecycleStage?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   source?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   birthday?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   company?: string;
 
   @IsBoolean()
@@ -98,46 +107,56 @@ class UpsertGuestDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   favoriteTable?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   preferredServer?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   dietaryNotes?: string;
 
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
   tags?: string[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
 class LeadDto {
   @IsString()
+  @MaxLength(200)
   fullName!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   source?: string;
 
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
   tags?: string[];
 }
@@ -155,6 +174,7 @@ class IngestLeadsDto {
 class GuestListQueryDto {
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   q?: string;
 
   @Type(() => Number)
@@ -600,6 +620,7 @@ export class GuestsController {
   }
 
   @RequireSubscription('active')
+  @Audited('webhook_secret.rotate_leads', { entityType: 'venue', summary: 'Rotated leads webhook secret' })
   @Post('rotate-webhook-secret')
   async rotateLeadsWebhookSecret(@VenueScope() scope: Scope) {
     this.requireManager(scope);

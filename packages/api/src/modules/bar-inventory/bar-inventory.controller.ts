@@ -13,7 +13,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Matches, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -48,9 +48,11 @@ type PrepItemStatus = (typeof PREP_ITEM_STATUSES)[number];
 class UpsertBarItemDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   itemId?: string;
 
   @IsString()
+  @MaxLength(200)
   name!: string;
 
   @IsIn(CATEGORIES)
@@ -58,9 +60,11 @@ class UpsertBarItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   area?: string;
 
   @IsString()
+  @MaxLength(50)
   unit!: string;
 
   @IsNumber()
@@ -78,14 +82,17 @@ class UpsertBarItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   supplier?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   sku?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
@@ -98,11 +105,13 @@ class RecordMovementDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
 class ParsedItemDto {
   @IsString()
+  @MaxLength(200)
   name!: string;
 
   @IsIn(CATEGORIES)
@@ -110,9 +119,11 @@ class ParsedItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   area?: string;
 
   @IsString()
+  @MaxLength(50)
   unit!: string;
 
   @IsNumber()
@@ -129,14 +140,17 @@ class ParsedItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   supplier?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   sku?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
@@ -157,26 +171,31 @@ class UpdateCostDto {
 class ParseBarInventoryInputDto {
   @IsString()
   @IsOptional()
+  @MaxLength(100_000)
   text?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(10_000_000)
   imageBase64?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   imageMimeType?: string;
 }
 
 class UpsertPrepBoardItemDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   itemId?: string;
 
   @IsIn(PREP_ITEM_KINDS)
   kind!: PrepItemKind;
 
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsNumber()
@@ -186,14 +205,17 @@ class UpsertPrepBoardItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   unit?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   station?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 
   @IsString()

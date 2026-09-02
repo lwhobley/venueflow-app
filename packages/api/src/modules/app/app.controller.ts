@@ -1,5 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, Logger, NotFoundException, Optional, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, ReservationStatus, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
 import type { Request } from 'express';
@@ -27,6 +27,7 @@ import { isActiveMembership } from '../../common/membership';
 import { syncTeamMemberCount } from '../../common/team-sync';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { endBreakForProfile, startBreakForProfile } from '../time-clock/break-transitions';
+import { Audited } from '../audit/audited.decorator';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -45,6 +46,7 @@ const MULTI_VENUE_PLAN_ID = 'venueflow_multi_venue_5';
 const MULTI_VENUE_PRICE_CENTS = 39900;
 const MULTI_VENUE_MAX_VENUES = 5;
 const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
+const PUBLIC_INVITE_GLOBAL_RATE_LIMIT_MAX = 500;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 // Human-typeable invite codes. Excludes look-alike characters (0/O, 1/I/L) so
@@ -77,34 +79,42 @@ function makeVenueCode(): string {
 class BootstrapProfileDto {
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   fullName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   jobTitle?: string;
 }
 
 class RegisterVenueDto {
   @IsString()
+  @MaxLength(200)
   businessName!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   ownerName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   address?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   venueType?: string;
 
   @IsString()
+  @MaxLength(50)
   staffRange!: string;
 
   @IsNumber()
@@ -121,12 +131,14 @@ class RegisterVenueDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   timezone?: string;
 }
 
 class UpdateVenueDto {
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   name?: string;
 
   @IsNumber()
@@ -148,6 +160,7 @@ class UpdateVenueDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   timezone?: string;
 }
 
@@ -159,12 +172,14 @@ class BreakStartDto {
 
 class VenueRoleDto {
   @IsString()
+  @MaxLength(100)
   name!: string;
 }
 
 class CreateInviteDto {
   @IsEmail()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsIn(['manager', 'staff'])
@@ -172,21 +187,25 @@ class CreateInviteDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   jobTitle?: string;
 }
 
 class JoinByCodeDto {
   @IsString()
+  @MaxLength(64)
   code!: string;
 }
 
 class RedeemInviteDto {
   @IsString()
+  @MaxLength(128)
   codeOrToken!: string;
 }
 
 class SwitchVenueDto {
   @IsString()
+  @MaxLength(64)
   venueId!: string;
 }
 
@@ -485,6 +504,7 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @RequireSubscription()
+  @Audited('join_code.rotate', { entityType: 'venue', summary: 'Rotated venue join code' })
   @Post('venue/join-code/rotate')
   async rotateVenueJoinCode(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
@@ -650,6 +670,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Audited('time_entries.export', { entityType: 'time_clock', summary: 'Exported time entries CSV' })
   @Get('time-entries/csv')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="time-entries.csv"')
@@ -867,6 +888,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Audited('invite.create', { entityType: 'invite', summary: 'Created team invite' })
   @Post('invites')
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
@@ -961,6 +983,12 @@ export class AppController {
   @Public()
   @Get('invite/:code')
   async previewInvite(@Req() request: Request, @Param('code') rawCode: string) {
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      'public-invite:global',
+      PUBLIC_INVITE_GLOBAL_RATE_LIMIT_MAX,
+      PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS,
+    );
     await assertWithinSharedRateLimit(
       this.prisma,
       `public-invite:${getClientIp(request)}`,
@@ -1139,6 +1167,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Audited('account.delete', { entityType: 'account', summary: 'Deleted user account' })
   @Delete('me')
   async deleteMyAccount(@CurrentUser() user: AuthUser, @Body() body: DeleteAccountDto = {}) {
     const deletionRunId = randomBytes(16).toString('hex');

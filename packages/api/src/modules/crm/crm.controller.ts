@@ -21,6 +21,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -37,6 +38,7 @@ import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { randomUUID } from 'crypto';
 import { CrmTemplateService } from './crm-template.service';
 import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
+import { AuditService } from '../audit/audit.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -51,25 +53,31 @@ const BEO_EMAIL_VENUE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 class SaveLeadDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   leadId?: string;
 
   @IsString()
+  @MaxLength(200)
   fullName!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   company?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   source?: string;
 
   @IsString()
@@ -80,11 +88,13 @@ class SaveLeadDto {
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
   tags?: string[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   assignedToId?: string;
 
   @IsInt()
@@ -95,19 +105,23 @@ class SaveLeadDto {
 
 class AddNoteDto {
   @IsString()
+  @MaxLength(4000)
   text!: string;
 }
 
 class SaveBeoDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   beoId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   leadId?: string;
 
   @IsString()
+  @MaxLength(200)
   eventName!: string;
 
   @IsNumber()
@@ -116,6 +130,7 @@ class SaveBeoDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   eventType?: string;
 
   @IsInt()
@@ -125,10 +140,12 @@ class SaveBeoDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   venueSpace?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   setupStyle?: string;
 
   @IsInt()
@@ -147,30 +164,37 @@ class SaveBeoDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   menuAppetizers?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   menuEntrees?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   menuDesserts?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   menuBarPackage?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   specialRequirements?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   internalNotes?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   assignedRepId?: string;
 
   @IsString()
@@ -182,18 +206,22 @@ class SaveBeoDto {
 class SaveContractDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   contractId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   leadId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   beoId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   eventName?: string;
 
   @IsNumber()
@@ -207,6 +235,7 @@ class SaveContractDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   venueSpace?: string;
 
   @IsInt()
@@ -216,16 +245,19 @@ class SaveContractDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(4000)
   cancellationPolicy?: string;
 
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(2000, { each: true })
   @IsOptional()
   customClauses?: string[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   clientSignatureName?: string;
 
   @IsString()
@@ -237,6 +269,7 @@ class SaveContractDto {
 class CrmListQueryDto {
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   search?: string;
 
   @Type(() => Number)
@@ -283,39 +316,48 @@ const ACTIVE_STAGES: CrmLeadStatus[] = ['new', 'contacted', 'qualified', 'propos
 
 class EmailBeoDto {
   @IsEmail({}, { message: 'toEmail must be a valid email address' })
+  @MaxLength(255)
   toEmail!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(4000)
   message?: string;
 }
 
 class SaveTemplateDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   templateId?: string;
 
   @IsString()
+  @MaxLength(100)
   name!: string;
 
   @IsString()
+  @MaxLength(500)
   subject!: string;
 
   @IsString()
+  @MaxLength(20000)
   body!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   variables?: string;
 }
 
 class RenderTemplateDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   leadId?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   beoId?: string;
 }
 
@@ -410,6 +452,7 @@ export class CrmController {
     private readonly email: EmailService,
     private readonly templates: CrmTemplateService,
     @Optional() private readonly executionAutopilot?: ExecutionAutopilotService,
+    @Optional() private readonly audit?: AuditService,
   ) {}
 
   @RequireSubscription('active')
@@ -580,6 +623,14 @@ export class CrmController {
   @Post('leads/:id/notes')
   async addNote(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: AddNoteDto) {
     requireManager(scope);
+
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `crm-note:profile:${scope.profileId}`,
+      30,
+      60_000,
+      'Too many notes added. Please wait a moment before adding another note.',
+    );
 
     const lead = await this.prisma.crmLead.findFirst({
       where: { id, venueId: scope.venueId, deletedAt: null },
@@ -939,22 +990,25 @@ export class CrmController {
   @Get('source-roi')
   async getSourceRoi(@VenueScope() scope: Scope) {
     requireManager(scope);
-    const leads = await this.prisma.crmLead.findMany({
+    const groups = await this.prisma.crmLead.groupBy({
+      by: ['source', 'status'],
       where: { venueId: scope.venueId, deletedAt: null },
-      select: { source: true, status: true, estimatedValueCents: true },
+      _count: { _all: true },
+      _sum: { estimatedValueCents: true },
     });
     const bySource = new Map<string, { source: string; leadCount: number; wonCount: number; lostCount: number; pipelineValueCents: number; wonValueCents: number }>();
-    for (const lead of leads) {
-      const source = lead.source ?? '(unspecified)';
+    for (const g of groups) {
+      const source = g.source ?? '(unspecified)';
       const row = bySource.get(source) ?? { source, leadCount: 0, wonCount: 0, lostCount: 0, pipelineValueCents: 0, wonValueCents: 0 };
-      row.leadCount += 1;
-      const value = lead.estimatedValueCents ?? 0;
-      row.pipelineValueCents += value;
-      if (lead.status === 'won') {
-        row.wonCount += 1;
-        row.wonValueCents += value;
-      } else if (lead.status === 'lost' || lead.status === 'unqualified') {
-        row.lostCount += 1;
+      const count = g._count._all;
+      const sum = g._sum.estimatedValueCents ?? 0;
+      row.leadCount += count;
+      row.pipelineValueCents += sum;
+      if (g.status === 'won') {
+        row.wonCount += count;
+        row.wonValueCents += sum;
+      } else if (g.status === 'lost' || g.status === 'unqualified') {
+        row.lostCount += count;
       }
       bySource.set(source, row);
     }
@@ -1039,6 +1093,22 @@ export class CrmController {
   @Post('beos/:id/email')
   async emailBeo(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: EmailBeoDto) {
     requireManager(scope);
+
+    const [beo, venue] = await Promise.all([
+      this.prisma.crmBeo.findFirst({
+        where: { id, venueId: scope.venueId },
+        include: { lead: { select: { fullName: true, email: true } } },
+      }),
+      this.prisma.venue.findUnique({
+        where: { id: scope.venueId },
+        select: { name: true, subscriptionStatus: true, stripeSubscriptionId: true },
+      }),
+    ]);
+    if (!beo) throw new NotFoundException('BEO not found');
+
+    const isTrial = venue?.subscriptionStatus === 'trialing' || !venue?.stripeSubscriptionId;
+    const venueEmailLimit = isTrial ? 5 : BEO_EMAIL_VENUE_LIMIT_MAX;
+
     await assertWithinSharedRateLimit(
       this.prisma,
       `crm-beo-email:manager:${scope.profileId}`,
@@ -1049,25 +1119,70 @@ export class CrmController {
     await assertWithinSharedRateLimit(
       this.prisma,
       `crm-beo-email:venue:${scope.venueId}`,
-      BEO_EMAIL_VENUE_LIMIT_MAX,
+      venueEmailLimit,
       BEO_EMAIL_VENUE_LIMIT_WINDOW_MS,
-      'This venue has sent too many BEO emails. Try again later.',
+      isTrial
+        ? 'Trial account BEO email limit reached (5/hour). Please upgrade for higher limits.'
+        : 'This venue has sent too many BEO emails. Try again later.',
     );
-    const [beo, venue] = await Promise.all([
-      this.prisma.crmBeo.findFirst({
-        where: { id, venueId: scope.venueId },
-        include: { lead: { select: { fullName: true, email: true } } },
-      }),
-      this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { name: true } }),
-    ]);
-    if (!beo) throw new NotFoundException('BEO not found');
+
+    // Validate that the recipient is authorized for this venue
+    const targetEmail = body.toEmail.trim().toLowerCase();
+    const isAssociatedLead = beo.lead?.email?.trim().toLowerCase() === targetEmail;
+    if (!isAssociatedLead) {
+      const [leadMatch, guestMatch, staffMatch] = await Promise.all([
+        this.prisma.crmLead.findFirst({
+          where: { venueId: scope.venueId, email: { equals: targetEmail, mode: 'insensitive' }, deletedAt: null },
+          select: { id: true },
+        }),
+        this.prisma.guest.findFirst({
+          where: { venueId: scope.venueId, email: { equals: targetEmail, mode: 'insensitive' } },
+          select: { id: true },
+        }),
+        this.prisma.profile.findFirst({
+          where: {
+            venueId: scope.venueId,
+            email: { equals: targetEmail, mode: 'insensitive' },
+            OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (!leadMatch && !guestMatch && !staffMatch) {
+        throw new BadRequestException('Recipient must be an associated lead, guest, or venue team member.');
+      }
+    }
+
     const venueName = venue?.name ?? 'Venue';
     const subject = `${venueName} - Banquet Event Order: ${beo.eventName}`;
     const text = renderBeoText(beo, venueName, body.message);
     const html = renderBeoHtml(beo, venueName, body.message);
-    await this.email.sendOrThrow({ to: body.toEmail, subject, text, html });
+    await this.email.sendOrThrow({
+      from: 'Venue Wrangler Events <no-reply@events.venuewrangler.com>',
+      to: body.toEmail,
+      subject,
+      text,
+      html,
+    });
     if (beo.leadId) {
       await this.logActivity(scope.venueId, beo.leadId, scope.profileId, 'beo_emailed', `-> ${body.toEmail}`);
+    }
+    if (this.audit) {
+      await this.audit.record({
+        venueId: scope.venueId,
+        actorProfileId: scope.profileId,
+        actorName: scope.fullName,
+        actorRole: scope.role,
+        entityType: 'beo',
+        entityId: beo.id,
+        action: 'beo_emailed',
+        summary: `${scope.fullName} emailed BEO "${beo.eventName}" to ${body.toEmail}.`,
+        metadata: {
+          beoId: beo.id,
+          recipient: body.toEmail,
+          eventName: beo.eventName,
+        },
+      });
     }
     return { ok: true };
   }

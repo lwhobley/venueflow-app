@@ -1,11 +1,20 @@
 import { Global, Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditService } from './audit.service';
+import { AuditInterceptor } from './audit.interceptor';
 import { PrismaModule } from '../../prisma/prisma.module';
 
 @Global()
 @Module({
   imports: [PrismaModule],
-  providers: [AuditService],
-  exports: [AuditService],
+  providers: [
+    AuditService,
+    AuditInterceptor,
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
+    },
+  ],
+  exports: [AuditService, AuditInterceptor],
 })
 export class AuditModule {}

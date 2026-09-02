@@ -17,6 +17,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -45,15 +46,18 @@ class TableChairDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   label?: string;
 }
 
 class TableDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   id?: string;
 
   @IsString()
+  @MaxLength(50)
   label!: string;
 
   @IsNumber()
@@ -74,6 +78,7 @@ class TableDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   section?: string;
 
   @IsInt()
@@ -82,6 +87,7 @@ class TableDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   seatLabelStyle?: string;
 
   @IsNumber()
@@ -112,6 +118,7 @@ const MAX_FLOOR_PLAN_TABLES = 500;
 class SaveFloorPlanDto {
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   name?: string;
 
   @IsNumber()
@@ -124,6 +131,7 @@ class SaveFloorPlanDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   backgroundImageUrl?: string | null;
 
   @IsArray()
@@ -142,6 +150,7 @@ class SaveFloorPlanDto {
 
 class AddWaitlistDto {
   @IsString()
+  @MaxLength(200)
   guestName!: string;
 
   @IsInt()
@@ -150,14 +159,17 @@ class AddWaitlistDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   notes?: string;
 }
 
@@ -169,11 +181,13 @@ class TableStatusDto {
 
 class AssignReservationDto {
   @IsString()
+  @MaxLength(64)
   reservationId!: string;
 
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   tableIds!: string[];
 
   @IsString()
@@ -192,11 +206,13 @@ class AssignReservationDto {
 
 class AssignWaitlistDto {
   @IsString()
+  @MaxLength(64)
   waitlistId!: string;
 
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   tableIds!: string[];
 
   @IsString()
@@ -217,6 +233,7 @@ class MergeTablesDto {
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   tableIds!: string[];
 
   @IsInt()

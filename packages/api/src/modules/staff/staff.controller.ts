@@ -8,7 +8,7 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Prisma, Role } from '@prisma/client';
 import { canManageRole, canManageVenue, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
@@ -18,6 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { syncTeamMemberCount } from '../../common/team-sync';
+import { AuditService } from '../audit/audit.service';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -26,9 +27,11 @@ const ELEVATED_ROLES = ['admin', 'owner', 'manager'];
 
 class UpsertStaffDto {
   @IsEmail()
+  @MaxLength(255)
   email!: string;
 
   @IsString()
+  @MaxLength(120)
   fullName!: string;
 
   @IsString()
@@ -36,18 +39,22 @@ class UpsertStaffDto {
   role!: string;
 
   @IsString()
+  @MaxLength(100)
   jobTitle!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   phone?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   altPhone?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   address?: string;
 
   @IsOptional()
@@ -58,6 +65,7 @@ class UpsertStaffDto {
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   certifications?: string[];
 }
 
@@ -66,6 +74,7 @@ export class StaffController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
+    private readonly audit: AuditService,
   ) {}
 
   @RequireSubscription()
@@ -122,6 +131,28 @@ export class StaffController {
         if (roleChanged && member.userId) {
           await tx.session.deleteMany({ where: { userId: member.userId } });
         }
+        await this.audit.record(
+          {
+            venueId: scope.venueId,
+            actorProfileId: scope.profileId,
+            actorName: scope.fullName,
+            actorRole: scope.role,
+            targetProfileId: u.id,
+            targetName: u.fullName,
+            targetRole: u.role,
+            entityType: 'profile',
+            entityId: u.id,
+            action: 'staff_updated',
+            summary: `${scope.fullName} updated ${u.fullName}${member.role !== u.role ? ` from ${member.role} to ${u.role}` : ''}.`,
+            metadata: {
+              previousRole: member.role,
+              nextRole: u.role,
+              previousJobTitle: member.jobTitle,
+              nextJobTitle: u.jobTitle,
+            },
+          },
+          tx,
+        );
         return u;
       });
       void this.email.send({
@@ -159,6 +190,23 @@ export class StaffController {
         },
       });
       await syncTeamMemberCount(tx, scope.venueId);
+      await this.audit.record(
+        {
+          venueId: scope.venueId,
+          actorProfileId: scope.profileId,
+          actorName: scope.fullName,
+          actorRole: scope.role,
+          targetProfileId: c.id,
+          targetName: c.fullName,
+          targetRole: c.role,
+          entityType: 'profile',
+          entityId: c.id,
+          action: 'staff_created',
+          summary: `${scope.fullName} added ${c.fullName} as ${c.role}.`,
+          metadata: { role: c.role, jobTitle: c.jobTitle },
+        },
+        tx,
+      );
       return c;
     });
     void this.email.send({
@@ -207,6 +255,22 @@ export class StaffController {
         if (activeElsewhere === 0) await tx.session.deleteMany({ where: { userId: staff.userId } });
       }
       await syncTeamMemberCount(tx, scope.venueId);
+      await this.audit.record(
+        {
+          venueId: scope.venueId,
+          actorProfileId: scope.profileId,
+          actorName: scope.fullName,
+          actorRole: scope.role,
+          targetProfileId: staff.id,
+          targetName: staff.fullName,
+          targetRole: staff.role,
+          entityType: 'profile',
+          entityId: staff.id,
+          action: 'staff_deactivated',
+          summary: `${scope.fullName} deactivated ${staff.fullName}.`,
+        },
+        tx,
+      );
       return u;
     });
     return mapProfile(updated);

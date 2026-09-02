@@ -8,7 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
 import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { csvCell, csvDocument } from '../../common/csv';
@@ -16,17 +16,21 @@ import { zonedDateBounds, zonedIsoDate } from '../../common/venue-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { Audited } from '../audit/audited.decorator';
 
 type Scope = VenueScopedRequest['venueScope'];
 
 class RecordPayrollExportDto {
   @IsString()
+  @MaxLength(64)
   provider!: string;
 
   @IsString()
+  @MaxLength(32)
   periodStart!: string;
 
   @IsString()
+  @MaxLength(32)
   periodEnd!: string;
 
   @IsInt()
@@ -187,6 +191,7 @@ export class PayrollController {
   }
 
   @RequireSubscription('paid')
+  @Audited('payroll.export', { entityType: 'payroll', summary: 'Exported payroll CSV' })
   @Get('export-csv')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="payroll.csv"')

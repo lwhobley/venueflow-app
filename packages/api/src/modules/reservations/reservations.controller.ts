@@ -29,6 +29,7 @@ import { secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { Audited } from '../audit/audited.decorator';
 import { ReservationMutationService } from './reservation-mutation.service';
 import { ReservationNotifierService } from './reservation-notifier.service';
 
@@ -46,9 +47,11 @@ const MAX_EXPORT_RANGE_DAYS = 366;
 class SaveReservationDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   reservationId?: string;
 
   @IsString()
+  @MaxLength(200)
   guestName!: string;
 
   @IsInt()
@@ -56,6 +59,7 @@ class SaveReservationDto {
   partySize!: number;
 
   @IsString()
+  @MaxLength(64)
   reservationTime!: string;
 
   @IsInt()
@@ -69,6 +73,7 @@ class SaveReservationDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 
   @IsIn(RESERVATION_SOURCES)
@@ -78,16 +83,19 @@ class SaveReservationDto {
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
   tags?: string[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   specialRequests?: string;
 
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   @IsOptional()
   tableIds?: string[];
 
@@ -95,23 +103,28 @@ class SaveReservationDto {
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
   tableNumbers?: string[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   guestCompany?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   occasion?: string;
 
   @IsOptional()
@@ -120,38 +133,47 @@ class SaveReservationDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   eventName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   eventStatus?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   eventSpace?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   setupStyle?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   menuNotes?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   beverageNotes?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   billingNotes?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   contractStatus?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   beoStatus?: string;
 
   @IsInt()
@@ -172,6 +194,7 @@ class ReservationSyncEventDto {
   externalEventId!: string;
 
   @IsString()
+  @MaxLength(100)
   eventType!: string;
 
   // When the source system produced this update. Arrival order is not reliable
@@ -185,6 +208,7 @@ class ReservationSyncEventDto {
   externalId!: string;
 
   @IsString()
+  @MaxLength(200)
   guestName!: string;
 
   @IsInt()
@@ -203,10 +227,10 @@ class ReservationSyncEventDto {
   @IsOptional()
   status?: string;
 
-  @IsString() @IsOptional() phone?: string;
-  @IsString() @IsOptional() email?: string;
-  @IsString() @IsOptional() notes?: string;
-  @IsString() @IsOptional() specialRequests?: string;
+  @IsString() @IsOptional() @MaxLength(50) phone?: string;
+  @IsString() @IsOptional() @MaxLength(255) email?: string;
+  @IsString() @IsOptional() @MaxLength(2000) notes?: string;
+  @IsString() @IsOptional() @MaxLength(2000) specialRequests?: string;
 }
 
 class ReservationIngestDto {
@@ -225,12 +249,15 @@ class ReservationIngestDto {
 
 class ReservationHoldDto {
   @IsString()
+  @MaxLength(64)
   startsAt!: string;
 
   @IsString()
+  @MaxLength(64)
   endsAt!: string;
 
   @IsString()
+  @MaxLength(500)
   reason!: string;
 }
 
@@ -682,6 +709,7 @@ export class ReservationsController {
   }
 
   @RequireSubscription('active')
+  @Audited('reservations.export', { entityType: 'reservation', summary: 'Exported reservations CSV' })
   @Get('export-csv')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="reservations.csv"')

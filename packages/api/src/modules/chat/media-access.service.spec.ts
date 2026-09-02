@@ -77,4 +77,18 @@ describe('MediaAccessService', () => {
     expect(() => service.assertToken('deadbeef'.repeat(8), 'chat-image', 'image-1', 'venue-1'))
       .toThrow(UnauthorizedException);
   });
+
+  it('validates a token bound to a specific profileId', () => {
+    const service = makeService();
+    const path = service.createPath('chat-image', 'image-1', 'venue-1', '/v1/chat/images/image-1', 'prof-1');
+    const url = new URL(path, 'http://localhost');
+    const token = url.searchParams.get('token')!;
+    const p = url.searchParams.get('p')!;
+
+    expect(p).toBe('prof-1');
+    expect(() => service.assertToken(token, 'chat-image', 'image-1', 'venue-1', 'prof-1')).not.toThrow();
+    expect(() => service.assertToken(token, 'chat-image', 'image-1', 'venue-1', 'prof-2'))
+      .toThrow(UnauthorizedException);
+  });
 });
+

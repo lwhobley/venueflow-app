@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Logger, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
@@ -22,15 +22,18 @@ const STRIPE_MULTI_AMOUNT_CENTS = 39900;
 class CreateStripeCheckoutDto {
   @IsString()
   @IsOptional()
+  @IsIn(['single', 'multi_venue'])
   plan?: 'single' | 'multi_venue';
 }
 
 class AppleSubscriptionSyncDto {
   @IsString()
+  @MaxLength(128)
   productId!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(128)
   entitlementId?: string;
 }
 

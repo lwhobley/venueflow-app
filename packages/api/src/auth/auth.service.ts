@@ -129,7 +129,12 @@ export class AuthService {
           await tx.profile.delete({ where: { id: existingByUser.id } });
           result = await tx.profile.update({
             where: { id: adoptableProfile.id },
-            data: { userId, role: 'staff' },
+            data: {
+              userId,
+              role: grant?.role ?? 'staff',
+              ...(grant?.jobTitle || adoptableProfile.jobTitle ? { jobTitle: grant?.jobTitle ?? adoptableProfile.jobTitle } : {}),
+              membershipStatus: grant ? grant.membershipStatus : 'pending',
+            },
             include: { venue: true },
           });
           await this.logProfileAdoption(tx, result);
@@ -184,6 +189,7 @@ export class AuthService {
               role: grant?.role ?? 'staff',
               jobTitle: grant?.jobTitle ?? adoptableProfile.jobTitle,
               venueId: grant?.venueId ?? adoptableProfile.venueId,
+              membershipStatus: grant ? grant.membershipStatus : 'pending',
               trialEndsAt: adoptableProfile.trialEndsAt ?? trialEndsAt,
             },
             include: { venue: true },
