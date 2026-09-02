@@ -21,6 +21,7 @@ import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
+import { canAccessConversation } from '../../common/conversation-access';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
 import { occupiedSlots, previousOvernightFilter } from '../../common/shift-overlap';
@@ -59,11 +60,16 @@ class CreateGroupDto {
   @MaxLength(100)
   name!: string;
 
+  // Optional: the New group form asks for a name only, and the creator is
+  // always added below, so a required array made every group creation fail
+  // with a raw "memberIds must be an array" in front of the manager. People are
+  // added to the group after it exists.
   @IsArray()
   @ArrayMaxSize(500)
   @IsString({ each: true })
   @MaxLength(64, { each: true })
-  memberIds!: string[];
+  @IsOptional()
+  memberIds?: string[];
 }
 
 class SendMessageDto {
@@ -447,7 +453,7 @@ export class ChatController {
     if (!name) throw new BadRequestException('Enter a group name');
     if (name.length > 100) throw new BadRequestException('Group name must be 100 characters or fewer');
 
-    const memberIds = Array.from(new Set([scope.profileId, ...body.memberIds]));
+    const memberIds = Array.from(new Set([scope.profileId, ...(body.memberIds ?? [])]));
     const activeMembers = await this.prisma.profile.findMany({
       where: { id: { in: memberIds }, venueId: scope.venueId, OR: ACTIVE_MEMBERSHIP },
       select: { id: true },
@@ -795,10 +801,27 @@ export class ChatController {
     const text = body.text.trim();
     if (!text) throw new BadRequestException('Text is required');
 
-    await this.prisma.message.update({
-      where: { id },
-      data: { text },
+    // The conversation list renders lastMessageText. Editing the newest message
+    // left the old wording sitting in that preview, so the list and the thread
+    // disagreed about what had been said. Only the newest message owns the
+    // preview — editing an older one must not overwrite it.
+    const newest = await this.prisma.message.findFirst({
+      where: { conversationId: msg.conversationId, venueId: scope.venueId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
     });
+
+    await this.prisma.$transaction([
+      this.prisma.message.update({ where: { id }, data: { text } }),
+      ...(newest?.id === id
+        ? [
+            this.prisma.conversation.update({
+              where: { id: conv.id },
+              data: { lastMessageText: text.slice(0, 80) },
+            }),
+          ]
+        : []),
+    ]);
 
     return { ok: true, text };
   }
@@ -854,20 +877,6 @@ export class ChatController {
     res.setHeader('Referrer-Policy', 'no-referrer');
     return res.redirect(302, url);
   }
-}
-
-function canAccessConversation(memberIds: string[], type: string, profileId: string) {
-  if (type === 'dm') {
-    return memberIds.includes(profileId);
-  }
-  // Deny empty membership lists — until ensureContextualConversations
-  // repopulates members, nobody (including managers) can read/send. Prefer a
-  // brief access gap over an open venue-wide conversation.
-  if (memberIds.length === 0) return false;
-  if (type === 'group' || type === 'role' || type === 'shift') {
-    return memberIds.includes(profileId);
-  }
-  return false;
 }
 
 function canDeleteConversation(type: string, isSystem: boolean) {

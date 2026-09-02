@@ -586,6 +586,15 @@ export class SchedulingAssignmentService {
       };
       profileId: string;
     }) => boolean | Promise<boolean>;
+    // Called only after a shift is durably assigned. canAssign runs before the
+    // transaction, which can still reject the write (double-book, no longer
+    // open, newly unavailable), so a caller tracking running totals — weekly
+    // hours, a labor budget — must accumulate here rather than in canAssign,
+    // or a shift that was skipped still spends against the cap.
+    onAssigned?: (input: {
+      shift: { dayIndex: number; startMinutes: number; endMinutes: number };
+      profileId: string;
+    }) => void;
   }) {
     let assigned = 0;
     let skipped = 0;
@@ -645,6 +654,7 @@ export class SchedulingAssignmentService {
       }
 
       assigned += 1;
+      args.onAssigned?.({ shift, profileId: assignment.profileId });
       assignedShifts.push({
         profileId: assignment.profileId,
         shiftId: shift.id,

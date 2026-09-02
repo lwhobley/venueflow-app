@@ -479,13 +479,25 @@ export class StaffRequestsController {
               venue?.timezone ?? null,
               dayIso,
             );
-            const existing = await tx.timeEntry.findFirst({
+            // Which punch is being corrected has to be unambiguous. With
+            // several punches on the same day this took whichever row came
+            // back first, so a manager could approve a correction and have it
+            // land on a different punch than the one the request described.
+            const sameDay = await tx.timeEntry.findMany({
               where: {
                 profileId: request.profileId,
                 venueId: request.venueId,
                 clockInAt: { gte: new Date(dayStartMs), lt: new Date(dayEndMs) },
               },
+              orderBy: { clockInAt: 'asc' },
+              select: { id: true },
             });
+            if (sameDay.length > 1) {
+              throw new BadRequestException(
+                'There are several punches on that day, so it is not clear which one this request corrects. Ask the employee to resubmit from the punch itself.',
+              );
+            }
+            const existing = sameDay[0] ?? null;
             if (existing) {
               await applyCorrection(existing.id);
             } else {
@@ -546,6 +558,37 @@ export class StaffRequestsController {
               });
             }
           }
+        }
+
+        // Approving a drop or a swap used to change only the request row: the
+        // shift itself kept the same assignee, so the manager's approval and
+        // the published schedule disagreed and the staff member was still on
+        // the floor plan for a shift they had been told they were off. Apply
+        // the approval to the shift the request names.
+        if ((request.kind === 'drop_shift' || request.kind === 'open_shift') && request.requestedShiftId) {
+          await tx.scheduleShift.updateMany({
+            // venueId as well as id: the shift id arrived on the request and a
+            // tenant predicate belongs on every write.
+            where: { id: request.requestedShiftId, venueId: request.venueId, profileId: request.profileId },
+            data: { profileId: null, status: 'open' },
+          });
+        }
+
+        // A swap needs two shifts and two people; a staff request carries one
+        // shift and one person, so approving it here could only ever update the
+        // request row and leave the schedule untouched — an approval that did
+        // nothing. The swaps queue (ShiftSwap) does apply both sides.
+        if (request.kind === 'shift_swap') {
+          throw new BadRequestException(
+            'Approve shift swaps from the swaps queue so both shifts are reassigned. This request cannot move a shift on its own.',
+          );
+        }
+
+        if (request.kind === 'add_shift' && request.requestedShiftId) {
+          await tx.scheduleShift.updateMany({
+            where: { id: request.requestedShiftId, venueId: request.venueId, profileId: null },
+            data: { profileId: request.profileId, status: 'scheduled' },
+          });
         }
       }
 

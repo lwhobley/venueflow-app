@@ -164,7 +164,7 @@ export class DocumentsController {
       this.logger.error(`Document access storage failed for document ${document.id}`, error instanceof Error ? error.stack : undefined);
       throw new ServiceUnavailableException('Document storage is temporarily unavailable. Please try again.');
     }
-    return { url, expiresInSeconds: 300 };
+    return { url, expiresInSeconds: 120 };
   }
 
   @RequireSubscription('active')

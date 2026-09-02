@@ -174,7 +174,7 @@ export class PayrollController {
     @Query('endDate') endDate?: string,
   ) {
     this.requireManager(scope);
-    const { periodStart, periodEnd } = await resolvePayrollPeriod(this.prisma, scope.venueId, startDate, endDate);
+    const { periodStart, periodEnd, startIso, endIso } = await resolvePayrollPeriod(this.prisma, scope.venueId, startDate, endDate);
 
     const rows = await buildPayrollRows(this.prisma, scope.venueId, periodStart, periodEnd);
     const totalHours = Math.round(rows.reduce((sum, r) => sum + r.totalHours, 0) * 100) / 100;
@@ -186,6 +186,8 @@ export class PayrollController {
         employeeCount: rows.filter((r) => r.totalHours > 0).length,
         periodStart: periodStart.getTime(),
         periodEnd: periodEnd.getTime(),
+        startDate: startIso,
+        endDate: endIso,
       },
     };
   }

@@ -247,6 +247,10 @@ function actorOf(scope: NonNullable<Scope>) {
   return { profileId: scope.profileId, fullName: scope.fullName, role: scope.role };
 }
 
+// Table states a non-manager may set from the floor screen. Seating, holds and
+// out-of-service are manager decisions or come from the assignment flows.
+const STAFF_TABLE_STATUSES = new Set<string>(['available', 'dirty']);
+
 function requireManager(scope: Scope): asserts scope is NonNullable<Scope> {
   if (!scope || !canManageVenue(scope.role, scope.allAccess)) throw new ForbiddenException('Not authorized');
 }
@@ -322,6 +326,11 @@ export class FloorController {
   @Patch('tables/:id/status')
   async updateTableStatus(@VenueScope() scope: Scope, @Param('id') id: string, @Body() body: TableStatusDto) {
     if (!scope) throw new ForbiddenException('No venue profile found');
+    // Staff run the floor during service, so bussing states stay open to them.
+    // Everything else on this route (out_of_service in particular) is a
+    // manager-only control the staff screen hides, and the hide was the only
+    // thing enforcing it — an altered request reached the service directly.
+    if (!STAFF_TABLE_STATUSES.has(body.status)) requireManager(scope);
     return this.floor.updateTableStatus(scope.venueId, id, body.status, actorOf(scope));
   }
 

@@ -342,6 +342,9 @@ model Venue {
   venueType                     String?
   staffRange                    String?
   weeklyLaborBudgetHours        Float?
+  // Venue-wide publish markers. Superseded by SchedulePublication for the
+  // per-week state; kept because existing rows are the only record of what was
+  // published before that table existed.
   schedulePublishedAt           DateTime?
   schedulePublishedById         String?
   scheduleUpdatedAfterPublishAt DateTime?
@@ -368,6 +371,7 @@ model Venue {
   pushTokens                    PushToken[]
   timeEntries                   TimeEntry[]
   blackoutDates                 BlackoutDate[]
+  schedulePublications          SchedulePublication[]
   staffRequests                 StaffRequest[]
   guests                        Guest[]
   reservations                  Reservation[]
@@ -499,6 +503,28 @@ model ScheduleShift {
   @@index([profileId])
   @@index([venueId, weekStart])
   @@index([venueId, profileId, weekStart, dayIndex])
+}
+
+/**
+ * Per-week publish state. The venue previously carried a single
+ * schedulePublishedAt covering every week at once, so publishing one week
+ * marked them all published and the manager's "Draft" badge could disagree with
+ * what staff were already being shown. One row per published week; a week with
+ * no row has never been published.
+ */
+model SchedulePublication {
+  id            String   @id @default(cuid())
+  venueId       String
+  // Sunday (YYYY-MM-DD), matching ScheduleShift.weekStart.
+  weekStart     String
+  publishedAt   DateTime
+  publishedById String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  venue         Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([venueId, weekStart])
+  @@index([venueId])
 }
 
 model BlackoutDate {
@@ -1601,6 +1627,10 @@ model BarInventoryItem {
   @@index([venueId, category])
   @@index([venueId, name])
   @@unique([venueId, normalizedName])
+  // A barcode has to identify one item: the SKU lookup takes the first match,
+  // so two items sharing one opened whichever row came back. NULLs stay
+  // distinct in Postgres, so items with no SKU are unconstrained.
+  @@unique([venueId, sku])
 }
 
 model BarInventoryMovement {
@@ -1611,6 +1641,10 @@ model BarInventoryMovement {
   quantity       Float
   previousOnHand Float
   nextOnHand     Float
+  // Unit cost as of this movement. Without it, waste and comp were valued at
+  // the item's current cost, so editing today's cost rewrote the value of
+  // every past waste record. Null only for rows written before this column.
+  unitCostCents  Int?
   notes          String?
   createdBy      String
   createdAt      DateTime             @default(now())
@@ -1793,6 +1827,7 @@ model EventExecutionWorkspace {
   sourceType String
   sourceId   String
   title      String
+  isArchived Boolean                      @default(false)
   createdAt  DateTime                     @default(now())
   updatedAt  DateTime                     @updatedAt
   venue      Venue                        @relation(fields: [venueId], references: [id], onDelete: Cascade)

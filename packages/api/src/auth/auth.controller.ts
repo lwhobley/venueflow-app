@@ -314,9 +314,11 @@ export class AuthController {
     // Swallow delivery errors: the account is already created and the session
     // token is ready to return. The user can request a new code from the
     // verify-email screen if the email didn't arrive.
+    let verificationEmailSent = !emailInvite ? false : null;
     if (!emailInvite) {
       try {
         await this.sendVerificationEmail(nextUserId, email, sessionResult.profile.fullName);
+        verificationEmailSent = true;
       } catch (err: any) {
         // Identify by user id, never the address. Cloud Run logs are retained
         // and fan out to downstream sinks, so an email here is PII at rest for
@@ -325,7 +327,11 @@ export class AuthController {
         this.logger.error(`Verification email failed for user ${nextUserId}: ${err?.message ?? String(err)}`);
       }
     }
-    return sessionResult;
+    // The failure is still swallowed — the account exists and the session token
+    // is ready, so failing the signup would be worse. But it is reported now:
+    // the app used to tell people to check an inbox for a code that was never
+    // sent, with no way to tell that from a slow delivery.
+    return { ...sessionResult, verificationEmailSent };
   }
 
   // Authenticated (not @Public): the global AuthGuard requires a valid bearer

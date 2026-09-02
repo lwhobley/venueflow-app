@@ -481,6 +481,9 @@ describe('OperationsController', () => {
       const result = await controller.getCommandCenter(managerUser);
 
       expect(result.readiness).toEqual(expect.objectContaining({ status: 'blocked', categories: expect.objectContaining({ execution: 0 }) }));
+      expect(prisma.eventExecutionWorkspace.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ isArchived: false }),
+      }));
       expect(result.blockers).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'OPEN_EXECUTION_TASK', targetId: 'execution-task-1' })]));
       expect(result.events[0]).toEqual(expect.objectContaining({ _id: 'evt-1', readiness: 'watch' }));
     });
@@ -494,6 +497,9 @@ describe('OperationsController', () => {
       const result = await controller.updateExecutionTask(managerUser, 'task-1', { status: 'done' });
 
       expect(result).toEqual(expect.objectContaining({ _id: 'task-1', status: 'done' }));
+      expect(prisma.eventExecutionTask.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ workspace: { isArchived: false } }),
+      }));
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: 'execution_task_completed', entityId: 'task-1' }) }));
     });
 
@@ -508,6 +514,19 @@ describe('OperationsController', () => {
       expect(executionAutopilot.ensureWorkspace).toHaveBeenCalledWith(expect.objectContaining({ venueId: 'venue-1', sourceType: 'venue-event', sourceId: 'evt-1', title: 'Gala' }));
     });
 
+    it.each(['reservation', 'beo'])('does not generate work for a cancelled %s', async (kind) => {
+      const { controller, prisma, executionAutopilot } = makeController();
+      prisma.profile.findUnique.mockResolvedValue(makeProfile());
+      prisma[kind === 'beo' ? 'crmBeo' : 'reservation'].findFirst.mockResolvedValue({
+        id: 'cancelled-event', status: 'cancelled', eventName: 'Cancelled event',
+        eventDate: new Date('2026-09-03T18:00:00Z'), reservationTime: new Date('2026-09-03T18:00:00Z'),
+        durationMinutes: 240, tableAssignments: [],
+      });
+
+      await expect(controller.generateCommandCenterEvent(managerUser, 'cancelled-event')).rejects.toThrow('Event not found');
+      expect(executionAutopilot.ensureWorkspace).not.toHaveBeenCalled();
+    });
+
     it('creates incidents from the source event id rather than treating it as a workspace id', async () => {
       const { controller, prisma } = makeController();
       prisma.profile.findUnique.mockResolvedValue(makeProfile());
@@ -518,7 +537,7 @@ describe('OperationsController', () => {
       const result = await controller.createExecutionIncident(managerUser, 'evt-1', { title: 'Power issue', severity: 'high', blocksReadiness: true });
 
       expect(result).toEqual(expect.objectContaining({ _id: 'incident-1', title: 'Power issue' }));
-      expect(prisma.eventExecutionWorkspace.findFirst).toHaveBeenCalledWith({ where: { venueId: 'venue-1', sourceType: 'venue-event', sourceId: 'evt-1' } });
+      expect(prisma.eventExecutionWorkspace.findFirst).toHaveBeenCalledWith({ where: { venueId: 'venue-1', sourceType: 'venue-event', sourceId: 'evt-1', isArchived: false } });
     });
 
     it('returns a persistent event workspace with timeline, vendor, and incident readiness', async () => {

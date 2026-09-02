@@ -192,6 +192,14 @@ export class PosController {
     if (!connection?.webhookSecret || !secretsMatch(secret, connection.webhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
     }
+    // Pausing a connection has to stop the data, not just relabel the
+    // integration screen. The credential stays valid (pause is reversible and
+    // must not force a secret rotation), so the pause is enforced here: a
+    // provider that keeps sending gets a clear refusal rather than silently
+    // updating a venue that believes the feed is off.
+    if (connection.status === 'paused') {
+      throw new ForbiddenException('This POS connection is paused. Resume it in Venue Wrangler to accept updates.');
+    }
     await assertWithinSharedRateLimit(this.prisma, `pos-ingest:${venueId}:${getClientIp(request)}`, INGEST_RATE_LIMIT_MAX, INGEST_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
 
     // class-validator's @IsNumber() accepts NaN/Infinity, which would surface

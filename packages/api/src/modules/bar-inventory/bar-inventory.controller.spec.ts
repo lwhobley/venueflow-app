@@ -677,6 +677,32 @@ describe('BarInventoryController', () => {
       expect(result.totalValueCents).toBe(10 * 1000 + 1 * 2000);
     });
 
+    it('counts an item exactly at par as stocked, matching the purchase-order rule', async () => {
+      // The reorder rule everywhere is onHand < parLevel. An item sitting
+      // exactly at par is not reordered, so it must not be counted as low
+      // either, or the badge disagrees with the purchase order it links to.
+      const { controller, prisma } = makeController();
+      prisma.barInventoryItem.findMany.mockResolvedValue([
+        makeItem({ id: 'at-par', name: 'At Par', onHand: 4, parLevel: 4 }),
+        makeItem({ id: 'below', name: 'Below Par', onHand: 3, parLevel: 4 }),
+      ]);
+
+      const result = await controller.getBarStock(managerUser);
+
+      expect(result.lowStockCount).toBe(1);
+    });
+
+    it('exports every stock row rather than a capped page', async () => {
+      const { controller, prisma } = makeController();
+      prisma.barInventoryItem.findMany.mockResolvedValue([makeItem()]);
+
+      await controller.exportStockCsv(managerUser);
+
+      expect(prisma.barInventoryItem.findMany).toHaveBeenCalledWith(
+        expect.not.objectContaining({ take: expect.anything() }),
+      );
+    });
+
     it('delegates getShrinkageReport to the reports service, scoped by venue', async () => {
       const { controller, reports } = makeController();
 
