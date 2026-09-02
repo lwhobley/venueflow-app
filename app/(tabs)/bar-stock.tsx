@@ -189,7 +189,7 @@ function BarStockScreen() {
     });
   }, [allItems, activeTab]);
 
-  const lowItems = useMemo(() => items.filter((item) => item.onHand <= item.parLevel), [items]);
+  const lowItems = useMemo(() => items.filter((item) => item.onHand < item.parLevel), [items]);
 
   const activeLowStockCount = lowItems.length;
   const activeTotalValueCents = useMemo(() => {
@@ -460,7 +460,7 @@ function BarStockScreen() {
                         <Text style={{ fontWeight: '700' }}>{item.name}</Text>
                         <Text style={{ color: colors.muted }}>{item.category} · {item.area ?? t('barStock.list.unassigned')}</Text>
                       </View>
-                      <Chip compact style={{ backgroundColor: item.onHand <= item.parLevel ? accents[4].bg : accents[2].bg }}>
+                      <Chip compact style={{ backgroundColor: item.onHand < item.parLevel ? accents[4].bg : accents[2].bg }}>
                         {item.onHand} / {item.parLevel}
                       </Chip>
                     </View>
@@ -904,7 +904,7 @@ function BarStockScreen() {
                     <Text style={{ fontWeight: '700' }}>{item.name}</Text>
                     <Text style={{ color: colors.muted }}>{item.category} · {item.area ?? t('barStock.list.unassigned')} · {money(item.unitCostCents)} / {item.unit}</Text>
                   </View>
-                  <Chip compact style={{ backgroundColor: item.onHand <= item.parLevel ? accents[4].bg : accents[2].bg }}>
+                  <Chip compact style={{ backgroundColor: item.onHand < item.parLevel ? accents[4].bg : accents[2].bg }}>
                     {item.onHand} / {item.parLevel}
                   </Chip>
                 </View>

@@ -702,7 +702,14 @@ function readinessInvalidations() {
 }
 
 function scheduleInvalidations() {
-  return [['scheduling', 'getManagerSchedule'], ['scheduling', 'getLaborForecast'], ['scheduling', 'getMySchedule'], ['scheduling', 'getMyShiftSwaps'], ['scheduling', 'listShiftSwaps']];
+  return [
+    ['scheduling', 'getManagerSchedule'],
+    ['scheduling', 'getLaborForecast'],
+    ['scheduling', 'getMySchedule'],
+    ['scheduling', 'getMyShiftSwaps'],
+    ['scheduling', 'listShiftSwaps'],
+    ...readinessInvalidations(),
+  ];
 }
 
 function normalizeReservationTimeInput(value: unknown) {

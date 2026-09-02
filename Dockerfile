@@ -55,8 +55,7 @@ COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_m
 COPY --from=build --chown=node:node /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build --chown=node:node /app/packages/api/dist packages/api/dist
 COPY --from=build --chown=node:node /app/packages/api/prisma packages/api/prisma
-COPY --from=build --chown=node:node /app/packages/api/scripts/assert-database-target.mjs packages/api/scripts/assert-database-target.mjs
-COPY --from=build --chown=node:node /app/packages/api/scripts/assert-migrations-current.mjs packages/api/scripts/assert-migrations-current.mjs
+COPY --from=build --chown=node:node /app/packages/api/scripts packages/api/scripts
 
 # Migrations run once in the release job. Every serving instance independently
 # verifies that the complete packaged migration history is present before it

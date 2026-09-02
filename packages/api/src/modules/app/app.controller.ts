@@ -967,10 +967,11 @@ export class AppController {
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
     // Only owner, admin, or allAccess profiles may create manager-level invites.
-    // A plain manager can only invite staff, matching the canManageRole policy
-    // enforced on direct staff edits.
     const canElevate = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess;
-    const inviteRole = body.role === 'manager' && canElevate ? 'manager' : 'staff';
+    if (body.role === 'manager' && !canElevate) {
+      throw new ForbiddenException('Only owners and administrators can invite managers.');
+    }
+    const inviteRole = body.role === 'manager' ? 'manager' : 'staff';
     const email = body.email?.trim().toLowerCase() || null;
     if (inviteRole === 'manager' && !email) {
       throw new BadRequestException('Manager invites require an email address.');
@@ -1057,6 +1058,10 @@ export class AppController {
   @Public()
   @Get('invite/:code')
   async previewInvite(@Req() request: Request, @Param('code') rawCode: string) {
+    const code = rawCode?.trim();
+    if (!code || code.length < 4 || code.length > 64) {
+      throw new BadRequestException('Invalid invite code format.');
+    }
     await assertWithinSharedRateLimit(
       this.prisma,
       'public-invite:global',
@@ -1069,7 +1074,7 @@ export class AppController {
       PUBLIC_INVITE_RATE_LIMIT_MAX,
       PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS,
     );
-    const invite = await this.findRedeemableInvite({ codeOrToken: rawCode });
+    const invite = await this.findRedeemableInvite({ codeOrToken: code });
     if (!invite) throw new NotFoundException('That invite code is invalid, used, or expired.');
     const venue = await this.prisma.venue.findUnique({ where: { id: invite.venueId }, select: { name: true } });
     return {

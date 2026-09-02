@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { AppController } from './app.controller';
@@ -17,6 +17,19 @@ describe('AppController invite preview', () => {
     await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'bad-code'))
       .rejects.toBeInstanceOf(NotFoundException);
     expect(assertWithinSharedRateLimit).toHaveBeenCalled();
+  });
+
+  it('rejects malformed or unbounded invite codes with BadRequestException', async () => {
+    const prisma = { invite: { findFirst: vi.fn() } };
+    const controller = new AppController(prisma as any, {} as any, {} as any);
+
+    await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, ''))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'abc'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'a'.repeat(65)))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invite.findFirst).not.toHaveBeenCalled();
   });
 
   it('returns only the team name for a valid public invite', async () => {
@@ -744,4 +757,26 @@ describe('AppController createInvite', () => {
     expect(deleteMany).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledOnce();
   });
+
+  it('throws ForbiddenException when a non-elevated manager attempts to create a manager invite', async () => {
+    const plainManagerProfile = {
+      id: 'profile-mgr', userId: 'user-2', venueId: 'venue-1', role: 'manager',
+      allAccess: false, membershipStatus: 'active', fullName: 'Plain Manager',
+      venue: { id: 'venue-1', name: 'Test Venue' },
+    };
+    const prisma: any = {
+      profile: { findFirst: vi.fn().mockResolvedValue(plainManagerProfile) },
+    };
+    const profiles = new ProfileService(prisma);
+    const email = { send: vi.fn().mockResolvedValue(undefined) };
+    const controller = new AppController(prisma, email as any, profiles);
+
+    await expect(
+      controller.createInvite(
+        { sub: 'user-2' } as any,
+        { role: 'manager', jobTitle: 'Assistant Manager', email: 'mgr@example.com' } as any,
+      ),
+    ).rejects.toThrow('Only owners and administrators can invite managers.');
+  });
 });
+

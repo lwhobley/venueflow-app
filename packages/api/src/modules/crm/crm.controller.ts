@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { CrmTemplateService } from './crm-template.service';
 import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
 import { AuditService } from '../audit/audit.service';
+import { refreshTableStates } from '../floor/table-state';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -501,6 +502,7 @@ export class CrmController {
         phone: l.phone ?? null,
         company: l.company ?? null,
         source: l.source ?? null,
+        guestId: l.guestId ?? null,
         status: l.status,
         tags: l.tags,
         assignedToId: l.assignedToId ?? null,
@@ -541,6 +543,7 @@ export class CrmController {
         phone: lead.phone ?? null,
         company: lead.company ?? null,
         source: lead.source ?? null,
+        guestId: lead.guestId ?? null,
         status: lead.status,
         tags: lead.tags,
         assignedToId: lead.assignedToId ?? null,
@@ -568,6 +571,32 @@ export class CrmController {
     requireManager(scope);
     const now = new Date();
     const assignedToId = await this.resolveVenueMemberId(scope.venueId, body.assignedToId, 'Lead assignee');
+    let guestId = body.guestId ?? null;
+    if (guestId) {
+      // A caller-supplied guest id is untrusted input. The auto-match below is
+      // already venue-scoped; without this check an explicit id could attach
+      // another venue's guest to this venue's lead.
+      const owned = await this.prisma.guest.findFirst({
+        where: { id: guestId, venueId: scope.venueId },
+        select: { id: true },
+      });
+      if (!owned) throw new BadRequestException('Guest not found at this venue.');
+    }
+    if (!guestId && (body.email || body.phone)) {
+      const email = body.email?.trim().toLowerCase();
+      const phone = body.phone?.trim();
+      const existingGuest = await this.prisma.guest.findFirst({
+        where: {
+          venueId: scope.venueId,
+          OR: [
+            ...(email ? [{ email }] : []),
+            ...(phone ? [{ phone }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      if (existingGuest) guestId = existingGuest.id;
+    }
 
     if (body.leadId) {
       const existing = await this.prisma.crmLead.findFirst({
@@ -604,6 +633,7 @@ export class CrmController {
         phone: body.phone ?? null,
         company: body.company ?? null,
         source: body.source ?? null,
+        guestId: guestId ?? null,
         status: (body.status ?? 'new') as CrmLeadStatus,
         tags: body.tags ?? [],
         assignedToId: assignedToId ?? null,
@@ -683,7 +713,20 @@ export class CrmController {
   async saveBeo(@VenueScope() scope: Scope, @Body() body: SaveBeoDto) {
     requireManager(scope);
     const now = new Date();
-    const assignedRepId = await this.resolveVenueMemberId(scope.venueId, body.assignedRepId, 'Assigned representative');
+
+    const existing = body.beoId
+      ? await this.prisma.crmBeo.findFirst({ where: { id: body.beoId, venueId: scope.venueId } })
+      : null;
+    if (body.beoId && !existing) throw new NotFoundException('BEO not found');
+
+    // saveBeo replaces every column, so any save has to resend assignedRepId
+    // even when it is not the thing being changed. Re-validating an unchanged
+    // value would make an unrelated save — confirming the BEO, editing the menu
+    // — fail outright once the rep assigned months ago has left the venue.
+    // Only a rep the caller is actually setting has to be an active member.
+    const assignedRepId = existing && body.assignedRepId === (existing.assignedRepId ?? undefined)
+      ? existing.assignedRepId
+      : await this.resolveVenueMemberId(scope.venueId, body.assignedRepId, 'Assigned representative');
 
     if (body.leadId) {
       const lead = await this.prisma.crmLead.findFirst({
@@ -713,12 +756,7 @@ export class CrmController {
       updatedAt: now,
     };
 
-    if (body.beoId) {
-      const existing = await this.prisma.crmBeo.findFirst({
-        where: { id: body.beoId, venueId: scope.venueId },
-      });
-      if (!existing) throw new NotFoundException('BEO not found');
-
+    if (existing) {
       const patch: Record<string, any> = { ...fields };
       if (body.status !== undefined) patch.status = body.status as BeoStatus;
       // Update the BEO and sync its reservation atomically. A hold conflict
@@ -741,6 +779,41 @@ export class CrmController {
         }
         if (u.status === 'confirmed' && u.eventDate) {
           await this.ensureBeoExecutionWorkspace(tx, scope.venueId, u);
+        }
+        if (body.status === 'cancelled') {
+          const beoTag = `beo:${body.beoId}`;
+          const linkedRes = await tx.reservation.findFirst({
+            where: { venueId: scope.venueId, tags: { has: beoTag }, deletedAt: null },
+            select: { id: true },
+          });
+          if (linkedRes) {
+            await tx.reservation.update({
+              where: { id: linkedRes.id },
+              data: { status: 'cancelled', eventStatus: 'cancelled', deletedAt: now },
+            });
+            // Releasing an assignment leaves TableState untouched, so refresh
+            // the tables this BEO was holding or the floor plan still shows
+            // them occupied with nothing left to release.
+            const heldTables = await tx.tableAssignment.findMany({
+              where: { venueId: scope.venueId, reservationId: linkedRes.id, releasedAt: null },
+              select: { tableId: true },
+            });
+            await tx.tableAssignment.updateMany({
+              where: { venueId: scope.venueId, reservationId: linkedRes.id, releasedAt: null },
+              data: { releasedAt: now, releasedReason: 'cancelled' },
+            });
+            await refreshTableStates(tx, scope.venueId, heldTables.map((t) => t.tableId));
+          }
+          await tx.eventExecutionWorkspace.updateMany({
+            where: {
+              venueId: scope.venueId,
+              OR: [
+                { sourceType: 'beo', sourceId: body.beoId },
+                ...(linkedRes ? [{ sourceType: 'reservation', sourceId: linkedRes.id }] : []),
+              ],
+            },
+            data: { isArchived: true },
+          });
         }
         return u;
       });
@@ -1344,8 +1417,31 @@ export class CrmController {
     }
 
     const lead = beo.leadId
-      ? await db.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { fullName: true, phone: true, email: true, company: true } })
+      ? await db.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { id: true, fullName: true, phone: true, email: true, company: true, guestId: true } })
       : null;
+
+    let guestId = lead?.guestId ?? null;
+    if (!guestId && (lead?.email || lead?.phone)) {
+      const email = lead.email?.trim().toLowerCase();
+      const phone = lead.phone?.trim();
+      const existingGuest = await db.guest.findFirst({
+        where: {
+          venueId,
+          OR: [
+            ...(email ? [{ email }] : []),
+            ...(phone ? [{ phone }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      if (existingGuest) {
+        guestId = existingGuest.id;
+        if (lead) {
+          await db.crmLead.update({ where: { id: lead.id }, data: { guestId } });
+        }
+      }
+    }
+
     // We tag the reservation with the BEO id so subsequent edits update the
     // same row instead of creating duplicates. Uses tags[] since there's no
     // dedicated FK column.
@@ -1356,6 +1452,7 @@ export class CrmController {
     const menuNotes = [beo.menuAppetizers, beo.menuEntrees].filter(Boolean).join(' / ') || null;
     const data = {
       venueId,
+      guestId,
       guestName: lead?.fullName ?? beo.eventName,
       guestPhone: lead?.phone ?? null,
       guestEmail: lead?.email ?? null,

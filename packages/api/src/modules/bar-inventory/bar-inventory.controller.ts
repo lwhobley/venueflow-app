@@ -348,7 +348,7 @@ export class BarInventoryController {
     const sorted = items.slice().sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return {
       items: sorted.map((item) => mapItem(item, includeCosts)),
-      lowStockCount: items.filter((item) => item.onHand <= item.parLevel).length,
+      lowStockCount: items.filter((item) => item.onHand < item.parLevel).length,
       totalValueCents: includeCosts
         ? items.reduce(
           (sum, item) => sum + Math.round(item.onHand * (item.unitCostCents ?? 0)),
@@ -603,10 +603,11 @@ export class BarInventoryController {
   async exportStockCsv(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
+    // A stock export is the whole stock list; a row cap here silently ships a
+    // short CSV that reads as complete.
     const items = await this.prisma.barInventoryItem.findMany({
       where: { venueId },
       orderBy: { name: 'asc' },
-      take: 500,
     });
     const headers = ['Name', 'Category', 'Area', 'Unit', 'On Hand', 'Par Level', 'Unit Cost ($)', 'Supplier', 'SKU', 'Last Counted'];
     const rows = [headers.map(csvCell).join(',')];
@@ -634,10 +635,11 @@ export class BarInventoryController {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
     const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    // Already bounded to the last two weeks; capping rows on top of that drops
+    // the oldest movements out of the export without saying so.
     const movements = await this.prisma.barInventoryMovement.findMany({
       where: { venueId, createdAt: { gte: twoWeeksAgo } },
       orderBy: { createdAt: 'desc' },
-      take: 1000,
     });
     const itemIds = Array.from(new Set(movements.map((m) => m.itemId)));
     const profileIds = Array.from(new Set(movements.map((m) => m.createdBy).filter(Boolean)));
@@ -882,7 +884,7 @@ export class BarInventoryController {
   async sendPurchaseOrderEmail(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
-    const items = await this.prisma.barInventoryItem.findMany({ where: { venueId }, orderBy: [{ supplier: 'asc' }, { name: 'asc' }], take: 500 });
+    const items = await this.prisma.barInventoryItem.findMany({ where: { venueId }, orderBy: [{ supplier: 'asc' }, { name: 'asc' }] });
     const belowPar = items.filter((i) => i.onHand < i.parLevel);
     if (belowPar.length === 0) return { sent: false, reason: 'All items at or above par — nothing to order.' };
 
@@ -928,7 +930,7 @@ export class BarInventoryController {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const [items, movements] = await Promise.all([
-      this.prisma.barInventoryItem.findMany({ where: { venueId }, take: 500 }),
+      this.prisma.barInventoryItem.findMany({ where: { venueId } }),
       this.prisma.barInventoryMovement.findMany({
         where: { venueId, createdAt: { gte: thirtyDaysAgo } },
         select: { itemId: true, movementType: true, quantity: true, unitCostCents: true },

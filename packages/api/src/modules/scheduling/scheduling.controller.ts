@@ -1205,7 +1205,7 @@ export class SchedulingController {
     this.requireManager(scope);
     const availabilityWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, weekStartDate);
     const previousSaturday = previousOvernightFilter(availabilityWeekStart, 0);
-    const [shifts, staff, requests] = await Promise.all([
+    const [shifts, staff, requests, venue] = await Promise.all([
       this.prisma.scheduleShift.findMany({
         where: {
           venueId: scope!.venueId,
@@ -1222,14 +1222,40 @@ export class SchedulingController {
         orderBy: { fullName: 'asc' },
       }),
       this.unavailableRequests(scope!.venueId, availabilityWeekStart),
+      this.prisma.venue.findUnique({
+        where: { id: scope!.venueId },
+        select: { weeklyLaborBudgetHours: true },
+      }),
     ]);
     const availabilityByProfile = this.unavailableByProfile(requests, availabilityWeekStart);
     const openShifts = shifts.filter((shift) =>
       shift.status === 'open' && !shift.profileId && (shift.weekStart ?? availabilityWeekStart) === availabilityWeekStart,
     );
     const assignments = new Map<string, number>();
+    for (const s of shifts) {
+      if (s.profileId && s.status !== 'cancelled' && (s.weekStart ?? availabilityWeekStart) === availabilityWeekStart) {
+        const dur = Math.max(0, s.endMinutes - s.startMinutes);
+        assignments.set(s.profileId, (assignments.get(s.profileId) ?? 0) + dur);
+      }
+    }
+    let totalScheduledMinutes = Array.from(assignments.values()).reduce((sum, m) => sum + m, 0);
+    const maxBudgetMinutes = venue?.weeklyLaborBudgetHours != null ? venue.weeklyLaborBudgetHours * 60 : Infinity;
     const assignedWindows: Array<{ profileId: string; weekStart: string | null; dayIndex: number; startMinutes: number; endMinutes: number }> = [];
     const proposals = openShifts.map((shift) => {
+      const shiftDuration = Math.max(0, shift.endMinutes - shift.startMinutes);
+      if (totalScheduledMinutes + shiftDuration > maxBudgetMinutes) {
+        return {
+          shiftId: shift.id,
+          dayLabel: dayLabel(shift.dayIndex),
+          startTime: minutesToTime(shift.startMinutes),
+          endTime: minutesToTime(shift.endMinutes),
+          jobTitle: shift.jobTitle,
+          station: shift.station,
+          profileId: null,
+          status: 'unassigned',
+          reason: 'exceeds_labor_budget',
+        };
+      }
       let sawRoleMatch = false;
       let sawAvailable = false;
       let sawFree = false;
@@ -1255,10 +1281,11 @@ export class SchedulingController {
         );
         if (overlapsExisting || overlapsProposed) return false;
         sawFree = true;
-        return assignedMinutes < 40 * 60;
+        return (assignedMinutes + shiftDuration) <= 40 * 60;
       });
       if (candidate) {
-        assignments.set(candidate.id, (assignments.get(candidate.id) ?? 0) + Math.max(0, shift.endMinutes - shift.startMinutes));
+        assignments.set(candidate.id, (assignments.get(candidate.id) ?? 0) + shiftDuration);
+        totalScheduledMinutes += shiftDuration;
         assignedWindows.push({
           profileId: candidate.id,
           weekStart: shift.weekStart ?? availabilityWeekStart,
@@ -1273,16 +1300,17 @@ export class SchedulingController {
         startTime: minutesToTime(shift.startMinutes),
         endTime: minutesToTime(shift.endMinutes),
         jobTitle: shift.jobTitle,
-        profileId: candidate?.id ?? null,
+        station: shift.station,
+        profileId: candidate ? candidate.id : null,
         reason: candidate ? 'assigned' : !sawRoleMatch ? 'no_role_match' : !sawAvailable ? 'no_availability' : !sawFree ? 'all_double_booked' : 'labor_cap',
       };
     });
     const filled = proposals.filter((proposal) => proposal.profileId).length;
     return {
+      weekStart: availabilityWeekStart,
       openCount: openShifts.length,
       filled,
       unfilled: openShifts.length - filled,
-      weekStart: availabilityWeekStart,
       proposals,
     };
   }
@@ -1292,12 +1320,51 @@ export class SchedulingController {
   async applyAutoSchedule(@VenueScope() scope: Scope, @Body() body: ApplyAutoScheduleDto) {
     this.requireManager(scope);
     const availabilityWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, body.weekStartDate);
-    const availabilityByProfile = this.unavailableByProfile(await this.unavailableRequests(scope!.venueId, availabilityWeekStart), availabilityWeekStart);
+    const [requests, existingShifts, venue] = await Promise.all([
+      this.unavailableRequests(scope!.venueId, availabilityWeekStart),
+      this.prisma.scheduleShift.findMany({
+        where: {
+          venueId: scope!.venueId,
+          weekStart: availabilityWeekStart,
+          profileId: { not: null },
+          status: { not: 'cancelled' },
+        },
+        select: { profileId: true, startMinutes: true, endMinutes: true },
+      }),
+      this.prisma.venue.findUnique({
+        where: { id: scope!.venueId },
+        select: { weeklyLaborBudgetHours: true },
+      }),
+    ]);
+    const availabilityByProfile = this.unavailableByProfile(requests, availabilityWeekStart);
+    const weeklyMinutesByProfile = new Map<string, number>();
+    for (const s of existingShifts) {
+      if (s.profileId) {
+        const dur = Math.max(0, s.endMinutes - s.startMinutes);
+        weeklyMinutesByProfile.set(s.profileId, (weeklyMinutesByProfile.get(s.profileId) ?? 0) + dur);
+      }
+    }
+    let totalVenueMinutes = Array.from(weeklyMinutesByProfile.values()).reduce((sum, m) => sum + m, 0);
+    const maxBudgetMinutes = venue?.weeklyLaborBudgetHours != null ? venue.weeklyLaborBudgetHours * 60 : Infinity;
+
     const { assigned, skipped, assignedShifts } = await this.assignments.applyOpenAssignments({
       venueId: scope!.venueId,
       assignments: body.assignments,
-      canAssign: ({ shift, profileId }) =>
-        availabilityCovers(availabilityByProfile.get(profileId), shift),
+      // Read-only: this runs before the write, which can still be rejected.
+      // The running totals are advanced in onAssigned so a skipped shift does
+      // not spend against the 40h cap or the venue's labor budget.
+      canAssign: ({ shift, profileId }) => {
+        if (!availabilityCovers(availabilityByProfile.get(profileId), shift)) return false;
+        const dur = Math.max(0, shift.endMinutes - shift.startMinutes);
+        if ((weeklyMinutesByProfile.get(profileId) ?? 0) + dur > 40 * 60) return false;
+        if (totalVenueMinutes + dur > maxBudgetMinutes) return false;
+        return true;
+      },
+      onAssigned: ({ shift, profileId }) => {
+        const dur = Math.max(0, shift.endMinutes - shift.startMinutes);
+        weeklyMinutesByProfile.set(profileId, (weeklyMinutesByProfile.get(profileId) ?? 0) + dur);
+        totalVenueMinutes += dur;
+      },
     });
     const assignedByProfile = new Map<string, typeof assignedShifts>();
     for (const assignedShift of assignedShifts) {
