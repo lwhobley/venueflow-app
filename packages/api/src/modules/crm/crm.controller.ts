@@ -1101,12 +1101,12 @@ export class CrmController {
       }),
       this.prisma.venue.findUnique({
         where: { id: scope.venueId },
-        select: { name: true, subscriptionStatus: true, stripeSubscriptionId: true },
+        select: { name: true, subscriptionStatus: true },
       }),
     ]);
     if (!beo) throw new NotFoundException('BEO not found');
 
-    const isTrial = venue?.subscriptionStatus === 'trialing' || !venue?.stripeSubscriptionId;
+    const isTrial = !venue?.subscriptionStatus || venue.subscriptionStatus === 'trialing';
     const venueEmailLimit = isTrial ? 5 : BEO_EMAIL_VENUE_LIMIT_MAX;
 
     await assertWithinSharedRateLimit(

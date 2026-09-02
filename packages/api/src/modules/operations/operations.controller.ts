@@ -38,12 +38,13 @@ import { buildDailyBriefPriorityActions } from './daily-brief-priority-actions';
 import { buildDailyBriefProfitabilityPulse } from './daily-brief-profitability';
 import { ExecutionAutopilotService } from './execution-autopilot.service';
 import { DocumentMalwareScannerService } from '../documents/document-malware-scanner.service';
+import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
 type Scope = VenueScopedRequest['venueScope'];
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
-const GOAL_PERIODS = ['day', 'week', 'month'] as const;
-const GOAL_STATUSES = ['open', 'completed', 'missed'] as const;
+const GOAL_PERIODS = ['day', 'week'] as const;
+const GOAL_STATUSES = ['open', 'done', 'cancelled'] as const;
 const LOGBOOK_CATEGORIES = ['general', 'shift_handover', 'incident', 'maintenance', 'vip'] as const;
 const CHECKLIST_KINDS = ['opening', 'closing'] as const;
 

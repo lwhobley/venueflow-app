@@ -63,9 +63,10 @@ function makeController() {
   } as any;
 
   const mediaCleanup = { processJob: vi.fn().mockResolvedValue(true) } as any;
+  const malwareScanner = { assertClean: vi.fn().mockResolvedValue(undefined) } as any;
 
-  const controller = new ChatController(prisma, mediaAccess, s3ImageService, mediaCleanup);
-  return { controller, prisma, mediaAccess, s3ImageService, mediaCleanup };
+  const controller = new ChatController(prisma, mediaAccess, s3ImageService, mediaCleanup, malwareScanner);
+  return { controller, prisma, mediaAccess, s3ImageService, mediaCleanup, malwareScanner };
 }
 
 const managerScope = {
