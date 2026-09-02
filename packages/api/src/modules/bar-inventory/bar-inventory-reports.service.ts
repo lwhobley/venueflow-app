@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { csvCell, csvDocument } from '../../common/csv';
 
+/** Escapes a POS/inventory name so it can be embedded in a RegExp literally. */
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Read-only bar-inventory analytics extracted from BarInventoryController.
  *
@@ -110,27 +115,31 @@ export class BarInventoryReportsService {
     // Single-attribution: each sold POS item credits AT MOST ONE best-matching inventory item.
     // Loose substring matching (like .includes()) could erroneously credit "Gin" to "Ginger Ale", "Ginger Beer", etc.
     const inventoryVelocityMap = new Map<string, number>();
-    const normalizedItems = items.map((item) => ({
-      item,
-      lower: item.name.toLowerCase().trim(),
-    }));
+    // Each item's word-boundary pattern is compiled once here, not once per
+    // (sold name x item) pair: this runs over the venue's whole item list and
+    // 30 days of check lines, neither of which is row-capped.
+    const normalizedItems = items.map((item) => {
+      const lower = item.name.toLowerCase().trim();
+      return { item, lower, wordRegex: new RegExp(`\\b${escapeRegExp(lower)}\\b`, 'i') };
+    });
+    const itemsByExactName = new Map(normalizedItems.map((ni) => [ni.lower, ni]));
 
     for (const [soldName, qty] of salesMap.entries()) {
       if (!soldName || qty <= 0) continue;
       // 1. Exact match
-      let bestItem = normalizedItems.find((ni) => ni.lower === soldName);
+      let bestItem = itemsByExactName.get(soldName);
       // 2. If no exact match, try matching by word boundary
       if (!bestItem) {
-        const candidates = normalizedItems.filter((ni) => {
-          const itemRegex = new RegExp(`\\b${ni.lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-          const soldRegex = new RegExp(`\\b${soldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-          return itemRegex.test(soldName) || soldRegex.test(ni.lower);
-        });
+        const soldRegex = new RegExp(`\\b${escapeRegExp(soldName)}\\b`, 'i');
+        const candidates = normalizedItems.filter(
+          (ni) => ni.wordRegex.test(soldName) || soldRegex.test(ni.lower),
+        );
         if (candidates.length === 1) {
           bestItem = candidates[0];
         } else if (candidates.length > 1) {
-          candidates.sort((a, b) => b.lower.length - a.lower.length);
-          bestItem = candidates[0];
+          // Longest name wins: "gin" and "gin fizz" both match a "Gin Fizz"
+          // sale, and the more specific item is the one actually poured.
+          bestItem = candidates.reduce((a, b) => (b.lower.length > a.lower.length ? b : a));
         }
       }
       if (bestItem) {
@@ -141,7 +150,7 @@ export class BarInventoryReportsService {
     const getVelocity = (idOrName: string) => {
       const byId = inventoryVelocityMap.get(idOrName);
       if (byId !== undefined) return Number((byId / 30).toFixed(2));
-      const found = normalizedItems.find((ni) => ni.lower === idOrName.toLowerCase().trim());
+      const found = itemsByExactName.get(idOrName.toLowerCase().trim());
       if (found) {
         return Number(((inventoryVelocityMap.get(found.item.id) ?? 0) / 30).toFixed(2));
       }
@@ -228,7 +237,7 @@ export class BarInventoryReportsService {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     const [items, recentMovements] = await Promise.all([
-      this.prisma.barInventoryItem.findMany({ where: { venueId }, take: 500 }),
+      this.prisma.barInventoryItem.findMany({ where: { venueId } }),
       this.prisma.barInventoryMovement.findMany({
         where: { venueId, createdAt: { gte: thirtyDaysAgo } },
         select: { itemId: true, movementType: true, createdAt: true },

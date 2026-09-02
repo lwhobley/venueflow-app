@@ -838,4 +838,44 @@ describe('CrmController', () => {
       expect(result).toEqual({ subject: 'Hi', body: 'Body' });
     });
   });
+
+  describe('saveLead guest linkage', () => {
+    it('refuses a guestId that belongs to another venue', async () => {
+      const { controller, prisma } = makeController();
+      // No guest with this id at venue-1 — the id names another venue's guest.
+      prisma.guest.findFirst.mockResolvedValue(null);
+
+      await expect(
+        controller.saveLead(managerScope, { fullName: 'Jo', guestId: 'guest-other-venue' } as any),
+      ).rejects.toThrow('Guest not found at this venue.');
+
+      expect(prisma.guest.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'guest-other-venue', venueId: 'venue-1' } }),
+      );
+      expect(prisma.crmLead.create).not.toHaveBeenCalled();
+    });
+
+    it('persists a guestId that does belong to this venue', async () => {
+      const { controller, prisma } = makeController();
+      prisma.guest.findFirst.mockResolvedValue({ id: 'guest-1' });
+
+      await controller.saveLead(managerScope, { fullName: 'Jo', guestId: 'guest-1' } as any);
+
+      expect(prisma.crmLead.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ guestId: 'guest-1' }) }),
+      );
+    });
+
+    it('matches an existing venue guest by email when no guestId is supplied', async () => {
+      const { controller, prisma } = makeController();
+      prisma.guest.findFirst.mockResolvedValue({ id: 'guest-7' });
+
+      await controller.saveLead(managerScope, { fullName: 'Jo', email: 'Jo@Example.com ' } as any);
+
+      expect(prisma.crmLead.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ guestId: 'guest-7' }) }),
+      );
+    });
+  });
+
 });

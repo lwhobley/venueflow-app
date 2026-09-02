@@ -780,6 +780,62 @@ describe('SchedulingController', () => {
       expect(result).toEqual({ assigned: 1, skipped: 0 });
       expect(email.send).toHaveBeenCalledWith(expect.objectContaining({ to: 'staff1@test.com' }));
     });
+
+    it('enforces the 40h cap and the venue labor budget through canAssign', async () => {
+      const { controller, prisma, assignments } = makeController();
+      prisma.venue.findUnique.mockResolvedValue({ ...bigVenue, weeklyLaborBudgetHours: 100 });
+      // staff-1 already sits at 38h (2280 min) for the week.
+      prisma.scheduleShift.findMany.mockResolvedValue([
+        { profileId: 'staff-1', startMinutes: 600, endMinutes: 2880 },
+      ]);
+      assignments.applyOpenAssignments.mockResolvedValue({ assigned: 0, skipped: 1, assignedShifts: [] });
+
+      await controller.applyAutoSchedule(managerScope, {
+        assignments: [{ shiftId: 'shift-1', profileId: 'staff-1' }],
+      });
+
+      const { canAssign } = assignments.applyOpenAssignments.mock.calls[0][0];
+      // 38h + 1h fits; 38h + 3h would cross 40h.
+      expect(canAssign({ shift: { dayIndex: 1, startMinutes: 600, endMinutes: 660 }, profileId: 'staff-1' })).toBe(true);
+      expect(canAssign({ shift: { dayIndex: 1, startMinutes: 600, endMinutes: 780 }, profileId: 'staff-1' })).toBe(false);
+    });
+
+    it('does not spend the labor budget on a shift the write rejected', async () => {
+      const { controller, prisma, assignments } = makeController();
+      // A 3h budget: exactly one 2h shift fits, so an over-count is visible.
+      prisma.venue.findUnique.mockResolvedValue({ ...bigVenue, weeklyLaborBudgetHours: 3 });
+      prisma.scheduleShift.findMany.mockResolvedValue([]);
+      assignments.applyOpenAssignments.mockResolvedValue({ assigned: 0, skipped: 2, assignedShifts: [] });
+
+      await controller.applyAutoSchedule(managerScope, {
+        assignments: [{ shiftId: 'shift-1', profileId: 'staff-1' }, { shiftId: 'shift-2', profileId: 'staff-2' }],
+      });
+
+      const { canAssign } = assignments.applyOpenAssignments.mock.calls[0][0];
+      const twoHourShift = { dayIndex: 1, startMinutes: 600, endMinutes: 720 };
+      // First shift passes the gate but its transaction fails, so onAssigned
+      // never runs. The next shift must still find the budget unspent.
+      expect(canAssign({ shift: twoHourShift, profileId: 'staff-1' })).toBe(true);
+      expect(canAssign({ shift: twoHourShift, profileId: 'staff-2' })).toBe(true);
+    });
+
+    it('spends the labor budget once a shift is durably assigned', async () => {
+      const { controller, prisma, assignments } = makeController();
+      prisma.venue.findUnique.mockResolvedValue({ ...bigVenue, weeklyLaborBudgetHours: 3 });
+      prisma.scheduleShift.findMany.mockResolvedValue([]);
+      assignments.applyOpenAssignments.mockResolvedValue({ assigned: 1, skipped: 0, assignedShifts: [] });
+
+      await controller.applyAutoSchedule(managerScope, {
+        assignments: [{ shiftId: 'shift-1', profileId: 'staff-1' }, { shiftId: 'shift-2', profileId: 'staff-2' }],
+      });
+
+      const { canAssign, onAssigned } = assignments.applyOpenAssignments.mock.calls[0][0];
+      const twoHourShift = { dayIndex: 1, startMinutes: 600, endMinutes: 720 };
+      expect(canAssign({ shift: twoHourShift, profileId: 'staff-1' })).toBe(true);
+      onAssigned({ shift: twoHourShift, profileId: 'staff-1' });
+      // 2h of a 3h budget is gone, so a second 2h shift no longer fits.
+      expect(canAssign({ shift: twoHourShift, profileId: 'staff-2' })).toBe(false);
+    });
   });
 
   // ---------------------------------------------------------------------

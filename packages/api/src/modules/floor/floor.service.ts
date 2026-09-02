@@ -6,6 +6,10 @@ import { AuditService } from '../audit/audit.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { ReservationNotifierService } from '../reservations/reservation-notifier.service';
 
+// Table states a manager or server sets deliberately, which survive a refresh
+// that finds no active seating on the table.
+const PRESERVED_TABLE_STATUSES = new Set<string>(['dirty', 'out_of_service']);
+
 /**
  * Floor-plan / table / waitlist / assignment data logic extracted from
  * FloorController. The controller keeps routing, DTO validation, and the
@@ -864,14 +868,31 @@ export class FloorService {
       return;
     }
     const now = new Date();
-    const assignments = await this.prisma.tableAssignment.findMany({
-      where: { venueId, tableId: { in: tableIds }, releasedAt: null, startsAt: { lte: now }, endsAt: { gt: now } },
-      include: { reservation: { select: { partySize: true } }, waitlist: { select: { partySize: true } } },
-    });
+    const [assignments, currentStates] = await Promise.all([
+      this.prisma.tableAssignment.findMany({
+        where: { venueId, tableId: { in: tableIds }, releasedAt: null, startsAt: { lte: now }, endsAt: { gt: now } },
+        include: { reservation: { select: { partySize: true } }, waitlist: { select: { partySize: true } } },
+      }),
+      this.prisma.tableState.findMany({
+        where: { venueId, tableId: { in: tableIds } },
+        select: { tableId: true, status: true },
+      }),
+    ]);
     const byTable = new Map<string, (typeof assignments)[number]>();
     for (const assignment of assignments) byTable.set(assignment.tableId, assignment);
+    const statusByTable = new Map(currentStates.map((state) => [state.tableId, state.status]));
     await Promise.all(tableIds.map((tableId) => {
       const assignment = byTable.get(tableId);
+      // Nothing seated here right now, but 'dirty' and 'out_of_service' are set
+      // by staff and say nothing about who is sitting down — falling through to
+      // 'available' would silently un-flag a table that still needs bussing or
+      // is deliberately off the floor.
+      if (!assignment && PRESERVED_TABLE_STATUSES.has(statusByTable.get(tableId) ?? '')) {
+        return this.prisma.tableState.updateMany({
+          where: { venueId, tableId },
+          data: { partySize: null, seatedAt: null, lastActivityAt: now },
+        });
+      }
       const seated = assignment?.holdType === 'seated';
       const status = seated ? 'seated' : assignment?.holdType === 'held' ? 'held' : assignment ? 'reserved' : 'available';
       return this.prisma.tableState.updateMany({

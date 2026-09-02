@@ -1350,16 +1350,20 @@ export class SchedulingController {
     const { assigned, skipped, assignedShifts } = await this.assignments.applyOpenAssignments({
       venueId: scope!.venueId,
       assignments: body.assignments,
+      // Read-only: this runs before the write, which can still be rejected.
+      // The running totals are advanced in onAssigned so a skipped shift does
+      // not spend against the 40h cap or the venue's labor budget.
       canAssign: ({ shift, profileId }) => {
-        const hasAvailability = availabilityCovers(availabilityByProfile.get(profileId), shift);
-        if (!hasAvailability) return false;
+        if (!availabilityCovers(availabilityByProfile.get(profileId), shift)) return false;
         const dur = Math.max(0, shift.endMinutes - shift.startMinutes);
-        const currentProfileMinutes = weeklyMinutesByProfile.get(profileId) ?? 0;
-        if (currentProfileMinutes + dur > 40 * 60) return false;
+        if ((weeklyMinutesByProfile.get(profileId) ?? 0) + dur > 40 * 60) return false;
         if (totalVenueMinutes + dur > maxBudgetMinutes) return false;
-        weeklyMinutesByProfile.set(profileId, currentProfileMinutes + dur);
-        totalVenueMinutes += dur;
         return true;
+      },
+      onAssigned: ({ shift, profileId }) => {
+        const dur = Math.max(0, shift.endMinutes - shift.startMinutes);
+        weeklyMinutesByProfile.set(profileId, (weeklyMinutesByProfile.get(profileId) ?? 0) + dur);
+        totalVenueMinutes += dur;
       },
     });
     const assignedByProfile = new Map<string, typeof assignedShifts>();

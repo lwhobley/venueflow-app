@@ -220,4 +220,41 @@ describe('FloorService regressions', () => {
     expect(result.releasedReservations).toBe(1);
     expect(result.releasedWaitlistEntries).toBe(1);
   });
+
+  describe('refreshTableStates via releaseAssignment', () => {
+    const makePrisma = (currentStatus: string) => ({
+      tableAssignment: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'assign-1', tableId: 'table-1', reservationId: null, waitlistId: null }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      tableState: {
+        findMany: vi.fn().mockResolvedValue([{ tableId: 'table-1', status: currentStatus }]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      floorTable: { findFirst: vi.fn().mockResolvedValue({ seats: 0 }) },
+    });
+
+    it.each(['dirty', 'out_of_service'])(
+      'leaves a %s table in that state when no seating is active on it',
+      async (status) => {
+        const prisma = makePrisma(status);
+        await new FloorService(prisma as any, {} as any).releaseAssignment('venue-1', 'assign-1');
+
+        const stateWrite = prisma.tableState.updateMany.mock.calls.at(-1)?.[0];
+        expect(stateWrite.data).not.toHaveProperty('status');
+        expect(stateWrite.data).toEqual(expect.objectContaining({ partySize: null, seatedAt: null }));
+      },
+    );
+
+    it('frees an ordinary table back to available', async () => {
+      const prisma = makePrisma('seated');
+      await new FloorService(prisma as any, {} as any).releaseAssignment('venue-1', 'assign-1');
+
+      const stateWrite = prisma.tableState.updateMany.mock.calls.at(-1)?.[0];
+      expect(stateWrite.data).toEqual(expect.objectContaining({ status: 'available', partySize: null }));
+    });
+  });
+
 });

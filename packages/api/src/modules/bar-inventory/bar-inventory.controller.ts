@@ -603,10 +603,11 @@ export class BarInventoryController {
   async exportStockCsv(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
+    // A stock export is the whole stock list; a row cap here silently ships a
+    // short CSV that reads as complete.
     const items = await this.prisma.barInventoryItem.findMany({
       where: { venueId },
       orderBy: { name: 'asc' },
-      take: 500,
     });
     const headers = ['Name', 'Category', 'Area', 'Unit', 'On Hand', 'Par Level', 'Unit Cost ($)', 'Supplier', 'SKU', 'Last Counted'];
     const rows = [headers.map(csvCell).join(',')];
@@ -634,10 +635,11 @@ export class BarInventoryController {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
     const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    // Already bounded to the last two weeks; capping rows on top of that drops
+    // the oldest movements out of the export without saying so.
     const movements = await this.prisma.barInventoryMovement.findMany({
       where: { venueId, createdAt: { gte: twoWeeksAgo } },
       orderBy: { createdAt: 'desc' },
-      take: 1000,
     });
     const itemIds = Array.from(new Set(movements.map((m) => m.itemId)));
     const profileIds = Array.from(new Set(movements.map((m) => m.createdBy).filter(Boolean)));

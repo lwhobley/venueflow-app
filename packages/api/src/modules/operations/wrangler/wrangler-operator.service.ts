@@ -334,7 +334,7 @@ export class WranglerOperatorService {
         where: { venueId, kind: 'eighty_six', status: 'open' },
         take: 100,
       });
-      let result = barItems.map((item) => ({ id: item.id, name: item.name, category: item.category, onHand: item.onHand, parLevel: item.parLevel, isLow: item.onHand <= item.parLevel }));
+      let result = barItems.map((item) => ({ id: item.id, name: item.name, category: item.category, onHand: item.onHand, parLevel: item.parLevel, isLow: item.onHand < item.parLevel }));
       if (lowStockOnly) result = result.filter((i) => i.isLow);
       return {
         inventory: result,

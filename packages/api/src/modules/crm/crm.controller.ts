@@ -576,6 +576,16 @@ export class CrmController {
     const now = new Date();
     const assignedToId = await this.resolveVenueMemberId(scope.venueId, body.assignedToId, 'Lead assignee');
     let guestId = body.guestId ?? null;
+    if (guestId) {
+      // A caller-supplied guest id is untrusted input. The auto-match below is
+      // already venue-scoped; without this check an explicit id could attach
+      // another venue's guest to this venue's lead.
+      const owned = await this.prisma.guest.findFirst({
+        where: { id: guestId, venueId: scope.venueId },
+        select: { id: true },
+      });
+      if (!owned) throw new BadRequestException('Guest not found at this venue.');
+    }
     if (!guestId && (body.email || body.phone)) {
       const email = body.email?.trim().toLowerCase();
       const phone = body.phone?.trim();
@@ -609,7 +619,7 @@ export class CrmController {
       if (body.assignedToId !== undefined) patch.assignedToId = assignedToId;
       if (body.estimatedValueCents !== undefined) patch.estimatedValueCents = body.estimatedValueCents;
       if (body.marketingOptIn !== undefined) patch.marketingOptIn = body.marketingOptIn;
-      if (body.guestId !== undefined) patch.guestId = body.guestId;
+      if (body.guestId !== undefined) patch.guestId = guestId;
       else if (guestId && !existing.guestId) patch.guestId = guestId;
 
       await this.prisma.crmLead.update({ where: { id: body.leadId }, data: patch });
