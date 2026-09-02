@@ -435,9 +435,14 @@ export class FloorService {
   }
 
   async addToWaitlist(venueId: string, body: { guestName: string; partySize: number; phone?: string; email?: string; notes?: string }) {
+    // Same gap reservations had: the party's contact details were stored as
+    // loose text and the entry was never attached to the guest profile it
+    // plainly belonged to, so a returning guest's history stayed empty.
+    const guestId = await this.resolveGuestId(venueId, { email: body.email, phone: body.phone });
     const row = await this.prisma.waitlist.create({
       data: {
         venueId,
+        guestId,
         guestName: body.guestName.trim(),
         partySize: body.partySize,
         guestPhone: body.phone?.trim() ?? null,
@@ -449,6 +454,22 @@ export class FloorService {
       },
     });
     return { _id: row.id, id: row.id };
+  }
+
+  /** Match a walk-in to an existing guest profile by email or phone. */
+  private async resolveGuestId(venueId: string, contact: { email?: string; phone?: string }): Promise<string | null> {
+    const email = contact.email?.trim().toLowerCase() || null;
+    const phone = contact.phone?.replace(/[^\d+]/g, '') || null;
+    if (!email && !phone) return null;
+    const match = await this.prisma.guest.findFirst({
+      where: {
+        venueId,
+        deletedAt: null,
+        OR: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])],
+      },
+      select: { id: true },
+    });
+    return match?.id ?? null;
   }
 
   async removeFromWaitlist(venueId: string, id: string, actor?: FloorActor) {

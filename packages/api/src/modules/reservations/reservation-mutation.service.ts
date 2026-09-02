@@ -57,6 +57,7 @@ export class ReservationMutationService {
     beoStatus?: string;
     estimatedValueCents?: number;
     depositDueCents?: number;
+    guestId?: string | null;
   }) {
     const guestName = args.guestName.trim();
     if (!guestName) throw new BadRequestException('Guest name is required');
@@ -67,8 +68,15 @@ export class ReservationMutationService {
       throw new BadRequestException('Invalid reservation time');
     }
 
+    const guestId = await this.resolveGuestId(args.venueId, {
+      guestId: args.guestId,
+      email: args.email,
+      phone: args.phone,
+    });
+
     const data = {
       venueId: args.venueId,
+      guestId,
       guestName,
       partySize: args.partySize,
       reservationTime,
@@ -296,6 +304,49 @@ export class ReservationMutationService {
         },
       });
     }
+  }
+
+  /**
+   * A reservation used to store the guest's name, email and phone as loose text
+   * and never set guestId, so the booking existed while the guest's own profile
+   * still showed no upcoming reservation — the app could recognise a returning
+   * guest at the top of the form and then file the booking under nobody.
+   *
+   * Resolution order: an explicit guestId (verified against this venue, so a
+   * client cannot attach a booking to another tenant's guest), then the same
+   * email/phone match the autofill endpoint uses to recognise the guest in the
+   * first place. Returns null rather than inventing a guest: creating profiles
+   * from every walk-in is a separate product decision.
+   */
+  private async resolveGuestId(
+    venueId: string,
+    contact: { guestId?: string | null; email?: string; phone?: string },
+  ): Promise<string | null> {
+    if (contact.guestId) {
+      const claimed = await this.prisma.guest.findFirst({
+        where: { id: contact.guestId, venueId, deletedAt: null },
+        select: { id: true },
+      });
+      if (claimed) return claimed.id;
+      throw new BadRequestException('That guest does not belong to this venue.');
+    }
+
+    const email = contact.email?.trim().toLowerCase() || null;
+    const phone = contact.phone?.replace(/[^\d+]/g, '') || null;
+    if (!email && !phone) return null;
+
+    const match = await this.prisma.guest.findFirst({
+      where: {
+        venueId,
+        deletedAt: null,
+        OR: [
+          ...(email ? [{ email }] : []),
+          ...(phone ? [{ phone }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    return match?.id ?? null;
   }
 
   private async ensureExecutionWorkspace(reservation: {
