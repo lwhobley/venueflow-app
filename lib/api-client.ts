@@ -200,9 +200,6 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   if (!response.ok) {
-    if (response.status === 401 && token) {
-      void useAuthStore.getState().clearSession();
-    }
     const errorText = await response.text().catch(() => '');
     let errorBody: { message?: string | string[] } | null = null;
     if (errorText) {
@@ -218,6 +215,10 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         : Array.isArray(errorBody?.message)
           ? errorBody.message.join(', ')
           : `Request failed (${response.status})`;
+
+    if (token && (response.status === 401 || (response.status === 403 && message.toLowerCase().includes('active membership')))) {
+      void useAuthStore.getState().clearSession();
+    }
     throw new ApiError(message, response.status);
   }
 

@@ -330,4 +330,45 @@ describe('TimeClockController', () => {
       expect(result!.regularHours).toBe(2.5);
     });
   });
+
+  describe('getClockBoard', () => {
+    it('returns null if scope is missing', async () => {
+      const { controller } = makeController();
+      const result = await controller.getClockBoard(undefined as any);
+      expect(result).toBeNull();
+    });
+
+    it('filters out entries for revoked profiles from the active board', async () => {
+      const { controller, prisma } = makeController();
+      prisma.timeEntry.findMany.mockResolvedValue([
+        {
+          id: 'te-active',
+          profileId: 'staff-active',
+          venueId: 'venue-1',
+          isOpen: true,
+          clockInAt: new Date(),
+          profile: { id: 'staff-active', fullName: 'Active Staff', jobTitle: 'Server', membershipStatus: 'active' },
+        },
+        {
+          id: 'te-revoked',
+          profileId: 'staff-revoked',
+          venueId: 'venue-1',
+          isOpen: true,
+          clockInAt: new Date(),
+          profile: { id: 'staff-revoked', fullName: 'Revoked Staff', jobTitle: 'Bartender', membershipStatus: 'revoked' },
+        },
+      ]);
+
+      const result = await controller.getClockBoard(managerScope);
+
+      expect(prisma.timeEntry.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          isOpen: true,
+          profile: { OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+        }),
+      }));
+      expect(result!.activeClockEntries).toHaveLength(1);
+      expect(result!.activeClockEntries[0].memberId).toBe('staff-active');
+    });
+  });
 });

@@ -814,11 +814,19 @@ export class WranglerOperatorService {
       }
       await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
         await tx.profile.update({ where: { id: target.id }, data: { membershipStatus: 'revoked' } as any });
+        await tx.timeEntry.updateMany({
+          where: { profileId: target.id, isOpen: true },
+          data: {
+            isOpen: false,
+            clockOutAt: new Date(),
+          },
+        });
         if (target.userId) {
           const activeElsewhere = await tx.profile.count({
             where: {
               userId: target.userId,
               venueId: { not: venueId },
+              venue: { isNot: null },
               OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
             },
           });

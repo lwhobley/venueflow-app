@@ -76,4 +76,40 @@ describe('apiRequest error bodies', () => {
       message: 'Service temporarily unavailable',
     });
   });
+
+  it('clears session on 401 when a token is present', async () => {
+    const { useAuthStore } = await import('./auth-store');
+    const storeState = (useAuthStore as any).getState();
+    storeState.token = 'test-token';
+    storeState.clearSession = vi.fn();
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 })));
+
+    await expect(apiRequest('/unauthorized')).rejects.toMatchObject({ status: 401 });
+    expect(storeState.clearSession).toHaveBeenCalled();
+  });
+
+  it('clears session on 403 when active membership was revoked', async () => {
+    const { useAuthStore } = await import('./auth-store');
+    const storeState = (useAuthStore as any).getState();
+    storeState.token = 'test-token';
+    storeState.clearSession = vi.fn();
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'You do not have an active membership at the requested venue.' }), { status: 403 })));
+
+    await expect(apiRequest('/revoked')).rejects.toMatchObject({ status: 403 });
+    expect(storeState.clearSession).toHaveBeenCalled();
+  });
+
+  it('does not clear session on ordinary 403 forbidden errors', async () => {
+    const { useAuthStore } = await import('./auth-store');
+    const storeState = (useAuthStore as any).getState();
+    storeState.token = 'test-token';
+    storeState.clearSession = vi.fn();
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'You cannot perform this action' }), { status: 403 })));
+
+    await expect(apiRequest('/forbidden')).rejects.toMatchObject({ status: 403 });
+    expect(storeState.clearSession).not.toHaveBeenCalled();
+  });
 });
