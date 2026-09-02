@@ -21,6 +21,7 @@ import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { Public } from '../../auth/public.decorator';
 import { SkipVenueScope } from '../../venue/skip-venue-scope.decorator';
+import { canAccessConversation } from '../../common/conversation-access';
 import { ALLOWED_IMAGE_MIME, assertAllowedImageBytes } from '../../common/image-bytes';
 import { addDays, todayInZone, weekStartFor } from '../../common/pay-period';
 import { occupiedSlots, previousOvernightFilter } from '../../common/shift-overlap';
@@ -854,20 +855,6 @@ export class ChatController {
     res.setHeader('Referrer-Policy', 'no-referrer');
     return res.redirect(302, url);
   }
-}
-
-function canAccessConversation(memberIds: string[], type: string, profileId: string) {
-  if (type === 'dm') {
-    return memberIds.includes(profileId);
-  }
-  // Deny empty membership lists — until ensureContextualConversations
-  // repopulates members, nobody (including managers) can read/send. Prefer a
-  // brief access gap over an open venue-wide conversation.
-  if (memberIds.length === 0) return false;
-  if (type === 'group' || type === 'role' || type === 'shift') {
-    return memberIds.includes(profileId);
-  }
-  return false;
 }
 
 function canDeleteConversation(type: string, isSystem: boolean) {
