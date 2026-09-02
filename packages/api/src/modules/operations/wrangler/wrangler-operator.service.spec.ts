@@ -9,9 +9,11 @@ import { WranglerOperatorService } from './wrangler-operator.service';
 // already used for fallbackParse() in safe-wrangler-operator.service.spec.ts,
 // since executeRead is not part of the public API.
 describe('WranglerOperatorService executeRead', () => {
+  const actor = { profileId: 'profile-1', fullName: 'Casey Manager', role: 'manager', allAccess: false };
+
   function callRead(prisma: any, tool: string, args: Record<string, unknown> = {}, timezone: string | null | undefined = 'UTC') {
     const service = new WranglerOperatorService(prisma as never);
-    return (service as any).executeRead('venue-1', timezone, tool, args);
+    return (service as any).executeRead('venue-1', timezone, tool, args, actor);
   }
 
   describe('FIND_RESERVATION', () => {
@@ -118,22 +120,50 @@ describe('WranglerOperatorService executeRead', () => {
   });
 
   describe('SEARCH_CHAT', () => {
-    it('scopes messages to conversations in the venue and filters by query text', async () => {
+    it('scopes messages to the caller\'s own conversations and filters by query text', async () => {
       const prisma = {
-        conversation: { findMany: vi.fn().mockResolvedValue([{ id: 'conv-1' }, { id: 'conv-2' }]) },
+        conversation: {
+          findMany: vi.fn().mockResolvedValue([
+            { id: 'conv-1', type: 'group', memberIds: ['profile-1', 'profile-2'] },
+            { id: 'conv-2', type: 'dm', memberIds: ['profile-1', 'profile-3'] },
+          ]),
+        },
         message: { findMany: vi.fn().mockResolvedValue([{ id: 'msg-1', text: 'run food to table 5', createdAt: new Date('2026-08-03T18:00:00Z'), conversationId: 'conv-1' }]) },
       };
 
       const result = await callRead(prisma, 'SEARCH_CHAT', { query: 'food' });
 
-      expect(prisma.conversation.findMany).toHaveBeenCalledWith({ where: { venueId: 'venue-1' }, take: 20 });
+      expect(prisma.conversation.findMany).toHaveBeenCalledWith({
+        where: { venueId: 'venue-1', memberIds: { has: 'profile-1' } },
+        take: 20,
+      });
       expect(prisma.message.findMany).toHaveBeenCalledWith(expect.objectContaining({
         where: expect.objectContaining({ conversationId: { in: ['conv-1', 'conv-2'] }, text: { contains: 'food', mode: 'insensitive' } }),
       }));
       expect(result).toEqual([{ id: 'msg-1', text: 'run food to table 5', createdAt: new Date('2026-08-03T18:00:00Z').getTime(), conversationId: 'conv-1' }]);
     });
 
-    it('searches with an empty conversation scope when the venue has no conversations', async () => {
+    it('excludes a venue conversation the caller does not belong to', async () => {
+      const prisma = {
+        conversation: {
+          findMany: vi.fn().mockResolvedValue([
+            { id: 'conv-1', type: 'dm', memberIds: ['profile-1', 'profile-2'] },
+            // A row the membership predicate would not return; belt and braces
+            // in case the filter is ever loosened, the access rule still holds.
+            { id: 'private-dm', type: 'dm', memberIds: ['profile-8', 'profile-9'] },
+          ]),
+        },
+        message: { findMany: vi.fn().mockResolvedValue([]) },
+      };
+
+      await callRead(prisma, 'SEARCH_CHAT', { query: 'raise' });
+
+      expect(prisma.message.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ conversationId: { in: ['conv-1'] } }),
+      }));
+    });
+
+    it('searches with an empty conversation scope when the caller has no conversations', async () => {
       const prisma = {
         conversation: { findMany: vi.fn().mockResolvedValue([]) },
         message: { findMany: vi.fn().mockResolvedValue([]) },

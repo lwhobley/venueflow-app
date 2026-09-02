@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Role, TableStatus, CrmLeadStatus } from '@prisma/client';
 import { canManageRole } from '../../../auth/roles';
+import { canAccessConversation } from '../../../common/conversation-access';
 import { callAiJson, resolveAiApiKey, resolveAiModel } from '../../../common/ai-json-parse';
 import { weekStartFor } from '../../../common/pay-period';
 import { adjacentWeekStarts, previousOvernightFilter, shiftsOverlap } from '../../../common/shift-overlap';
@@ -125,7 +126,7 @@ export class WranglerOperatorService {
     const risk = this.riskFor(parsed.tool);
 
     if (risk === 'read') {
-      const result = await this.executeRead(input.venueId, input.timezone, parsed.tool, parsed.args);
+      const result = await this.executeRead(input.venueId, input.timezone, parsed.tool, parsed.args, input.actor);
       return { status: 'executed' as const, tool: parsed.tool, risk, summary: parsed.summary, result };
     }
 
@@ -152,7 +153,7 @@ export class WranglerOperatorService {
     if (!ALLOWED_TOOLS.includes(input.plan.tool)) throw new BadRequestException('Unsupported Wrangler operator tool');
     const risk = this.riskFor(input.plan.tool);
     if (risk === 'read') {
-      const result = await this.executeRead(input.venueId, input.timezone, input.plan.tool, input.plan.args);
+      const result = await this.executeRead(input.venueId, input.timezone, input.plan.tool, input.plan.args, input.actor);
       return { ok: true, tool: input.plan.tool, risk, result };
     }
 
@@ -260,7 +261,7 @@ export class WranglerOperatorService {
     return 'operational_write';
   }
 
-  private async executeRead(venueId: string, timezone: string | null | undefined, tool: OperatorTool, args: Record<string, unknown>) {
+  private async executeRead(venueId: string, timezone: string | null | undefined, tool: OperatorTool, args: Record<string, unknown>, actor: Actor) {
     if (tool === 'FIND_RESERVATION') {
       const guestName = this.cleanText(args.guestName);
       const where: any = { venueId, deletedAt: null, ...(guestName ? { guestName: { contains: guestName, mode: 'insensitive' } } : {}) };
@@ -296,11 +297,17 @@ export class WranglerOperatorService {
 
     if (tool === 'SEARCH_CHAT') {
       const query = this.cleanText(args.query);
+      // Venue scope is not membership. Chat already refuses to open a
+      // conversation the caller does not belong to; searching through Wrangler
+      // must honour the same rule, or a manager can read a private staff DM by
+      // asking for it in words instead of opening it.
       const convs = await this.prisma.conversation.findMany({
-        where: { venueId },
+        where: { venueId, memberIds: { has: actor.profileId } },
         take: 20,
       });
-      const convIds = convs.map((c) => c.id);
+      const convIds = convs
+        .filter((c) => canAccessConversation(c.memberIds, c.type, actor.profileId))
+        .map((c) => c.id);
       const messages = await this.prisma.message.findMany({
         where: {
           conversationId: { in: convIds },
