@@ -333,6 +333,61 @@ describe('FloorService regressions', () => {
       );
     });
 
+    it('records an early seating as starting now, not at the booked time', async () => {
+      // Consumers select assignments with startsAt <= now < endsAt. Persisting
+      // the scheduled 19:00 start while writing a seated TableState left the
+      // two disagreeing: merging the party's tables threw, and any refresh
+      // before 19:00 reset the table to available with guests still at it.
+      const { prisma, tx } = makeAssignPrisma();
+      const before = Date.now();
+      const inThirtyMinutes = before + 30 * 60 * 1000;
+
+      await new FloorService(prisma, {} as any).assignReservationToTables('venue-1', 'res-1', ['table-1'], {
+        holdType: 'seated',
+        startsAt: inThirtyMinutes,
+        endsAt: inThirtyMinutes + 120 * 60 * 1000,
+      });
+
+      const row = tx.tableAssignment.create.mock.calls[0][0].data;
+      expect(row.startsAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(row.startsAt.getTime()).toBeLessThan(inThirtyMinutes);
+      // The booked duration is preserved, just shifted.
+      expect(row.endsAt.getTime() - row.startsAt.getTime()).toBe(120 * 60 * 1000);
+      expect(row.startsAt.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(row.endsAt.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('records a late seating as starting now too', async () => {
+      const { prisma, tx } = makeAssignPrisma();
+      const threeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
+
+      await new FloorService(prisma, {} as any).assignReservationToTables('venue-1', 'res-1', ['table-1'], {
+        holdType: 'seated',
+        startsAt: threeHoursAgo,
+        endsAt: threeHoursAgo + 90 * 60 * 1000,
+      });
+
+      const row = tx.tableAssignment.create.mock.calls[0][0].data;
+      // The booked window closed an hour and a half ago; a party sitting down
+      // now still has to occupy the table now.
+      expect(row.endsAt.getTime()).toBeGreaterThan(Date.now());
+      expect(row.startsAt.getTime()).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('keeps a future reservation hold on its booked window', async () => {
+      const { prisma, tx } = makeAssignPrisma();
+      const tomorrow = Date.now() + 24 * 60 * 60 * 1000;
+
+      await new FloorService(prisma, {} as any).assignReservationToTables('venue-1', 'res-1', ['table-1'], {
+        holdType: 'reserved',
+        startsAt: tomorrow,
+        endsAt: tomorrow + 120 * 60 * 1000,
+      });
+
+      const row = tx.tableAssignment.create.mock.calls[0][0].data;
+      expect(row.startsAt.getTime()).toBe(tomorrow);
+    });
+
     it('leaves the table free for a reservation hold whose window has not opened', async () => {
       const { prisma, tx } = makeAssignPrisma();
       const tomorrow = Date.now() + 24 * 60 * 60 * 1000;

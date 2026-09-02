@@ -878,4 +878,52 @@ describe('CrmController', () => {
     });
   });
 
+
+  describe('saveBeo assigned rep validation', () => {
+    const beo = {
+      id: 'beo-1',
+      venueId: 'venue-1',
+      leadId: 'lead-1',
+      eventName: 'Gala',
+      status: 'draft',
+      assignedRepId: 'rep-departed',
+      eventDate: null,
+    };
+
+    it('does not re-validate a rep that is not being changed', async () => {
+      // saveBeo rewrites every column, so every save resends assignedRepId.
+      // Confirming a BEO must not 400 because the rep assigned months ago has
+      // since left the venue.
+      const { controller, prisma } = makeController();
+      prisma.crmBeo.findFirst.mockResolvedValue(beo);
+      prisma.crmLead.findFirst.mockResolvedValue({ id: 'lead-1' });
+      // The departed rep resolves to no active member.
+      prisma.profile.findFirst.mockResolvedValue(null);
+
+      await controller.saveBeo(managerScope, {
+        beoId: 'beo-1',
+        leadId: 'lead-1',
+        eventName: 'Gala',
+        assignedRepId: 'rep-departed',
+        status: 'confirmed',
+      } as any);
+
+      expect(prisma.crmBeo.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ assignedRepId: 'rep-departed' }) }),
+      );
+    });
+
+    it('still rejects assigning a rep who is not an active member', async () => {
+      const { controller, prisma } = makeController();
+      prisma.crmBeo.findFirst.mockResolvedValue(beo);
+      prisma.profile.findFirst.mockResolvedValue(null);
+
+      await expect(controller.saveBeo(managerScope, {
+        beoId: 'beo-1',
+        eventName: 'Gala',
+        assignedRepId: 'rep-someone-else',
+      } as any)).rejects.toThrow('Assigned representative must be an active member of this venue.');
+    });
+  });
+
 });

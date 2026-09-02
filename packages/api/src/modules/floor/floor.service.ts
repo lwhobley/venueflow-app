@@ -613,13 +613,21 @@ export class FloorService {
     if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) throw new BadRequestException('Invalid seating window');
     let priorTableIds: string[] = [];
     const now = new Date();
-    // A 'seated' hold means a party is physically at the table right now, so it
-    // takes the table whatever the window says: the host screen sends the
-    // reservation's own scheduled time as startsAt, so seating a party even a
-    // minute early would otherwise leave the table free and the reservation
-    // un-seated. Only a future 'reserved' hold waits for its window — that is
-    // the case this gate exists for.
-    const occupiesTableNow = holdType === 'seated' || (startsAt <= now && endsAt > now);
+    // A 'seated' hold means a party is physically at the table right now, but
+    // the host screen sends the reservation's *scheduled* window, so seating a
+    // 19:00 party at 18:30 (or a very late one at 21:00) hands us a window that
+    // does not cover this moment. Slide it to start now, keeping the booked
+    // duration: every other consumer — merge, refreshTableStates, the floor
+    // reads — selects assignments with startsAt <= now < endsAt, so persisting
+    // the scheduled window would leave the row disagreeing with the seated
+    // state written from it. A 'reserved' hold keeps its window and waits.
+    let effectiveStartsAt = startsAt;
+    let effectiveEndsAt = endsAt;
+    if (holdType === 'seated' && !(startsAt <= now && endsAt > now)) {
+      effectiveStartsAt = now;
+      effectiveEndsAt = new Date(now.getTime() + (endsAt.getTime() - startsAt.getTime()));
+    }
+    const occupiesTableNow = effectiveStartsAt <= now && effectiveEndsAt > now;
 
     // Release prior assignments for THIS reservation, then check each requested
     // table for active overlaps from OTHER reservations, then create the new
@@ -641,8 +649,8 @@ export class FloorService {
           venueId,
           tableId: { in: tableIds },
           releasedAt: null,
-          startsAt: { lt: endsAt },
-          endsAt: { gt: startsAt },
+          startsAt: { lt: effectiveEndsAt },
+          endsAt: { gt: effectiveStartsAt },
           NOT: { reservationId },
         },
         select: { tableId: true },
@@ -657,8 +665,8 @@ export class FloorService {
             reservationId,
             tableId,
             holdType,
-            startsAt,
-            endsAt,
+            startsAt: effectiveStartsAt,
+            endsAt: effectiveEndsAt,
           },
         });
       }
@@ -666,7 +674,7 @@ export class FloorService {
         await tx.tableState.updateMany({ where: { venueId, tableId: { in: tableIds } }, data: {
           status: holdType === 'seated' ? 'seated' : 'reserved',
           partySize: reservation.partySize,
-          seatedAt: holdType === 'seated' ? startsAt : null,
+          seatedAt: holdType === 'seated' ? effectiveStartsAt : null,
           lastActivityAt: new Date(),
         } });
         if (holdType === 'seated') {
@@ -712,10 +720,16 @@ export class FloorService {
     let priorTableIds: string[] = [];
     const now = new Date();
     // Same rule as reservations: anything but an explicit 'held' hold is a
-    // party sitting down now. The client supplies startsAt from its own clock,
-    // so a device running seconds ahead of the server must not silently fail
-    // to seat.
-    const occupiesTableNow = body.holdType !== 'held' || (startsAt <= now && endsAt > now);
+    // party sitting down now, and its window is slid to match. startsAt here
+    // comes from the client's clock, so a device running seconds ahead of the
+    // server must not silently fail to seat.
+    let effectiveStartsAt = startsAt;
+    let effectiveEndsAt = endsAt;
+    if (body.holdType !== 'held' && !(startsAt <= now && endsAt > now)) {
+      effectiveStartsAt = now;
+      effectiveEndsAt = new Date(now.getTime() + (endsAt.getTime() - startsAt.getTime()));
+    }
+    const occupiesTableNow = effectiveStartsAt <= now && effectiveEndsAt > now;
 
     await withSerializableRetry(this.prisma, async (tx) => {
       const conflict = await tx.tableAssignment.findFirst({
@@ -723,8 +737,8 @@ export class FloorService {
           venueId,
           tableId: { in: body.tableIds },
           releasedAt: null,
-          startsAt: { lt: endsAt },
-          endsAt: { gt: startsAt },
+          startsAt: { lt: effectiveEndsAt },
+          endsAt: { gt: effectiveStartsAt },
           NOT: { waitlistId: body.waitlistId },
         },
         select: { tableId: true },
@@ -749,8 +763,8 @@ export class FloorService {
             waitlistId: body.waitlistId,
             tableId,
             holdType: (body.holdType ?? 'seated') as any,
-            startsAt,
-            endsAt,
+            startsAt: effectiveStartsAt,
+            endsAt: effectiveEndsAt,
           },
         });
       }
@@ -764,7 +778,7 @@ export class FloorService {
           data: {
             status: body.holdType === 'held' ? 'held' : 'seated',
             partySize: waitlist.partySize,
-            seatedAt: body.holdType === 'held' ? null : startsAt,
+            seatedAt: body.holdType === 'held' ? null : effectiveStartsAt,
             lastActivityAt: new Date(),
           },
         });

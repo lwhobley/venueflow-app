@@ -720,7 +720,20 @@ export class CrmController {
   async saveBeo(@VenueScope() scope: Scope, @Body() body: SaveBeoDto) {
     requireManager(scope);
     const now = new Date();
-    const assignedRepId = await this.resolveVenueMemberId(scope.venueId, body.assignedRepId, 'Assigned representative');
+
+    const existing = body.beoId
+      ? await this.prisma.crmBeo.findFirst({ where: { id: body.beoId, venueId: scope.venueId } })
+      : null;
+    if (body.beoId && !existing) throw new NotFoundException('BEO not found');
+
+    // saveBeo replaces every column, so any save has to resend assignedRepId
+    // even when it is not the thing being changed. Re-validating an unchanged
+    // value would make an unrelated save — confirming the BEO, editing the menu
+    // — fail outright once the rep assigned months ago has left the venue.
+    // Only a rep the caller is actually setting has to be an active member.
+    const assignedRepId = existing && body.assignedRepId === (existing.assignedRepId ?? undefined)
+      ? existing.assignedRepId
+      : await this.resolveVenueMemberId(scope.venueId, body.assignedRepId, 'Assigned representative');
 
     if (body.leadId) {
       const lead = await this.prisma.crmLead.findFirst({
@@ -750,12 +763,7 @@ export class CrmController {
       updatedAt: now,
     };
 
-    if (body.beoId) {
-      const existing = await this.prisma.crmBeo.findFirst({
-        where: { id: body.beoId, venueId: scope.venueId },
-      });
-      if (!existing) throw new NotFoundException('BEO not found');
-
+    if (existing) {
       const patch: Record<string, any> = { ...fields };
       if (body.status !== undefined) patch.status = body.status as BeoStatus;
       // Update the BEO and sync its reservation atomically. A hold conflict
