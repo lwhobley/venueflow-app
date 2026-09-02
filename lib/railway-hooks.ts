@@ -22,7 +22,7 @@ const queryRoutes: Record<string, Route> = {
   'app.getMe': { path: '/v1/app/me' },
   'app.getVenueJoinCode': { path: '/v1/app/venue/join-code' },
   'app.getDashboard': { path: '/v1/app/dashboard' },
-  'app.getNotifications': { path: '/v1/app/notifications' },
+  'app.getNotifications': { path: (args) => `/v1/app/notifications${args?.limit ? `?limit=${args.limit}` : ''}` },
   'app.getClockBoard': { path: '/v1/time-clock/board' },
   'app.getMyTimeClock': { path: '/v1/time-clock/me' },
   'app.getMyVenueBilling': { path: '/v1/app/billing' },

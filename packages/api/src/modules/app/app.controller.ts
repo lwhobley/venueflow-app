@@ -771,8 +771,14 @@ export class AppController {
   @UseGuards(AuthGuard)
   @RequireSubscription()
   @Get('notifications')
-  async getNotifications(@CurrentUser() user: AuthUser) {
+  async getNotifications(@CurrentUser() user: AuthUser, @Query('limit') limitQuery?: string) {
     const profile = await this.requireVenueProfile(user);
+    // The list was hard-capped at 20 with no way to reach anything older, so an
+    // unread notification past the newest 20 could not be read at all. The cap
+    // stays (this is a list, not an archive) but the caller can now ask for
+    // more, which is what the Load more control does.
+    const requested = Number(limitQuery);
+    const limit = Number.isFinite(requested) ? Math.min(Math.max(1, Math.floor(requested)), 200) : 20;
     const rows = await this.prisma.notificationEvent.findMany({
       where: {
         venueId: profile.venueId!,
@@ -783,7 +789,7 @@ export class AppController {
         ],
       },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: limit,
     });
     const reads = await this.prisma.notificationRead.findMany({
       where: { profileId: profile.id, notificationId: { in: rows.map((row) => row.id) } },
