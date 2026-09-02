@@ -25,6 +25,16 @@ function makeController() {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ ...bigVenue }),
       update: vi.fn().mockResolvedValue({}),
     },
+    schedulePublication: {
+      // Default: the week under test is published, which is what staff and
+      // manager views both assumed before publish state became per-week.
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockImplementation(({ where }: any) => {
+        const weeks: string[] = where?.weekStart?.in ?? [];
+        return Promise.resolve(weeks.map((weekStart) => ({ weekStart })));
+      }),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     blackoutDate: {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue({ id: 'blackout-1' }),
@@ -958,6 +968,25 @@ describe('SchedulingController', () => {
       expect(result.mine).toHaveLength(1);
       expect(result.open).toHaveLength(1);
       expect(result.roster).toHaveLength(7);
+    });
+
+    it('shows staff nothing for a week that has not been published', async () => {
+      // Regression: publish state was one venue-wide timestamp and staff shifts
+      // were never gated on it, so a manager could be looking at a schedule
+      // marked Draft while their team was already working from those shifts.
+      const { controller, prisma } = makeController();
+      prisma.schedulePublication.findMany.mockResolvedValue([]);
+      prisma.scheduleShift.findMany.mockResolvedValue([
+        { id: 's1', profileId: 'staff-1', dayIndex: 1, startMinutes: 600, endMinutes: 900, jobTitle: 'Server', station: 'Floor', status: 'scheduled', notes: null, profile: { fullName: 'Staff One' } },
+      ]);
+
+      const result = await controller.getMySchedule(staffScope);
+
+      expect(result.mine).toEqual([]);
+      expect(result.open).toEqual([]);
+      expect(result.publishState).toEqual({ status: 'draft', weekStart: expect.any(String) });
+      // The shifts are never even read for an unpublished week.
+      expect(prisma.scheduleShift.findMany).not.toHaveBeenCalled();
     });
   });
 });

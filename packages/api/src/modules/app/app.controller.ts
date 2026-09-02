@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, Logger, NotFoundException, Optional, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Prisma, ReservationStatus, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
@@ -9,7 +9,7 @@ import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { closeOpenBreaks, unpaidBreakMs } from '../../common/break-duration';
+import { closeOpenBreaks, parseTimeBreaks, unpaidBreakMs } from '../../common/break-duration';
 import { csvCell, csvDocument } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
@@ -17,7 +17,7 @@ import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
 import { buildClockAlerts, clockAlertShiftWindow } from '../../common/clock-alerts';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
-import { isIanaTimeZone, zonedDayBounds } from '../../common/venue-time';
+import { isIanaTimeZone, zonedDateBounds, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { runWithoutTenant } from '../../prisma/tenant-context';
@@ -218,6 +218,35 @@ class DeleteAccountDto {
 function planForStaffRange(range: string) {
   void range;
   return { planId: FLAT_PLAN_ID, priceCents: FLAT_PLAN_PRICE_CENTS };
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Venue-local [start, end) for an export's selected period. Both dates are
+ * inclusive calendar days in the venue's own timezone, so a manager in another
+ * timezone gets the venue's days rather than their device's. No dates means no
+ * range: the export falls back to its recent-rows behaviour rather than
+ * silently returning an arbitrary window.
+ */
+function resolveExportRange(
+  timezone: string | null,
+  startDate?: string,
+  endDate?: string,
+): { start: Date; end: Date } | null {
+  if (!startDate && !endDate) return null;
+  const startIso = startDate ?? endDate!;
+  const endIso = endDate ?? startDate!;
+  if (!ISO_DATE.test(startIso) || !ISO_DATE.test(endIso)) {
+    throw new BadRequestException('startDate and endDate must be YYYY-MM-DD.');
+  }
+  if (endIso < startIso) {
+    throw new BadRequestException('endDate must not be before startDate.');
+  }
+  return {
+    start: new Date(zonedDateBounds(timezone, startIso).start),
+    end: new Date(zonedDateBounds(timezone, endIso).end),
+  };
 }
 
 @Controller('v1/app')
@@ -689,20 +718,39 @@ export class AppController {
   @Get('time-entries/csv')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="time-entries.csv"')
-  async exportTimeEntriesCsv(@CurrentUser() user: AuthUser) {
+  async exportTimeEntriesCsv(
+    @CurrentUser() user: AuthUser,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
+    // The export ignored the period the manager had selected and returned the
+    // most recent 1000 punches whatever the screen said, so a chosen range and
+    // the file that came back could describe different weeks.
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { timezone: true } });
+    const timezone = venue?.timezone ?? null;
+    const range = resolveExportRange(timezone, startDate, endDate);
     const entries = await this.prisma.timeEntry.findMany({
-      where: { venueId },
+      where: {
+        venueId,
+        ...(range ? { clockInAt: { gte: range.start, lt: range.end } } : {}),
+      },
       include: { profile: true },
       orderBy: { clockInAt: 'desc' },
-      take: 1000,
+      take: 5000,
     });
-    const header = 'id,memberId,memberName,clockInAt,clockOutAt,hoursWorked\n';
+    const header = 'id,memberId,memberName,clockInAt,clockOutAt,unpaidBreakHours,hoursWorked\n';
     const rows = entries
       .map((e) => {
+        // Unpaid breaks were never deducted here, so this export disagreed with
+        // payroll — which does deduct them — for the same punches.
+        const unpaidMs = parseTimeBreaks(e.breaks)
+          .filter((b) => b.type === 'unpaid')
+          .reduce((sum, b) => sum + unpaidBreakMs(b.startAt, b.endAt), 0);
+        const unpaidHours = Math.round((unpaidMs / 3600000) * 100) / 100;
         const hours = e.clockOutAt
-          ? Math.round(((e.clockOutAt.getTime() - e.clockInAt.getTime()) / 3600000) * 100) / 100
+          ? Math.round((Math.max(0, e.clockOutAt.getTime() - e.clockInAt.getTime() - unpaidMs) / 3600000) * 100) / 100
           : '';
         return [
           csvCell(e.id),
@@ -710,6 +758,7 @@ export class AppController {
           csvCell(e.profile?.fullName ?? e.profileFullName ?? 'Former staff'),
           csvCell(e.clockInAt.toISOString()),
           csvCell(e.clockOutAt?.toISOString() ?? ''),
+          csvCell(unpaidHours),
           csvCell(hours),
         ].join(',');
       })

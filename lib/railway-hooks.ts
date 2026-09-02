@@ -31,7 +31,12 @@ const queryRoutes: Record<string, Route> = {
   'app.listStaffAuditLog': { path: '/v1/app/staff/audit-log' },
   'app.listStaffRequests': { path: '/v1/staff-requests' },
   'app.getManagerInsights': { path: '/v1/app/manager-insights' },
-  'app.exportTimeEntriesCsv': { path: '/v1/app/time-entries/csv' },
+  'app.exportTimeEntriesCsv': {
+    // The selected period travels with the request; without it the export
+    // returned recent punches regardless of what the screen showed.
+    path: (args) =>
+      `/v1/app/time-entries/csv${args?.startDate ? `?startDate=${encodeURIComponent(args.startDate)}&endDate=${encodeURIComponent(args.endDate ?? args.startDate)}` : ''}`,
+  },
   'staffAuth.listVenueRoles': { path: '/v1/app/venue-roles' },
   'scheduling.listBlackouts': { path: '/v1/scheduling/blackouts' },
   'scheduling.getManagerSchedule': { path: (args) => `/v1/scheduling/manager${args?.weekStart ? `?weekStart=${encodeURIComponent(args.weekStart)}` : ''}` },
@@ -56,7 +61,10 @@ const queryRoutes: Record<string, Route> = {
     path: (args) => `/v1/operations/checklist?kind=${encodeURIComponent(args.kind)}${args?.date ? `&date=${encodeURIComponent(args.date)}` : ''}`,
   },
   'reservations.getReservationsPage': { path: '/v1/reservations' },
-  'reservations.exportReservationsCsv': { path: '/v1/reservations/export-csv' },
+  'reservations.exportReservationsCsv': {
+    path: (args) =>
+      `/v1/reservations/export-csv${args?.startDate ? `?startDate=${encodeURIComponent(args.startDate)}&endDate=${encodeURIComponent(args.endDate ?? args.startDate)}` : ''}`,
+  },
   'payroll.getPayrollSummary': { path: (args) => `/v1/payroll/summary${args.startDate ? `?startDate=${args.startDate}&endDate=${args.endDate ?? ''}` : ''}` },
   'payroll.exportPayrollCsv': { path: (args) => `/v1/payroll/export-csv${args.startDate ? `?startDate=${args.startDate}&endDate=${args.endDate ?? ''}` : ''}` },
   'barInventory.getBarStock': { path: '/v1/bar-inventory' },
