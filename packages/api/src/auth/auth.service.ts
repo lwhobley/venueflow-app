@@ -8,7 +8,9 @@ import { hashInviteToken } from '../common/invite-token';
 
 const pbkdf2Async = promisify(pbkdf2);
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
-const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+// A stolen mobile bearer token must not remain useful for a full week. The
+// server-side Session row still supports immediate logout/revocation.
+export const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 600_000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = 'sha256';
@@ -33,7 +35,7 @@ export class AuthService {
   }
 
   generateOneTimeCode() {
-    return Array.from({ length: 8 }, () => randomInt(0, 10)).join('');
+    return Array.from({ length: 10 }, () => randomInt(0, 10)).join('');
   }
 
   hashOneTimeCode(code: string) {
@@ -127,7 +129,12 @@ export class AuthService {
           await tx.profile.delete({ where: { id: existingByUser.id } });
           result = await tx.profile.update({
             where: { id: adoptableProfile.id },
-            data: { userId, role: 'staff' },
+            data: {
+              userId,
+              role: grant?.role ?? 'staff',
+              ...(grant?.jobTitle || adoptableProfile.jobTitle ? { jobTitle: grant?.jobTitle ?? adoptableProfile.jobTitle } : {}),
+              membershipStatus: grant ? grant.membershipStatus : 'pending',
+            },
             include: { venue: true },
           });
           await this.logProfileAdoption(tx, result);
@@ -182,6 +189,7 @@ export class AuthService {
               role: grant?.role ?? 'staff',
               jobTitle: grant?.jobTitle ?? adoptableProfile.jobTitle,
               venueId: grant?.venueId ?? adoptableProfile.venueId,
+              membershipStatus: grant ? grant.membershipStatus : 'pending',
               trialEndsAt: adoptableProfile.trialEndsAt ?? trialEndsAt,
             },
             include: { venue: true },

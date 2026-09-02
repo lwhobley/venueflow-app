@@ -24,8 +24,9 @@ describe('DocumentsController', () => {
     delete: vi.fn(),
   } as any;
   const mediaCleanup = { processJob: vi.fn().mockResolvedValue(true) } as any;
+  const malwareScanner = { assertClean: vi.fn().mockResolvedValue(undefined) } as any;
   prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) => callback(prisma));
-  const controller = new DocumentsController(prisma, storage, mediaCleanup);
+  const controller = new DocumentsController(prisma, storage, malwareScanner, mediaCleanup);
 
   beforeEach(() => vi.clearAllMocks());
 
@@ -47,6 +48,7 @@ describe('DocumentsController', () => {
       dataBase64: Buffer.from('%PDF-1.7\nbody').toString('base64'),
     });
     expect(storage.upload).toHaveBeenCalledWith(expect.any(Buffer), 'application/pdf', 'venue-1');
+    expect(malwareScanner.assertClean).toHaveBeenCalledWith(expect.any(Buffer));
     expect(prisma.venueDocument.create).toHaveBeenCalledWith({ data: expect.objectContaining({ title: 'Opening SOP', venueId: 'venue-1' }) });
     expect(result).toEqual({ id: 'doc-1', _id: 'doc-1' });
   });

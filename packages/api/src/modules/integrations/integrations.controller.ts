@@ -1,5 +1,5 @@
 import { Body, Controller, ForbiddenException, Get, Post } from '@nestjs/common';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { IntegrationStatus, ReservationSource } from '@prisma/client';
 import { canManageVenue } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
@@ -20,6 +20,7 @@ class UpsertReservationConnectionDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   externalVenueId?: string;
 
   @IsString()

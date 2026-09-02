@@ -1,5 +1,5 @@
 import { Body, ConflictException, Controller, ForbiddenException, Post } from '@nestjs/common';
-import { IsIn, IsString } from 'class-validator';
+import { IsIn, IsString, MaxLength } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { VenueScope } from '../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../venue/venue-scope.interceptor';
@@ -10,6 +10,7 @@ const PUSH_PLATFORMS = ['ios', 'android', 'web'] as const;
 
 class RegisterPushTokenDto {
   @IsString()
+  @MaxLength(500)
   token!: string;
 
   @IsIn(PUSH_PLATFORMS)
@@ -41,9 +42,11 @@ export class PushController {
       if (existing && (existing.profileId !== scope.profileId || existing.venueId !== scope.venueId)) {
         throw new ConflictException('This device token is already registered to another profile.');
       }
-      return existing
-        ? tx.pushToken.update({ where: { token }, data })
-        : tx.pushToken.create({ data: { token, ...data } });
+      return tx.pushToken.upsert({
+        where: { token },
+        create: { ...data, token },
+        update: data,
+      });
     });
 
     return { id: pushToken.id, ok: true };

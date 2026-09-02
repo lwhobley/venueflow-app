@@ -4,6 +4,22 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
 
+// A completed, no-show, or cancelled reservation is a closed record. Nothing
+// here models the full transition graph (requested/confirmed/checked_in/
+// seated all remain freely interchangeable, since real flows skip states —
+// e.g. a host seating a confirmed walk-in without a separate check-in step)
+// — only that a closed reservation cannot become active again. Without this,
+// `saveReservation`'s generic upsert accepted `cancelled -> seated` as a
+// plain cast with no validation at all.
+const TERMINAL_RESERVATION_STATUSES: ReadonlySet<ReservationStatus> = new Set(['completed', 'no_show', 'cancelled']);
+
+function assertReservationTransitionAllowed(from: ReservationStatus, to: ReservationStatus) {
+  if (from === to) return;
+  if (TERMINAL_RESERVATION_STATUSES.has(from)) {
+    throw new BadRequestException(`A ${from} reservation cannot be changed to ${to}.`);
+  }
+}
+
 @Injectable()
 export class ReservationMutationService {
   constructor(
@@ -91,6 +107,7 @@ export class ReservationMutationService {
           where: { id: args.reservationId, venueId: args.venueId },
         });
         if (!existing) throw new BadRequestException('Reservation not found');
+        assertReservationTransitionAllowed(existing.status, data.status);
 
         const updated = await transaction.reservation.update({
           where: { id: existing.id },
@@ -141,6 +158,20 @@ export class ReservationMutationService {
       );
       if (overlapsReservation) {
         throw new BadRequestException('This hold overlaps an existing reservation. Move or cancel the reservation first.');
+      }
+      // Regression for VW-08: this only ever checked new holds against
+      // reservations, never against each other, so two holds could cover
+      // the same window.
+      const overlappingHold = await transaction.reservationHold.findFirst({
+        where: {
+          venueId: args.venueId,
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+        },
+        select: { id: true },
+      });
+      if (overlappingHold) {
+        throw new BadRequestException('This hold overlaps another hold already on the calendar.');
       }
       return transaction.reservationHold.create({
         data: { venueId: args.venueId, startsAt, endsAt, reason },

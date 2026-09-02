@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthController } from './auth.controller';
 
@@ -238,6 +240,14 @@ describe('AuthController email invite signup', () => {
     expect(result.profile.venueId).toBe('venue-1');
     expect(result.token).toBe('jwt-token');
     expect(result.venue.name).toBe('Test Venue');
+    expect(jwt.signAsync).toHaveBeenCalledWith({
+      sub: 'user-1',
+      email: 'staff@example.com',
+      name: 'Test Staff',
+      sid: 'session-1',
+      profileId: 'profile-1',
+      venueId: 'venue-1',
+    });
     expect(email.sendOrThrow).not.toHaveBeenCalled();
   });
 
@@ -283,7 +293,7 @@ describe('AuthController email invite signup', () => {
     const authService = {
       hashPassword: vi.fn().mockResolvedValue({ salt: 'salt', hash: 'hash' }),
       issueSession: vi.fn().mockResolvedValue({ session: { id: 'session-1' }, profile: { id: 'profile-1', venueId: 'venue-1', role: 'staff', emailVerified: true, venue: { id: 'venue-1', name: 'Test Venue' } } }),
-      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const email = { send: vi.fn(), sendOrThrow: vi.fn().mockResolvedValue(undefined) };
@@ -384,7 +394,7 @@ describe('AuthController recovery and logout safety', () => {
     await expect(controller.verifyEmail(
       { ip: '127.0.0.1' } as never,
       { sub: 'user-1' } as never,
-      { code: '12345678' },
+      { code: '1234567890' },
     )).resolves.toEqual({ ok: true });
 
     expect(tx.user.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'user-1' } }));
@@ -418,7 +428,7 @@ describe('AuthController recovery and logout safety', () => {
       sendOrThrow: vi.fn().mockRejectedValue(new Error('provider down')),
     };
     const authService = {
-      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const controller = new AuthController(prisma as any, {} as any, email as any, authService as any);
@@ -439,7 +449,7 @@ describe('AuthController recovery and logout safety', () => {
     };
     const email = { send: vi.fn() };
     const authService = {
-      generateOneTimeCode: vi.fn().mockReturnValue('12345678'),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
       hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
     };
     const controller = new AuthController(prisma as any, {} as any, email as any, authService as any);
@@ -450,7 +460,7 @@ describe('AuthController recovery and logout safety', () => {
     )).resolves.toEqual({ ok: true });
 
     expect(authService.generateOneTimeCode).toHaveBeenCalledOnce();
-    expect(authService.hashOneTimeCode).toHaveBeenCalledWith('12345678');
+    expect(authService.hashOneTimeCode).toHaveBeenCalledWith('1234567890');
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: '__missing_password_reset_account__' },
     }));
@@ -502,7 +512,7 @@ describe('AuthController recovery and logout safety', () => {
     };
     const controller = new AuthController(prisma as any, {} as any, {} as any, authService as any);
     const request = { ip: '127.0.0.1' } as any;
-    const body = { email: 'staff@example.com', code: '12345678', newPassword: 'password123' };
+    const body = { email: 'staff@example.com', code: '1234567890', newPassword: 'password123' };
 
     const results = await Promise.allSettled([
       controller.resetPassword(request, body),
@@ -587,5 +597,75 @@ describe('AuthController recovery and logout safety', () => {
     expect(prisma.pushToken.deleteMany).toHaveBeenCalledWith({
       where: { profileId: 'profile-1', token: 'ExponentPushToken[this-device]' },
     });
+  });
+});
+
+describe('AuthController log hygiene', () => {
+  it('identifies a failed verification email by user id, never by address', async () => {
+    // Drives the real catch in password(): a manager-created invite (one with
+    // a join code) does not auto-verify, so the controller sends a
+    // verification email, and a delivery failure is swallowed and logged.
+    // Cloud Run logs are retained and fan out to downstream sinks, so an
+    // address interpolated there is PII at rest for the life of the log.
+    const prisma: any = {
+      user: {
+        findUnique: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ emailVerifiedAt: null }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      // `code: null` matches only an emailed single-use invite; returning null
+      // for it forces the branch that actually sends a verification email.
+      invite: { findFirst: vi.fn(async ({ where }: any) => (where.code === null ? null : { id: 'invite-1' })) },
+      session: { update: vi.fn().mockResolvedValue({}) },
+      $transaction: vi.fn(async (callback: any) => callback({
+        user: { create: vi.fn().mockResolvedValue({ id: 'user-42' }) },
+        passwordCredential: { create: vi.fn().mockResolvedValue({}) },
+      })),
+    };
+    const venue = { id: 'venue-1', name: 'Test Venue', latitude: 1, longitude: 2, geofenceRadiusM: 100, subscriptionStatus: 'trialing' };
+    const authService = {
+      hashPassword: vi.fn().mockResolvedValue({ salt: 'salt', hash: 'hash' }),
+      issueSession: vi.fn().mockResolvedValue({
+        session: { id: 'session-1' },
+        profile: { id: 'profile-1', venueId: 'venue-1', role: 'staff', emailVerified: false, fullName: 'Renee', venue },
+      }),
+      generateOneTimeCode: vi.fn().mockReturnValue('1234567890'),
+      hashOneTimeCode: vi.fn().mockReturnValue('hashed-code'),
+    };
+    const email = { send: vi.fn(), sendOrThrow: vi.fn().mockRejectedValue(new Error('provider down')) };
+    const jwt = { signAsync: vi.fn().mockResolvedValue('jwt-token') };
+    const controller = new AuthController(prisma, jwt as any, email as any, authService as any);
+
+    const logged: string[] = [];
+    vi.spyOn((controller as any).logger, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map((arg) => String(arg)).join(' '));
+    });
+
+    await (controller as any).password(
+      { ip: '127.0.0.1' },
+      {
+        email: 'Renee@Example.test',
+        password: 'password123',
+        flow: 'signUp',
+        fullName: 'Renee',
+        inviteToken: 'shareable-token',
+        termsAccepted: true,
+      },
+    );
+
+    // Guard the guard: if delivery never failed there is nothing to assert on.
+    expect(email.sendOrThrow).toHaveBeenCalled();
+    const output = logged.join(' | ');
+    expect(output).toContain('Verification email failed for user user-42');
+    expect(output).not.toContain('renee@example.test');
+  });
+
+  it('keeps every logger call in the auth controller free of raw addresses', () => {
+    // Source-level guard: the unit test above only covers the one call site,
+    // and this class has several logging paths that could regress.
+    const source = readFileSync(join(__dirname, 'auth.controller.ts'), 'utf8');
+    const offenders = [...source.matchAll(/logger\.[a-z]+\(`[^`]*`/g)]
+      .map((m) => m[0])
+      .filter((call) => /\$\{\s*(email|to|recipient|account\.email)\s*\}/.test(call));
+    expect(offenders).toEqual([]);
   });
 });

@@ -1,7 +1,8 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Prisma, TableShape, TableSection, TableStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { ReservationNotifierService } from '../reservations/reservation-notifier.service';
 
@@ -12,11 +13,15 @@ import { ReservationNotifierService } from '../reservations/reservation-notifier
  * venueId and does the Prisma work. Bodies moved verbatim from the controller
  * (same pattern as BarInventoryReportsService) — no behavior change.
  */
+/** Who performed a floor action, for the audit trail. */
+export type FloorActor = { profileId: string; fullName: string; role: string };
+
 @Injectable()
 export class FloorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifier: ReservationNotifierService,
+    @Optional() private readonly audit?: AuditService,
   ) {}
 
   async getActiveFloorPlan(venueId: string) {
@@ -248,7 +253,7 @@ export class FloorService {
 
       if (creates.length > 0) {
         await tx.floorTable.createMany({
-          data: creates.map(({ isNew: _isNew, ...data }) => ({ ...data, floorPlanId: plan.id })),
+          data: creates.map(({ isNew: _isNew, ...data }) => ({ ...data, venueId, floorPlanId: plan.id })),
         });
         await tx.tableState.createMany({
           data: creates.map((row) => ({ venueId, tableId: row.id, status: 'available', lastActivityAt: new Date() })),
@@ -411,10 +416,22 @@ export class FloorService {
     return { _id: row.id, id: row.id };
   }
 
-  async removeFromWaitlist(venueId: string, id: string) {
+  async removeFromWaitlist(venueId: string, id: string, actor?: FloorActor) {
     const row = await this.prisma.waitlist.findFirst({ where: { id, venueId } });
     if (!row) throw new NotFoundException('Waitlist entry not found');
     await this.prisma.waitlist.update({ where: { id: row.id }, data: { status: 'removed' } });
+    // Destructive and reachable by the lowest-privilege role, so it needs to be
+    // attributable — this was the only such action with no trace at all.
+    void this.audit?.record({
+      venueId,
+      actorProfileId: actor?.profileId,
+      actorName: actor?.fullName,
+      actorRole: actor?.role,
+      action: 'floor.waitlist.removed',
+      entityType: 'Waitlist',
+      entityId: row.id,
+      summary: `Removed ${row.guestName ?? 'a party'} from the waitlist`,
+    });
     return { ok: true };
   }
 
@@ -425,7 +442,7 @@ export class FloorService {
     return { ok: true };
   }
 
-  async updateTableStatus(venueId: string, id: string, status: string) {
+  async updateTableStatus(venueId: string, id: string, status: string, actor?: FloorActor) {
     const state = await this.prisma.tableState.findFirst({ where: { tableId: id, venueId } });
     if (!state) throw new NotFoundException('Table not found');
     const result = await this.prisma.tableState.updateMany({
@@ -433,6 +450,16 @@ export class FloorService {
       data: { status: status as TableStatus, lastActivityAt: new Date() },
     });
     if (result.count === 0) throw new ConflictException('Table status changed. Refresh and try again.');
+    void this.audit?.record({
+      venueId,
+      actorProfileId: actor?.profileId,
+      actorName: actor?.fullName,
+      actorRole: actor?.role,
+      action: 'floor.table.status_changed',
+      entityType: 'TableState',
+      entityId: state.id,
+      summary: `Table status set to ${status}`,
+    });
     return { ok: true };
   }
 

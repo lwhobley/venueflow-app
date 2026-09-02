@@ -96,6 +96,108 @@ describe('tenant isolation extension (integration)', () => {
     await base.barInventoryItem.delete({ where: { id: created.id } });
   });
 
+  // ── Unique-keyed writes ──────────────────────────────────────────────────
+  //
+  // update/delete/upsert go through mergeUniqueVenueWhere, which appends
+  // venueId to a WhereUniqueInput and relies on Prisma's extended-unique-where
+  // behaviour. Only the argument shaping was covered by unit tests; what
+  // Prisma and Postgres actually do with those arguments was not, so deleting
+  // the UNIQUE_KEYED_OPERATIONS branch left every test passing.
+
+  it('update cannot reach another tenant by id', async () => {
+    const otherTenantItem = await base.barInventoryItem.findFirstOrThrow({ where: { venueId: venueB } });
+
+    await expect(
+      asTenant(venueA, () => db.barInventoryItem.update({
+        where: { id: otherTenantItem.id },
+        data: { name: 'HIJACKED' },
+      })),
+    ).rejects.toThrow();
+
+    const after = await base.barInventoryItem.findUniqueOrThrow({ where: { id: otherTenantItem.id } });
+    expect(after.name).toBe('B-Rum');
+  });
+
+  it('delete cannot reach another tenant by id', async () => {
+    const otherTenantItem = await base.barInventoryItem.findFirstOrThrow({ where: { venueId: venueB } });
+
+    await expect(
+      asTenant(venueA, () => db.barInventoryItem.delete({ where: { id: otherTenantItem.id } })),
+    ).rejects.toThrow();
+
+    expect(await base.barInventoryItem.findUnique({ where: { id: otherTenantItem.id } })).not.toBeNull();
+  });
+
+  it('update cannot move a row into another tenant via data.venueId', async () => {
+    const own = await base.barInventoryItem.findFirstOrThrow({ where: { venueId: venueA } });
+
+    const updated = await asTenant(venueA, () => db.barInventoryItem.update({
+      where: { id: own.id },
+      data: { venueId: venueB, name: 'A-Gin' },
+    }));
+
+    expect(updated.venueId).toBe(venueA);
+  });
+
+  it('updateMany with a hostile where affects no rows', async () => {
+    const result = await asTenant(venueA, () => db.barInventoryItem.updateMany({
+      where: { venueId: venueB },
+      data: { name: 'HIJACKED' },
+    }));
+
+    expect(result.count).toBe(0);
+    const untouched = await base.barInventoryItem.findFirstOrThrow({ where: { venueId: venueB } });
+    expect(untouched.name).toBe('B-Rum');
+  });
+
+  it('upsert on another tenant unique key creates inside the bound tenant instead', async () => {
+    // The extended filter does not match, so Prisma falls through to the create
+    // branch — which scopeArgs forces into the bound venue. The other tenant's
+    // row must be left exactly as it was.
+    const otherTenantItem = await base.barInventoryItem.findFirstOrThrow({ where: { venueId: venueB } });
+
+    const result = await asTenant(venueA, () => db.barInventoryItem.upsert({
+      where: { id: otherTenantItem.id },
+      update: { name: 'HIJACKED' },
+      create: {
+        venueId: venueB,
+        name: 'A-Upserted',
+        normalizedName: 'a-upserted',
+        category: 'spirit',
+        unit: 'bottle',
+        parLevel: 1,
+        onHand: 1,
+      },
+    }));
+
+    expect(result.venueId).toBe(venueA);
+    const otherAfter = await base.barInventoryItem.findUniqueOrThrow({ where: { id: otherTenantItem.id } });
+    expect(otherAfter.name).toBe('B-Rum');
+    await base.barInventoryItem.delete({ where: { id: result.id } });
+  });
+
+  it('upsert still updates the bound tenant own row', async () => {
+    const own = await base.barInventoryItem.findFirstOrThrow({ where: { venueId: venueA } });
+
+    const result = await asTenant(venueA, () => db.barInventoryItem.upsert({
+      where: { id: own.id },
+      update: { parLevel: 9 },
+      create: {
+        venueId: venueA,
+        name: 'unused',
+        normalizedName: 'unused',
+        category: 'spirit',
+        unit: 'bottle',
+        parLevel: 1,
+        onHand: 1,
+      },
+    }));
+
+    expect(result.id).toBe(own.id);
+    expect(result.parLevel).toBe(9);
+    await base.barInventoryItem.update({ where: { id: own.id }, data: { parLevel: 1 } });
+  });
+
   it('database constraints reject a cross-tenant scheduling reference even without tenant context', async () => {
     await expect(base.scheduleShift.create({
       data: {

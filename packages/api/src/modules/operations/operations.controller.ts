@@ -15,7 +15,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
@@ -29,6 +29,7 @@ import { isActiveMembership } from '../../common/membership';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { previousOvernightFilter } from '../../common/shift-overlap';
 import { zonedDayBounds, zonedDayOfWeek, zonedIsoDate } from '../../common/venue-time';
+import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaAccessService } from '../chat/media-access.service';
 import { S3ImageService } from '../chat/s3-image.service';
@@ -36,12 +37,16 @@ import { buildDailyBriefAlerts } from './daily-brief-alerts';
 import { buildDailyBriefPriorityActions } from './daily-brief-priority-actions';
 import { buildDailyBriefProfitabilityPulse } from './daily-brief-profitability';
 import { ExecutionAutopilotService } from './execution-autopilot.service';
+import { DocumentMalwareScannerService } from '../documents/document-malware-scanner.service';
+import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 
+type Scope = VenueScopedRequest['venueScope'];
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const GOAL_PERIODS = ['day', 'week'] as const;
 const GOAL_STATUSES = ['open', 'done', 'cancelled'] as const;
-const LOGBOOK_CATEGORIES = ['handoff', 'incident', 'maintenance', 'general'] as const;
+const LOGBOOK_CATEGORIES = ['general', 'shift_handover', 'incident', 'maintenance', 'vip'] as const;
 const CHECKLIST_KINDS = ['opening', 'closing'] as const;
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 type ManagerGoalPeriod = (typeof GOAL_PERIODS)[number];
 type ManagerGoalStatus = (typeof GOAL_STATUSES)[number];
@@ -49,19 +54,23 @@ type ManagerGoalStatus = (typeof GOAL_STATUSES)[number];
 class UpsertManagerGoalDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   goalId?: string;
 
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   details?: string;
 
   @IsIn(GOAL_PERIODS)
   period!: ManagerGoalPeriod;
 
   @IsString()
+  @MaxLength(32)
   targetDate!: string;
 
   @IsIn(GOAL_STATUSES)
@@ -70,9 +79,11 @@ class UpsertManagerGoalDto {
 
 class LogbookEntryDto {
   @IsString()
+  @MaxLength(100)
   category!: string;
 
   @IsString()
+  @MaxLength(10000)
   body!: string;
 
   @IsOptional()
@@ -85,6 +96,7 @@ class ChecklistTemplateItemDto {
   kind!: (typeof CHECKLIST_KINDS)[number];
 
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsOptional()
@@ -95,6 +107,7 @@ class ChecklistTemplateItemDto {
 class CompleteChecklistItemDto {
   @IsOptional()
   @IsString()
+  @MaxLength(10_000_000)
   photoBase64?: string;
 
   @IsOptional()
@@ -124,6 +137,7 @@ class UpdateExecutionIncidentDto {
 
 class CreateExecutionIncidentDto {
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsOptional()
@@ -247,6 +261,7 @@ export class OperationsController {
     private readonly mediaAccess: MediaAccessService,
     private readonly s3ImageService: S3ImageService,
     @Optional() private readonly executionAutopilot?: ExecutionAutopilotService,
+    @Optional() private readonly malwareScanner?: DocumentMalwareScannerService,
   ) {}
 
   @RequireSubscription('active')
@@ -866,6 +881,15 @@ export class OperationsController {
   @Post('logbook')
   async addLogbookEntry(@CurrentUser() user: AuthUser, @Body() body: LogbookEntryDto) {
     const profile = await this.requireVenueProfile(user);
+
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      `logbook-entry:profile:${profile.id}`,
+      30,
+      60_000,
+      'Too many logbook entries. Please wait a moment before posting again.',
+    );
+
     const text = body.body.trim();
     if (!text) throw new BadRequestException('Entry text is required');
     const category = LOGBOOK_CATEGORIES.includes(body.category as (typeof LOGBOOK_CATEGORIES)[number])
@@ -1005,6 +1029,9 @@ export class OperationsController {
       if (data.length === 0) throw new BadRequestException('Photo is empty');
       if (data.length > MAX_PHOTO_BYTES) throw new BadRequestException('Photo is too large (max 5MB)');
       const mime = assertAllowedImageBytes(data, body.photoMimeType);
+      if (this.malwareScanner) {
+        await this.malwareScanner.assertClean(data);
+      }
       photoKey = await this.s3ImageService.upload(data, mime, venueId);
     }
     const completedAt = new Date();

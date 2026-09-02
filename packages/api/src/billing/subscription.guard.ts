@@ -79,6 +79,7 @@ export class SubscriptionGuard implements CanActivate {
       const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
         venueId: verified.venueId,
         venueStatus: verified.venue.subscriptionStatus,
+        venuePlatform: verified.venue.subscriptionPlatform,
         trialEndsAt: verified.trialEndsAt,
       });
       request.venueScope = {
@@ -105,7 +106,7 @@ export class SubscriptionGuard implements CanActivate {
         ...(requestedVenueId ? { venueId: requestedVenueId } : { venueId: { not: null } }),
         OR: ACTIVE_MEMBERSHIP,
       },
-      include: { venue: { select: { id: true, name: true, subscriptionStatus: true } } },
+      include: { venue: { select: { id: true, name: true, subscriptionStatus: true, subscriptionPlatform: true } } },
       orderBy: { createdAt: 'asc' },
     });
     if (!profile?.venueId || !profile.venue) return null;
@@ -117,6 +118,7 @@ export class SubscriptionGuard implements CanActivate {
     const subscriptionStatus = await resolveVenueSubscriptionStatus(this.prisma, {
       venueId: profile.venueId,
       venueStatus: profile.venue.subscriptionStatus,
+      venuePlatform: profile.venue.subscriptionPlatform,
       trialEndsAt: profile.trialEndsAt,
     });
 

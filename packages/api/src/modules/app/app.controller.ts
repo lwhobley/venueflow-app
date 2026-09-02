@@ -1,6 +1,6 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Header, HttpException, HttpStatus, Logger, NotFoundException, Optional, Param, Patch, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
-import { Prisma, Role } from '@prisma/client';
+import { IsBoolean, IsEmail, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { Prisma, ReservationStatus, Role } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
 import type { Request } from 'express';
 import { AuthGuard } from '../../auth/auth.guard';
@@ -10,11 +10,12 @@ import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole, isOwnerOrAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
 import { closeOpenBreaks, unpaidBreakMs } from '../../common/break-duration';
-import { csvCell } from '../../common/csv';
+import { csvCell, csvDocument } from '../../common/csv';
 import { getClientIp } from '../../common/http';
 import { hashInviteToken } from '../../common/invite-token';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { sanitizeForEmail } from '../../common/sanitize-email-text';
+import { buildClockAlerts, clockAlertShiftWindow } from '../../common/clock-alerts';
 import { todayInZone, weekStartFor } from '../../common/pay-period';
 import { isIanaTimeZone, zonedDayBounds } from '../../common/venue-time';
 import { EmailService } from '../../email/email.service';
@@ -26,6 +27,7 @@ import { isActiveMembership } from '../../common/membership';
 import { syncTeamMemberCount } from '../../common/team-sync';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { endBreakForProfile, startBreakForProfile } from '../time-clock/break-transitions';
+import { Audited } from '../audit/audited.decorator';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -44,6 +46,7 @@ const MULTI_VENUE_PLAN_ID = 'venueflow_multi_venue_5';
 const MULTI_VENUE_PRICE_CENTS = 39900;
 const MULTI_VENUE_MAX_VENUES = 5;
 const PUBLIC_INVITE_RATE_LIMIT_MAX = 20;
+const PUBLIC_INVITE_GLOBAL_RATE_LIMIT_MAX = 500;
 const PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 // Human-typeable invite codes. Excludes look-alike characters (0/O, 1/I/L) so
@@ -76,34 +79,42 @@ function makeVenueCode(): string {
 class BootstrapProfileDto {
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   fullName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   jobTitle?: string;
 }
 
 class RegisterVenueDto {
   @IsString()
+  @MaxLength(200)
   businessName!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   ownerName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   address?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   venueType?: string;
 
   @IsString()
+  @MaxLength(50)
   staffRange!: string;
 
   @IsNumber()
@@ -120,12 +131,14 @@ class RegisterVenueDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   timezone?: string;
 }
 
 class UpdateVenueDto {
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   name?: string;
 
   @IsNumber()
@@ -147,6 +160,7 @@ class UpdateVenueDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   timezone?: string;
 }
 
@@ -158,12 +172,14 @@ class BreakStartDto {
 
 class VenueRoleDto {
   @IsString()
+  @MaxLength(100)
   name!: string;
 }
 
 class CreateInviteDto {
   @IsEmail()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsIn(['manager', 'staff'])
@@ -171,21 +187,25 @@ class CreateInviteDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   jobTitle?: string;
 }
 
 class JoinByCodeDto {
   @IsString()
+  @MaxLength(64)
   code!: string;
 }
 
 class RedeemInviteDto {
   @IsString()
+  @MaxLength(128)
   codeOrToken!: string;
 }
 
 class SwitchVenueDto {
   @IsString()
+  @MaxLength(64)
   venueId!: string;
 }
 
@@ -418,7 +438,13 @@ export class AppController {
           latitude,
           longitude,
           geofenceRadiusM: 150,
-          timezone: parseVenueTimeZone(body.timezone) ?? null,
+          // Regression for VW-24: timezone is now required at the database
+          // layer (see the schema comment). A caller that omits it — the
+          // marketing site now sends one, but this is the backstop for any
+          // caller that doesn't — gets UTC rather than a constraint
+          // violation, matching the fallback every zonedDateBounds()-style
+          // helper already used for a null timezone.
+          timezone: parseVenueTimeZone(body.timezone) ?? 'UTC',
           phone: body.phone?.trim() || null,
           address: body.address?.trim() || null,
           venueType: body.venueType?.trim() || null,
@@ -478,6 +504,7 @@ export class AppController {
 
   @UseGuards(AuthGuard)
   @RequireSubscription()
+  @Audited('join_code.rotate', { entityType: 'venue', summary: 'Rotated venue join code' })
   @Post('venue/join-code/rotate')
   async rotateVenueJoinCode(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
@@ -498,6 +525,10 @@ export class AppController {
         throw new BadRequestException('Venue coordinates cannot be 0,0. Use a real location for the time-clock geofence.');
       }
     }
+    // timezone can no longer be null (VW-24), so an empty/whitespace value is
+    // treated as "no change" rather than "clear it" — there is no unset
+    // state to clear it to anymore.
+    const nextTimezone = parseVenueTimeZone(body.timezone);
     const venue = await this.prisma.venue.update({
       where: { id: profile.venueId },
       data: {
@@ -505,7 +536,7 @@ export class AppController {
         ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
         ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
         ...(body.geofenceRadiusM !== undefined ? { geofenceRadiusM: Math.max(25, Math.min(2000, body.geofenceRadiusM)) } : {}),
-        ...(body.timezone !== undefined ? { timezone: parseVenueTimeZone(body.timezone) ?? null } : {}),
+        ...(nextTimezone ? { timezone: nextTimezone } : {}),
       },
     });
     return mapVenue(venue);
@@ -570,22 +601,76 @@ export class AppController {
     const profile = await this.requireVenueProfile(user);
     if (!profile?.venueId || !canManageVenue(profile.role, profile.allAccess)) return null;
     const venueId = profile.venueId;
-    const weekStart = weekStartFor(todayInZone(profile.venue?.timezone));
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [completedEntries, scheduledShifts, openRequests] = await Promise.all([
+    const timezone = profile.venue?.timezone ?? null;
+    const weekStart = weekStartFor(todayInZone(timezone));
+    const now = Date.now();
+    const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const nowDate = new Date(now);
+    const in24h = new Date(now + 24 * 60 * 60 * 1000);
+    // A reservation that is cancelled or a no-show is not "active" for any
+    // operational purpose, so both counts exclude them.
+    const liveReservation = {
+      venueId,
+      status: { notIn: [ReservationStatus.cancelled, ReservationStatus.no_show] },
+    };
+    const [
+      completedEntries,
+      scheduledShifts,
+      openShifts,
+      pendingRequests,
+      openEntries,
+      alertShifts,
+      activeReservations,
+      upcomingReservations,
+    ] = await Promise.all([
       this.prisma.timeEntry.findMany({
         where: { venueId, isOpen: false, clockOutAt: { gte: weekAgo } },
         select: { clockInAt: true, clockOutAt: true },
       }),
       this.prisma.scheduleShift.count({ where: { venueId, weekStart, status: 'scheduled' } }),
+      this.prisma.scheduleShift.count({ where: { venueId, weekStart, status: 'open' } }),
       this.prisma.staffRequest.count({ where: { venueId, status: 'pending' } }),
+      this.prisma.timeEntry.findMany({
+        where: { venueId, isOpen: true },
+        select: { isOpen: true, clockInAt: true, profileId: true, profile: { select: { id: true, fullName: true } } },
+      }),
+      this.prisma.scheduleShift.findMany({
+        where: { venueId, OR: clockAlertShiftWindow(timezone, now).where },
+        include: { profile: true },
+      }),
+      this.prisma.reservation.count({ where: { ...liveReservation, reservationTime: { gte: nowDate } } }),
+      this.prisma.reservation.count({
+        where: { ...liveReservation, reservationTime: { gte: nowDate, lt: in24h } },
+      }),
     ]);
     const laborMs = completedEntries.reduce((sum, e) => sum + (e.clockOutAt!.getTime() - e.clockInAt.getTime()), 0);
     const laborHours = Math.round((laborMs / 3600000) * 10) / 10;
-    return { laborHours, scheduledShifts, openRequests };
+    // Same rule the manager clock board renders, so the tile and the board
+    // can never disagree.
+    const lateOrMissedAlerts = buildClockAlerts({
+      timezone,
+      nowMs: now,
+      shifts: alertShifts,
+      entries: openEntries,
+    }).length;
+    return {
+      laborHours,
+      scheduledShifts,
+      openShifts,
+      activeClocks: openEntries.length,
+      lateOrMissedAlerts,
+      activeReservations,
+      upcomingReservations,
+      pendingRequests,
+      // Retained under its original name: existing clients read `openRequests`,
+      // and dropping it here would break them the way the missing fields broke
+      // the Reports screen.
+      openRequests: pendingRequests,
+    };
   }
 
   @UseGuards(AuthGuard)
+  @Audited('time_entries.export', { entityType: 'time_clock', summary: 'Exported time entries CSV' })
   @Get('time-entries/csv')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="time-entries.csv"')
@@ -613,8 +698,10 @@ export class AppController {
           csvCell(hours),
         ].join(',');
       })
-      .join('\n');
-    return header + rows;
+      .join('\r\n');
+    // csvDocument supplies the UTF-8 BOM and trailing CRLF; `header`
+    // carries its own trailing newline, so emit it as its own row.
+    return csvDocument([header.replace(/\r?\n$/, ''), rows]);
   }
 
   @UseGuards(AuthGuard)
@@ -770,10 +857,24 @@ export class AppController {
       where: { venueId: profile.venueId!, name: { equals: name, mode: 'insensitive' } },
     });
     if (existing) return { _id: existing.id, id: existing.id, name: existing.name };
-    const role = await this.prisma.venueRole.create({
-      data: { venueId: profile.venueId!, name },
-    });
-    return { _id: role.id, id: role.id, name: role.name };
+    try {
+      const role = await this.prisma.venueRole.create({
+        data: { venueId: profile.venueId!, name },
+      });
+      return { _id: role.id, id: role.id, name: role.name };
+    } catch (error: any) {
+      // Regression for VW-28: the check above and this create race under
+      // concurrent requests. A case-insensitive unique index now catches
+      // what the check alone could not — surface it the same way a
+      // legitimate duplicate would look, rather than a raw 500.
+      if (error?.code === 'P2002') {
+        const race = await this.prisma.venueRole.findFirst({
+          where: { venueId: profile.venueId!, name: { equals: name, mode: 'insensitive' } },
+        });
+        if (race) return { _id: race.id, id: race.id, name: race.name };
+      }
+      throw error;
+    }
   }
 
   @UseGuards(AuthGuard)
@@ -787,6 +888,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Audited('invite.create', { entityType: 'invite', summary: 'Created team invite' })
   @Post('invites')
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
@@ -807,19 +909,47 @@ export class AppController {
     const token = randomBytes(18).toString('base64url');
     const tokenHash = hashInviteToken(token);
     const code = await this.uniqueInviteCode();
-    const invite = await this.prisma.invite.create({
-      data: {
-        venueId: profile.venueId!,
-        email,
-        tokenHash,
-        code,
-        role: inviteRole,
-        jobTitle: body.jobTitle?.trim() || 'Team Member',
-        createdBy: profile.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
+    const invite = await this.prisma.$transaction(async (tx) => {
+      if (email) {
+        // Regression for VW-25: nothing stopped a manager from creating
+        // multiple simultaneous pending invites for the same email at this
+        // venue. A fresh invite supersedes any prior unused one for the
+        // same address rather than leaving an ambiguous set of valid links
+        // (only one of which the recipient should actually use).
+        await tx.invite.deleteMany({
+          where: { venueId: profile.venueId!, email, usedBy: null },
+        });
+      }
+      return tx.invite.create({
+        data: {
+          venueId: profile.venueId!,
+          email,
+          tokenHash,
+          code,
+          role: inviteRole,
+          jobTitle: body.jobTitle?.trim() || 'Team Member',
+          createdBy: profile.id,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
     });
-    const inviteUrl = `venuewrangler://join?invite=${encodeURIComponent(token)}`;
+    // Universal Link, not the venuewrangler:// custom scheme it replaced.
+    // Mail clients do not linkify an unknown scheme - Gmail's web client and
+    // Outlook render it as plain text - so the "tap this link" instruction
+    // below was unfollowable for most recipients, and on a device without the
+    // app installed a custom-scheme tap fails silently with no store or web
+    // fallback. https resolves for everyone: iOS opens the app directly via
+    // the AASA at site/.well-known/apple-app-site-association, and anyone
+    // else lands on site/join/index.html, which completes the same signup.
+    //
+    // The token rides in the query rather than the fragment that
+    // site/join/index.html prefers, because a fragment never reaches the
+    // native app: there is no window.location off the web, so expo-router's
+    // useLocalSearchParams is the only channel and it parses the query only.
+    // Referrer-Policy: strict-origin-when-cross-origin in site/_headers keeps
+    // the query off any cross-origin Referer, and the token is single-use,
+    // stored only as a hash, and expires in 7 days.
+    const inviteUrl = `https://venuewrangler.com/join?invite=${encodeURIComponent(token)}`;
     const venueName = sanitizeForEmail(profile.venue?.name ?? 'your Venue Wrangler team');
     if (email) {
       void this.email.send({
@@ -832,7 +962,7 @@ export class AppController {
           `1. Open the Venue Wrangler app on your phone and choose "Join a team"\n` +
           `2. Enter the following invite code when prompted:\n\n` +
           `   ${code}\n\n` +
-          `Alternatively, you can tap this link directly on your mobile device:\n` +
+          `Or just tap this link on your phone:\n` +
           `${inviteUrl}\n\n` +
           `Note: This invitation is valid for 7 days.\n\n` +
           `Questions? support@venuewrangler.com\n\n` +
@@ -848,11 +978,17 @@ export class AppController {
   }
 
   // Public: lets the join screen show which team a code belongs to before the
-  // employee creates an account. Returns nothing identifying beyond the team
-  // name and the role they'd get.
+  // employee creates an account. Role and job title stay private until the
+  // invite is redeemed by an authenticated account.
   @Public()
   @Get('invite/:code')
   async previewInvite(@Req() request: Request, @Param('code') rawCode: string) {
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      'public-invite:global',
+      PUBLIC_INVITE_GLOBAL_RATE_LIMIT_MAX,
+      PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS,
+    );
     await assertWithinSharedRateLimit(
       this.prisma,
       `public-invite:${getClientIp(request)}`,
@@ -865,9 +1001,6 @@ export class AppController {
     return {
       valid: true,
       venueName: venue?.name ?? 'a Venue Wrangler team',
-      role: invite.role,
-      jobTitle: invite.jobTitle,
-      expiresAt: invite.expiresAt.getTime(),
     };
   }
 
@@ -1034,6 +1167,7 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Audited('account.delete', { entityType: 'account', summary: 'Deleted user account' })
   @Delete('me')
   async deleteMyAccount(@CurrentUser() user: AuthUser, @Body() body: DeleteAccountDto = {}) {
     const deletionRunId = randomBytes(16).toString('hex');

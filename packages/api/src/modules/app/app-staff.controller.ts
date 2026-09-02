@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsDateString, IsEmail, IsIn, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, Role } from '@prisma/client';
 import { AuthGuard } from '../../auth/auth.guard';
@@ -23,33 +23,41 @@ const AI_PARSE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 class StaffDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   staffId?: string;
 
   @IsString()
+  @MaxLength(64)
   venueId!: string;
 
   @IsEmail()
+  @MaxLength(255)
   email!: string;
 
   @IsString()
+  @MaxLength(120)
   fullName!: string;
 
   @IsIn(['admin', 'owner', 'manager', 'server', 'staff'])
   role!: Role;
 
   @IsString()
+  @MaxLength(100)
   jobTitle!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   altPhone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   address?: string;
 
   @IsDateString()
@@ -60,34 +68,41 @@ class StaffDto {
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   certifications?: string[];
 }
 
 class ParseStaffImportDto {
   @IsString()
+  @MaxLength(100_000)
   text!: string;
 }
 
 class StaffImportRowDto {
   @IsEmail()
+  @MaxLength(255)
   email!: string;
 
   @IsString()
+  @MaxLength(120)
   fullName!: string;
 
   @IsIn(['manager', 'staff'])
   role!: 'manager' | 'staff';
 
   @IsString()
+  @MaxLength(100)
   jobTitle!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 }
 
 class CommitStaffImportDto {
   @IsString()
+  @MaxLength(64)
   venueId!: string;
 
   @IsArray()

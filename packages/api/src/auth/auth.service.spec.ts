@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
-import { AuthService } from './auth.service';
+import { AuthService, SESSION_DURATION_MS } from './auth.service';
 import { hashInviteToken } from '../common/invite-token';
+
+describe('AuthService one-time codes', () => {
+  it('generates ten-digit numeric codes', () => {
+    const service = new AuthService({} as never);
+    expect(service.generateOneTimeCode()).toMatch(/^\d{10}$/);
+  });
+});
+
+describe('AuthService session lifetime', () => {
+  it('limits sessions to one day', () => {
+    expect(SESSION_DURATION_MS).toBe(24 * 60 * 60 * 1000);
+  });
+});
 
 describe('AuthService invited signup lifecycle', () => {
   it('reserves a valid invite and creates an inactive venue membership until email verification', async () => {
@@ -264,7 +277,7 @@ describe('AuthService.issueSession branch coverage', () => {
     expect(tx.profile.delete).toHaveBeenCalledWith({ where: { id: 'existing-1' } });
     expect(tx.profile.update).toHaveBeenCalledWith({
       where: { id: 'placeholder-1' },
-      data: { userId: 'user-1', role: 'staff' },
+      data: { userId: 'user-1', role: 'staff', membershipStatus: 'pending' },
       include: { venue: true },
     });
     expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({

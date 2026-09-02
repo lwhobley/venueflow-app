@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
-import { assertFixNotReplayed, assertWithinGeofence } from './geofence';
+import { assertFixNotReplayed, assertWithinGeofence, fixReplayVerdict } from './geofence';
 
 const venue = { latitude: 40.0, longitude: -73.0, geofenceRadiusM: 100 };
 
@@ -43,25 +43,60 @@ describe('assertWithinGeofence', () => {
   });
 });
 
-describe('assertFixNotReplayed', () => {
+describe('fixReplayVerdict', () => {
+  const GNSS = 6;   // satellite-grade accuracy
+  const WIFI = 35;  // typical Wi-Fi/cell positioning accuracy, still inside the 50m gate
+
   it('allows a punch when there is no prior fix to compare against', () => {
-    expect(() => assertFixNotReplayed(40.0, -73.0, null)).not.toThrow();
+    expect(fixReplayVerdict(40.0, -73.0, GNSS, [])).toBe('ok');
   });
 
   it('allows a punch when the prior entry stored no coordinates', () => {
-    expect(() => assertFixNotReplayed(40.0, -73.0, { lat: null, lng: null })).not.toThrow();
+    expect(fixReplayVerdict(40.0, -73.0, GNSS, [{ lat: null, lng: null }])).toBe('ok');
   });
 
-  it('rejects coordinates identical to an earlier day\'s fix', () => {
-    expect(() => assertFixNotReplayed(40.0, -73.0, { lat: 40.0, lng: -73.0 })).toThrow(BadRequestException);
+  it('rejects an exact repeat that claims satellite-grade accuracy', () => {
+    // Two independent GNSS fixes cannot match bit-for-bit.
+    expect(fixReplayVerdict(40.0, -73.0, GNSS, [{ lat: 40.0, lng: -73.0 }])).toBe('reject');
+  });
+
+  it('flags rather than rejects an exact repeat from a coarse fix', () => {
+    // Wi-Fi positioning returns the registered position of the surrounding
+    // access points, which is deterministic and repeats exactly day after day.
+    // Rejecting here locked real employees out of the clock permanently.
+    expect(fixReplayVerdict(40.0, -73.0, WIFI, [{ lat: 40.0, lng: -73.0 }])).toBe('flag');
+  });
+
+  it('compares against several earlier fixes, not just the most recent', () => {
+    // A device alternating between two access points would otherwise never
+    // repeat the single latest fix and the signal would be lost.
+    const priors = [{ lat: 41.0, lng: -74.0 }, { lat: 40.0, lng: -73.0 }];
+    expect(fixReplayVerdict(40.0, -73.0, WIFI, priors)).toBe('flag');
   });
 
   it('allows a real fix that jitters in the low bits', () => {
-    // Two independent GNSS fixes never match exactly; metre-level jitter is enough.
-    expect(() => assertFixNotReplayed(40.00000012, -73.00000004, { lat: 40.0, lng: -73.0 })).not.toThrow();
+    expect(fixReplayVerdict(40.00000012, -73.00000004, GNSS, [{ lat: 40.0, lng: -73.0 }])).toBe('ok');
   });
 
   it('does not treat a matching latitude alone as a replay', () => {
-    expect(() => assertFixNotReplayed(40.0, -73.5, { lat: 40.0, lng: -73.0 })).not.toThrow();
+    expect(fixReplayVerdict(40.0, -73.5, GNSS, [{ lat: 40.0, lng: -73.0 }])).toBe('ok');
+  });
+
+  it('treats a non-finite accuracy as coarse rather than satellite-grade', () => {
+    expect(fixReplayVerdict(40.0, -73.0, Number.NaN, [{ lat: 40.0, lng: -73.0 }])).toBe('flag');
+  });
+});
+
+describe('assertFixNotReplayed', () => {
+  it('throws only for the impossible-GNSS case', () => {
+    expect(() => assertFixNotReplayed(40.0, -73.0, 6, [{ lat: 40.0, lng: -73.0 }])).toThrow(BadRequestException);
+  });
+
+  it('returns the flag verdict without blocking a coarse repeat', () => {
+    expect(assertFixNotReplayed(40.0, -73.0, 35, [{ lat: 40.0, lng: -73.0 }])).toBe('flag');
+  });
+
+  it('returns ok for a novel fix', () => {
+    expect(assertFixNotReplayed(40.5, -73.5, 35, [{ lat: 40.0, lng: -73.0 }])).toBe('ok');
   });
 });

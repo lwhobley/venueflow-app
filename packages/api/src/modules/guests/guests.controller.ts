@@ -13,9 +13,10 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
+import { createHash } from 'crypto';
 import { canManageVenue } from '../../auth/roles';
 import { Public } from '../../auth/public.decorator';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
@@ -25,41 +26,79 @@ import { generateWebhookSecret, secretsMatch } from '../../common/webhook-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
+import { Audited } from '../audit/audited.decorator';
 
 type Scope = VenueScopedRequest['venueScope'];
 const LEADS_WEBHOOK_RATE_LIMIT_MAX = 120;
 const LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
+const LEADS_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
+const LEADS_WEBHOOK_EVENT_TTL_MS = 24 * 60 * 60_000;
+
+export function validateLeadWebhookReplayHeaders(
+  eventId: string | undefined,
+  timestamp: string | undefined,
+  now = Date.now(),
+): string {
+  const normalizedEventId = eventId?.trim();
+  if (!normalizedEventId || normalizedEventId.length > 200 || !/^[A-Za-z0-9._:-]+$/.test(normalizedEventId)) {
+    throw new BadRequestException('A valid x-webhook-id header is required.');
+  }
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) {
+    throw new BadRequestException('A valid x-webhook-timestamp header is required.');
+  }
+  const timestampMs = timestampSeconds * 1000;
+  if (Math.abs(now - timestampMs) > LEADS_WEBHOOK_TIMESTAMP_TOLERANCE_MS) {
+    throw new UnauthorizedException('Webhook timestamp is outside the allowed window.');
+  }
+  return normalizedEventId;
+}
+
+/**
+ * Applied to a lead that shares a name with an existing guest but carries no
+ * matching email or phone. The importer creates a separate record and leaves
+ * the merge decision to a human.
+ */
+export const POSSIBLE_DUPLICATE_TAG = 'possible-duplicate';
 
 class UpsertGuestDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   guestId?: string;
 
   @IsString()
+  @MaxLength(200)
   fullName!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   lifecycleStage?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   source?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(32)
   birthday?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   company?: string;
 
   @IsBoolean()
@@ -68,46 +107,56 @@ class UpsertGuestDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   favoriteTable?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   preferredServer?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   dietaryNotes?: string;
 
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
   tags?: string[];
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
 class LeadDto {
   @IsString()
+  @MaxLength(200)
   fullName!: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   source?: string;
 
   @IsArray()
   @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
   tags?: string[];
 }
@@ -125,6 +174,7 @@ class IngestLeadsDto {
 class GuestListQueryDto {
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   q?: string;
 
   @Type(() => Number)
@@ -390,9 +440,24 @@ export class GuestsController {
     this.requireManager(scope);
     const guest = await this.prisma.guest.findFirst({ where: { id, venueId: scope.venueId } });
     if (!guest) throw new BadRequestException('Guest not found');
-    await this.prisma.guest.update({
-      where: { id: guest.id },
-      data: { deletedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.guest.update({
+        where: { id: guest.id },
+        data: { deletedAt: new Date() },
+      });
+      // Regression for VW-06: Reservation and Waitlist denormalize guest
+      // contact details for display without a live Guest row. Deleting the
+      // guest previously severed the link (Guest -> SetNull) but left this
+      // PII sitting on every historical booking. guestName is kept — an
+      // operational booking record with no name at all is unusable.
+      await tx.reservation.updateMany({
+        where: { guestId: guest.id, venueId: scope.venueId },
+        data: { guestPhone: null, guestEmail: null, guestCompany: null },
+      });
+      await tx.waitlist.updateMany({
+        where: { guestId: guest.id, venueId: scope.venueId },
+        data: { guestPhone: null, guestEmail: null },
+      });
     });
     return { ok: true };
   }
@@ -412,6 +477,8 @@ export class GuestsController {
     @Req() request: Request,
     @Param('venueId') venueId: string,
     @Headers('x-webhook-secret') secret: string | undefined,
+    @Headers('x-webhook-id') eventId: string | undefined,
+    @Headers('x-webhook-timestamp') timestamp: string | undefined,
     @Body() body: IngestLeadsDto,
   ) {
     // Verify the webhook secret before touching the rate limiter so an
@@ -420,8 +487,26 @@ export class GuestsController {
     if (!venue?.leadsWebhookSecret || !secretsMatch(secret, venue.leadsWebhookSecret)) {
       throw new UnauthorizedException('Invalid webhook secret');
     }
-    await assertWithinSharedRateLimit(this.prisma, `leads-webhook:${venueId}:${getClientIp(request)}`, LEADS_WEBHOOK_RATE_LIMIT_MAX, LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
-    return this.ingestLeadsForVenue(venueId, body.leads);
+    const validatedEventId = validateLeadWebhookReplayHeaders(eventId, timestamp);
+    const eventHash = createHash('sha256').update(validatedEventId).digest('hex');
+    const replayKey = `leads-webhook-event:${venueId}:${eventHash}`;
+    await assertWithinSharedRateLimit(
+      this.prisma,
+      replayKey,
+      1,
+      LEADS_WEBHOOK_EVENT_TTL_MS,
+      'Duplicate webhook event.',
+    );
+    try {
+      await assertWithinSharedRateLimit(this.prisma, `leads-webhook:${venueId}:${getClientIp(request)}`, LEADS_WEBHOOK_RATE_LIMIT_MAX, LEADS_WEBHOOK_RATE_LIMIT_WINDOW_MS, 'Too many webhook requests.');
+      return await this.ingestLeadsForVenue(venueId, body.leads);
+    } catch (error) {
+      // The event claim blocks concurrent/replayed delivery. Release only our
+      // claim if processing fails so the provider may safely retry the same
+      // event id; the lead mutation itself is transactional.
+      await this.prisma.rateLimitBucket.deleteMany({ where: { key: replayKey } }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async ingestLeadsForVenue(venueId: string, rawLeads: LeadDto[]) {
@@ -477,11 +562,17 @@ export class GuestsController {
         if (seen.has(lead.key)) { skipped++; continue; }
         seen.add(lead.key);
 
+        // Merge only on an identifier that actually identifies a person.
+        // Matching on a shared name grafted one guest's contact details and
+        // history onto another's: two different "John Smith"s collapsed into
+        // one record, and a stranger's email was written onto an existing
+        // guest that happened to have none. This runs from a public webhook,
+        // where common names and sparse contact details are the norm.
         const existing =
           (email ? byEmail.get(email) : null) ??
           (phone ? byPhone.get(phone) : null) ??
-          byName.get(lead.nameLower) ??
           null;
+        const nameOnlyMatch = !existing && byName.has(lead.nameLower);
 
         if (existing) {
           await tx.guest.update({
@@ -489,8 +580,10 @@ export class GuestsController {
             data: {
               fullName,
               nameLower: fullName.toLowerCase(),
-              phone: phone ?? existing.phone,
-              email: email ?? existing.email,
+              // Never overwrite a contact value we already hold: a lead matched
+              // on phone alone must not replace the stored email, and vice versa.
+              phone: existing.phone ?? phone ?? null,
+              email: existing.email ?? email ?? null,
               lifecycleStage: existing.lifecycleStage ?? 'lead',
               source: source ?? existing.source,
               tags: mergeTags(existing.tags, incomingTags),
@@ -509,7 +602,9 @@ export class GuestsController {
               lifecycleStage: 'lead',
               source,
               marketingOptIn: false,
-              tags: incomingTags,
+              // Flag rather than merge, so a human resolves genuine duplicates
+              // on the guests screen instead of the importer guessing.
+              tags: nameOnlyMatch ? mergeTags(incomingTags, [POSSIBLE_DUPLICATE_TAG]) : incomingTags,
             },
           });
           if (newGuest.email) byEmail.set(newGuest.email.toLowerCase(), newGuest);
@@ -525,6 +620,7 @@ export class GuestsController {
   }
 
   @RequireSubscription('active')
+  @Audited('webhook_secret.rotate_leads', { entityType: 'venue', summary: 'Rotated leads webhook secret' })
   @Post('rotate-webhook-secret')
   async rotateLeadsWebhookSecret(@VenueScope() scope: Scope) {
     this.requireManager(scope);

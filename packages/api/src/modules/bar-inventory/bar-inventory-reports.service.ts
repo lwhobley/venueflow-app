@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { csvCell } from '../../common/csv';
+import { csvCell, csvDocument } from '../../common/csv';
 
 /**
  * Read-only bar-inventory analytics extracted from BarInventoryController.
@@ -191,7 +191,7 @@ export class BarInventoryReportsService {
         ].join(','));
       }
     }
-    return rows.join('\n');
+    return csvDocument(rows);
   }
 
   // ── Stock aging report ───────────────────────────────────────────────

@@ -187,11 +187,63 @@ describe('ReservationMutationService', () => {
     expect(result).toEqual({ reservation: updated, previousStatus: 'requested' });
   });
 
+  it('rejects reopening a cancelled reservation', async () => {
+    // Regression for VW-05: status was a raw cast with no transition check,
+    // so a cancelled reservation could be moved straight to seated.
+    const existing = { id: 'reservation-3', status: 'cancelled' };
+    const prisma = withTransaction({
+      reservationHold: { findFirst: vi.fn().mockResolvedValue(null) },
+      reservation: {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        update: vi.fn(),
+      },
+    });
+    const service = new ReservationMutationService(prisma as any);
+
+    await expect(
+      service.saveReservation({
+        venueId: 'venue-1',
+        reservationId: 'reservation-3',
+        guestName: 'Alex Guest',
+        partySize: 4,
+        reservationTime: '2026-06-28T19:00:00.000Z',
+        status: 'seated',
+      }),
+    ).rejects.toThrow('A cancelled reservation cannot be changed to seated.');
+    expect(prisma.reservation.update).not.toHaveBeenCalled();
+  });
+
+  it('allows a no-op update that leaves status unchanged, even on a closed reservation', async () => {
+    const existing = { id: 'reservation-4', status: 'completed' };
+    const updated = { id: 'reservation-4', status: 'completed', notes: 'Updated notes' };
+    const prisma = withTransaction({
+      reservationHold: { findFirst: vi.fn().mockResolvedValue(null) },
+      reservation: {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        update: vi.fn().mockResolvedValue(updated),
+      },
+    });
+    const service = new ReservationMutationService(prisma as any);
+
+    const result = await service.saveReservation({
+      venueId: 'venue-1',
+      reservationId: 'reservation-4',
+      guestName: 'Alex Guest',
+      partySize: 4,
+      reservationTime: '2026-06-28T19:00:00.000Z',
+      status: 'completed',
+      notes: 'Updated notes',
+    });
+
+    expect(result).toEqual({ reservation: updated, previousStatus: 'completed' });
+  });
+
   it('creates and trims a reservation hold', async () => {
     const created = { id: 'hold-1' };
     const prisma = withTransaction({
       reservationHold: {
         create: vi.fn().mockResolvedValue(created),
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       reservation: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -217,7 +269,7 @@ describe('ReservationMutationService', () => {
 
   it('rejects a hold that overlaps an existing reservation under the shared lock', async () => {
     const prisma = withTransaction({
-      reservationHold: { create: vi.fn() },
+      reservationHold: { create: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) },
       reservation: {
         findMany: vi.fn().mockResolvedValue([
           { reservationTime: new Date('2026-06-28T19:00:00.000Z'), durationMinutes: 90 },
@@ -234,6 +286,30 @@ describe('ReservationMutationService', () => {
         reason: 'Private buyout',
       }),
     ).rejects.toThrow('This hold overlaps an existing reservation');
+    expect(prisma.reservationHold.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a hold that overlaps another hold', async () => {
+    // Regression for VW-08: previously only checked against reservations.
+    const prisma = withTransaction({
+      reservationHold: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue({ id: 'hold-existing' }),
+      },
+      reservation: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new ReservationMutationService(prisma as any);
+
+    await expect(
+      service.createHold({
+        venueId: 'venue-1',
+        startsAt: '2026-06-28T20:00:00.000Z',
+        endsAt: '2026-06-28T21:00:00.000Z',
+        reason: 'Private buyout',
+      }),
+    ).rejects.toThrow('This hold overlaps another hold already on the calendar.');
     expect(prisma.reservationHold.create).not.toHaveBeenCalled();
   });
 

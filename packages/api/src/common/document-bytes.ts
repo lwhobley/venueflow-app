@@ -12,11 +12,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   txt: 'text/plain',
   csv: 'text/csv',
   rtf: 'application/rtf',
-  doc: 'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
@@ -26,12 +23,6 @@ const ZIP_MIME = new Set([
   MIME_BY_EXTENSION.xlsx,
   MIME_BY_EXTENSION.pptx,
 ]);
-const OLE_MIME = new Set([
-  MIME_BY_EXTENSION.doc,
-  MIME_BY_EXTENSION.xls,
-  MIME_BY_EXTENSION.ppt,
-]);
-
 export function safeDocumentFileName(value: string): string {
   const leaf = value.split(/[\\/]/).pop()?.trim() ?? '';
   const cleaned = leaf.replace(/[\u0000-\u001f\u007f"<>:|?*]/g, '_').slice(0, 180);
@@ -45,7 +36,7 @@ export function assertAllowedDocumentBytes(data: Buffer, claimedMime: string, fi
   const extension = fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
   const trustedMime = MIME_BY_EXTENSION[extension];
   if (!trustedMime) {
-    throw new BadRequestException('Unsupported file type. Use PDF, Word, Excel, PowerPoint, image, text, CSV, or RTF files.');
+    throw new BadRequestException('Unsupported file type. Use PDF, modern Office, image, text, CSV, or RTF files.');
   }
 
   const normalizedClaim = claimedMime.toLowerCase().trim();
@@ -61,10 +52,6 @@ export function assertAllowedDocumentBytes(data: Buffer, claimedMime: string, fi
     const signature = data.subarray(0, 4).toString('hex');
     if (!['504b0304', '504b0506', '504b0708'].includes(signature)) {
       throw new BadRequestException('Invalid Office document');
-    }
-  } else if (OLE_MIME.has(trustedMime)) {
-    if (data.subarray(0, 8).toString('hex') !== 'd0cf11e0a1b11ae1') {
-      throw new BadRequestException('Invalid legacy Office document');
     }
   } else if (trustedMime === MIME_BY_EXTENSION.rtf) {
     if (!data.subarray(0, 5).toString('ascii').startsWith('{\\rtf')) throw new BadRequestException('Invalid RTF file');

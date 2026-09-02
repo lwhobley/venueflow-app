@@ -13,14 +13,14 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Matches, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AuthGuard } from '../../auth/auth.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import type { AuthUser } from '../../auth/auth.guard';
 import { canManageVenue, isAdminRole } from '../../auth/roles';
 import { RequireSubscription } from '../../billing/require-subscription.decorator';
-import { csvCell } from '../../common/csv';
+import { csvCell, csvDocument } from '../../common/csv';
 import { htmlEscape } from '../../common/html-escape';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -48,9 +48,11 @@ type PrepItemStatus = (typeof PREP_ITEM_STATUSES)[number];
 class UpsertBarItemDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   itemId?: string;
 
   @IsString()
+  @MaxLength(200)
   name!: string;
 
   @IsIn(CATEGORIES)
@@ -58,9 +60,11 @@ class UpsertBarItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   area?: string;
 
   @IsString()
+  @MaxLength(50)
   unit!: string;
 
   @IsNumber()
@@ -78,14 +82,17 @@ class UpsertBarItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   supplier?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   sku?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
@@ -98,11 +105,13 @@ class RecordMovementDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
 class ParsedItemDto {
   @IsString()
+  @MaxLength(200)
   name!: string;
 
   @IsIn(CATEGORIES)
@@ -110,9 +119,11 @@ class ParsedItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   area?: string;
 
   @IsString()
+  @MaxLength(50)
   unit!: string;
 
   @IsNumber()
@@ -129,14 +140,17 @@ class ParsedItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   supplier?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   sku?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 }
 
@@ -157,26 +171,31 @@ class UpdateCostDto {
 class ParseBarInventoryInputDto {
   @IsString()
   @IsOptional()
+  @MaxLength(100_000)
   text?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(10_000_000)
   imageBase64?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   imageMimeType?: string;
 }
 
 class UpsertPrepBoardItemDto {
   @IsString()
   @IsOptional()
+  @MaxLength(64)
   itemId?: string;
 
   @IsIn(PREP_ITEM_KINDS)
   kind!: PrepItemKind;
 
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsNumber()
@@ -186,14 +205,17 @@ class UpsertPrepBoardItemDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   unit?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   station?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   notes?: string;
 
   @IsString()
@@ -394,6 +416,17 @@ export class BarInventoryController {
   ) {
     const profile = await this.requireManagerProfile(user);
     const venueId = profile.venueId!;
+    // Regression for VW-07: quantity had no sign constraint, so a 'waste'
+    // movement with a positive quantity silently increased stock instead of
+    // reducing it. The app itself already submits waste/comp as negative and
+    // received as positive (see app/(tabs)/bar-stock.tsx) — this just makes
+    // that convention a server-enforced invariant rather than a client habit.
+    if ((body.movementType === 'waste' || body.movementType === 'comp') && body.quantity > 0) {
+      throw new BadRequestException(`A ${body.movementType} movement must reduce stock. Use a negative quantity.`);
+    }
+    if (body.movementType === 'received' && body.quantity < 0) {
+      throw new BadRequestException('A received movement must be positive.');
+    }
     const { movement, item, previousOnHand, nextOnHand } = await this.prisma.$transaction(async (tx) => {
       const lockKey = `bar-inventory-${itemId}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
@@ -580,7 +613,7 @@ export class BarInventoryController {
         csvCell(item.lastCountedAt ? item.lastCountedAt.toISOString().slice(0, 10) : ''),
       ].join(','));
     }
-    return rows.join('\n');
+    return csvDocument(rows);
   }
 
   // ── Movement log CSV export ──────────────────────────────────────────
@@ -617,7 +650,7 @@ export class BarInventoryController {
         csvCell(m.notes),
       ].join(','));
     }
-    return rows.join('\n');
+    return csvDocument(rows);
   }
 
   // ── Shrinkage / variance report ──────────────────────────────────────

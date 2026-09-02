@@ -5,7 +5,52 @@ import { ReservationMutationService } from '../../reservations/reservation-mutat
 import { SchedulingAssignmentService } from '../../scheduling/scheduling-assignment.service';
 import { weekStartFor } from '../../../common/pay-period';
 import { normalizedShiftEnd } from '../../../common/venue-time';
-import { WranglerOperatorService } from './wrangler-operator.service';
+import { WranglerOperatorService, type OperatorTool } from './wrangler-operator.service';
+
+/**
+ * Which execution path each operator tool takes.
+ *
+ *  - 'strict' : re-validated and re-executed here through the domain services,
+ *               with every argument type-checked and the venue re-resolved.
+ *  - 'parser' : handled by WranglerOperatorService, which validates against
+ *               ALLOWED_TOOLS and normalises through resolveWritePlan. Still
+ *               guarded — ADD_STAFF blocks non-owners from minting a manager,
+ *               REMOVE_STAFF enforces canManageRole — just not re-checked here.
+ *
+ * Typed as an exhaustive Record over OperatorTool on purpose: adding a tool to
+ * ALLOWED_TOOLS without classifying it is a compile error rather than a silent
+ * downgrade to the weaker path.
+ */
+export const SAFE_TOOL_ROUTING: Record<OperatorTool, 'strict' | 'parser'> = {
+  CREATE_RESERVATION: 'strict',
+  UPDATE_RESERVATION: 'strict',
+  CREATE_SHIFT: 'strict',
+  UPDATE_SHIFT: 'strict',
+  ASSIGN_SHIFT: 'strict',
+  CORRECT_PUNCH: 'strict',
+
+  FIND_RESERVATION: 'parser',
+  CANCEL_RESERVATION: 'parser',
+  LIST_SCHEDULE: 'parser',
+  CLEAR_TABLE: 'parser',
+  UPDATE_TABLE_STATUS: 'parser',
+  LIST_WAITLIST: 'parser',
+  ADD_WAITLIST: 'parser',
+  FIND_CRM_LEAD: 'parser',
+  CREATE_CRM_LEAD: 'parser',
+  UPDATE_CRM_LEAD: 'parser',
+  SEARCH_CHAT: 'parser',
+  POST_CHAT_ANNOUNCEMENT: 'parser',
+  LIST_INVENTORY: 'parser',
+  UPDATE_ITEM_86: 'parser',
+  UPDATE_BAR_STOCK: 'parser',
+  GET_SALES_PULSE: 'parser',
+  LIST_INTEGRATIONS: 'parser',
+  FIND_STAFF: 'parser',
+  ADD_STAFF: 'parser',
+  REMOVE_STAFF: 'parser',
+  LIST_CLOCKS: 'parser',
+};
 
 @Injectable()
 export class SafeWranglerOperatorService {
@@ -37,7 +82,12 @@ export class SafeWranglerOperatorService {
       throw new ForbiddenException('Manager access required for Wrangler operator actions');
     }
     const tool = String(input.plan?.tool ?? '');
-    if (!['CREATE_RESERVATION', 'UPDATE_RESERVATION', 'CREATE_SHIFT', 'UPDATE_SHIFT', 'ASSIGN_SHIFT', 'CORRECT_PUNCH'].includes(tool)) {
+    // Routing is an exhaustive map rather than an inline allowlist so that a
+    // tool added to ALLOWED_TOOLS fails to compile until someone classifies it.
+    // The previous `if (!list.includes(tool)) return this.parser.execute(...)`
+    // defaulted new tools to the LESS validated path silently — nothing was
+    // exploitable, but the default pointed the wrong way.
+    if (SAFE_TOOL_ROUTING[tool as OperatorTool] !== 'strict') {
       return this.parser.execute(input);
     }
     const args = { ...(input.plan?.args ?? {}) };

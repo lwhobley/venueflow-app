@@ -24,6 +24,8 @@ import { VenueScope } from '../../venue/venue-scope.decorator';
 import type { VenueScopedRequest } from '../../venue/venue-scope.interceptor';
 import { MediaCleanupService } from '../media-cleanup/media-cleanup.service';
 import { S3DocumentService } from './s3-document.service';
+import { DocumentMalwareScannerService } from './document-malware-scanner.service';
+import { Audited } from '../audit/audited.decorator';
 
 const DOCUMENT_CATEGORIES = ['sop', 'manual', 'recipe', 'menu', 'training', 'form', 'other'] as const;
 type DocumentCategoryValue = (typeof DOCUMENT_CATEGORIES)[number];
@@ -47,6 +49,7 @@ class UploadDocumentDto {
   category!: DocumentCategoryValue;
 
   @IsString()
+  @MaxLength(15_000_000)
   dataBase64!: string;
 }
 
@@ -65,6 +68,7 @@ export class DocumentsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: S3DocumentService,
+    private readonly malwareScanner: DocumentMalwareScannerService,
     private readonly mediaCleanup: MediaCleanupService,
   ) {}
 
@@ -100,6 +104,7 @@ export class DocumentsController {
   }
 
   @RequireSubscription('active')
+  @Audited('document.upload', { entityType: 'document', summary: 'Uploaded venue document' })
   @Post()
   async upload(@VenueScope() scope: Scope, @Body() body: UploadDocumentDto) {
     requireManager(scope);
@@ -114,6 +119,7 @@ export class DocumentsController {
     if (data.length === 0) throw new BadRequestException('Document is empty');
     if (data.length > MAX_DOCUMENT_BYTES) throw new BadRequestException('Document is too large (max 10MB)');
     const mimeType = assertAllowedDocumentBytes(data, body.mimeType, fileName);
+    await this.malwareScanner.assertClean(data);
 
     let s3Key: string;
     try {
@@ -143,6 +149,7 @@ export class DocumentsController {
   }
 
   @RequireSubscription('active')
+  @Audited('document.access', { entityType: 'document', summary: 'Generated access URL for venue document' })
   @Post(':id/access')
   async access(@VenueScope() scope: Scope, @Param('id') id: string) {
     requireScope(scope);
@@ -161,6 +168,7 @@ export class DocumentsController {
   }
 
   @RequireSubscription('active')
+  @Audited('document.delete', { entityType: 'document', summary: 'Deleted venue document' })
   @Delete(':id')
   async remove(@VenueScope() scope: Scope, @Param('id') id: string) {
     requireManager(scope);

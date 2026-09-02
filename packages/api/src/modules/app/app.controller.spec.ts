@@ -19,7 +19,7 @@ describe('AppController invite preview', () => {
     expect(assertWithinSharedRateLimit).toHaveBeenCalled();
   });
 
-  it('returns only the intended public invite metadata', async () => {
+  it('returns only the team name for a valid public invite', async () => {
     const expiresAt = new Date(Date.now() + 60_000);
     const prisma = {
       invite: {
@@ -38,9 +38,6 @@ describe('AppController invite preview', () => {
     await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'VW-ABC123')).resolves.toEqual({
       valid: true,
       venueName: 'Test Venue',
-      role: 'staff',
-      jobTitle: 'Server',
-      expiresAt: expiresAt.getTime(),
     });
   });
 });
@@ -245,6 +242,47 @@ describe('AppController multi-venue invariants', () => {
     );
 
     expect(prisma.profile.delete).toHaveBeenCalledWith({ where: { id: 'profile-signup' } });
+  });
+
+  it('defaults a new venue to UTC when the caller sends no timezone', async () => {
+    // Regression for VW-24: Venue.timezone is now required at the database
+    // layer. Every creation path must resolve a concrete value rather than
+    // relying on a nullable column silently accepting an omission.
+    const existingProfile = { id: 'profile-signup', userId: 'user-1', venueId: null, email: 'owner@example.com', fullName: 'Owner' };
+    const prisma: any = {
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      profile: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findFirst: vi.fn().mockImplementation((args: any) =>
+          Promise.resolve(args?.where?.venue ? null : existingProfile)),
+        create: vi.fn().mockResolvedValue({ id: 'profile-venue', venueId: 'venue-new', userId: 'user-1' }),
+        delete: vi.fn().mockResolvedValue(existingProfile),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      venue: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 'venue-new', name: 'New Venue' }),
+      },
+      subscription: { create: vi.fn().mockResolvedValue({}) },
+      staffOnboardingTask: { createMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      team: { upsert: vi.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction = vi.fn(async (callback: any) => callback(prisma));
+    const profiles = {
+      ensureUser: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      isEmailVerified: vi.fn().mockResolvedValue(true),
+      listUserVenues: vi.fn().mockResolvedValue([{ id: 'venue-new', name: 'New Venue', role: 'admin', profileId: 'profile-venue' }]),
+    };
+    const controller = new AppController(prisma, {} as any, profiles as any);
+
+    await controller.registerVenue(
+      { sub: 'user-1', email: 'owner@example.com' } as any,
+      { businessName: 'New Venue', staffRange: '1-15', latitude: 40.7, longitude: -74.0 } as any,
+    );
+
+    expect(prisma.venue.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ timezone: 'UTC' }) }),
+    );
   });
 
   it('does not delete an existing profile that already belongs to another venue', async () => {
@@ -583,5 +621,64 @@ describe('AppController multi-venue invariants', () => {
       ([args]: any[]) => typeof args?.data?.profileFullName === 'string',
     );
     expect(closeOrder).toBeLessThan(prisma.timeEntry.updateMany.mock.invocationCallOrder[renameCall]);
+  });
+});
+
+describe('AppController createInvite', () => {
+  it('supersedes an existing unused invite for the same email before creating a new one', async () => {
+    // Regression for VW-25: nothing stopped multiple simultaneous pending
+    // invites for one email at one venue.
+    const managerProfile = {
+      id: 'profile-manager', userId: 'user-1', venueId: 'venue-1', role: 'owner',
+      allAccess: false, membershipStatus: 'active', fullName: 'Owner',
+      venue: { id: 'venue-1', name: 'Test Venue' },
+    };
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const create = vi.fn().mockResolvedValue({ id: 'invite-new', code: 'VW-ABCDE', expiresAt: new Date() });
+    const prisma: any = {
+      profile: { findFirst: vi.fn().mockResolvedValue(managerProfile) },
+      invite: { findUnique: vi.fn().mockResolvedValue(null), deleteMany, create },
+    };
+    prisma.$transaction = vi.fn((callback: any) => callback(prisma));
+    const profiles = new ProfileService(prisma);
+    const email = { send: vi.fn().mockResolvedValue(undefined) };
+    const controller = new AppController(prisma, email as any, profiles);
+
+    await controller.createInvite(
+      { sub: 'user-1' } as any,
+      { role: 'staff', jobTitle: 'Server', email: 'New.Hire@Example.com' } as any,
+    );
+
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { venueId: 'venue-1', email: 'new.hire@example.com', usedBy: null },
+    });
+    expect(create).toHaveBeenCalledOnce();
+    expect(deleteMany.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]);
+  });
+
+  it('does not attempt to supersede when the invite has no email (phone-only staff invite)', async () => {
+    const managerProfile = {
+      id: 'profile-manager', userId: 'user-1', venueId: 'venue-1', role: 'owner',
+      allAccess: false, membershipStatus: 'active', fullName: 'Owner',
+      venue: { id: 'venue-1', name: 'Test Venue' },
+    };
+    const deleteMany = vi.fn().mockResolvedValue({ count: 0 });
+    const create = vi.fn().mockResolvedValue({ id: 'invite-new', code: 'VW-ABCDE', expiresAt: new Date() });
+    const prisma: any = {
+      profile: { findFirst: vi.fn().mockResolvedValue(managerProfile) },
+      invite: { findUnique: vi.fn().mockResolvedValue(null), deleteMany, create },
+    };
+    prisma.$transaction = vi.fn((callback: any) => callback(prisma));
+    const profiles = new ProfileService(prisma);
+    const email = { send: vi.fn().mockResolvedValue(undefined) };
+    const controller = new AppController(prisma, email as any, profiles);
+
+    await controller.createInvite(
+      { sub: 'user-1' } as any,
+      { role: 'staff', jobTitle: 'Server' } as any,
+    );
+
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
   });
 });

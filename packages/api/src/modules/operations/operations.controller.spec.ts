@@ -69,6 +69,7 @@ function makeController() {
       update: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    $queryRaw: vi.fn().mockResolvedValue([{ count: 1 }]),
   } as any;
   const mediaAccess = {
     createPath: vi.fn().mockResolvedValue('/v1/operations/checklist/photo/completion-1?token=tok'),

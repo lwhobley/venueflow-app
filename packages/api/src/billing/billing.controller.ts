@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Headers, Logger, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
 import type { Request } from 'express';
@@ -84,6 +84,8 @@ function unixToDate(seconds: number | null | undefined): Date | null {
 
 @Controller('v1/billing')
 export class BillingController {
+  private readonly logger = new Logger(BillingController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -285,14 +287,31 @@ export class BillingController {
   private async recordStripeInvoice(invoice: any, event: StripeEvent, eventAt: Date) {
     const stripeInvoiceId = typeof invoice?.id === 'string' ? invoice.id : null;
     if (!stripeInvoiceId) return;
-    const subId = typeof invoice?.subscription === 'string' ? invoice.subscription : null;
+    // Stripe API 2025-03-31 removed the top-level `invoice.subscription` and
+    // moved it under `parent.subscription_details`. The subscription handler
+    // above already migrated `current_period_*` for the same version bump; this
+    // one was missed. Read the new location first and keep the legacy field for
+    // accounts still on an older API version.
+    const nestedSubId = invoice?.parent?.subscription_details?.subscription;
+    const subId = typeof nestedSubId === 'string'
+      ? nestedSubId
+      : typeof invoice?.subscription === 'string'
+        ? invoice.subscription
+        : null;
     const customerId = typeof invoice?.customer === 'string' ? invoice.customer : null;
     const venueId = await this.resolveStripeVenueIdByRefs(
       typeof invoice?.metadata?.venueId === 'string' ? invoice.metadata.venueId : null,
       subId,
       customerId,
     );
-    if (!venueId) return;
+    if (!venueId) {
+      // Previously a silent return: an invoice for a customer with no prior
+      // Subscription row was dropped with no trace at all.
+      this.logger.warn(
+        `Stripe invoice ${stripeInvoiceId} (${event.type ?? 'unknown'}) could not be matched to a venue; ignoring.`,
+      );
+      return;
+    }
 
     const data = {
       venueId,
@@ -496,9 +515,12 @@ export class BillingController {
   }
 
   private async resolveRevenueCatVenueIds(subscriberId: string, entitlementIds?: string[]): Promise<string[]> {
-    const asVenue = await this.prisma.venue.findUnique({ where: { id: subscriberId }, select: { id: true } });
-    if (asVenue) return [asVenue.id];
-
+    // subscriberId is RevenueCat's app_user_id, which this app sets to our
+    // internal userId (see lib/purchases.native.ts). Older clients briefly
+    // sent venueId instead, which made a Venue.id lookup here a live IDOR:
+    // any attacker who set app_user_id to a victim's venueId could trigger a
+    // purchase/cancel against that venue. Resolve only through Profile
+    // membership — never trust subscriberId as a Venue.id directly.
     const profiles = await this.prisma.profile.findMany({
       where: {
         userId: subscriberId,

@@ -2,7 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthGuard } from './auth.guard';
-import { AuthService } from './auth.service';
+import { AuthService, SESSION_DURATION_MS } from './auth.service';
 
 @Global()
 @Module({
@@ -20,7 +20,7 @@ import { AuthService } from './auth.service';
         // against a future change that adds an asymmetric verification path.
         return {
           secret,
-          signOptions: { expiresIn: '30d', algorithm: 'HS256' },
+          signOptions: { expiresIn: Math.floor(SESSION_DURATION_MS / 1000), algorithm: 'HS256' },
           verifyOptions: { algorithms: ['HS256'] },
         };
       },

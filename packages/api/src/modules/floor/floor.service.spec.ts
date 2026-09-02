@@ -65,6 +65,10 @@ describe('FloorService regressions', () => {
 
     expect(transaction.floorTable.createMany).toHaveBeenCalledTimes(1);
     expect(transaction.floorTable.createMany.mock.calls[0][0].data).toHaveLength(1);
+    // Regression for VW-09: FloorTable now carries its own venueId.
+    expect(transaction.floorTable.createMany.mock.calls[0][0].data[0]).toEqual(
+      expect.objectContaining({ venueId: 'venue-1' }),
+    );
     expect(transaction.floorTable.create).not.toHaveBeenCalled();
     expect(transaction.floorTable.update).not.toHaveBeenCalled();
     expect(transaction.tableState.createMany).toHaveBeenCalledTimes(1);

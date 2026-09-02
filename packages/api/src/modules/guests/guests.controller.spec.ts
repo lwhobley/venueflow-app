@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { GuestsController } from './guests.controller';
+import { GuestsController, validateLeadWebhookReplayHeaders } from './guests.controller';
 import { generateWebhookSecret, hashWebhookSecret } from '../../common/webhook-auth';
 
 vi.mock('../../common/rate-limit', () => ({
@@ -29,6 +29,13 @@ function makeController() {
     reservation: {
       groupBy: vi.fn().mockResolvedValue([]),
       findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    waitlist: {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    rateLimitBucket: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     $transaction: vi.fn().mockImplementation((arg: any) => {
       if (Array.isArray(arg)) return Promise.all(arg);
@@ -67,6 +74,10 @@ function makeGuestRow(overrides: Partial<Record<string, any>> = {}) {
 
 function makeRequest(ip = '203.0.113.5') {
   return { ip } as any;
+}
+
+function webhookHeaders(eventId = 'event-1') {
+  return [eventId, String(Math.floor(Date.now() / 1000))] as const;
 }
 
 afterEach(() => {
@@ -394,6 +405,24 @@ describe('GuestsController', () => {
       });
       expect(result).toEqual({ ok: true });
     });
+
+    it('scrubs denormalized contact details from that guest\'s bookings', async () => {
+      // Regression for VW-06: Reservation and Waitlist keep their own copies
+      // of guest contact info, which previously survived guest deletion.
+      const { controller, prisma } = makeController();
+      prisma.guest.findFirst.mockResolvedValue(makeGuestRow({ id: 'guest-1' }));
+
+      await controller.removeGuest(managerScope, 'guest-1');
+
+      expect(prisma.reservation.updateMany).toHaveBeenCalledWith({
+        where: { guestId: 'guest-1', venueId: 'venue-1' },
+        data: { guestPhone: null, guestEmail: null, guestCompany: null },
+      });
+      expect(prisma.waitlist.updateMany).toHaveBeenCalledWith({
+        where: { guestId: 'guest-1', venueId: 'venue-1' },
+        data: { guestPhone: null, guestEmail: null },
+      });
+    });
   });
 
   describe('ingestLeads / lead ingestion logic', () => {
@@ -480,6 +509,75 @@ describe('GuestsController', () => {
       expect(result).toEqual({ created: 1, updated: 0, skipped: 1, guestIds: ['guest-new'] });
     });
 
+    it('does not merge two different people who share a name', async () => {
+      // The name fallback used to graft a stranger's email onto an existing
+      // guest and collapse their histories together. This runs from a public
+      // webhook, where common names and sparse contact details are the norm.
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([
+        { id: 'guest-1', email: null, phone: '5551234567', nameLower: 'john smith', tags: [], lifecycleStage: 'regular', source: 'walkin' },
+      ]);
+      prisma.guest.create.mockResolvedValue({ id: 'guest-2', email: 'other.john@x.com', phone: null, nameLower: 'john smith' });
+
+      const result = await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'John Smith', email: 'other.john@x.com' }],
+      } as any);
+
+      expect(prisma.guest.update).not.toHaveBeenCalled();
+      expect(prisma.guest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          fullName: 'John Smith',
+          email: 'other.john@x.com',
+          tags: expect.arrayContaining(['possible-duplicate']),
+        }),
+      });
+      expect(result).toEqual({ created: 1, updated: 0, skipped: 0, guestIds: ['guest-2'] });
+    });
+
+    it('still merges on a matching phone number', async () => {
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([
+        { id: 'guest-1', email: null, phone: '5551234567', nameLower: 'john smith', tags: [], lifecycleStage: 'regular', source: 'walkin' },
+      ]);
+
+      const result = await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'John Smith', phone: '5551234567' }],
+      } as any);
+
+      expect(prisma.guest.create).not.toHaveBeenCalled();
+      expect(result).toEqual({ created: 0, updated: 1, skipped: 0, guestIds: ['guest-1'] });
+    });
+
+    it('never overwrites a contact value the guest already has', async () => {
+      // Matched on phone, so the incoming email must not replace a stored one.
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([
+        { id: 'guest-1', email: 'real@x.com', phone: '5551234567', nameLower: 'john smith', tags: [], lifecycleStage: 'regular', source: 'walkin' },
+      ]);
+
+      await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'John Smith', phone: '5551234567', email: 'someone.else@x.com' }],
+      } as any);
+
+      expect(prisma.guest.update).toHaveBeenCalledWith({
+        where: { id: 'guest-1' },
+        data: expect.objectContaining({ email: 'real@x.com', phone: '5551234567' }),
+      });
+    });
+
+    it('does not tag a genuinely new name as a possible duplicate', async () => {
+      const { controller, prisma } = makeController();
+      prisma.guest.findMany.mockResolvedValue([]);
+      prisma.guest.create.mockResolvedValue({ id: 'guest-new', email: null, phone: null, nameLower: 'nobody else' });
+
+      await controller.ingestLeads(managerScope, {
+        leads: [{ fullName: 'Nobody Else' }],
+      } as any);
+
+      const created = prisma.guest.create.mock.calls[0][0].data;
+      expect(created.tags).not.toContain('possible-duplicate');
+    });
+
     it('returns zero counts for an empty leads batch', async () => {
       const { controller } = makeController();
 
@@ -495,7 +593,7 @@ describe('GuestsController', () => {
       prisma.venue.findUnique.mockResolvedValue(null);
 
       await expect(
-        controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', { leads: [] } as any),
+        controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', undefined, undefined, { leads: [] } as any),
       ).rejects.toThrow(UnauthorizedException);
 
       // An unauthenticated spray of random venueIds must not churn buckets.
@@ -506,7 +604,7 @@ describe('GuestsController', () => {
       const { controller, prisma } = makeController();
       prisma.venue.findUnique.mockResolvedValue({ leadsWebhookSecret: hashWebhookSecret('secret') });
 
-      await controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', { leads: [] } as any);
+      await controller.leadsWebhook(makeRequest(), 'venue-1', 'secret', ...webhookHeaders(), { leads: [] } as any);
 
       expect(assertWithinSharedRateLimit).toHaveBeenCalledWith(
         prisma,
@@ -522,7 +620,7 @@ describe('GuestsController', () => {
       prisma.venue.findUnique.mockResolvedValue({ leadsWebhookSecret: null });
 
       await expect(
-        controller.leadsWebhook(makeRequest(), 'venue-1', 'any-secret', { leads: [] } as any),
+        controller.leadsWebhook(makeRequest(), 'venue-1', 'any-secret', undefined, undefined, { leads: [] } as any),
       ).rejects.toThrow('Invalid webhook secret');
     });
 
@@ -532,7 +630,7 @@ describe('GuestsController', () => {
       prisma.venue.findUnique.mockResolvedValue({ leadsWebhookSecret: hashedSecret });
 
       await expect(
-        controller.leadsWebhook(makeRequest(), 'venue-1', 'wrong-secret', { leads: [] } as any),
+        controller.leadsWebhook(makeRequest(), 'venue-1', 'wrong-secret', undefined, undefined, { leads: [] } as any),
       ).rejects.toThrow('Invalid webhook secret');
     });
 
@@ -543,7 +641,7 @@ describe('GuestsController', () => {
       prisma.guest.findMany.mockResolvedValue([]);
       prisma.guest.create.mockResolvedValue({ id: 'guest-new', email: 'lead@x.com', phone: null, nameLower: 'web lead' });
 
-      const result = await controller.leadsWebhook(makeRequest(), 'venue-1', secret, {
+      const result = await controller.leadsWebhook(makeRequest(), 'venue-1', secret, ...webhookHeaders(), {
         leads: [{ fullName: 'Web Lead', email: 'lead@x.com' }],
       } as any);
 
@@ -551,6 +649,23 @@ describe('GuestsController', () => {
         expect.objectContaining({ data: expect.objectContaining({ venueId: 'venue-1' }) }),
       );
       expect(result).toEqual({ created: 1, updated: 0, skipped: 0, guestIds: ['guest-new'] });
+    });
+  });
+
+  describe('lead webhook replay headers', () => {
+    it('accepts a recent unique event identifier', () => {
+      const now = Date.now();
+      expect(validateLeadWebhookReplayHeaders('provider:event-1', String(Math.floor(now / 1000)), now))
+        .toBe('provider:event-1');
+    });
+
+    it('rejects missing, malformed, and stale replay headers', () => {
+      const now = Date.now();
+      expect(() => validateLeadWebhookReplayHeaders(undefined, String(Math.floor(now / 1000)), now)).toThrow(/x-webhook-id/);
+      expect(() => validateLeadWebhookReplayHeaders('event 1', String(Math.floor(now / 1000)), now)).toThrow(/x-webhook-id/);
+      expect(() => validateLeadWebhookReplayHeaders('event-1', 'not-a-time', now)).toThrow(/x-webhook-timestamp/);
+      expect(() => validateLeadWebhookReplayHeaders('event-1', String(Math.floor((now - 6 * 60_000) / 1000)), now))
+        .toThrow(/outside the allowed window/);
     });
   });
 

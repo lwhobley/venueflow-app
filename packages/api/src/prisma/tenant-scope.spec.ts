@@ -133,21 +133,48 @@ describe('scopeArgs — security invariants', () => {
 });
 
 describe('scopeArgs — unique-keyed operations', () => {
-  it.each(['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert'])('adds venueId to %s where clauses', (op) => {
+  it.each(['findUnique', 'findUniqueOrThrow', 'delete', 'upsert'])('adds venueId to %s where clauses', (op) => {
     const args = { where: { id: 'abc' }, data: { x: 1 } };
     expect(scopeArgs(op, args, VENUE)).toEqual({ ...args, where: { id: 'abc', venueId: VENUE } });
   });
 
-  it('forces the create branch of an upsert into the bound venue', () => {
+  it('forces venueId onto update data, overriding a hostile value', () => {
+    // Regression for F18: `where` scoping alone only guarantees which row is
+    // reachable, not what it can be rewritten to. Without forcing `data`
+    // here, `update({ where: { id }, data: { venueId: 'other-venue' } })`
+    // could move a row this tenant owns into another tenant.
+    const out = scopeArgs('update', { where: { id: 'abc' }, data: { name: 'x', venueId: 'other-venue' } }, VENUE);
+    expect(out).toEqual({
+      where: { id: 'abc', venueId: VENUE },
+      data: { name: 'x', venueId: VENUE },
+    });
+  });
+
+  it('forces both the create and update branches of an upsert into the bound venue', () => {
     const out = scopeArgs('upsert', {
       where: { id: 'abc' },
       create: { name: 'x', venueId: 'other-venue' },
-      update: { name: 'x' },
+      update: { name: 'x', venueId: 'other-venue' },
     }, VENUE);
     expect(out).toEqual({
       where: { id: 'abc', venueId: VENUE },
       create: { name: 'x', venueId: VENUE },
-      update: { name: 'x' },
+      update: { name: 'x', venueId: VENUE },
     });
+  });
+});
+
+describe('scopeArgs — updateMany forces data.venueId', () => {
+  it('overrides a hostile venueId in updateMany data', () => {
+    const out = scopeArgs('updateMany', { where: { x: 1 }, data: { name: 'x', venueId: 'other-venue' } }, VENUE);
+    expect(out).toEqual({
+      where: { AND: [{ venueId: VENUE }, { x: 1 }] },
+      data: { name: 'x', venueId: VENUE },
+    });
+  });
+
+  it('leaves updateMany without a data field untouched beyond where-scoping', () => {
+    const out = scopeArgs('updateMany', { where: { x: 1 } }, VENUE);
+    expect(out).toEqual({ where: { AND: [{ venueId: VENUE }, { x: 1 }] } });
   });
 });

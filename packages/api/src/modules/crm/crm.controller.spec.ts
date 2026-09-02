@@ -40,8 +40,11 @@ function makeController() {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
     },
+    guest: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     venue: {
-      findUnique: vi.fn().mockResolvedValue({ name: 'Test Venue' }),
+      findUnique: vi.fn().mockResolvedValue({ name: 'Test Venue', stripeSubscriptionId: 'sub_123', subscriptionStatus: 'active' }),
     },
     emailTemplate: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -66,9 +69,10 @@ function makeController() {
   const email = { sendOrThrow: vi.fn().mockResolvedValue(undefined) };
   const templates = { renderTemplate: vi.fn().mockResolvedValue({ subject: 'Hi', body: 'Body' }) };
   const executionAutopilot = { ensureWorkspace: vi.fn().mockResolvedValue({ id: 'workspace-1' }) };
+  const audit = { record: vi.fn().mockResolvedValue(undefined) };
 
-  const controller = new CrmController(prisma, email as any, templates as any, executionAutopilot as any);
-  return { controller, prisma, email, templates, executionAutopilot };
+  const controller = new CrmController(prisma, email as any, templates as any, executionAutopilot as any, audit as any);
+  return { controller, prisma, email, templates, executionAutopilot, audit };
 }
 
 const managerScope = { venueId: 'venue-1', profileId: 'manager-1', role: 'manager', allAccess: false } as any;
@@ -639,11 +643,11 @@ describe('CrmController', () => {
   describe('getSourceRoi', () => {
     it('computes win rate and sorts sources by won revenue descending', async () => {
       const { controller, prisma } = makeController();
-      prisma.crmLead.findMany.mockResolvedValue([
-        { source: 'Instagram', status: 'won', estimatedValueCents: 3000 },
-        { source: 'Instagram', status: 'lost', estimatedValueCents: 1000 },
-        { source: 'Referral', status: 'won', estimatedValueCents: 8000 },
-        { source: null, status: 'new', estimatedValueCents: 500 },
+      prisma.crmLead.groupBy.mockResolvedValue([
+        { source: 'Instagram', status: 'won', _count: { _all: 1 }, _sum: { estimatedValueCents: 3000 } },
+        { source: 'Instagram', status: 'lost', _count: { _all: 1 }, _sum: { estimatedValueCents: 1000 } },
+        { source: 'Referral', status: 'won', _count: { _all: 1 }, _sum: { estimatedValueCents: 8000 } },
+        { source: null, status: 'new', _count: { _all: 1 }, _sum: { estimatedValueCents: 500 } },
       ]);
 
       const result = await controller.getSourceRoi(managerScope);
@@ -744,10 +748,24 @@ describe('CrmController', () => {
         menuAppetizers: null, menuEntrees: null, menuDesserts: null, menuBarPackage: null, specialRequirements: null,
         lead: null,
       });
+      prisma.profile.findFirst.mockResolvedValue({ id: 'staff-1', email: 'jo@example.com' });
 
       await controller.emailBeo(managerScope, 'beo-1', { toEmail: 'jo@example.com' });
 
       expect(prisma.crmActivityLog.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects sending to an email address outside the venue lead/guest/staff pool', async () => {
+      const { controller, prisma } = makeController();
+      prisma.crmBeo.findFirst.mockResolvedValue({
+        id: 'beo-1', leadId: null, eventName: 'Gala', eventDate: null, eventType: null, guestCount: null,
+        venueSpace: null, setupStyle: null, fbMinimumCents: null, depositCents: null, depositDueDate: null,
+        menuAppetizers: null, menuEntrees: null, menuDesserts: null, menuBarPackage: null, specialRequirements: null,
+        lead: null,
+      });
+
+      await expect(controller.emailBeo(managerScope, 'beo-1', { toEmail: 'stranger@example.com' }))
+        .rejects.toThrow(BadRequestException);
     });
   });
 

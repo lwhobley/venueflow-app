@@ -22,8 +22,9 @@ function makeController() {
   prisma.$transaction = vi.fn().mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma));
 
   const email = { send: vi.fn().mockResolvedValue(undefined) } as any;
-  const controller = new StaffController(prisma, email);
-  return { controller, prisma, email };
+  const audit = { record: vi.fn().mockResolvedValue(undefined) } as any;
+  const controller = new StaffController(prisma, email, audit);
+  return { controller, prisma, email, audit };
 }
 
 const managerScope = { venueId: 'venue-1', venueName: 'Test Venue', profileId: 'manager-1', role: 'manager', allAccess: false } as any;
@@ -424,12 +425,20 @@ describe('StaffController', () => {
     it('deactivates a staff member, clears sessions, and syncs the team count', async () => {
       const { controller, prisma } = makeController();
       prisma.profile.findUnique.mockResolvedValue({ id: 'staff-2', venueId: 'venue-1', role: 'staff', userId: 'user-2' });
+      prisma.profile.count.mockResolvedValue(0);
 
       const result = await controller.deactivateVenueStaff(managerScope, 'staff-2');
 
       expect(prisma.profile.update).toHaveBeenCalledWith({
         where: { id: 'staff-2' },
-        data: { venueId: null },
+        data: { membershipStatus: 'revoked' },
+      });
+      expect(prisma.profile.count).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-2',
+          venueId: { not: 'venue-1' },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
       });
       expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-2' } });
       expect(prisma.team.upsert).toHaveBeenCalledWith({
@@ -437,7 +446,120 @@ describe('StaffController', () => {
         create: expect.objectContaining({ venueId: 'venue-1', memberCount: expect.any(Number) }),
         update: { memberCount: expect.any(Number) },
       });
-      expect(result).toEqual(expect.objectContaining({ venueId: null }));
+      expect(result).toEqual(expect.objectContaining({ _id: 'staff-2' }));
+    });
+
+    it('keeps sessions alive when the staff member is still active at another venue', async () => {
+      const { controller, prisma } = makeController();
+      prisma.profile.findUnique.mockResolvedValue({ id: 'staff-2', venueId: 'venue-1', role: 'staff', userId: 'user-2' });
+      prisma.profile.count.mockResolvedValue(1);
+
+      await controller.deactivateVenueStaff(managerScope, 'staff-2');
+
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: 'staff-2' },
+        data: { membershipStatus: 'revoked' },
+      });
+      expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('records an audit event when deactivating a staff member', async () => {
+      const { controller, prisma, audit } = makeController();
+      prisma.profile.findUnique.mockResolvedValue({
+        id: 'staff-2',
+        venueId: 'venue-1',
+        role: 'staff',
+        fullName: 'Jane Doe',
+        userId: 'user-2',
+      });
+      prisma.profile.count.mockResolvedValue(0);
+
+      await controller.deactivateVenueStaff(managerScope, 'staff-2');
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'staff_deactivated',
+          entityType: 'profile',
+          entityId: 'staff-2',
+          venueId: 'venue-1',
+          actorProfileId: 'manager-1',
+          targetProfileId: 'staff-2',
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('audit logging for upsertVenueStaff', () => {
+    it('records staff_created when adding a new staff member', async () => {
+      const { controller, prisma, audit } = makeController();
+      prisma.profile.findMany.mockResolvedValue([]);
+      prisma.profile.create.mockResolvedValue({
+        id: 'new-staff-1',
+        email: 'new@example.com',
+        fullName: 'New Staff',
+        role: 'server',
+        jobTitle: 'Server',
+        venueId: 'venue-1',
+      });
+
+      await controller.upsertVenueStaff(managerScope, {
+        email: 'new@example.com',
+        fullName: 'New Staff',
+        role: 'server',
+        jobTitle: 'Server',
+      });
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'staff_created',
+          entityType: 'profile',
+          entityId: 'new-staff-1',
+          venueId: 'venue-1',
+          actorProfileId: 'manager-1',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('records staff_updated when updating an existing staff member', async () => {
+      const { controller, prisma, audit } = makeController();
+      prisma.profile.findMany.mockResolvedValue([
+        {
+          id: 'existing-staff-1',
+          email: 'existing@example.com',
+          fullName: 'Existing Staff',
+          role: 'server',
+          jobTitle: 'Server',
+          venueId: 'venue-1',
+        },
+      ]);
+      prisma.profile.update.mockResolvedValue({
+        id: 'existing-staff-1',
+        email: 'existing@example.com',
+        fullName: 'Existing Staff Updated',
+        role: 'server',
+        jobTitle: 'Lead Server',
+        venueId: 'venue-1',
+      });
+
+      await controller.upsertVenueStaff(managerScope, {
+        email: 'existing@example.com',
+        fullName: 'Existing Staff Updated',
+        role: 'server',
+        jobTitle: 'Lead Server',
+      });
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'staff_updated',
+          entityType: 'profile',
+          entityId: 'existing-staff-1',
+          venueId: 'venue-1',
+          actorProfileId: 'manager-1',
+        }),
+        expect.anything(),
+      );
     });
   });
 });

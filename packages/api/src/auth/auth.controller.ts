@@ -2,14 +2,14 @@ import { BadRequestException, Body, Controller, Logger, Optional, Post, Req, Una
 import { JwtService } from '@nestjs/jwt';
 import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import type { Request } from 'express';
 import { createHash, pbkdf2, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import { hashInviteToken } from '../common/invite-token';
 
 const pbkdf2Async = promisify(pbkdf2);
-import { Public } from './public.decorator';
+import { AllowUnverifiedEmail, Public } from './public.decorator';
 import { CurrentUser } from './current-user.decorator';
 import type { AuthUser } from './auth.guard';
 import { getClientIp } from '../common/http';
@@ -22,8 +22,6 @@ import { AuthService } from './auth.service';
 import { AuditService } from '../modules/audit/audit.service';
 
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
-// Matches the JWT's 30-day expiry so a session and its token expire together.
-const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 const EMAIL_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 600_000;
@@ -48,10 +46,12 @@ class PasswordAuthDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50)
   phone?: string;
 
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   password!: string;
 
   @IsIn(['signIn', 'signUp'])
@@ -59,18 +59,22 @@ class PasswordAuthDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(120)
   fullName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(60)
   firstName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(60)
   lastName?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(128)
   inviteToken?: string;
 
   @IsBoolean()
@@ -81,16 +85,18 @@ class PasswordAuthDto {
 class ChangePasswordDto {
   @IsString()
   @IsOptional()
+  @MaxLength(128)
   currentPassword?: string;
 
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   newPassword!: string;
 }
 
 class VerifyEmailDto {
   @IsString()
-  @Matches(/^\d{8}$/)
+  @Matches(/^\d{10}$/)
   code!: string;
 }
 
@@ -106,6 +112,7 @@ class LogoutDto {
   // nothing rather than something belonging to another profile.
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   pushToken?: string;
 }
 
@@ -114,11 +121,12 @@ class ResetPasswordDto {
   email!: string;
 
   @IsString()
-  @Matches(/^\d{8}$/)
+  @Matches(/^\d{10}$/)
   code!: string;
 
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   newPassword!: string;
 }
 
@@ -310,7 +318,11 @@ export class AuthController {
       try {
         await this.sendVerificationEmail(nextUserId, email, sessionResult.profile.fullName);
       } catch (err: any) {
-        this.logger.error(`Verification email failed for ${email}: ${err?.message ?? String(err)}`);
+        // Identify by user id, never the address. Cloud Run logs are retained
+        // and fan out to downstream sinks, so an email here is PII at rest for
+        // the life of the log. The reset path below and the invite-check path
+        // in workforce.controller already log this way.
+        this.logger.error(`Verification email failed for user ${nextUserId}: ${err?.message ?? String(err)}`);
       }
     }
     return sessionResult;
@@ -371,6 +383,7 @@ export class AuthController {
     return { ok: true };
   }
 
+  @AllowUnverifiedEmail()
   @Post('verify-email/send')
   async resendVerification(@CurrentUser() user: AuthUser) {
     const account = await this.prisma.user.findUnique({
@@ -384,6 +397,7 @@ export class AuthController {
     return { ok: true };
   }
 
+  @AllowUnverifiedEmail()
   @Post('verify-email')
   async verifyEmail(@Req() request: Request, @CurrentUser() user: AuthUser, @Body() body: VerifyEmailDto) {
     await assertWithinSharedRateLimit(this.prisma, `verify-email:ip:${getClientIp(request)}`, VERIFY_EMAIL_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS);
@@ -574,6 +588,7 @@ export class AuthController {
 
   // Revoke the current session (this device). The bearer token stops working
   // immediately on the next request.
+  @AllowUnverifiedEmail()
   @Post('logout')
   async logout(@CurrentUser() user: AuthUser, @Body() body?: LogoutDto, @Req() request?: Request) {
     if (user.sid) {
@@ -607,6 +622,7 @@ export class AuthController {
   }
 
   // Revoke every session for the account (all devices).
+  @AllowUnverifiedEmail()
   @Post('logout-all')
   async logoutAll(@CurrentUser() user: AuthUser) {
     await this.prisma.$transaction([
@@ -632,11 +648,6 @@ export class AuthController {
       sid: session.id,
       profileId: profile.id,
       venueId: profile.venueId,
-      venueName: profile.venue?.name ?? null,
-      role: profile.role,
-      allAccess: profile.allAccess,
-      trialEndsAt: profile.trialEndsAt?.toISOString() ?? null,
-      venueStatus: profile.venue?.subscriptionStatus ?? null,
     });
     await this.prisma.session.update({
       where: { id: session.id },

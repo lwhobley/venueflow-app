@@ -33,16 +33,18 @@ export class S3DocumentService {
   }
 
   async getPresignedUrl(key: string, fileName: string, mimeType: string): Promise<string> {
-    const disposition = mimeType === 'application/pdf' || mimeType.startsWith('image/') || mimeType.startsWith('text/')
-      ? 'inline'
-      : 'attachment';
+    const isSafeImage = mimeType.startsWith('image/') && mimeType !== 'image/svg+xml';
+    const isPdf = mimeType === 'application/pdf';
+    const disposition = isSafeImage || isPdf ? 'inline' : 'attachment';
+    const safeName = fileName.replace(/["\\\r\n]/g, '_');
+
     return getSignedUrl(
       this.s3,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        ResponseContentType: mimeType,
-        ResponseContentDisposition: `${disposition}; filename="${fileName.replace(/["\\\r\n]/g, '_')}"`,
+        ResponseContentType: isSafeImage || isPdf ? mimeType : 'application/octet-stream',
+        ResponseContentDisposition: `${disposition}; filename="${safeName}"`,
       }),
       { expiresIn: 300 },
     );

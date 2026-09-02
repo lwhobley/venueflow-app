@@ -10,7 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { runWithoutTenant } from '../../../prisma/tenant-context';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
-const ALLOWED_TOOLS = [
+export const ALLOWED_TOOLS = [
   'FIND_RESERVATION',
   'CREATE_RESERVATION',
   'UPDATE_RESERVATION',
@@ -40,7 +40,7 @@ const ALLOWED_TOOLS = [
   'CORRECT_PUNCH',
 ] as const;
 
-type OperatorTool = (typeof ALLOWED_TOOLS)[number];
+export type OperatorTool = (typeof ALLOWED_TOOLS)[number];
 type OperatorRisk = 'read' | 'low_risk_write' | 'operational_write' | 'sensitive_write';
 type OperatorPlan = { tool: OperatorTool; args: Record<string, unknown>; summary: string; risk: OperatorRisk; preview?: string[] };
 type OperatorExecutionResponse = { ok: true; tool: OperatorTool; risk: OperatorRisk; result: unknown };
