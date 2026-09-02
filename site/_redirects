@@ -4,4 +4,9 @@
 /app /app/index.html 200
 /app/ /app/index.html 200
 /_expo/* /app/_expo/:splat 200
+# The web bundle requests its assets from the site root, not from /app. Both
+# prefixes below are exported only under site/app, and the marketing site's
+# own /assets holds no `assets` or `node_modules` subdirectory, so neither
+# rule shadows a marketing file.
+/assets/assets/* /app/assets/assets/:splat 200
 /assets/node_modules/* /app/assets/node_modules/:splat 200
