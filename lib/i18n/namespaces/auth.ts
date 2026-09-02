@@ -124,6 +124,8 @@ export const en = {
     resendSuccessMessage: 'We sent a new verification code to {email}.',
     resendFailedTitle: 'Could not resend code',
     tryAgain: 'Try again.',
+    deliveryFailedTitle: 'We could not send your code',
+    deliveryFailedMessage: 'The verification email did not go out. Send a new code below, and check the address on your account if it keeps failing.',
   },
   teamChoice: {
     kicker: 'Get started',
@@ -352,6 +354,8 @@ export const es: AuthDictionary = {
     resendSuccessMessage: 'Enviamos un nuevo código de verificación a {email}.',
     resendFailedTitle: 'No se pudo reenviar el código',
     tryAgain: 'Inténtalo de nuevo.',
+    deliveryFailedTitle: 'No pudimos enviar tu código',
+    deliveryFailedMessage: 'El correo de verificación no se envió. Solicita un nuevo código abajo y revisa la dirección de tu cuenta si sigue fallando.',
   },
   teamChoice: {
     kicker: 'Comencemos',
@@ -578,6 +582,8 @@ export const fr: AuthDictionary = {
     resendSuccessMessage: 'Nous avons envoyé un nouveau code de vérification à {email}.',
     resendFailedTitle: 'Impossible de renvoyer le code',
     tryAgain: 'Réessayez.',
+    deliveryFailedTitle: 'Nous n\'avons pas pu envoyer votre code',
+    deliveryFailedMessage: 'L\'e-mail de vérification n\'est pas parti. Demandez un nouveau code ci-dessous et vérifiez l\'adresse de votre compte si l\'échec persiste.',
   },
   teamChoice: {
     kicker: 'Commençons',

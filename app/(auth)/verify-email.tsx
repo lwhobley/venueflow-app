@@ -11,7 +11,10 @@ import { useI18n } from '../../lib/i18n';
 
 export default function VerifyEmailScreen() {
   const { t } = useI18n();
-  const { invite } = useLocalSearchParams<{ invite?: string }>();
+  const { invite, emailSendFailed } = useLocalSearchParams<{ invite?: string; emailSendFailed?: string }>();
+  // Signup could not deliver the code. Say so plainly instead of leaving
+  // someone waiting on an inbox that will never receive it.
+  const deliveryFailed = emailSendFailed === '1';
   const user = useAuthStore((state: AuthState) => state.user);
   const setSession = useAuthStore((state: AuthState) => state.setSession);
   const clearSession = useAuthStore((state: AuthState) => state.clearSession);
@@ -101,6 +104,12 @@ export default function VerifyEmailScreen() {
 
         <Card style={styles.card}>
           <Card.Content style={{ gap: spacing.md }}>
+            {deliveryFailed ? (
+              <View style={{ gap: 4, padding: spacing.sm, borderRadius: 8, backgroundColor: '#FDE7E9' }}>
+                <Text style={{ fontWeight: '700', color: '#A81C24' }}>{t('verifyEmail.deliveryFailedTitle')}</Text>
+                <Text variant="bodySmall" style={{ color: '#A81C24' }}>{t('verifyEmail.deliveryFailedMessage')}</Text>
+              </View>
+            ) : null}
             <TextInput
               {...inputProps}
               label={t('verifyEmail.codeLabel')}
