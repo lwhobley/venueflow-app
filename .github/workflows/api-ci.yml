@@ -155,14 +155,14 @@ jobs:
               fi
               echo "✓ ${database}: ${index}"
             done
-            # VW-A16: Guard against proconfig being silently lost on public RPCs via CREATE OR REPLACE
+            # VW-A16: Guard against proconfig being silently lost on public user-defined RPCs via CREATE OR REPLACE
             unpinned_funcs="$(psql -h localhost -U postgres -d "$database" -Atc \
-              "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proconfig IS NULL")"
+              "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e' WHERE n.nspname = 'public' AND p.proconfig IS NULL AND d.objid IS NULL")"
             if [[ -n "$unpinned_funcs" ]]; then
               echo "::error::Functions missing search_path pin in ${database}: ${unpinned_funcs}"
               exit 1
             fi
-            echo "✓ ${database}: all public functions have search_path pinned"
+            echo "✓ ${database}: all public user-defined functions have search_path pinned"
 
             required_checks=(
               TimeEntry_open_state_check
