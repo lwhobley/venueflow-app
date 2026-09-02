@@ -14,6 +14,9 @@ function makeController() {
     session: {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    timeEntry: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
     team: {
       upsert: vi.fn().mockResolvedValue({ id: 'team-1' }),
     },
@@ -433,10 +436,15 @@ describe('StaffController', () => {
         where: { id: 'staff-2' },
         data: { membershipStatus: 'revoked' },
       });
+      expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
+        where: { profileId: 'staff-2', isOpen: true },
+        data: { isOpen: false, clockOutAt: expect.any(Date) },
+      });
       expect(prisma.profile.count).toHaveBeenCalledWith({
         where: {
           userId: 'user-2',
           venueId: { not: 'venue-1' },
+          venue: { isNot: null },
           OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
         },
       });

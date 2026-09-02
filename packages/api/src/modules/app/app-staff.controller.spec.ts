@@ -27,6 +27,7 @@ function makeController() {
       create: vi.fn().mockResolvedValue({}),
     },
     session: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    timeEntry: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     team: {
       upsert: vi.fn().mockResolvedValue({ id: 'team-1' }),
     },
@@ -545,6 +546,18 @@ describe('AppStaffController', () => {
       await controller.deactivateVenueStaff(user, 'staff-2');
 
       expect(prisma.profile.update).toHaveBeenCalledWith({ where: { id: 'staff-2' }, data: { membershipStatus: 'revoked' } });
+      expect(prisma.timeEntry.updateMany).toHaveBeenCalledWith({
+        where: { profileId: 'staff-2', isOpen: true },
+        data: { isOpen: false, clockOutAt: expect.any(Date) },
+      });
+      expect(prisma.profile.count).toHaveBeenCalledWith({
+        where: {
+          userId: 'staff-2-user',
+          venueId: { not: 'venue-1' },
+          venue: { isNot: null },
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
+      });
       expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'staff-2-user' } });
       expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ action: 'staff_deactivated' }),

@@ -102,16 +102,21 @@ export class TimeClockController {
     if (!venue) return null;
 
     // The board only surfaces open entries and alerts derived from them, so we
-    // never need the venue's full (unbounded) time-entry history.
+    // never need the venue's full (unbounded) time-entry history. Exclude revoked
+    // profiles so deactivated staff never linger on the board.
     const entries = await this.prisma.timeEntry.findMany({
-      where: { venueId: venue.id, isOpen: true },
+      where: {
+        venueId: venue.id,
+        isOpen: true,
+        profile: { OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+      },
       include: { profile: true },
     });
 
-    const myRawEntry = entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile);
+    const myRawEntry = entries.find((entry) => entry.isOpen && entry.profileId === scope.profileId && entry.profile && entry.profile.membershipStatus !== 'revoked');
     const myOpenEntry = myRawEntry ? mapClockEntry(myRawEntry, myRawEntry.profile!, venue) : null;
     const activeClockEntries = managerView
-      ? entries.flatMap((entry) => (entry.isOpen && entry.profile ? [mapClockEntry(entry, entry.profile, venue, { includeLocation: false })] : []))
+      ? entries.flatMap((entry) => (entry.isOpen && entry.profile && entry.profile.membershipStatus !== 'revoked' ? [mapClockEntry(entry, entry.profile, venue, { includeLocation: false })] : []))
       : myOpenEntry
         ? [myOpenEntry]
         : [];

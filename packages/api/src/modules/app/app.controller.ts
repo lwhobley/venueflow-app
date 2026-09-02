@@ -238,7 +238,10 @@ export class AppController {
     let profile = await this.getProfile(user, requestedVenueId);
     if (!profile) {
       profile = await this.prisma.profile.findFirst({
-        where: { userId: user.sub },
+        where: {
+          userId: user.sub,
+          OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
+        },
         include: { venue: true },
         orderBy: { createdAt: 'asc' },
       });
@@ -568,12 +571,24 @@ export class AppController {
       canManage ? this.prisma.profile.count({ where: { venueId: profile.venueId! } }) : Promise.resolve(0),
       canManage
         ? this.prisma.timeEntry.findMany({
-            where: { venueId: profile.venueId!, isOpen: true },
+            where: {
+              venueId: profile.venueId!,
+              isOpen: true,
+              profile: { OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+            },
             include: { profile: true, venue: true },
             take: 50,
           })
         : Promise.resolve([]),
-      canManage ? this.prisma.timeEntry.count({ where: { venueId: profile.venueId!, isOpen: true } }) : Promise.resolve(0),
+      canManage
+        ? this.prisma.timeEntry.count({
+            where: {
+              venueId: profile.venueId!,
+              isOpen: true,
+              profile: { OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+            },
+          })
+        : Promise.resolve(0),
     ]);
     const countByStatus = (status: string) => shiftCounts.find((c) => c.status === status)?._count._all ?? 0;
 
@@ -759,7 +774,11 @@ export class AppController {
   async getClockBoard(@CurrentUser() user: AuthUser) {
     const profile = await this.requireVenueProfile(user);
     const entries = await this.prisma.timeEntry.findMany({
-      where: { venueId: profile.venueId!, isOpen: true },
+      where: {
+        venueId: profile.venueId!,
+        isOpen: true,
+        profile: { OR: [{ membershipStatus: null }, { membershipStatus: 'active' }] },
+      },
       include: { profile: true, venue: true },
       orderBy: { clockInAt: 'desc' },
       take: 100,

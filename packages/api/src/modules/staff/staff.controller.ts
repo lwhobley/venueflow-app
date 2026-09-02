@@ -244,11 +244,19 @@ export class StaffController {
         where: { id: staff.id },
         data: { membershipStatus: 'revoked' },
       });
+      await tx.timeEntry.updateMany({
+        where: { profileId: staff.id, isOpen: true },
+        data: {
+          isOpen: false,
+          clockOutAt: new Date(),
+        },
+      });
       if (staff.userId) {
         const activeElsewhere = await tx.profile.count({
           where: {
             userId: staff.userId,
             venueId: { not: scope.venueId },
+            venue: { isNot: null },
             OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
           },
         });

@@ -400,11 +400,19 @@ export class AppStaffController {
     const updated = await runWithoutTenant(() => this.prisma.$transaction(async (tx) => {
       await this.assertCanManageLegacyStaffTarget(viewer, staff, true, tx);
       const u = await tx.profile.update({ where: { id: staff.id }, data: { membershipStatus: 'revoked' } });
+      await tx.timeEntry.updateMany({
+        where: { profileId: staff.id, isOpen: true },
+        data: {
+          isOpen: false,
+          clockOutAt: new Date(),
+        },
+      });
       if (staff.userId) {
         const activeElsewhere = await tx.profile.count({
           where: {
             userId: staff.userId,
             venueId: { not: viewer.venueId! },
+            venue: { isNot: null },
             OR: [{ membershipStatus: null }, { membershipStatus: 'active' }],
           },
         });
