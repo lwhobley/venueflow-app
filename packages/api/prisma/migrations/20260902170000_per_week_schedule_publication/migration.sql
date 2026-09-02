@@ -22,6 +22,24 @@ ALTER TABLE "SchedulePublication"
   ADD CONSTRAINT "SchedulePublication_venueId_fkey"
   FOREIGN KEY ("venueId") REFERENCES "Venue"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- RLS, in the same migration that creates the table: the Supabase Data API
+-- lockdown enabled it per-table on everything that existed then, and ENABLE is
+-- not covered by ALTER DEFAULT PRIVILEGES, so a new table lands unprotected
+-- without this. Publish state is server-owned and must never be reachable from
+-- a browser role.
+ALTER TABLE "SchedulePublication" ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON TABLE "SchedulePublication" FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON TABLE "SchedulePublication" FROM authenticated;
+  END IF;
+END
+$$;
+
 -- Backfill so nothing staff can see today disappears: every week that already
 -- has shifts, in a venue that had published at all, is treated as published at
 -- that venue's existing timestamp. Venues that never published stay unpublished
