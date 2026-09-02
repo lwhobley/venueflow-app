@@ -22,6 +22,19 @@ export type AuthState = SessionState & {
     venues?: VenueSummary[];
     token?: string | null;
   }) => void;
+  /**
+   * Refresh the signed-in person's own details (name, role, job title,
+   * verification) without touching authEpoch.
+   *
+   * authEpoch keys every cached query and clearing it wipes the cache, so
+   * routing a /me refresh through setSession made the app clear its cache,
+   * refetch /me, apply the response, clear again — a reload loop that ran until
+   * the API rate-limited it and the screen showed an error. Identity detail is
+   * not a cache scope: the account and the venue are the same ones the cached
+   * data belongs to. A genuine scope change (a different account or venue) is
+   * still setSession's job and still bumps the epoch.
+   */
+  syncProfile: (profile: { user: UserSummary; venue: Venue | null }) => void;
   setVenue: (venue: Venue) => void;
   setVenues: (venues: VenueSummary[]) => void;
   switchVenue: (venue: Venue) => void;
@@ -43,6 +56,49 @@ const memoryStorage = {
     memoryStorage.values.delete(key);
   },
   values: new Map<string, string>(),
+};
+
+/**
+ * Web session storage.
+ *
+ * The session used to live only in memory, so a page refresh — or anything that
+ * remounts the app — dropped the token and signed the person out mid-task. That
+ * is what made the reviewed web build unusable rather than merely inconvenient.
+ *
+ * sessionStorage, not localStorage: the bearer token survives a reload of the
+ * tab the person is working in, and still never persists past the tab closing
+ * or leaks into another one. Keeping a long-lived token in localStorage is a
+ * security decision (any XSS then reads it) that belongs to the venue's own
+ * risk posture, not to this fix. A second tab therefore still signs in
+ * separately.
+ *
+ * Every accessor is guarded: Safari's private mode and "block site data" throw
+ * on access rather than returning null, and a throw here would take the whole
+ * app down at startup.
+ */
+const webSessionStorage = {
+  getItem: async (key: string) => {
+    try {
+      return window.sessionStorage?.getItem(key) ?? null;
+    } catch {
+      return memoryStorage.getItem(key);
+    }
+  },
+  setItem: async (key: string, value: string) => {
+    try {
+      window.sessionStorage?.setItem(key, value);
+    } catch {
+      await memoryStorage.setItem(key, value);
+    }
+  },
+  removeItem: async (key: string) => {
+    try {
+      window.sessionStorage?.removeItem(key);
+    } catch {
+      // Fall through to the memory copy below.
+    }
+    await memoryStorage.removeItem(key);
+  },
 };
 
 type PersistBlob = {
@@ -146,7 +202,12 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
   } catch {}
 }
 
-const storage = Platform.OS === 'web' ? memoryStorage : splitNativeStorage;
+const storage =
+  Platform.OS === 'web'
+    ? typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined'
+      ? webSessionStorage
+      : memoryStorage
+    : splitNativeStorage;
 
 const createAuthStore = (set: any): AuthState => ({
   authEpoch: 0,
@@ -168,6 +229,18 @@ const createAuthStore = (set: any): AuthState => ({
         venues: session.venues ?? state.venues,
         ...(session.token !== undefined ? { token: session.token } : {}),
         authEpoch: state.authEpoch + 1,
+      };
+    }),
+  syncProfile: (profile: { user: UserSummary; venue: Venue | null }) =>
+    set((state: AuthState) => {
+      const scopeChanged =
+        state.user?.id !== profile.user.id || (state.venue?.id ?? null) !== (profile.venue?.id ?? null);
+      return {
+        user: profile.user,
+        venue: profile.venue,
+        // A different account or venue really is a new cache scope; only then
+        // does the epoch move.
+        ...(scopeChanged ? { authEpoch: state.authEpoch + 1 } : {}),
       };
     }),
   setVenue: (venue: Venue) => set((state: AuthState) => ({ venue, authEpoch: state.authEpoch + 1 })),

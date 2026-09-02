@@ -79,7 +79,13 @@ export default function RegisterScreen() {
       // the code is confirmed, which will automatically claim the unclaimed staff
       // profile and link this account to the venue.
       if (!profile.emailVerified) {
-        router.replace('/(auth)/verify-email');
+        // The server reports whether the code actually went out. It used to
+        // swallow a delivery failure silently, so people were sent to wait for
+        // an email that was never sent, with no way to tell that from a slow
+        // one. `emailSendFailed` makes the next screen say so and lead with
+        // Resend.
+        const emailSendFailed = (resp as { verificationEmailSent?: boolean | null }).verificationEmailSent === false;
+        router.replace(emailSendFailed ? '/(auth)/verify-email?emailSendFailed=1' : '/(auth)/verify-email');
       } else if (venue) {
         router.replace('/(tabs)/home');
       } else {
