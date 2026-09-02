@@ -1182,12 +1182,20 @@ export class AppController {
           where: { id: profile.id },
         });
 
-        // Adopt the unclaimed profile
+        // Adopt the unclaimed profile, keeping the role the manager set on the
+        // roster. Forcing 'staff' here silently demoted anyone added as a
+        // manager: the roster said manager, the account that claimed it was
+        // staff, and the person landed in a workspace missing the controls
+        // they had been told to expect. Owner and admin are not adoptable this
+        // way — those roles are granted deliberately, not by claiming a roster
+        // row — so they fall back to manager.
+        const rosterRole = unclaimedProfile.role;
+        const adoptedRole: Role = rosterRole === 'owner' || rosterRole === 'admin' ? 'manager' : rosterRole;
         return tx.profile.update({
           where: { id: unclaimedProfile.id },
           data: {
             userId: user.sub,
-            role: 'staff',
+            role: adoptedRole,
           },
           include: { venue: true },
         });
