@@ -364,14 +364,20 @@ function ensureValidShiftWindow(dayIndex: number, startMinutes: number, endMinut
   return normalized;
 }
 
-function schedulePublishState(venue: {
-  schedulePublishedAt: Date | null;
-  scheduleUpdatedAfterPublishAt: Date | null;
-}) {
-  const publishedAt = venue.schedulePublishedAt?.getTime() ?? null;
-  const updatedAfterPublishAt = venue.scheduleUpdatedAfterPublishAt?.getTime() ?? null;
+/**
+ * Publish state for one specific week. It used to be a single venue-wide
+ * timestamp, so publishing any week marked every week published and the badge
+ * the manager read could disagree with the shifts staff were already working
+ * from. `lastShiftEditAt` is the newest ScheduleShift.updatedAt in the week —
+ * derived rather than tracked, so it cannot fall out of step with the edits it
+ * describes.
+ */
+function schedulePublishState(publication: { publishedAt: Date } | null, lastShiftEditAt: Date | null) {
+  const publishedAt = publication?.publishedAt.getTime() ?? null;
+  const updatedAfterPublishAt =
+    publishedAt && lastShiftEditAt && lastShiftEditAt.getTime() > publishedAt ? lastShiftEditAt.getTime() : null;
   return {
-    status: !publishedAt ? 'draft' : updatedAfterPublishAt && updatedAfterPublishAt > publishedAt ? 'edited_after_publish' : 'published',
+    status: !publishedAt ? 'draft' : updatedAfterPublishAt ? 'edited_after_publish' : 'published',
     publishedAt,
     updatedAfterPublishAt,
   };
@@ -497,8 +503,11 @@ export class SchedulingController {
     this.requireManager(scope);
     const selectedWeekStart = await this.resolveAvailabilityWeekStart(scope!.venueId, requestedWeekStart);
     const previousWeekStart = addDays(selectedWeekStart, -7);
-    const [venue, shifts, carryInShifts, staff] = await Promise.all([
+    const [venue, publication, shifts, carryInShifts, staff] = await Promise.all([
       this.prisma.venue.findUniqueOrThrow({ where: { id: scope!.venueId } }),
+      this.prisma.schedulePublication.findUnique({
+        where: { venueId_weekStart: { venueId: scope!.venueId, weekStart: selectedWeekStart } },
+      }),
       this.prisma.scheduleShift.findMany({
         where: { venueId: scope!.venueId, weekStart: selectedWeekStart },
         include: { profile: true },
@@ -559,7 +568,10 @@ export class SchedulingController {
       laborBudgetHours: venue.weeklyLaborBudgetHours ?? null,
       totalScheduledHours: Math.round((totalScheduledMinutes / 60) * 10) / 10,
       weekStart: selectedWeekStart,
-      publishState: schedulePublishState(venue),
+      publishState: schedulePublishState(
+        publication,
+        shifts.reduce<Date | null>((latest, shift) => (!latest || shift.updatedAt > latest ? shift.updatedAt : latest), null),
+      ),
     };
   }
 
@@ -814,12 +826,25 @@ export class SchedulingController {
     const venue = await this.prisma.venue.findUnique({ where: { id: scope.venueId }, select: { timezone: true } });
     const weekStart = weekStartFor(todayInZone(venue?.timezone ?? null));
     const previousSaturday = previousOvernightFilter(weekStart, 0);
+    // Staff see a week only once it is published. Without this the manager
+    // could be looking at a draft while their team was already working from it
+    // — the two screens disagreed and neither said so.
+    const publishedWeeks = await this.prisma.schedulePublication.findMany({
+      where: { venueId: scope.venueId, weekStart: { in: [weekStart, previousSaturday.weekStart] } },
+      select: { weekStart: true },
+    });
+    const publishedWeekStarts = new Set(publishedWeeks.map((row) => row.weekStart));
+    if (!publishedWeekStarts.has(weekStart) && !publishedWeekStarts.has(previousSaturday.weekStart)) {
+      return { mine: [], open: [], roster: [], publishState: { status: 'draft' as const, weekStart } };
+    }
     const shifts = await this.prisma.scheduleShift.findMany({
       where: {
         venueId: scope.venueId,
         OR: [
-          { weekStart },
-          { weekStart: previousSaturday.weekStart, dayIndex: previousSaturday.dayIndex, endMinutes: { gt: 1440 } },
+          ...(publishedWeekStarts.has(weekStart) ? [{ weekStart }] : []),
+          ...(publishedWeekStarts.has(previousSaturday.weekStart)
+            ? [{ weekStart: previousSaturday.weekStart, dayIndex: previousSaturday.dayIndex, endMinutes: { gt: 1440 } }]
+            : []),
         ],
       },
       include: { profile: true },
@@ -859,6 +884,7 @@ export class SchedulingController {
       mine: mine.map((shift) => this.mapEmployeeShift(shift, true, !availabilityCovers(unavailableByProfile.get(scope.profileId), shift))),
       open: open.map((shift) => this.mapEmployeeShift(shift, false, false)),
       roster,
+      publishState: { status: 'published' as const, weekStart },
     };
   }
 
@@ -892,10 +918,23 @@ export class SchedulingController {
     const shifts = await this.prisma.scheduleShift.findMany({ where: { venueId: scope!.venueId, weekStart: selectedWeekStart } });
     const assigned = shifts.filter((shift) => shift.profileId).length;
     const open = shifts.filter((shift) => shift.status === 'open').length;
+    const publishedAt = new Date();
+    // Per week, so publishing next week no longer implies this one. The
+    // venue-level markers are kept in step for anything still reading them.
+    await this.prisma.schedulePublication.upsert({
+      where: { venueId_weekStart: { venueId: scope!.venueId, weekStart: selectedWeekStart } },
+      create: {
+        venueId: scope!.venueId,
+        weekStart: selectedWeekStart,
+        publishedAt,
+        publishedById: scope!.profileId,
+      },
+      update: { publishedAt, publishedById: scope!.profileId },
+    });
     await this.prisma.venue.update({
       where: { id: scope!.venueId },
       data: {
-        schedulePublishedAt: new Date(),
+        schedulePublishedAt: publishedAt,
         schedulePublishedById: scope!.profileId,
         scheduleUpdatedAfterPublishAt: null,
       },

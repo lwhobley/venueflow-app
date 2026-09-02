@@ -342,6 +342,9 @@ model Venue {
   venueType                     String?
   staffRange                    String?
   weeklyLaborBudgetHours        Float?
+  // Venue-wide publish markers. Superseded by SchedulePublication for the
+  // per-week state; kept because existing rows are the only record of what was
+  // published before the table existed.
   schedulePublishedAt           DateTime?
   schedulePublishedById         String?
   scheduleUpdatedAfterPublishAt DateTime?
@@ -368,6 +371,7 @@ model Venue {
   pushTokens                    PushToken[]
   timeEntries                   TimeEntry[]
   blackoutDates                 BlackoutDate[]
+  schedulePublications          SchedulePublication[]
   staffRequests                 StaffRequest[]
   guests                        Guest[]
   reservations                  Reservation[]
@@ -499,6 +503,28 @@ model ScheduleShift {
   @@index([profileId])
   @@index([venueId, weekStart])
   @@index([venueId, profileId, weekStart, dayIndex])
+}
+
+/**
+ * Per-week publish state. The venue previously carried a single
+ * schedulePublishedAt for every week at once, so publishing one week marked
+ * them all published and the manager's "Draft" badge could disagree with what
+ * staff were already being shown. One row per published week; a week with no
+ * row has never been published.
+ */
+model SchedulePublication {
+  id            String   @id @default(cuid())
+  venueId       String
+  // Sunday (YYYY-MM-DD), matching ScheduleShift.weekStart.
+  weekStart     String
+  publishedAt   DateTime
+  publishedById String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  venue         Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([venueId, weekStart])
+  @@index([venueId])
 }
 
 model BlackoutDate {

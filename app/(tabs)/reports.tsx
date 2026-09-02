@@ -70,8 +70,18 @@ function ReportsScreen() {
 
   const insights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip') as Insight | null | undefined;
   const laborForecast = useQuery(api.scheduling.getLaborForecast, isReady && canManage ? {} : 'skip') as any;
-  const timeCsv = useQuery(api.app.exportTimeEntriesCsv, isReady && canManage && showTimeCsv ? {} : 'skip') as string | null | undefined;
-  const reservationCsv = useQuery(api.reservations.exportReservationsCsv, isReady && canManage && showReservationCsv && venue?.id ? { venueId: venue.id } : 'skip') as string | null | undefined;
+  // Carry the selected period into the export. Without it the file described
+  // a different span than the range the manager had just chosen on screen.
+  const timeCsv = useQuery(
+    api.app.exportTimeEntriesCsv,
+    isReady && canManage && showTimeCsv ? { startDate: dateRange.startDate, endDate: dateRange.endDate } : 'skip',
+  ) as string | null | undefined;
+  const reservationCsv = useQuery(
+    api.reservations.exportReservationsCsv,
+    isReady && canManage && showReservationCsv && venue?.id
+      ? { venueId: venue.id, startDate: dateRange.startDate, endDate: dateRange.endDate }
+      : 'skip',
+  ) as string | null | undefined;
   // Payroll is a 'paid'-tier route, so a venue on its trial gets 402 here.
   // useQueryState reports that separately from loading; the data-only useQuery
   // could not, which left this card on "Loading…" for the whole trial.
@@ -82,7 +92,9 @@ function ReportsScreen() {
   } = useQueryState<PayrollSummary>(api.payroll.getPayrollSummary, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip');
   const { data: payrollCsv, subscriptionRequired: payrollCsvLocked } = useQueryState<string>(
     api.payroll.exportPayrollCsv,
-    isReady && canManage && showPayrollCsv && venue?.id ? { venueId: venue.id } : 'skip',
+    isReady && canManage && showPayrollCsv && venue?.id
+      ? { venueId: venue.id, startDate: dateRange.startDate, endDate: dateRange.endDate }
+      : 'skip',
   );
   const recordPayrollExport = useMutation(api.payroll.recordPayrollExport);
   const [exportNotice, setExportNotice] = useState<{ tone: 'ok' | 'error'; message: string } | null>(null);
