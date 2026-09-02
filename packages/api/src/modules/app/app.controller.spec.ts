@@ -100,7 +100,7 @@ describe('AppController redeem-my-invite', () => {
         findUnique: vi.fn().mockResolvedValue({ id: 'profile-temp', venueId: null, venue: null }),
         findFirst: vi.fn().mockImplementation((args: any) => {
           if (args?.where?.userId === 'user-new') return Promise.resolve({ id: 'profile-temp', venueId: null, venue: null });
-          return Promise.resolve({ id: 'profile-roster', venueId: 'venue-b', venue: { id: 'venue-b' } });
+          return Promise.resolve({ id: 'profile-roster', role: 'staff', venueId: 'venue-b', venue: { id: 'venue-b' } });
         }),
         findMany: vi.fn().mockResolvedValue([]),
         delete: vi.fn(),
@@ -119,6 +119,69 @@ describe('AppController redeem-my-invite', () => {
     expect(prisma.profile.delete).toHaveBeenCalledWith({ where: { id: 'profile-temp' } });
     expect(prisma.profile.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'profile-roster' }, data: { userId: 'user-new', role: 'staff' } }),
+    );
+  });
+
+  it('keeps the role the manager put on the roster instead of forcing staff', async () => {
+    // Regression (E02): adoption hardcoded 'staff', so someone added to the
+    // roster as a manager claimed their account and landed in a workspace
+    // without the controls they had been told to expect.
+    const adopted = {
+      id: 'profile-roster',
+      email: 'mo@example.com',
+      fullName: 'Mo Manager',
+      role: 'manager',
+      jobTitle: 'GM',
+      venueId: 'venue-b',
+      allAccess: false,
+      venue: { id: 'venue-b', name: 'Venue B', latitude: 3, longitude: 4, geofenceRadiusM: 150 },
+    };
+    const prisma: any = {
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'mo@example.com', emailVerifiedAt: new Date() }) },
+      profile: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'profile-temp', venueId: null, venue: null }),
+        findFirst: vi.fn().mockImplementation((args: any) => {
+          if (args?.where?.userId === 'user-mo') return Promise.resolve({ id: 'profile-temp', venueId: null, venue: null });
+          return Promise.resolve({ id: 'profile-roster', role: 'manager', venueId: 'venue-b', venue: { id: 'venue-b' } });
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
+        delete: vi.fn(),
+        update: vi.fn().mockResolvedValue(adopted),
+      },
+      invite: { findMany: vi.fn().mockResolvedValue([]) },
+      $transaction: vi.fn(async (fn: any) => fn(prisma)),
+    };
+    const controller = new AppController(prisma, {} as any, new ProfileService(prisma));
+
+    await controller.redeemMyInvite({ sub: 'user-mo' } as any);
+
+    expect(prisma.profile.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { userId: 'user-mo', role: 'manager' } }),
+    );
+  });
+
+  it('does not hand out owner or admin by claiming a roster row', async () => {
+    const prisma: any = {
+      user: { findUnique: vi.fn().mockResolvedValue({ email: 'o@example.com', emailVerifiedAt: new Date() }) },
+      profile: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'profile-temp', venueId: null, venue: null }),
+        findFirst: vi.fn().mockImplementation((args: any) => {
+          if (args?.where?.userId === 'user-o') return Promise.resolve({ id: 'profile-temp', venueId: null, venue: null });
+          return Promise.resolve({ id: 'profile-roster', role: 'owner', venueId: 'venue-b', venue: { id: 'venue-b' } });
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
+        delete: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: 'profile-roster', role: 'manager', venueId: 'venue-b', venue: { id: 'venue-b', name: 'B', latitude: 1, longitude: 2, geofenceRadiusM: 150 } }),
+      },
+      invite: { findMany: vi.fn().mockResolvedValue([]) },
+      $transaction: vi.fn(async (fn: any) => fn(prisma)),
+    };
+    const controller = new AppController(prisma, {} as any, new ProfileService(prisma));
+
+    await controller.redeemMyInvite({ sub: 'user-o' } as any);
+
+    expect(prisma.profile.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { userId: 'user-o', role: 'manager' } }),
     );
   });
 });
