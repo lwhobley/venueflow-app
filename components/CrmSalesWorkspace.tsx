@@ -322,13 +322,20 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
 
   const confirmBeo = async (beo: BeoRow) => {
     if (crmBusyRef.current || !venueId) return;
+    // The API only creates the reservation and blocks tables for a BEO that
+    // has an event date. Confirming without one is a status change and nothing
+    // more, so ask for the date instead of reporting a sync that won't happen.
+    if (!beo.eventDate) {
+      setMessage(`Add an event date to "${beo.eventName}" before confirming — the reservation and table hold are created from it.`);
+      return;
+    }
     crmBusyRef.current = true;
     try {
       await saveBeo({
         venueId,
         beoId: beo._id,
         eventName: beo.eventName,
-        eventDate: beo.eventDate ? new Date(beo.eventDate).getTime() : undefined,
+        eventDate: new Date(beo.eventDate).getTime(),
         eventType: beo.eventType ?? undefined,
         guestCount: beo.guestCount ?? undefined,
         venueSpace: beo.venueSpace ?? undefined,

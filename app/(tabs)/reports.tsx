@@ -56,7 +56,17 @@ type Insight = {
 /** Mirrors GET /v1/payroll/summary (payroll.controller.ts getPayrollSummary). */
 type PayrollSummary = {
   byEmployee: Array<{ profileId: string | null; employeeName: string; role: string; jobTitle: string; regularHours: number; totalHours: number }>;
-  totals: { totalHours: number; employeeCount: number; periodStart: number; periodEnd: number };
+  totals: {
+    totalHours: number;
+    employeeCount: number;
+    periodStart: number;
+    periodEnd: number;
+    // The period the API actually resolved, as YYYY-MM-DD in the venue's
+    // timezone. periodStart/periodEnd are the same bounds as epoch ms, which
+    // render in the device's timezone and so can name the wrong day.
+    startDate?: string;
+    endDate?: string;
+  };
 };
 
 function ReportsScreen() {
@@ -117,9 +127,19 @@ function ReportsScreen() {
   // The summary nests everything under `totals`; reading these off the root
   // yielded undefined and rendered "undefinedh · undefined open entries".
   const totals = payroll?.totals;
-  const periodLabel = totals?.periodStart && totals?.periodEnd
-    ? `${new Date(totals.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(totals.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-    : null;
+  // Format the ISO day the API resolved rather than the epoch bounds: parsing
+  // as UTC and printing as UTC keeps the label on the venue's calendar day for
+  // a manager reading it from another timezone. Falls back to the epoch bounds
+  // for an API response that predates the ISO fields.
+  const formatPeriodDay = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
+  };
+  const periodLabel = totals?.startDate && totals?.endDate
+    ? `${formatPeriodDay(totals.startDate)} – ${formatPeriodDay(totals.endDate)}`
+    : totals?.periodStart && totals?.periodEnd
+      ? `${new Date(totals.periodStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(totals.periodEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      : null;
 
   const onRecordExport = () => {
     if (!venue?.id || !totals || !payroll) return;
