@@ -12,18 +12,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import {
-  ArrayMaxSize,
-  IsArray,
-  IsEmail,
-  IsIn,
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  MaxLength,
-  Min,
-} from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Prisma, CrmLeadStatus, BeoStatus, ContractStatus, ReservationSource, ReservationStatus } from '@prisma/client';
 import { canManageVenue } from '../../auth/roles';
@@ -101,6 +90,14 @@ class SaveLeadDto {
   @Min(0)
   @IsOptional()
   estimatedValueCents?: number;
+
+  // The lead form has always collected marketing consent and sent it; the DTO
+  // never accepted it, and with forbidNonWhitelisted the whole request was
+  // rejected — the first lead a venue tried to save simply failed. CrmLead has
+  // carried the column all along, so accept it and persist it.
+  @IsBoolean()
+  @IsOptional()
+  marketingOptIn?: boolean;
 }
 
 class AddNoteDto {
@@ -588,6 +585,7 @@ export class CrmController {
       if (body.tags !== undefined) patch.tags = body.tags;
       if (body.assignedToId !== undefined) patch.assignedToId = assignedToId;
       if (body.estimatedValueCents !== undefined) patch.estimatedValueCents = body.estimatedValueCents;
+      if (body.marketingOptIn !== undefined) patch.marketingOptIn = body.marketingOptIn;
 
       await this.prisma.crmLead.update({ where: { id: body.leadId }, data: patch });
       // Record status changes specifically - they're the most useful timeline
@@ -610,6 +608,7 @@ export class CrmController {
         tags: body.tags ?? [],
         assignedToId: assignedToId ?? null,
         estimatedValueCents: body.estimatedValueCents ?? null,
+        marketingOptIn: body.marketingOptIn ?? null,
         lastActivityAt: now,
         createdAt: now,
         updatedAt: now,
@@ -789,6 +788,19 @@ export class CrmController {
     });
     if (!beo) throw new NotFoundException('BEO not found');
 
+    // Conversion is idempotent. Pressing Convert twice (or a retried request)
+    // used to mint a second contract for the same event, leaving sales and
+    // operations looking at different paperwork with no way to tell which one
+    // counts. A cancelled contract is not live, so it does not block issuing a
+    // replacement.
+    const existingContract = await this.prisma.crmContract.findFirst({
+      where: { venueId: scope.venueId, beoId: beo.id, status: { not: 'cancelled' } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (existingContract) {
+      return { contractId: existingContract.id, contractNumber: existingContract.contractNumber, alreadyExisted: true };
+    }
+
     const now = new Date();
     const contractNumber = makeContractNumber();
 
@@ -818,7 +830,7 @@ export class CrmController {
       },
     });
 
-    return { contractId: contract.id };
+    return { contractId: contract.id, contractNumber: contract.contractNumber, alreadyExisted: false };
   }
 
   @RequireSubscription('active')

@@ -332,15 +332,42 @@ export class FloorService {
     const tableIds = plan.tables.map((t) => t.id);
     const chairIds = plan.chairs.map((c) => c.id);
 
+    // Clearing the plan deletes the assignments that seat a party. The
+    // reservation and waitlist rows behind them survive, and used to be left
+    // reading 'seated' with nothing to seat them at — a guest who, from every
+    // other screen, is sitting at a table that no longer exists. Walk them back
+    // to the state they were in before the table was assigned.
+    const strandedAssignments = await this.prisma.tableAssignment.findMany({
+      where: { tableId: { in: tableIds }, releasedAt: null },
+      select: { reservationId: true, waitlistId: true },
+    });
+    const reservationIds = [...new Set(strandedAssignments.map((a) => a.reservationId).filter((id): id is string => Boolean(id)))];
+    const waitlistIds = [...new Set(strandedAssignments.map((a) => a.waitlistId).filter((id): id is string => Boolean(id)))];
+
     await this.prisma.$transaction([
       this.prisma.tableState.deleteMany({ where: { tableId: { in: tableIds } } }),
       this.prisma.tableAssignment.deleteMany({ where: { tableId: { in: tableIds } } }),
       this.prisma.floorChair.deleteMany({ where: { id: { in: chairIds } } }),
       this.prisma.floorTable.deleteMany({ where: { floorPlanId: plan.id } }),
       this.prisma.floorPlan.update({ where: { id: plan.id }, data: { isActive: false } }),
+      // Scoped by venueId as well as id: these ids come from assignment rows,
+      // and a tenant predicate on every write is the house rule.
+      this.prisma.reservation.updateMany({
+        where: { id: { in: reservationIds }, venueId, status: 'seated' },
+        data: { status: 'confirmed' },
+      }),
+      this.prisma.waitlist.updateMany({
+        where: { id: { in: waitlistIds }, venueId, status: { in: ['seated', 'assigned'] } },
+        data: { status: 'waiting', readyAt: null },
+      }),
     ]);
 
-    return { deletedTables: tableIds.length, deletedChairs: chairIds.length };
+    return {
+      deletedTables: tableIds.length,
+      deletedChairs: chairIds.length,
+      releasedReservations: reservationIds.length,
+      releasedWaitlistEntries: waitlistIds.length,
+    };
   }
 
   async getUnassignedReservations(venueId: string, withinMinutes?: string) {
@@ -383,8 +410,14 @@ export class FloorService {
   }
 
   async getOpenWaitlist(venueId: string) {
+    // 'assigned' means the party has been called or held at a table but is not
+    // seated yet. It has to stay in this queue: this is the only list the host
+    // screen offers a Seat action from, so filtering to 'waiting' made a party
+    // vanish the moment it was marked Ready — the record survived, but nobody
+    // could act on it. 'seated', 'completed' and 'removed' are terminal and stay
+    // out.
     const rows = await this.prisma.waitlist.findMany({
-      where: { venueId, status: 'waiting' },
+      where: { venueId, status: { in: ['waiting', 'assigned'] } },
       orderBy: { requestedAt: 'asc' },
     });
     return rows.map((r) => ({
@@ -395,6 +428,8 @@ export class FloorService {
       phone: r.guestPhone ?? null,
       notes: r.notes ?? null,
       status: r.status,
+      isReady: r.status === 'assigned',
+      readyAt: r.readyAt?.getTime() ?? null,
       requestedAt: r.requestedAt.getTime(),
     }));
   }

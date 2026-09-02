@@ -91,6 +91,19 @@ describe('PosController', () => {
         .rejects.toThrow('Invalid webhook secret');
     });
 
+    it('refuses an update for a paused connection even with a valid secret', async () => {
+      // Regression: pausing changed what the integrations screen said but did
+      // not stop the next valid delivery, so a venue that had switched the feed
+      // off kept receiving POS data. The secret stays valid because pausing is
+      // reversible and must not force a rotation.
+      const { controller, prisma } = makeController();
+      prisma.posConnection.findFirst.mockResolvedValue({ id: 'conn-1', status: 'paused', webhookSecret: hashWebhookSecret('secret') });
+
+      await expect(controller.ingest(makeRequest(), 'venue-1', 'secret', { provider: 'toast' } as any))
+        .rejects.toThrow('This POS connection is paused. Resume it in Venue Wrangler to accept updates.');
+      expect(prisma.posCheck.upsert).not.toHaveBeenCalled();
+    });
+
     it('rejects when the connection has no webhook secret configured', async () => {
       const { controller, prisma } = makeController();
       prisma.posConnection.findFirst.mockResolvedValue({ id: 'conn-1', webhookSecret: null });

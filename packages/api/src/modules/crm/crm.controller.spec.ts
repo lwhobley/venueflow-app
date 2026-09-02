@@ -502,7 +502,7 @@ describe('CrmController', () => {
           paymentSchedule: [expect.objectContaining({ amountCents: 100000, type: 'deposit' })],
         }),
       }));
-      expect(result).toEqual({ contractId: 'contract-new' });
+      expect(result).toEqual({ contractId: 'contract-new', contractNumber: expect.any(String), alreadyExisted: false });
     });
 
     it('leaves the payment schedule empty when the BEO has no deposit', async () => {

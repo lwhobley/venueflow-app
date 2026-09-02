@@ -160,4 +160,64 @@ describe('FloorService regressions', () => {
       where: { id: 'state-1', venueId: 'venue-1', lastActivityAt },
     }));
   });
+  it('keeps a party marked Ready in the queue that offers the Seat action', async () => {
+    // Regression: getOpenWaitlist filtered to status 'waiting', while
+    // markWaitlistReady moves the row to 'assigned' — so marking a party Ready
+    // removed it from the only list a host can seat from.
+    const prisma = {
+      waitlist: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'w-1', guestName: 'Ana', partySize: 2, guestPhone: null, notes: null, status: 'assigned', readyAt: new Date('2026-09-02T18:00:00Z'), requestedAt: new Date('2026-09-02T17:30:00Z') },
+        ]),
+      },
+    };
+    const service = new FloorService(prisma as any, {} as any);
+
+    const rows = await service.getOpenWaitlist('venue-1');
+
+    expect(prisma.waitlist.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { venueId: 'venue-1', status: { in: ['waiting', 'assigned'] } },
+    }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].isReady).toBe(true);
+  });
+
+  it('walks seated bookings back when clearing the floor plan deletes their assignments', async () => {
+    // Regression: clearing the plan deleted the assignments but left the
+    // reservation reading 'seated' and the waitlist entry 'seated'/'assigned',
+    // pointing at a table that no longer exists.
+    const prisma = {
+      floorPlan: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'plan-1', tables: [{ id: 't1' }], chairs: [{ id: 'c1' }] }),
+        update: vi.fn(),
+      },
+      tableAssignment: {
+        findMany: vi.fn().mockResolvedValue([
+          { reservationId: 'res-1', waitlistId: null },
+          { reservationId: null, waitlistId: 'w-1' },
+        ]),
+        deleteMany: vi.fn(),
+      },
+      tableState: { deleteMany: vi.fn() },
+      floorChair: { deleteMany: vi.fn() },
+      floorTable: { deleteMany: vi.fn() },
+      reservation: { updateMany: vi.fn() },
+      waitlist: { updateMany: vi.fn() },
+      $transaction: vi.fn().mockResolvedValue([]),
+    };
+    const service = new FloorService(prisma as any, {} as any);
+
+    const result = await service.clearActiveFloorPlan('venue-1');
+
+    expect(prisma.reservation.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['res-1'] }, venueId: 'venue-1', status: 'seated' },
+      data: { status: 'confirmed' },
+    });
+    expect(prisma.waitlist.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['w-1'] }, venueId: 'venue-1', status: { in: ['seated', 'assigned'] } },
+      data: { status: 'waiting', readyAt: null },
+    });
+    expect(result.releasedReservations).toBe(1);
+    expect(result.releasedWaitlistEntries).toBe(1);
+  });
 });

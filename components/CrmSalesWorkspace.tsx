@@ -434,8 +434,10 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
             <EventsView beos={beos} onConvert={async (beoId) => {
               if (!venueId) return;
               try {
-                await convertBeoToContract({ venueId, beoId });
-                setMessage('Converted BEO to contract.');
+                const result = await convertBeoToContract({ venueId, beoId }) as { alreadyExisted?: boolean } | undefined;
+                setMessage(result?.alreadyExisted
+                  ? 'This event already has a contract — opening the existing one rather than issuing a second.'
+                  : 'Converted BEO to contract.');
               } catch (err) {
                 setMessage(`Failed to convert: ${errorMessage(err)}`);
               }
