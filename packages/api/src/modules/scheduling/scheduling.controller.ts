@@ -372,6 +372,20 @@ function ensureValidShiftWindow(dayIndex: number, startMinutes: number, endMinut
  * derived rather than tracked, so it cannot fall out of step with the edits it
  * describes.
  */
+/**
+ * The shape the schedule-change email needs. weekStart is what makes the date
+ * correct for a shift outside the current week; it is optional only because a
+ * legacy shift can have none, in which case the current week is the best
+ * available guess.
+ */
+type ScheduleEmailShift = {
+  weekStart?: string | null;
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  station: string;
+};
+
 function schedulePublishState(publication: { publishedAt: Date } | null, lastShiftEditAt: Date | null) {
   const publishedAt = publication?.publishedAt.getTime() ?? null;
   const updatedAfterPublishAt =
@@ -715,6 +729,7 @@ export class SchedulingController {
         body: `${dayLabel(body.dayIndex)} ${minutesToTime(body.startMinutes)}-${minutesToTime(endMinutes)} - ${body.jobTitle}`,
       });
       void this.sendScheduleUpdateEmail(body.profileId, 'Added', undefined, {
+        weekStart: shift.weekStart,
         dayIndex: body.dayIndex,
         startMinutes: body.startMinutes,
         endMinutes,
@@ -741,11 +756,13 @@ export class SchedulingController {
     });
     if (shift.profileId) {
       void this.sendScheduleUpdateEmail(shift.profileId, 'Edited', {
+        weekStart: shift.weekStart,
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,
         endMinutes: shift.endMinutes,
         station: shift.station,
       }, {
+        weekStart: shift.weekStart,
         dayIndex: body.dayIndex,
         startMinutes: body.startMinutes,
         endMinutes,
@@ -766,6 +783,7 @@ export class SchedulingController {
     });
     if (nextProfileId && shift.profileId !== nextProfileId) {
       void this.sendScheduleUpdateEmail(nextProfileId, 'Added', undefined, {
+        weekStart: shift.weekStart,
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,
         endMinutes: shift.endMinutes,
@@ -774,6 +792,7 @@ export class SchedulingController {
     }
     if (!nextProfileId && shift.profileId) {
       void this.sendScheduleUpdateEmail(shift.profileId, 'Removed', {
+        weekStart: shift.weekStart,
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,
         endMinutes: shift.endMinutes,
@@ -782,6 +801,7 @@ export class SchedulingController {
     }
     if (nextProfileId && shift.profileId && shift.profileId !== nextProfileId) {
       void this.sendScheduleUpdateEmail(shift.profileId, 'Removed', {
+        weekStart: shift.weekStart,
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,
         endMinutes: shift.endMinutes,
@@ -801,6 +821,7 @@ export class SchedulingController {
     });
     if (shift.profileId) {
       void this.sendScheduleUpdateEmail(shift.profileId, 'Removed', {
+        weekStart: shift.weekStart,
         dayIndex: shift.dayIndex,
         startMinutes: shift.startMinutes,
         endMinutes: shift.endMinutes,
@@ -1681,8 +1702,8 @@ export class SchedulingController {
   private sendScheduleUpdateEmail(
     profileId: string,
     changeType: 'Added' | 'Edited' | 'Removed',
-    before?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
-    after?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
+    before?: ScheduleEmailShift,
+    after?: ScheduleEmailShift,
   ) {
     void this.sendScheduleUpdateEmailInBackground(profileId, changeType, before, after).catch((error) => {
       this.logBackgroundFailure('schedule update email', error);
@@ -1692,8 +1713,8 @@ export class SchedulingController {
   private async sendScheduleUpdateEmailInBackground(
     profileId: string,
     changeType: 'Added' | 'Edited' | 'Removed',
-    before?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
-    after?: { dayIndex: number; startMinutes: number; endMinutes: number; station: string },
+    before?: ScheduleEmailShift,
+    after?: ScheduleEmailShift,
   ) {
     const profile = await this.prisma.profile.findUnique({ where: { id: profileId } });
     if (!profile) return;
@@ -1703,20 +1724,23 @@ export class SchedulingController {
       select: { timezone: true },
     });
     const tz = venue?.timezone ?? null;
-    const today = todayInZone(tz);
-    const sunday = weekStartFor(today);
+    // The date has to come from the shift's own week. This used to anchor on
+    // the current week's Sunday whatever week the shift was in, so editing a
+    // future-week shift emailed the staff member a date in this week — the
+    // change was right and the notice about it was wrong.
+    const currentSunday = weekStartFor(todayInZone(tz));
 
-    const formatDateMDY = (dayIdx: number) => {
-      const dateStr = addDays(sunday, dayIdx);
+    const formatDateMDY = (shift: ScheduleEmailShift) => {
+      const dateStr = addDays(shift.weekStart ?? currentSunday, shift.dayIndex);
       const [y, m, d] = dateStr.split('-');
       return `${m}/${d}/${y}`;
     };
 
     const formatTime = (minutes: number) => minutesToTime(minutes);
-    const beforeDate = before ? formatDateMDY(before.dayIndex) : '-';
+    const beforeDate = before ? formatDateMDY(before) : '-';
     const beforeTime = before ? `${formatTime(before.startMinutes)} - ${formatTime(before.endMinutes)}` : '-';
     const beforeArea = before ? (before.station || 'Floor') : '-';
-    const afterDate = after ? formatDateMDY(after.dayIndex) : '-';
+    const afterDate = after ? formatDateMDY(after) : '-';
     const afterTime = after ? `${formatTime(after.startMinutes)} - ${formatTime(after.endMinutes)}` : '-';
     const afterArea = after ? (after.station || 'Floor') : '-';
 

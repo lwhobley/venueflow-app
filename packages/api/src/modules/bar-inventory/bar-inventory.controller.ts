@@ -786,16 +786,32 @@ export class BarInventoryController {
   @Get('prep-board')
   async listPrepBoard(@CurrentUser() user: AuthUser) {
     const profile = await this.requireManagerProfile(user);
-    const items = await this.prisma.prepBoardItem.findMany({
-      where: { venueId: profile.venueId!, status: { not: 'cancelled' } },
-      orderBy: [{ status: 'asc' }, { kind: 'asc' }, { createdAt: 'desc' }],
-      take: 100,
-    });
+    const venueId = profile.venueId!;
+    // Open work first. Ordering by status text put 'done' ahead of 'open'
+    // alphabetically, so once a venue had 100 completed items the still-open
+    // prep and 86 work fell off the end of the page and out of the board.
+    const [openItems, recentlyDone, openCount, eightySixCount, prepCount] = await Promise.all([
+      this.prisma.prepBoardItem.findMany({
+        where: { venueId, status: 'open' },
+        orderBy: [{ kind: 'asc' }, { createdAt: 'desc' }],
+        take: 200,
+      }),
+      this.prisma.prepBoardItem.findMany({
+        where: { venueId, status: { notIn: ['cancelled', 'open'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      // Counted in the database, not off the truncated page: the totals used to
+      // shrink as soon as the list was capped.
+      this.prisma.prepBoardItem.count({ where: { venueId, status: 'open' } }),
+      this.prisma.prepBoardItem.count({ where: { venueId, status: 'open', kind: 'eighty_six' } }),
+      this.prisma.prepBoardItem.count({ where: { venueId, status: 'open', kind: 'prep' } }),
+    ]);
     return {
-      items: items.map(mapPrepBoardItem),
-      openCount: items.filter((item) => item.status === 'open').length,
-      eightySixCount: items.filter((item) => item.status === 'open' && item.kind === 'eighty_six').length,
-      prepCount: items.filter((item) => item.status === 'open' && item.kind === 'prep').length,
+      items: [...openItems, ...recentlyDone].map(mapPrepBoardItem),
+      openCount,
+      eightySixCount,
+      prepCount,
     };
   }
 

@@ -479,13 +479,25 @@ export class StaffRequestsController {
               venue?.timezone ?? null,
               dayIso,
             );
-            const existing = await tx.timeEntry.findFirst({
+            // Which punch is being corrected has to be unambiguous. With
+            // several punches on the same day this took whichever row came
+            // back first, so a manager could approve a correction and have it
+            // land on a different punch than the one the request described.
+            const sameDay = await tx.timeEntry.findMany({
               where: {
                 profileId: request.profileId,
                 venueId: request.venueId,
                 clockInAt: { gte: new Date(dayStartMs), lt: new Date(dayEndMs) },
               },
+              orderBy: { clockInAt: 'asc' },
+              select: { id: true },
             });
+            if (sameDay.length > 1) {
+              throw new BadRequestException(
+                'There are several punches on that day, so it is not clear which one this request corrects. Ask the employee to resubmit from the punch itself.',
+              );
+            }
+            const existing = sameDay[0] ?? null;
             if (existing) {
               await applyCorrection(existing.id);
             } else {
