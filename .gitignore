@@ -2,12 +2,21 @@
 
 # dependencies
 node_modules/
+# ...except inside the exported web bundle. Expo names the directory holding
+# its bundled font and icon assets `node_modules`, and the rule above matches
+# that basename at any depth — so the export wrote the files, git ignored them,
+# and the deployed app requested assets that had never been published.
+!site/app/assets/node_modules/
 
 # Expo
 .expo/
 dist/
 web-build/
 web-dist/
+dist-web/
+dist-site/
+coverage/
+.wrangler/
 expo-env.d.ts
 packages/*/dist/
 

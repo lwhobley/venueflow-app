@@ -1,8 +1,5 @@
-# Static URL routing for the Expo web app deployed under /app
-/app/sign-in /app/sign-in.html 200
-/app/sign-in/ /app/sign-in.html 200
-/app /app/index.html 200
-/app/ /app/index.html 200
+# App document routing is handled by _worker.js using the canonical /app/ URL.
+# Keep these asset aliases for older open tabs during the next deployment.
 /_expo/* /app/_expo/:splat 200
 # The web bundle requests its assets from the site root, not from /app. Both
 # prefixes below are exported only under site/app, and the marketing site's

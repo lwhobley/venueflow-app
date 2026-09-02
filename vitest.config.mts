@@ -1,8 +1,11 @@
 import { defineConfig, configDefaults } from 'vitest/config';
 
 export default defineConfig({
+  // Tests use explicit fixtures and must never ingest the production-backed
+  // local environment snapshot.
+  envDir: false,
   test: {
-    exclude: [...configDefaults.exclude, '.claude/**', '**/*.integration.spec.ts'],
+    exclude: [...configDefaults.exclude, '.claude/**', 'dist-site/**', 'tests/ui/**', '**/*.integration.spec.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text-summary'],
