@@ -715,6 +715,37 @@ describe('SchedulingController', () => {
       expect(result.proposals[0]).toEqual(expect.objectContaining({ profileId: 'staff-1', reason: 'assigned' }));
       expect(result.filled).toBe(1);
     });
+
+    it('enforces existing weekly hours so a candidate already assigned 36 hours is not assigned a 5-hour shift', async () => {
+      const { controller, prisma } = makeController();
+      prisma.scheduleShift.findMany.mockResolvedValue([
+        // Staff 1 already has 36 hours (2160 minutes) scheduled this week
+        { id: 'shift-existing', dayIndex: 0, startMinutes: 600, endMinutes: 2760, jobTitle: 'Server', station: 'Floor', status: 'scheduled', profileId: 'staff-1', weekStart: '2026-07-12' },
+        // Open shift is 5 hours (300 minutes), which would put staff 1 at 41 hours
+        { id: 'shift-open', dayIndex: 2, startMinutes: 600, endMinutes: 900, jobTitle: 'Server', station: 'Floor', status: 'open', profileId: null, weekStart: '2026-07-12' },
+      ]);
+      prisma.profile.findMany.mockResolvedValue([{ id: 'staff-1', fullName: 'Alex', jobTitle: 'Server', role: 'staff' }]);
+      const result = await controller.previewAutoSchedule(managerScope, '2026-07-12');
+
+      expect(result.proposals[0]).toEqual(expect.objectContaining({ profileId: null, reason: 'labor_cap' }));
+      expect(result.filled).toBe(0);
+    });
+
+    it('enforces weekly labor budget ceiling across the venue', async () => {
+      const { controller, prisma } = makeController();
+      prisma.venue.findUnique.mockResolvedValue({ ...bigVenue, weeklyLaborBudgetHours: 10 });
+      prisma.scheduleShift.findMany.mockResolvedValue([
+        // 8 hours already assigned
+        { id: 'shift-existing', dayIndex: 0, startMinutes: 600, endMinutes: 1080, jobTitle: 'Server', station: 'Floor', status: 'scheduled', profileId: 'staff-1', weekStart: '2026-07-12' },
+        // Open shift is 3 hours (180 minutes), which exceeds the 10 hour budget (8 + 3 = 11 > 10)
+        { id: 'shift-open', dayIndex: 2, startMinutes: 600, endMinutes: 780, jobTitle: 'Server', station: 'Floor', status: 'open', profileId: null, weekStart: '2026-07-12' },
+      ]);
+      prisma.profile.findMany.mockResolvedValue([{ id: 'staff-2', fullName: 'Sam', jobTitle: 'Server', role: 'staff' }]);
+      const result = await controller.previewAutoSchedule(managerScope, '2026-07-12');
+
+      expect(result.proposals[0]).toEqual(expect.objectContaining({ profileId: null, reason: 'exceeds_labor_budget' }));
+      expect(result.filled).toBe(0);
+    });
   });
 
   describe('applyAutoSchedule', () => {

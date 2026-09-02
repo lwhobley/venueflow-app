@@ -610,11 +610,21 @@ export class FloorService {
     const startsAt = options.startsAt ? new Date(options.startsAt) : reservation.reservationTime;
     const endsAt = options.endsAt ? new Date(options.endsAt) : new Date(reservation.reservationTime.getTime() + reservation.durationMinutes * 60 * 1000);
     if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) throw new BadRequestException('Invalid seating window');
+    let priorTableIds: string[] = [];
+    const now = new Date();
+    const isCurrentlyActive = startsAt <= now && endsAt > now;
+
     // Release prior assignments for THIS reservation, then check each requested
     // table for active overlaps from OTHER reservations, then create the new
     // holds — all inside a Serializable transaction so two managers can't
     // simultaneously assign overlapping holds to the same table.
     await withSerializableRetry(this.prisma, async (tx) => {
+      const priorAssignments = await tx.tableAssignment.findMany({
+        where: { venueId, reservationId, releasedAt: null },
+        select: { tableId: true },
+      });
+      priorTableIds = priorAssignments.map((a) => a.tableId);
+
       await tx.tableAssignment.updateMany({
         where: { venueId, reservationId, releasedAt: null },
         data: { releasedAt: new Date(), releasedReason: 'reassigned' },
@@ -645,16 +655,26 @@ export class FloorService {
           },
         });
       }
-      await tx.tableState.updateMany({ where: { venueId, tableId: { in: tableIds } }, data: {
-        status: holdType === 'seated' ? 'seated' : 'reserved',
-        partySize: reservation.partySize,
-        seatedAt: holdType === 'seated' ? startsAt : null,
-        lastActivityAt: new Date(),
-      } });
-      if (holdType === 'seated') {
-        await tx.reservation.update({ where: { id: reservation.id }, data: { status: 'seated' } });
+      if (isCurrentlyActive) {
+        await tx.tableState.updateMany({ where: { venueId, tableId: { in: tableIds } }, data: {
+          status: holdType === 'seated' ? 'seated' : 'reserved',
+          partySize: reservation.partySize,
+          seatedAt: holdType === 'seated' ? startsAt : null,
+          lastActivityAt: new Date(),
+        } });
+        if (holdType === 'seated') {
+          await tx.reservation.update({ where: { id: reservation.id }, data: { status: 'seated' } });
+        }
       }
     });
+
+    const tablesToRefresh = Array.from(new Set([
+      ...priorTableIds.filter((id) => !tableIds.includes(id)),
+      ...(!isCurrentlyActive ? tableIds : []),
+    ]));
+    if (tablesToRefresh.length) {
+      await this.refreshTableStates(venueId, tablesToRefresh);
+    }
     return { ok: true };
   }
 
@@ -682,6 +702,10 @@ export class FloorService {
       throw new BadRequestException('Invalid seating window');
     }
 
+    let priorTableIds: string[] = [];
+    const now = new Date();
+    const isCurrentlyActive = startsAt <= now && endsAt > now;
+
     await withSerializableRetry(this.prisma, async (tx) => {
       const conflict = await tx.tableAssignment.findFirst({
         where: {
@@ -697,6 +721,12 @@ export class FloorService {
       if (conflict) {
         throw new ConflictException(`Table ${conflict.tableId} is already booked for this time window`);
       }
+      const priorAssignments = await tx.tableAssignment.findMany({
+        where: { venueId, waitlistId: body.waitlistId, releasedAt: null },
+        select: { tableId: true },
+      });
+      priorTableIds = priorAssignments.map((a) => a.tableId);
+
       await tx.tableAssignment.updateMany({
         where: { venueId, waitlistId: body.waitlistId, releasedAt: null },
         data: { releasedAt: new Date(), releasedReason: 'reassigned' },
@@ -717,23 +747,33 @@ export class FloorService {
         where: { id: waitlist.id },
         data: { status: body.holdType === 'held' ? 'assigned' : 'seated', readyAt: new Date() },
       });
-      await tx.tableState.updateMany({
-        where: { venueId, tableId: { in: body.tableIds } },
-        data: {
-          status: body.holdType === 'held' ? 'held' : 'seated',
-          partySize: waitlist.partySize,
-          seatedAt: body.holdType === 'held' ? null : startsAt,
-          lastActivityAt: new Date(),
-        },
-      });
+      if (isCurrentlyActive) {
+        await tx.tableState.updateMany({
+          where: { venueId, tableId: { in: body.tableIds } },
+          data: {
+            status: body.holdType === 'held' ? 'held' : 'seated',
+            partySize: waitlist.partySize,
+            seatedAt: body.holdType === 'held' ? null : startsAt,
+            lastActivityAt: new Date(),
+          },
+        });
+      }
     });
+
+    const tablesToRefresh = Array.from(new Set([
+      ...priorTableIds.filter((id) => !body.tableIds.includes(id)),
+      ...(!isCurrentlyActive ? body.tableIds : []),
+    ]));
+    if (tablesToRefresh.length) {
+      await this.refreshTableStates(venueId, tablesToRefresh);
+    }
     return { ok: true };
   }
 
   async releaseAssignment(venueId: string, id: string) {
     const assignment = await this.prisma.tableAssignment.findFirst({
       where: { venueId, id, releasedAt: null },
-      select: { id: true, tableId: true },
+      select: { id: true, tableId: true, reservationId: true, waitlistId: true },
     });
     const tableIds = assignment ? [assignment.tableId] : [id];
     const released = assignment
@@ -747,6 +787,41 @@ export class FloorService {
         });
     if (released.count === 0) throw new NotFoundException('Assignment not found');
     await this.refreshTableStates(venueId, tableIds);
+
+    if (assignment?.reservationId) {
+      const activeLeft = await this.prisma.tableAssignment.count({
+        where: { venueId, reservationId: assignment.reservationId, releasedAt: null },
+      });
+      if (activeLeft === 0) {
+        const r = await this.prisma.reservation.findFirst({
+          where: { id: assignment.reservationId, venueId },
+          select: { status: true },
+        });
+        if (r && r.status === 'seated') {
+          await this.prisma.reservation.update({
+            where: { id: assignment.reservationId },
+            data: { status: 'completed' },
+          });
+        }
+      }
+    }
+    if (assignment?.waitlistId) {
+      const activeLeft = await this.prisma.tableAssignment.count({
+        where: { venueId, waitlistId: assignment.waitlistId, releasedAt: null },
+      });
+      if (activeLeft === 0) {
+        const w = await this.prisma.waitlist.findFirst({
+          where: { id: assignment.waitlistId, venueId },
+          select: { status: true },
+        });
+        if (w && (w.status === 'seated' || w.status === 'assigned')) {
+          await this.prisma.waitlist.update({
+            where: { id: assignment.waitlistId },
+            data: { status: 'completed' },
+          });
+        }
+      }
+    }
     // Find seats freed up by the released table so we can match a waitlist
     // entry whose party fits. Best-effort; fire-and-forget so the manager
     // action returns immediately.

@@ -967,10 +967,11 @@ export class AppController {
   async createInvite(@CurrentUser() user: AuthUser, @Body() body: CreateInviteDto) {
     const profile = await this.requireManagerProfile(user);
     // Only owner, admin, or allAccess profiles may create manager-level invites.
-    // A plain manager can only invite staff, matching the canManageRole policy
-    // enforced on direct staff edits.
     const canElevate = profile.role === 'owner' || profile.role === 'admin' || profile.allAccess;
-    const inviteRole = body.role === 'manager' && canElevate ? 'manager' : 'staff';
+    if (body.role === 'manager' && !canElevate) {
+      throw new ForbiddenException('Only owners and administrators can invite managers.');
+    }
+    const inviteRole = body.role === 'manager' ? 'manager' : 'staff';
     const email = body.email?.trim().toLowerCase() || null;
     if (inviteRole === 'manager' && !email) {
       throw new BadRequestException('Manager invites require an email address.');

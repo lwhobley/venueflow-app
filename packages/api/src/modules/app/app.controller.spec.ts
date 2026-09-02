@@ -744,4 +744,26 @@ describe('AppController createInvite', () => {
     expect(deleteMany).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledOnce();
   });
+
+  it('throws ForbiddenException when a non-elevated manager attempts to create a manager invite', async () => {
+    const plainManagerProfile = {
+      id: 'profile-mgr', userId: 'user-2', venueId: 'venue-1', role: 'manager',
+      allAccess: false, membershipStatus: 'active', fullName: 'Plain Manager',
+      venue: { id: 'venue-1', name: 'Test Venue' },
+    };
+    const prisma: any = {
+      profile: { findFirst: vi.fn().mockResolvedValue(plainManagerProfile) },
+    };
+    const profiles = new ProfileService(prisma);
+    const email = { send: vi.fn().mockResolvedValue(undefined) };
+    const controller = new AppController(prisma, email as any, profiles);
+
+    await expect(
+      controller.createInvite(
+        { sub: 'user-2' } as any,
+        { role: 'manager', jobTitle: 'Assistant Manager', email: 'mgr@example.com' } as any,
+      ),
+    ).rejects.toThrow('Only owners and administrators can invite managers.');
+  });
 });
+

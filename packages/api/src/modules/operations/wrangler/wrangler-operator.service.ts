@@ -199,13 +199,13 @@ export class WranglerOperatorService {
       }
       return { tool: 'LIST_WAITLIST', args: {}, summary: 'Show active waitlist.' };
     }
-    if (lower.includes('sales') || lower.includes('revenue') || lower.includes('pulse') || lower.includes('totals')) {
+    if (lower.includes('sales') || lower.includes('revenue') || lower.includes('pulse') || /\b(?:sales|revenue|daily)\s+totals?\b/i.test(lower)) {
       return { tool: 'GET_SALES_PULSE', args: {}, summary: 'Show current sales pulse.' };
     }
-    if (lower.includes('integration') || lower.includes('pos status') || lower.includes('connections')) {
+    if (lower.includes('integration') || lower.includes('pos status') || /\b(?:pos|api|system)\s+connections?\b/i.test(lower)) {
       return { tool: 'LIST_INTEGRATIONS', args: {}, summary: 'Check integration connections.' };
     }
-    if (lower.includes('crm') || lower.includes('lead')) {
+    if (lower.includes('crm') || /\blead\b/i.test(lower)) {
       if (lower.includes('add') || lower.includes('create')) {
         const name = text.replace(/.*?(?:add|create)\s+(?:lead\s+)?/i, '').trim();
         return { tool: 'CREATE_CRM_LEAD', args: name ? { fullName: name } : {}, summary: `Create CRM lead ${name}.` };
@@ -219,7 +219,7 @@ export class WranglerOperatorService {
       }
       return { tool: 'SEARCH_CHAT', args: { query: text }, summary: 'Search chat messages.' };
     }
-    if (lower.includes('stock') || lower.includes('inventory') || lower.includes('86')) {
+    if (lower.includes('stock') || lower.includes('inventory') || /\b86\b/i.test(lower)) {
       if (lower.startsWith('86 ') || lower.includes('mark 86')) {
         const item = text.replace(/.*?(?:86|mark 86)\s+/i, '').trim();
         return { tool: 'UPDATE_ITEM_86', args: { itemName: item, isEightySix: true }, summary: `86 item ${item}.` };
@@ -231,15 +231,19 @@ export class WranglerOperatorService {
       const name = addShiftMatch ? addShiftMatch[1].trim() : '';
       return { tool: 'CREATE_SHIFT', args: name ? { staffName: name } : {}, summary: `Add shift for ${name || 'staff'}.` };
     }
-    if (lower.includes('reservation') || lower.startsWith('find ')) {
+    if (lower.includes('reservation') || lower.includes('booking') || /^(?:find|look\s*up|show)\s+(?:a\s+|the\s+)?(?:reservation|booking)\b/i.test(lower)) {
       const findReservation = lower.match(/(?:find|look up|lookup|show)\s+(?:the\s+)?(?:reservation\s+(?:for\s+)?)?(.+)/i);
-      return { tool: 'FIND_RESERVATION', args: { guestName: findReservation ? findReservation[1].replace(/\breservation\b/gi, '').trim() : '' }, summary: 'Find reservation.' };
+      return { tool: 'FIND_RESERVATION', args: { guestName: findReservation ? findReservation[1].replace(/\b(?:reservation|booking)\b/gi, '').trim() : '' }, summary: 'Find reservation.' };
     }
     if (lower.includes('clock') || lower.includes('punch')) {
       return { tool: 'LIST_CLOCKS', args: {}, summary: 'Look up clock records.' };
     }
-    if (lower.includes('working') || lower.includes('schedule')) return { tool: 'LIST_SCHEDULE', args: {}, summary: 'Show schedule.' };
-    if (lower.includes('staff') || lower.includes('bartender') || lower.includes('server')) return { tool: 'FIND_STAFF', args: {}, summary: 'Search staff roster.' };
+    if (/\b(?:schedule|roster)\b/i.test(lower) || /\bwho(?:'s|\s+is)\s+working\b/i.test(lower) || /\bworking\s+(?:today|tonight|now|this\s+shift)\b/i.test(lower)) {
+      return { tool: 'LIST_SCHEDULE', args: {}, summary: 'Show schedule.' };
+    }
+    if (lower.includes('staff') || lower.includes('bartender') || lower.includes('server') || lower.includes('employee') || /^(?:find|search|lookup)\s+(?:staff|employee|server|bartender)\b/i.test(lower)) {
+      return { tool: 'FIND_STAFF', args: {}, summary: 'Search staff roster.' };
+    }
     throw new BadRequestException('AI operator requires GEMINI_API_KEY for write commands and complex requests');
   }
 

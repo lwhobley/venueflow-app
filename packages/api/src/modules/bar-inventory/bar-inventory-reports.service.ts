@@ -82,12 +82,10 @@ export class BarInventoryReportsService {
       this.prisma.barInventoryItem.findMany({
         where: { venueId },
         orderBy: [{ supplier: 'asc' }, { name: 'asc' }],
-        take: 500,
       }),
       this.prisma.posCheck.findMany({
         where: { venueId, openedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
         select: { menuItems: true },
-        take: 1000,
       }),
     ]);
 
@@ -109,18 +107,48 @@ export class BarInventoryReportsService {
       }
     }
 
-    const getVelocity = (itemName: string) => {
-      const lowerName = itemName.toLowerCase().trim();
-      let totalSold = 0;
-      for (const [soldName, qty] of salesMap.entries()) {
-        if (soldName.includes(lowerName) || lowerName.includes(soldName)) {
-          totalSold += qty;
+    // Single-attribution: each sold POS item credits AT MOST ONE best-matching inventory item.
+    // Loose substring matching (like .includes()) could erroneously credit "Gin" to "Ginger Ale", "Ginger Beer", etc.
+    const inventoryVelocityMap = new Map<string, number>();
+    const normalizedItems = items.map((item) => ({
+      item,
+      lower: item.name.toLowerCase().trim(),
+    }));
+
+    for (const [soldName, qty] of salesMap.entries()) {
+      if (!soldName || qty <= 0) continue;
+      // 1. Exact match
+      let bestItem = normalizedItems.find((ni) => ni.lower === soldName);
+      // 2. If no exact match, try matching by word boundary
+      if (!bestItem) {
+        const candidates = normalizedItems.filter((ni) => {
+          const itemRegex = new RegExp(`\\b${ni.lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+          const soldRegex = new RegExp(`\\b${soldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+          return itemRegex.test(soldName) || soldRegex.test(ni.lower);
+        });
+        if (candidates.length === 1) {
+          bestItem = candidates[0];
+        } else if (candidates.length > 1) {
+          candidates.sort((a, b) => b.lower.length - a.lower.length);
+          bestItem = candidates[0];
         }
       }
-      return Number((totalSold / 30).toFixed(2));
+      if (bestItem) {
+        inventoryVelocityMap.set(bestItem.item.id, (inventoryVelocityMap.get(bestItem.item.id) ?? 0) + qty);
+      }
+    }
+
+    const getVelocity = (idOrName: string) => {
+      const byId = inventoryVelocityMap.get(idOrName);
+      if (byId !== undefined) return Number((byId / 30).toFixed(2));
+      const found = normalizedItems.find((ni) => ni.lower === idOrName.toLowerCase().trim());
+      if (found) {
+        return Number(((inventoryVelocityMap.get(found.item.id) ?? 0) / 30).toFixed(2));
+      }
+      return 0;
     };
 
-    const belowPar = items.filter((i) => i.onHand < i.parLevel || getVelocity(i.name) > 0);
+    const belowPar = items.filter((i) => i.onHand < i.parLevel || getVelocity(i.id) > 0);
 
     const bySupplier = new Map<string, typeof belowPar>();
     for (const item of belowPar) {
@@ -132,7 +160,7 @@ export class BarInventoryReportsService {
 
     const groups = Array.from(bySupplier.entries()).map(([supplier, groupItems]) => {
       const lines = groupItems.map((item) => {
-        const velocity = getVelocity(item.name);
+        const velocity = getVelocity(item.id);
         const predictedDemand = Math.ceil(velocity * 7);
         const baseQty = Math.max(0, Math.ceil(item.parLevel - item.onHand));
         const smartQty = Math.max(0, Math.ceil(item.parLevel - (item.onHand - predictedDemand)));

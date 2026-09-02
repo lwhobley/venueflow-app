@@ -189,7 +189,7 @@ function BarStockScreen() {
     });
   }, [allItems, activeTab]);
 
-  const lowItems = useMemo(() => items.filter((item) => item.onHand <= item.parLevel), [items]);
+  const lowItems = useMemo(() => items.filter((item) => item.onHand < item.parLevel), [items]);
 
   const activeLowStockCount = lowItems.length;
   const activeTotalValueCents = useMemo(() => {

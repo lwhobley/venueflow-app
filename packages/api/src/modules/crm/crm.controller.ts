@@ -98,6 +98,11 @@ class SaveLeadDto {
   @IsBoolean()
   @IsOptional()
   marketingOptIn?: boolean;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(64)
+  guestId?: string;
 }
 
 class AddNoteDto {
@@ -501,6 +506,7 @@ export class CrmController {
         phone: l.phone ?? null,
         company: l.company ?? null,
         source: l.source ?? null,
+        guestId: l.guestId ?? null,
         status: l.status,
         tags: l.tags,
         assignedToId: l.assignedToId ?? null,
@@ -541,6 +547,7 @@ export class CrmController {
         phone: lead.phone ?? null,
         company: lead.company ?? null,
         source: lead.source ?? null,
+        guestId: lead.guestId ?? null,
         status: lead.status,
         tags: lead.tags,
         assignedToId: lead.assignedToId ?? null,
@@ -568,6 +575,22 @@ export class CrmController {
     requireManager(scope);
     const now = new Date();
     const assignedToId = await this.resolveVenueMemberId(scope.venueId, body.assignedToId, 'Lead assignee');
+    let guestId = body.guestId ?? null;
+    if (!guestId && (body.email || body.phone)) {
+      const email = body.email?.trim().toLowerCase();
+      const phone = body.phone?.trim();
+      const existingGuest = await this.prisma.guest.findFirst({
+        where: {
+          venueId: scope.venueId,
+          OR: [
+            ...(email ? [{ email }] : []),
+            ...(phone ? [{ phone }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      if (existingGuest) guestId = existingGuest.id;
+    }
 
     if (body.leadId) {
       const existing = await this.prisma.crmLead.findFirst({
@@ -586,6 +609,8 @@ export class CrmController {
       if (body.assignedToId !== undefined) patch.assignedToId = assignedToId;
       if (body.estimatedValueCents !== undefined) patch.estimatedValueCents = body.estimatedValueCents;
       if (body.marketingOptIn !== undefined) patch.marketingOptIn = body.marketingOptIn;
+      if (body.guestId !== undefined) patch.guestId = body.guestId;
+      else if (guestId && !existing.guestId) patch.guestId = guestId;
 
       await this.prisma.crmLead.update({ where: { id: body.leadId }, data: patch });
       // Record status changes specifically - they're the most useful timeline
@@ -604,6 +629,7 @@ export class CrmController {
         phone: body.phone ?? null,
         company: body.company ?? null,
         source: body.source ?? null,
+        guestId: guestId ?? null,
         status: (body.status ?? 'new') as CrmLeadStatus,
         tags: body.tags ?? [],
         assignedToId: assignedToId ?? null,
@@ -741,6 +767,33 @@ export class CrmController {
         }
         if (u.status === 'confirmed' && u.eventDate) {
           await this.ensureBeoExecutionWorkspace(tx, scope.venueId, u);
+        }
+        if (body.status === 'cancelled') {
+          const beoTag = `beo:${body.beoId}`;
+          const linkedRes = await tx.reservation.findFirst({
+            where: { venueId: scope.venueId, tags: { has: beoTag }, deletedAt: null },
+            select: { id: true },
+          });
+          if (linkedRes) {
+            await tx.reservation.update({
+              where: { id: linkedRes.id },
+              data: { status: 'cancelled', eventStatus: 'cancelled', deletedAt: now },
+            });
+            await tx.tableAssignment.updateMany({
+              where: { venueId: scope.venueId, reservationId: linkedRes.id, releasedAt: null },
+              data: { releasedAt: now, releasedReason: 'cancelled' },
+            });
+          }
+          await tx.eventExecutionWorkspace.updateMany({
+            where: {
+              venueId: scope.venueId,
+              OR: [
+                { sourceType: 'beo', sourceId: body.beoId },
+                ...(linkedRes ? [{ sourceType: 'reservation', sourceId: linkedRes.id }] : []),
+              ],
+            },
+            data: { isArchived: true },
+          });
         }
         return u;
       });
@@ -1344,8 +1397,31 @@ export class CrmController {
     }
 
     const lead = beo.leadId
-      ? await db.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { fullName: true, phone: true, email: true, company: true } })
+      ? await db.crmLead.findFirst({ where: { id: beo.leadId, venueId }, select: { id: true, fullName: true, phone: true, email: true, company: true, guestId: true } })
       : null;
+
+    let guestId = lead?.guestId ?? null;
+    if (!guestId && (lead?.email || lead?.phone)) {
+      const email = lead.email?.trim().toLowerCase();
+      const phone = lead.phone?.trim();
+      const existingGuest = await db.guest.findFirst({
+        where: {
+          venueId,
+          OR: [
+            ...(email ? [{ email }] : []),
+            ...(phone ? [{ phone }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      if (existingGuest) {
+        guestId = existingGuest.id;
+        if (lead) {
+          await db.crmLead.update({ where: { id: lead.id }, data: { guestId } });
+        }
+      }
+    }
+
     // We tag the reservation with the BEO id so subsequent edits update the
     // same row instead of creating duplicates. Uses tags[] since there's no
     // dedicated FK column.
@@ -1356,6 +1432,7 @@ export class CrmController {
     const menuNotes = [beo.menuAppetizers, beo.menuEntrees].filter(Boolean).join(' / ') || null;
     const data = {
       venueId,
+      guestId,
       guestName: lead?.fullName ?? beo.eventName,
       guestPhone: lead?.phone ?? null,
       guestEmail: lead?.email ?? null,

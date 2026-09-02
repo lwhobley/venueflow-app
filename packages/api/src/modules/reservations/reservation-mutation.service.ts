@@ -121,6 +121,30 @@ export class ReservationMutationService {
           where: { id: existing.id },
           data,
         });
+        if (data.status === 'cancelled') {
+          const now = new Date();
+          await transaction.tableAssignment.updateMany({
+            where: { venueId: args.venueId, reservationId: existing.id, releasedAt: null },
+            data: { releasedAt: now, releasedReason: 'cancelled' },
+          });
+          const beoTag = existing.tags.find((t) => t.startsWith('beo:'));
+          if (beoTag) {
+            await transaction.crmBeo.updateMany({
+              where: { id: beoTag.slice(4), venueId: args.venueId },
+              data: { status: 'cancelled', updatedAt: now },
+            });
+          }
+          await transaction.eventExecutionWorkspace.updateMany({
+            where: {
+              venueId: args.venueId,
+              OR: [
+                { sourceType: 'reservation', sourceId: existing.id },
+                ...(beoTag ? [{ sourceType: 'beo', sourceId: beoTag.slice(4) }] : []),
+              ],
+            },
+            data: { isArchived: true },
+          });
+        }
         await this.syncTableAssignments(transaction, updated, args.tableIds ?? args.tableNumbers);
         await this.ensureExecutionWorkspace(updated, transaction);
         return { reservation: updated, previousStatus: existing.status };
@@ -208,9 +232,33 @@ export class ReservationMutationService {
     });
     if (!reservation) throw new BadRequestException('Reservation not found');
 
-    await this.prisma.reservation.update({
-      where: { id: reservation.id },
-      data: { deletedAt: new Date() },
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: { status: 'cancelled', eventStatus: 'cancelled', deletedAt: now },
+      });
+      await tx.tableAssignment.updateMany({
+        where: { venueId: args.venueId, reservationId: reservation.id, releasedAt: null },
+        data: { releasedAt: now, releasedReason: 'cancelled' },
+      });
+      const beoTag = reservation.tags.find((t) => t.startsWith('beo:'));
+      if (beoTag) {
+        await tx.crmBeo.updateMany({
+          where: { id: beoTag.slice(4), venueId: args.venueId },
+          data: { status: 'cancelled', updatedAt: now },
+        });
+      }
+      await tx.eventExecutionWorkspace.updateMany({
+        where: {
+          venueId: args.venueId,
+          OR: [
+            { sourceType: 'reservation', sourceId: reservation.id },
+            ...(beoTag ? [{ sourceType: 'beo', sourceId: beoTag.slice(4) }] : []),
+          ],
+        },
+        data: { isArchived: true },
+      });
     });
   }
 

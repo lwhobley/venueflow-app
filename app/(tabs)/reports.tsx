@@ -66,7 +66,7 @@ function ReportsScreen() {
   const [showPayrollCsv, setShowPayrollCsv] = useState(false);
   const [payrollProvider, setPayrollProvider] = useState<PayrollProvider>('gusto');
   const [showReservationCsv, setShowReservationCsv] = useState(false);
-  const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today');
+  const { selected: dateRange, setSelected: setDateRange, presets } = useDateRange('today', venue?.timezone);
 
   const insights = useQuery(api.app.getManagerInsights, isReady && canManage ? {} : 'skip') as Insight | null | undefined;
   const laborForecast = useQuery(api.scheduling.getLaborForecast, isReady && canManage ? {} : 'skip') as any;
@@ -89,7 +89,12 @@ function ReportsScreen() {
     data: payroll,
     isLoading: payrollLoading,
     subscriptionRequired: payrollLocked,
-  } = useQueryState<PayrollSummary>(api.payroll.getPayrollSummary, isReady && canManage && venue?.id ? { venueId: venue.id } : 'skip');
+  } = useQueryState<PayrollSummary>(
+    api.payroll.getPayrollSummary,
+    isReady && canManage && venue?.id
+      ? { venueId: venue.id, startDate: dateRange.startDate, endDate: dateRange.endDate }
+      : 'skip',
+  );
   const { data: payrollCsv, subscriptionRequired: payrollCsvLocked } = useQueryState<string>(
     api.payroll.exportPayrollCsv,
     isReady && canManage && showPayrollCsv && venue?.id

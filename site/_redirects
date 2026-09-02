@@ -1,3 +1,7 @@
-# The Expo web app uses static output, so Cloudflare Pages resolves clean URLs
-# such as /app/sign-in to their generated HTML files. Do not add an /app/*
-# fallback here: it also rewrites JavaScript, fonts, and other assets to HTML.
+# Static URL routing for the Expo web app deployed under /app
+/app/sign-in /app/sign-in.html 200
+/app/sign-in/ /app/sign-in.html 200
+/app /app/index.html 200
+/app/ /app/index.html 200
+/_expo/* /app/_expo/:splat 200
+/assets/node_modules/* /app/assets/node_modules/:splat 200
