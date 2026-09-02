@@ -60,11 +60,16 @@ class CreateGroupDto {
   @MaxLength(100)
   name!: string;
 
+  // Optional: the New group form asks for a name only, and the creator is
+  // always added below, so a required array made every group creation fail
+  // with a raw "memberIds must be an array" in front of the manager. People are
+  // added to the group after it exists.
   @IsArray()
   @ArrayMaxSize(500)
   @IsString({ each: true })
   @MaxLength(64, { each: true })
-  memberIds!: string[];
+  @IsOptional()
+  memberIds?: string[];
 }
 
 class SendMessageDto {
@@ -448,7 +453,7 @@ export class ChatController {
     if (!name) throw new BadRequestException('Enter a group name');
     if (name.length > 100) throw new BadRequestException('Group name must be 100 characters or fewer');
 
-    const memberIds = Array.from(new Set([scope.profileId, ...body.memberIds]));
+    const memberIds = Array.from(new Set([scope.profileId, ...(body.memberIds ?? [])]));
     const activeMembers = await this.prisma.profile.findMany({
       where: { id: { in: memberIds }, venueId: scope.venueId, OR: ACTIVE_MEMBERSHIP },
       select: { id: true },
