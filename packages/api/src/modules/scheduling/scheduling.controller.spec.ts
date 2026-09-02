@@ -749,6 +749,17 @@ describe('SchedulingController', () => {
   });
 
   describe('applyAutoSchedule', () => {
+    it('counts all persisted assigned shifts without querying a nonexistent cancelled status', async () => {
+      const { controller, prisma, assignments } = makeController();
+      assignments.applyOpenAssignments.mockResolvedValue({ assigned: 0, skipped: 0, assignedShifts: [] });
+
+      await controller.applyAutoSchedule(managerScope, { assignments: [], weekStartDate: '2026-07-12' });
+
+      expect(prisma.scheduleShift.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { venueId: 'venue-1', weekStart: '2026-07-12', profileId: { not: null } },
+      }));
+    });
+
     it('delegates to applyOpenAssignments with a canAssign gate that defaults to available', async () => {
       const { controller, assignments } = makeController();
       assignments.applyOpenAssignments.mockResolvedValue({ assigned: 1, skipped: 0, assignedShifts: [] });

@@ -53,7 +53,7 @@ export async function refreshTableStates(
   ]);
   const byTable = new Map<string, any>();
   for (const assignment of assignments) byTable.set(assignment.tableId, assignment);
-  const statusByTable = new Map(currentStates.map((state: { tableId: string; status: string }) => [state.tableId, state.status]));
+  const statusByTable = new Map<string, string>(currentStates.map((state: { tableId: string; status: string }) => [state.tableId, state.status]));
   await Promise.all(tableIds.map((tableId) => {
     const assignment = byTable.get(tableId);
     if (!assignment && PRESERVED_TABLE_STATUSES.has(statusByTable.get(tableId) ?? '')) {

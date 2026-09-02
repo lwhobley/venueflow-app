@@ -1827,6 +1827,7 @@ model EventExecutionWorkspace {
   sourceType String
   sourceId   String
   title      String
+  isArchived Boolean                      @default(false)
   createdAt  DateTime                     @default(now())
   updatedAt  DateTime                     @updatedAt
   venue      Venue                        @relation(fields: [venueId], references: [id], onDelete: Cascade)

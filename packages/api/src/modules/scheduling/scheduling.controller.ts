@@ -1233,7 +1233,9 @@ export class SchedulingController {
     );
     const assignments = new Map<string, number>();
     for (const s of shifts) {
-      if (s.profileId && s.status !== 'cancelled' && (s.weekStart ?? availabilityWeekStart) === availabilityWeekStart) {
+      // ScheduleShift has no cancelled status; removed shifts are deleted.
+      // Every persisted assigned shift contributes to the weekly totals.
+      if (s.profileId && (s.weekStart ?? availabilityWeekStart) === availabilityWeekStart) {
         const dur = Math.max(0, s.endMinutes - s.startMinutes);
         assignments.set(s.profileId, (assignments.get(s.profileId) ?? 0) + dur);
       }
@@ -1327,7 +1329,6 @@ export class SchedulingController {
           venueId: scope!.venueId,
           weekStart: availabilityWeekStart,
           profileId: { not: null },
-          status: { not: 'cancelled' },
         },
         select: { profileId: true, startMinutes: true, endMinutes: true },
       }),
