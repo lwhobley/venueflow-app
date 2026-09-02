@@ -801,10 +801,27 @@ export class ChatController {
     const text = body.text.trim();
     if (!text) throw new BadRequestException('Text is required');
 
-    await this.prisma.message.update({
-      where: { id },
-      data: { text },
+    // The conversation list renders lastMessageText. Editing the newest message
+    // left the old wording sitting in that preview, so the list and the thread
+    // disagreed about what had been said. Only the newest message owns the
+    // preview — editing an older one must not overwrite it.
+    const newest = await this.prisma.message.findFirst({
+      where: { conversationId: msg.conversationId, venueId: scope.venueId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
     });
+
+    await this.prisma.$transaction([
+      this.prisma.message.update({ where: { id }, data: { text } }),
+      ...(newest?.id === id
+        ? [
+            this.prisma.conversation.update({
+              where: { id: conv.id },
+              data: { lastMessageText: text.slice(0, 80) },
+            }),
+          ]
+        : []),
+    ]);
 
     return { ok: true, text };
   }
