@@ -14,6 +14,9 @@ dist/
 web-build/
 web-dist/
 dist-web/
+dist-site/
+coverage/
+.wrangler/
 expo-env.d.ts
 packages/*/dist/
 

@@ -11,6 +11,11 @@ on:
       - 'modules/**'
       - 'assets/**'
       - 'app.json'
+      - 'app.config.js'
+      - 'site/_worker.js'
+      - 'site/_routes.json'
+      - 'scripts/build-site.mjs'
+      - 'scripts/site-build-files.mjs'
       - 'eas.json'
       - 'metro.config.js'
       - 'babel.config.js'
@@ -29,6 +34,11 @@ on:
       - 'modules/**'
       - 'assets/**'
       - 'app.json'
+      - 'app.config.js'
+      - 'site/_worker.js'
+      - 'site/_routes.json'
+      - 'scripts/build-site.mjs'
+      - 'scripts/site-build-files.mjs'
       - 'eas.json'
       - 'metro.config.js'
       - 'babel.config.js'
@@ -59,4 +69,4 @@ jobs:
       - run: npm test
       - run: npm run test:ui -- --coverage
       - name: Verify Expo web bundle
-        run: npx expo export --platform web
+        run: npm run build:site

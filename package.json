@@ -23,6 +23,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "build:site": "node scripts/build-site.mjs",
     "api:dev": "npm run start:dev -w @venue-wrangler/api",
     "api:build": "npm run build -w @venue-wrangler/api",
     "api:prisma:generate": "npm run prisma:generate -w @venue-wrangler/api",
