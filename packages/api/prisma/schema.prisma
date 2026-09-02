@@ -421,7 +421,7 @@ model Venue {
 }
 
 model Profile {
-  id                         String               @id @default(cuid())
+  id                         String                @id @default(cuid())
   userId                     String?
   tokenIdentifier            String?
   email                      String
@@ -432,36 +432,36 @@ model Profile {
   altPhone                   String?
   address                    String?
   dateOfBirth                DateTime?
-  certifications             String[]             @default([])
+  certifications             String[]              @default([])
   venueId                    String?
   membershipStatus           MembershipStatus?
-  allAccess                  Boolean              @default(false)
-  sickHoursAccrued           Float                @default(0.0)
-  ptoHoursAccrued            Float                @default(0.0)
+  allAccess                  Boolean               @default(false)
+  sickHoursAccrued           Float                 @default(0.0)
+  ptoHoursAccrued            Float                 @default(0.0)
   trialEndsAt                DateTime?
-  createdAt                  DateTime             @default(now())
-  updatedAt                  DateTime             @updatedAt
-  user                       User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
-  venue                      Venue?               @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  user                       User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  venue                      Venue?                @relation(fields: [venueId], references: [id], onDelete: SetNull)
   shifts                     ScheduleShift[]
   availability               Availability[]
   pushTokens                 PushToken[]
   timeEntries                TimeEntry[]
-  staffRequests              StaffRequest[]       @relation("StaffRequestProfile")
-  reviewedStaffRequests      StaffRequest[]       @relation("StaffRequestReviewer")
+  staffRequests              StaffRequest[]        @relation("StaffRequestProfile")
+  reviewedStaffRequests      StaffRequest[]        @relation("StaffRequestReviewer")
   sentMessages               Message[]
   conversationReads          ConversationRead[]
   notificationEvents         NotificationEvent[]
   notificationReads          NotificationRead[]
-  requestedShiftSwaps        ShiftSwap[]          @relation("ShiftSwapRequesterProfile")
-  targetShiftSwaps           ShiftSwap[]          @relation("ShiftSwapTargetProfile")
+  requestedShiftSwaps        ShiftSwap[]           @relation("ShiftSwapRequesterProfile")
+  targetShiftSwaps           ShiftSwap[]           @relation("ShiftSwapTargetProfile")
   crmNotes                   CrmNote[]
   crmActivityLogs            CrmActivityLog[]
   tableStateHistory          TableStateHistory[]
-  servedTables               TableState[]         @relation("ServerTables")
-  assignedLeads              CrmLead[]            @relation("AssignedLeads")
-  createdScheduleMemoryNotes ScheduleMemoryNote[] @relation("ScheduleMemoryCreatedBy")
-  uploadedDocuments          VenueDocument[]      @relation("DocumentUploader")
+  servedTables               TableState[]          @relation("ServerTables")
+  assignedLeads              CrmLead[]             @relation("AssignedLeads")
+  createdScheduleMemoryNotes ScheduleMemoryNote[]  @relation("ScheduleMemoryCreatedBy")
+  uploadedDocuments          VenueDocument[]       @relation("DocumentUploader")
   aiUsageEvents              AiUsageEvent[]
   scheduleEmailEvents        ScheduleEmailEvent[]
   staffOnboardingTasks       StaffOnboardingTask[]
@@ -474,7 +474,7 @@ model Profile {
 }
 
 model ScheduleShift {
-  id             String      @id @default(cuid())
+  id             String         @id @default(cuid())
   venueId        String
   profileId      String?
   // Sunday (YYYY-MM-DD) of the concrete calendar week this shift belongs to.
@@ -486,12 +486,12 @@ model ScheduleShift {
   station        String
   notes          String?
   status         ShiftStatus
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  venue          Venue       @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  profile        Profile?    @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  requesterSwaps ShiftSwap[] @relation("ShiftSwapRequesterShift")
-  targetSwaps    ShiftSwap[] @relation("ShiftSwapTargetShift")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  venue          Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile        Profile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  requesterSwaps ShiftSwap[]    @relation("ShiftSwapRequesterShift")
+  targetSwaps    ShiftSwap[]    @relation("ShiftSwapTargetShift")
   messages       Message[]
   staffRequests  StaffRequest[]
 
@@ -569,7 +569,7 @@ model Availability {
 }
 
 model StaffRequest {
-  id                  String        @id @default(cuid())
+  id                  String         @id @default(cuid())
   venueId             String
   profileId           String
   kind                String
@@ -584,13 +584,13 @@ model StaffRequest {
   reviewerId          String?
   reviewedAt          DateTime?
   responseNotes       String?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  venue               Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  profile             Profile       @relation("StaffRequestProfile", fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  venue               Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  profile             Profile        @relation("StaffRequestProfile", fields: [profileId], references: [id], onDelete: Cascade)
   // VW-12: requestedShiftId and reviewerId carried no FK.
   requestedShift      ScheduleShift? @relation(fields: [requestedShiftId], references: [id], onDelete: SetNull)
-  reviewer            Profile?      @relation("StaffRequestReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewer            Profile?       @relation("StaffRequestReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
 
   @@index([venueId])
   @@index([profileId])
@@ -673,18 +673,18 @@ model ConversationRead {
 // S3 store for chat photo attachments. Served via an unguessable
 // capability URL (GET /v1/chat/images/:id) that redirects to S3 pre-signed URL.
 model ChatImage {
-  id         String   @id @default(cuid())
-  venueId    String
-  mimeType   String
-  s3Key      String
-  uploadedBy String?
-  messageId  String?  @unique
+  id             String    @id @default(cuid())
+  venueId        String
+  mimeType       String
+  s3Key          String
+  uploadedBy     String?
+  messageId      String?   @unique
   // Set while an orphan cleanup owns this row. Message attachment only wins
   // while this remains null, preventing cleanup/send races.
   purgeStartedAt DateTime?
-  createdAt  DateTime @default(now())
-  venue      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  message    Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now())
+  venue          Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  message        Message?  @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([venueId])
   @@index([messageId, createdAt])
@@ -707,17 +707,17 @@ model ChatImage {
 /// historical reference, not a tenant key — same reasoning as
 /// ObjectDeletionJob above.
 model RetainedTimeEntry {
-  id                String    @id @default(cuid())
-  originVenueId     String
-  originVenueName   String?
-  profileFullName   String?
-  profileEmail      String?
-  clockInAt         DateTime
-  clockOutAt        DateTime?
-  isOpen            Boolean
-  breaks            Json?
-  originCreatedAt   DateTime
-  retainedAt        DateTime  @default(now())
+  id              String    @id @default(cuid())
+  originVenueId   String
+  originVenueName String?
+  profileFullName String?
+  profileEmail    String?
+  clockInAt       DateTime
+  clockOutAt      DateTime?
+  isOpen          Boolean
+  breaks          Json?
+  originCreatedAt DateTime
+  retainedAt      DateTime  @default(now())
 
   @@index([originVenueId])
   // Composite so the retention job's cutoff filter and its id tiebreak for
@@ -847,14 +847,14 @@ model TimeEntry {
   updatedAt         DateTime  @updatedAt
   venue             Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
   profile           Profile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  // VW-35: a standalone boolean index removed. Every real query filters
+  // isOpen alongside venueId or profileId (never alone), and both are
+  // already served by the composite indexes above.
 
   @@index([venueId])
   @@index([venueId, clockInAt])
   @@index([profileId])
   @@index([profileId, isOpen])
-  // VW-35: a standalone boolean index removed. Every real query filters
-  // isOpen alongside venueId or profileId (never alone), and both are
-  // already served by the composite indexes above.
 }
 
 model ShiftSwap {
@@ -1274,7 +1274,7 @@ model CrmNote {
 }
 
 model CrmBeo {
-  id                  String    @id @default(cuid())
+  id                  String        @id @default(cuid())
   venueId             String
   leadId              String?
   eventName           String
@@ -1294,10 +1294,10 @@ model CrmBeo {
   internalNotes       String?
   assignedRepId       String?
   status              BeoStatus
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  venue               Venue     @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  lead                CrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  venue               Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  lead                CrmLead?      @relation(fields: [leadId], references: [id], onDelete: SetNull)
   contracts           CrmContract[]
 
   @@index([venueId])
@@ -1578,29 +1578,33 @@ model ReservationSyncEvent {
 }
 
 model BarInventoryItem {
-  id            String                 @id @default(cuid())
-  venueId       String
-  name          String
+  id             String                 @id @default(cuid())
+  venueId        String
+  name           String
   normalizedName String
-  category      BarStockCategory
-  area          String?
-  unit          String
-  parLevel      Float
-  onHand        Float
-  unitCostCents Int?
-  supplier      String?
-  sku           String?
-  notes         String?
-  lastCountedAt DateTime?
-  createdAt     DateTime               @default(now())
-  updatedAt     DateTime               @updatedAt
-  venue         Venue                  @relation(fields: [venueId], references: [id], onDelete: Cascade)
-  movements     BarInventoryMovement[]
+  category       BarStockCategory
+  area           String?
+  unit           String
+  parLevel       Float
+  onHand         Float
+  unitCostCents  Int?
+  supplier       String?
+  sku            String?
+  notes          String?
+  lastCountedAt  DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  venue          Venue                  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  movements      BarInventoryMovement[]
 
+  @@unique([venueId, normalizedName])
+  // A barcode has to identify one item: the SKU lookup takes the first match,
+  // so two items sharing one opened whichever row came back. NULLs stay
+  // distinct in Postgres, so items with no SKU are unconstrained.
+  @@unique([venueId, sku])
   @@index([venueId])
   @@index([venueId, category])
   @@index([venueId, name])
-  @@unique([venueId, normalizedName])
 }
 
 model BarInventoryMovement {
@@ -1611,6 +1615,10 @@ model BarInventoryMovement {
   quantity       Float
   previousOnHand Float
   nextOnHand     Float
+  // Unit cost as of this movement. Without it, waste and comp were valued at
+  // the item's current cost, so editing today's cost rewrote the value of
+  // every past waste record. Null only for rows written before this column.
+  unitCostCents  Int?
   notes          String?
   createdBy      String
   createdAt      DateTime             @default(now())
