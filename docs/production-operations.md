@@ -6,9 +6,7 @@
 - Cloud Run service: `venue-wrangler-api` in `us-east1`
 - The `venue_wrangler_5xx` log-based metric counts HTTP 5xx responses.
 - Alert policy: `Venue Wrangler API 5xx errors` (`projects/venuewrangler/alertPolicies/7994759751285739344`).
-- The policy is enabled and sends email notifications through the production alerts notification channel.
-
-Keep a second notification destination (for example, an on-call webhook) for a staffed production launch.
+- The policy is enabled and sends email notifications to both the primary notification channel (`projects/venuewrangler/notificationChannels/526772857379885924`, `lwhobley@gmail.com`) and secondary destination (`projects/venuewrangler/notificationChannels/5688119539037926179`, `venuewrangler@gmail.com`).
 
 ## Rollback
 
