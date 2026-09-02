@@ -401,6 +401,13 @@ export class BarInventoryController {
       return mapItem(created);
     } catch (error: any) {
       if (error?.code === 'P2002') {
+        // Two unique constraints now guard this table; say which one was hit,
+        // because "name already exists" on a barcode clash sent managers
+        // hunting for a duplicate name that was not there.
+        const target = Array.isArray(error?.meta?.target) ? error.meta.target.join(',') : String(error?.meta?.target ?? '');
+        if (target.includes('sku')) {
+          throw new ConflictException('Another item in this venue already uses that barcode. Scanning it must open exactly one item.');
+        }
         throw new ConflictException('An inventory item with this name already exists.');
       }
       throw error;
@@ -455,6 +462,10 @@ export class BarInventoryController {
           previousOnHand,
           nextOnHand,
           notes: cleanText(body.notes) ?? null,
+          // Freeze the valuation at write time. Reports used to multiply a
+          // historical movement by the item's present cost, so changing a cost
+          // today retroactively changed what last month's waste was worth.
+          unitCostCents: item.unitCostCents ?? null,
           createdBy: profile.id,
           createdAt: now,
         },
@@ -904,7 +915,7 @@ export class BarInventoryController {
       this.prisma.barInventoryItem.findMany({ where: { venueId }, take: 500 }),
       this.prisma.barInventoryMovement.findMany({
         where: { venueId, createdAt: { gte: thirtyDaysAgo } },
-        select: { itemId: true, movementType: true, quantity: true },
+        select: { itemId: true, movementType: true, quantity: true, unitCostCents: true },
       }),
     ]);
 
@@ -917,7 +928,9 @@ export class BarInventoryController {
     for (const m of movements) {
       const item = itemMap.get(m.itemId);
       if (!item) continue;
-      const cost = item.unitCostCents ?? 0;
+      // The cost recorded with the movement, falling back to the item's
+      // current cost only for rows written before movements carried one.
+      const cost = m.unitCostCents ?? item.unitCostCents ?? 0;
       if (m.movementType === 'waste') wasteCents += Math.abs(m.quantity) * cost;
       if (m.movementType === 'comp') compCents += Math.abs(m.quantity) * cost;
     }

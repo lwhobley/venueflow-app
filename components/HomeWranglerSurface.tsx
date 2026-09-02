@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Button } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { CommandText } from './FutureUI';
@@ -74,6 +75,19 @@ export function HomeWranglerSurface({ enabled }: Props) {
   const snapshot = wrangler.data;
 
   if (!enabled) return null;
+
+  // A failed first snapshot left this on "Building the live service picture…"
+  // for good: there is no second attempt to wait for, and the copy reads like
+  // progress. Say it failed and offer the retry.
+  if (!snapshot && wrangler.error) {
+    return (
+      <View style={{ marginHorizontal: spacing.lg, marginTop: -1, borderWidth: StyleSheet.hairlineWidth, borderColor: palette.border, backgroundColor: palette.surface, padding: spacing.md, gap: spacing.sm }}>
+        <CommandText palette={palette} variant="label">THE WRANGLER</CommandText>
+        <CommandText palette={palette} variant="caption">The live service picture could not be loaded.</CommandText>
+        <Button compact mode="outlined" textColor={palette.primary} onPress={() => void wrangler.refetch()}>Try again</Button>
+      </View>
+    );
+  }
 
   if (wrangler.isLoading || !snapshot) {
     return (

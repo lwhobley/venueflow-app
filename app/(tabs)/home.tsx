@@ -50,11 +50,15 @@ function HomeScreen() {
   // These three feed the readiness/flow/pulse cards below with fallbacks like
   // "Open checks: 0" and "No upcoming events" — indistinguishable from a
   // genuinely quiet day unless a fetch failure is called out separately.
+  // Any one of the three failing is enough to make the cards below lie: they
+  // fall back to "0" and "No upcoming events", which reads as a quiet venue.
+  // The old condition required all three to be missing, so a single failed
+  // fetch showed a confidently wrong readiness figure with no warning.
   const commandCenterLoadFailed =
     isReady && canManage && Boolean(venue?.id) &&
-    !managerDashboardQuery.isLoading && !dailyBriefQuery.isLoading && !commandCenterQuery.isLoading &&
-    managerDashboard === undefined && dailyBrief === undefined && commandCenter === undefined &&
-    Boolean(managerDashboardQuery.error || dailyBriefQuery.error || commandCenterQuery.error);
+    ((!managerDashboardQuery.isLoading && managerDashboard === undefined && Boolean(managerDashboardQuery.error))
+      || (!dailyBriefQuery.isLoading && dailyBrief === undefined && Boolean(dailyBriefQuery.error))
+      || (!commandCenterQuery.isLoading && commandCenter === undefined && Boolean(commandCenterQuery.error)));
   const notificationsList = (notifications ?? []) as NotificationItem[];
   const unreadCount = notificationsList.filter((item) => !item.read).length;
   const readiness = commandCenter?.readiness;
