@@ -47,8 +47,12 @@ ClamAV daemon before S3 upload. Configure `CLAMAV_HOST` and ensure Cloud Run can
 reach TCP port `3310`; the deployment workflow records the approved host on the
 candidate revision. Uploads fail closed if the scanner is absent, times out, or
 returns an indeterminate result. Do not expose the ClamAV daemon to the public
-internet. Legacy OLE Office formats (`.doc`, `.xls`, `.ppt`) are intentionally
-blocked; use modern `.docx`, `.xlsx`, or `.pptx` files.
+internet. In the production GCP project, ClamAV is deployed in the GKE cluster
+`stadium-wrangler-broker` under the `clamav` namespace with an internal load
+balancer service (`10.142.15.221:3310`), reachable from Cloud Run via the
+`stadium-cloud-run` Serverless VPC Access connector. Legacy OLE Office formats
+(`.doc`, `.xls`, `.ppt`) are intentionally blocked; use modern `.docx`, `.xlsx`,
+or `.pptx` files.
 
 ## Retention cleanup
 
