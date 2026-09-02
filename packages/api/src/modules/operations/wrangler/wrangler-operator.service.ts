@@ -205,7 +205,7 @@ export class WranglerOperatorService {
     if (lower.includes('integration') || lower.includes('pos status') || /\b(?:pos|api|system)\s+connections?\b/i.test(lower)) {
       return { tool: 'LIST_INTEGRATIONS', args: {}, summary: 'Check integration connections.' };
     }
-    if (lower.includes('crm') || /\blead\b/i.test(lower)) {
+    if (lower.includes('crm') || /\bleads?\b/i.test(lower)) {
       if (lower.includes('add') || lower.includes('create')) {
         const name = text.replace(/.*?(?:add|create)\s+(?:lead\s+)?/i, '').trim();
         return { tool: 'CREATE_CRM_LEAD', args: name ? { fullName: name } : {}, summary: `Create CRM lead ${name}.` };

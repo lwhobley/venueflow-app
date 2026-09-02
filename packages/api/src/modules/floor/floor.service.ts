@@ -5,10 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { ReservationNotifierService } from '../reservations/reservation-notifier.service';
-
-// Table states a manager or server sets deliberately, which survive a refresh
-// that finds no active seating on the table.
-const PRESERVED_TABLE_STATUSES = new Set<string>(['dirty', 'out_of_service']);
+import { refreshTableStates } from './table-state';
 
 /**
  * Floor-plan / table / waitlist / assignment data logic extracted from
@@ -616,7 +613,13 @@ export class FloorService {
     if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) throw new BadRequestException('Invalid seating window');
     let priorTableIds: string[] = [];
     const now = new Date();
-    const isCurrentlyActive = startsAt <= now && endsAt > now;
+    // A 'seated' hold means a party is physically at the table right now, so it
+    // takes the table whatever the window says: the host screen sends the
+    // reservation's own scheduled time as startsAt, so seating a party even a
+    // minute early would otherwise leave the table free and the reservation
+    // un-seated. Only a future 'reserved' hold waits for its window — that is
+    // the case this gate exists for.
+    const occupiesTableNow = holdType === 'seated' || (startsAt <= now && endsAt > now);
 
     // Release prior assignments for THIS reservation, then check each requested
     // table for active overlaps from OTHER reservations, then create the new
@@ -659,7 +662,7 @@ export class FloorService {
           },
         });
       }
-      if (isCurrentlyActive) {
+      if (occupiesTableNow) {
         await tx.tableState.updateMany({ where: { venueId, tableId: { in: tableIds } }, data: {
           status: holdType === 'seated' ? 'seated' : 'reserved',
           partySize: reservation.partySize,
@@ -674,7 +677,7 @@ export class FloorService {
 
     const tablesToRefresh = Array.from(new Set([
       ...priorTableIds.filter((id) => !tableIds.includes(id)),
-      ...(!isCurrentlyActive ? tableIds : []),
+      ...(!occupiesTableNow ? tableIds : []),
     ]));
     if (tablesToRefresh.length) {
       await this.refreshTableStates(venueId, tablesToRefresh);
@@ -708,7 +711,11 @@ export class FloorService {
 
     let priorTableIds: string[] = [];
     const now = new Date();
-    const isCurrentlyActive = startsAt <= now && endsAt > now;
+    // Same rule as reservations: anything but an explicit 'held' hold is a
+    // party sitting down now. The client supplies startsAt from its own clock,
+    // so a device running seconds ahead of the server must not silently fail
+    // to seat.
+    const occupiesTableNow = body.holdType !== 'held' || (startsAt <= now && endsAt > now);
 
     await withSerializableRetry(this.prisma, async (tx) => {
       const conflict = await tx.tableAssignment.findFirst({
@@ -751,7 +758,7 @@ export class FloorService {
         where: { id: waitlist.id },
         data: { status: body.holdType === 'held' ? 'assigned' : 'seated', readyAt: new Date() },
       });
-      if (isCurrentlyActive) {
+      if (occupiesTableNow) {
         await tx.tableState.updateMany({
           where: { venueId, tableId: { in: body.tableIds } },
           data: {
@@ -766,7 +773,7 @@ export class FloorService {
 
     const tablesToRefresh = Array.from(new Set([
       ...priorTableIds.filter((id) => !body.tableIds.includes(id)),
-      ...(!isCurrentlyActive ? body.tableIds : []),
+      ...(!occupiesTableNow ? body.tableIds : []),
     ]));
     if (tablesToRefresh.length) {
       await this.refreshTableStates(venueId, tablesToRefresh);
@@ -818,10 +825,20 @@ export class FloorService {
           where: { id: assignment.waitlistId, venueId },
           select: { status: true },
         });
-        if (w && (w.status === 'seated' || w.status === 'assigned')) {
+        // A seated party leaving is done. An 'assigned' party was only held or
+        // called — releasing that table cancels the hold, it does not seat and
+        // finish them, so they go back in the queue. Completing them here made
+        // them vanish from getOpenWaitlist, the only list with a Seat action,
+        // and left re-seating throwing NotFound.
+        if (w?.status === 'seated') {
           await this.prisma.waitlist.update({
             where: { id: assignment.waitlistId },
             data: { status: 'completed' },
+          });
+        } else if (w?.status === 'assigned') {
+          await this.prisma.waitlist.update({
+            where: { id: assignment.waitlistId },
+            data: { status: 'waiting', readyAt: null },
           });
         }
       }
@@ -860,51 +877,7 @@ export class FloorService {
   }
 
   private async refreshTableStates(venueId: string, tableIds: string[]) {
-    if (!this.prisma.tableAssignment?.findMany) {
-      await this.prisma.tableState.updateMany({
-        where: { venueId, tableId: { in: tableIds } },
-        data: { status: 'available', partySize: null, seatedAt: null, lastActivityAt: new Date() },
-      });
-      return;
-    }
-    const now = new Date();
-    const [assignments, currentStates] = await Promise.all([
-      this.prisma.tableAssignment.findMany({
-        where: { venueId, tableId: { in: tableIds }, releasedAt: null, startsAt: { lte: now }, endsAt: { gt: now } },
-        include: { reservation: { select: { partySize: true } }, waitlist: { select: { partySize: true } } },
-      }),
-      this.prisma.tableState.findMany({
-        where: { venueId, tableId: { in: tableIds } },
-        select: { tableId: true, status: true },
-      }),
-    ]);
-    const byTable = new Map<string, (typeof assignments)[number]>();
-    for (const assignment of assignments) byTable.set(assignment.tableId, assignment);
-    const statusByTable = new Map(currentStates.map((state) => [state.tableId, state.status]));
-    await Promise.all(tableIds.map((tableId) => {
-      const assignment = byTable.get(tableId);
-      // Nothing seated here right now, but 'dirty' and 'out_of_service' are set
-      // by staff and say nothing about who is sitting down — falling through to
-      // 'available' would silently un-flag a table that still needs bussing or
-      // is deliberately off the floor.
-      if (!assignment && PRESERVED_TABLE_STATUSES.has(statusByTable.get(tableId) ?? '')) {
-        return this.prisma.tableState.updateMany({
-          where: { venueId, tableId },
-          data: { partySize: null, seatedAt: null, lastActivityAt: now },
-        });
-      }
-      const seated = assignment?.holdType === 'seated';
-      const status = seated ? 'seated' : assignment?.holdType === 'held' ? 'held' : assignment ? 'reserved' : 'available';
-      return this.prisma.tableState.updateMany({
-        where: { venueId, tableId },
-        data: {
-          status,
-          partySize: assignment?.reservation?.partySize ?? assignment?.waitlist?.partySize ?? null,
-          seatedAt: seated ? assignment!.startsAt : null,
-          lastActivityAt: now,
-        },
-      });
-    }));
+    await refreshTableStates(this.prisma, venueId, tableIds);
   }
 
   private mapAssignment(

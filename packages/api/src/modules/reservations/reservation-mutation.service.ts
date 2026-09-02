@@ -3,6 +3,7 @@ import { Prisma, ReservationSource, ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { withSerializableRetry } from '../../common/tx-retry';
 import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
+import { refreshTableStates } from '../floor/table-state';
 
 // A completed, no-show, or cancelled reservation is a closed record. Nothing
 // here models the full transition graph (requested/confirmed/checked_in/
@@ -123,10 +124,18 @@ export class ReservationMutationService {
         });
         if (data.status === 'cancelled') {
           const now = new Date();
+          // Capture the tables before releasing: releasing an assignment does
+          // not move TableState, so without the refresh below the floor plan
+          // keeps showing an occupied table with nothing left to release.
+          const heldTables = await transaction.tableAssignment.findMany({
+            where: { venueId: args.venueId, reservationId: existing.id, releasedAt: null },
+            select: { tableId: true },
+          });
           await transaction.tableAssignment.updateMany({
             where: { venueId: args.venueId, reservationId: existing.id, releasedAt: null },
             data: { releasedAt: now, releasedReason: 'cancelled' },
           });
+          await refreshTableStates(transaction, args.venueId, heldTables.map((t) => t.tableId));
           const beoTag = existing.tags.find((t) => t.startsWith('beo:'));
           if (beoTag) {
             await transaction.crmBeo.updateMany({
@@ -238,10 +247,15 @@ export class ReservationMutationService {
         where: { id: reservation.id },
         data: { status: 'cancelled', eventStatus: 'cancelled', deletedAt: now },
       });
+      const heldTables = await tx.tableAssignment.findMany({
+        where: { venueId: args.venueId, reservationId: reservation.id, releasedAt: null },
+        select: { tableId: true },
+      });
       await tx.tableAssignment.updateMany({
         where: { venueId: args.venueId, reservationId: reservation.id, releasedAt: null },
         data: { releasedAt: now, releasedReason: 'cancelled' },
       });
+      await refreshTableStates(tx, args.venueId, heldTables.map((t) => t.tableId));
       const beoTag = reservation.tags.find((t) => t.startsWith('beo:'));
       if (beoTag) {
         await tx.crmBeo.updateMany({

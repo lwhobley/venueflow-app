@@ -248,12 +248,108 @@ describe('FloorService regressions', () => {
       },
     );
 
+    it('returns a held party to the queue instead of completing them', async () => {
+      // getOpenWaitlist lists 'waiting' and 'assigned' only, and it is the one
+      // list with a Seat action — completing an 'assigned' party made them
+      // vanish and left re-seating throwing NotFound.
+      const prisma = makePrisma('held');
+      prisma.tableAssignment.findFirst.mockResolvedValue({ id: 'assign-1', tableId: 'table-1', reservationId: null, waitlistId: 'wl-1' });
+      (prisma as any).waitlist = {
+        findFirst: vi.fn().mockResolvedValue({ status: 'assigned' }),
+        update: vi.fn().mockResolvedValue({}),
+      };
+
+      await new FloorService(prisma as any, {} as any).releaseAssignment('venue-1', 'assign-1');
+
+      expect((prisma as any).waitlist.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'waiting', readyAt: null } }),
+      );
+    });
+
+    it('completes a seated party when their table is released', async () => {
+      const prisma = makePrisma('seated');
+      prisma.tableAssignment.findFirst.mockResolvedValue({ id: 'assign-1', tableId: 'table-1', reservationId: null, waitlistId: 'wl-1' });
+      (prisma as any).waitlist = {
+        findFirst: vi.fn().mockResolvedValue({ status: 'seated' }),
+        update: vi.fn().mockResolvedValue({}),
+      };
+
+      await new FloorService(prisma as any, {} as any).releaseAssignment('venue-1', 'assign-1');
+
+      expect((prisma as any).waitlist.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'completed' } }),
+      );
+    });
+
     it('frees an ordinary table back to available', async () => {
       const prisma = makePrisma('seated');
       await new FloorService(prisma as any, {} as any).releaseAssignment('venue-1', 'assign-1');
 
       const stateWrite = prisma.tableState.updateMany.mock.calls.at(-1)?.[0];
       expect(stateWrite.data).toEqual(expect.objectContaining({ status: 'available', partySize: null }));
+    });
+  });
+
+
+  describe('seating window', () => {
+    const makeAssignPrisma = () => {
+      const tx = {
+        tableAssignment: {
+          findMany: vi.fn().mockResolvedValue([]),
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          create: vi.fn().mockResolvedValue({}),
+        },
+        tableState: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), findMany: vi.fn().mockResolvedValue([]) },
+        reservation: { update: vi.fn().mockResolvedValue({}) },
+      };
+      const prisma: any = {
+        reservation: { findFirst: vi.fn().mockResolvedValue({ id: 'res-1', partySize: 4, durationMinutes: 120, reservationTime: new Date() }) },
+        floorPlan: { findFirst: vi.fn().mockResolvedValue({ tables: [{ id: 'table-1' }] }) },
+        tableAssignment: tx.tableAssignment,
+        tableState: tx.tableState,
+        $transaction: vi.fn((cb: any) => cb(tx)),
+      };
+      return { prisma, tx };
+    };
+
+    it('seats a party who arrived before their booking time', async () => {
+      // The host screen sends the reservation's scheduled startsAt, so an early
+      // seat has a window that has not opened yet. It must still take the table.
+      const { prisma, tx } = makeAssignPrisma();
+      const inThirtyMinutes = Date.now() + 30 * 60 * 1000;
+
+      await new FloorService(prisma, {} as any).assignReservationToTables('venue-1', 'res-1', ['table-1'], {
+        holdType: 'seated',
+        startsAt: inThirtyMinutes,
+        endsAt: inThirtyMinutes + 120 * 60 * 1000,
+      });
+
+      expect(tx.tableState.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'seated' }) }),
+      );
+      expect(tx.reservation.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'seated' } }),
+      );
+    });
+
+    it('leaves the table free for a reservation hold whose window has not opened', async () => {
+      const { prisma, tx } = makeAssignPrisma();
+      const tomorrow = Date.now() + 24 * 60 * 60 * 1000;
+
+      await new FloorService(prisma, {} as any).assignReservationToTables('venue-1', 'res-1', ['table-1'], {
+        holdType: 'reserved',
+        startsAt: tomorrow,
+        endsAt: tomorrow + 120 * 60 * 1000,
+      });
+
+      // The hold is recorded, but the table stays free until its window opens:
+      // the only state write is the refresh settling it back to available.
+      const statuses = tx.tableState.updateMany.mock.calls.map((call: any[]) => call[0].data.status);
+      expect(statuses).not.toContain('reserved');
+      expect(statuses).not.toContain('seated');
+      expect(statuses).toContain('available');
+      expect(tx.reservation.update).not.toHaveBeenCalled();
     });
   });
 

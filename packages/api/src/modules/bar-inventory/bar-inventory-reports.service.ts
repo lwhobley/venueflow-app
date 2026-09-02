@@ -8,6 +8,23 @@ function escapeRegExp(value: string) {
 }
 
 /**
+ * Matches `name` as a whole phrase inside a larger string.
+ *
+ * \b only asserts a boundary next to a word character, so it never matches a
+ * name that starts or ends with punctuation — "#9 Gin" or "Amaro (Nonino)"
+ * would score zero velocity forever. Asserting "no word character adjacent"
+ * instead behaves the same for ordinary names and works for these too.
+ */
+function wholePhraseRegExp(name: string) {
+  return new RegExp(`(?<!\\w)${escapeRegExp(name)}(?!\\w)`, 'i');
+}
+
+/** Word tokens used to pre-filter match candidates. */
+function nameTokens(value: string) {
+  return value.match(/[a-z0-9]+/gi)?.map((token) => token.toLowerCase()) ?? [];
+}
+
+/**
  * Read-only bar-inventory analytics extracted from BarInventoryController.
  *
  * Demonstrates the controller -> service decomposition pattern (review item #5):
@@ -118,11 +135,25 @@ export class BarInventoryReportsService {
     // Each item's word-boundary pattern is compiled once here, not once per
     // (sold name x item) pair: this runs over the venue's whole item list and
     // 30 days of check lines, neither of which is row-capped.
-    const normalizedItems = items.map((item) => {
+    const normalizedItems = items.map((item, index) => {
       const lower = item.name.toLowerCase().trim();
-      return { item, lower, wordRegex: new RegExp(`\\b${escapeRegExp(lower)}\\b`, 'i') };
+      return { item, index, lower, wordRegex: wholePhraseRegExp(lower), tokens: nameTokens(lower) };
     });
     const itemsByExactName = new Map(normalizedItems.map((ni) => [ni.lower, ni]));
+    // Any phrase match in either direction shares at least one word with the
+    // sold name, so this index narrows the scan from the whole item list to a
+    // handful per check line.
+    const itemsByToken = new Map<string, typeof normalizedItems>();
+    // A name with no word characters at all indexes under no token, so it has
+    // to stay in every candidate set or it could never match.
+    const tokenlessItems = normalizedItems.filter((ni) => ni.tokens.length === 0);
+    for (const ni of normalizedItems) {
+      for (const token of new Set(ni.tokens)) {
+        const bucket = itemsByToken.get(token);
+        if (bucket) bucket.push(ni);
+        else itemsByToken.set(token, [ni]);
+      }
+    }
 
     for (const [soldName, qty] of salesMap.entries()) {
       if (!soldName || qty <= 0) continue;
@@ -130,10 +161,16 @@ export class BarInventoryReportsService {
       let bestItem = itemsByExactName.get(soldName);
       // 2. If no exact match, try matching by word boundary
       if (!bestItem) {
-        const soldRegex = new RegExp(`\\b${escapeRegExp(soldName)}\\b`, 'i');
-        const candidates = normalizedItems.filter(
-          (ni) => ni.wordRegex.test(soldName) || soldRegex.test(ni.lower),
-        );
+        const soldRegex = wholePhraseRegExp(soldName);
+        const nearby = new Set<(typeof normalizedItems)[number]>(tokenlessItems);
+        for (const token of new Set(nameTokens(soldName))) {
+          for (const ni of itemsByToken.get(token) ?? []) nearby.add(ni);
+        }
+        const candidates = [...nearby]
+          .filter((ni) => ni.wordRegex.test(soldName) || soldRegex.test(ni.lower))
+          // Restore item order so an equal-length tie resolves the same way it
+          // would have when this scanned the item list directly.
+          .sort((a, b) => a.index - b.index);
         if (candidates.length === 1) {
           bestItem = candidates[0];
         } else if (candidates.length > 1) {

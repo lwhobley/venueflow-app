@@ -54,6 +54,11 @@ type BeoRow = {
   menuBarPackage?: string;
   specialRequirements?: string;
   internalNotes?: string;
+  // saveBeo rewrites every BEO column from the request body, so a partial save
+  // nulls whatever it omits. These three are not shown on the card but must
+  // still be echoed back by any action that saves one.
+  depositDueDate?: number | null;
+  assignedRepId?: string | null;
   status: string;
   updatedAt: number;
 };
@@ -334,6 +339,11 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
       await saveBeo({
         venueId,
         beoId: beo._id,
+        // Confirming is a status change, but saveBeo replaces every column, so
+        // resend the whole record. Dropping leadId here silently unlinked the
+        // BEO from its lead and left syncBeoToReservation building the
+        // reservation with no guest name, phone, email or guest id.
+        leadId: beo.leadId ?? undefined,
         eventName: beo.eventName,
         eventDate: new Date(beo.eventDate).getTime(),
         eventType: beo.eventType ?? undefined,
@@ -348,6 +358,8 @@ export function CrmSalesWorkspace({ venueId, enabled }: { venueId: Id<'venues'> 
         menuBarPackage: beo.menuBarPackage ?? undefined,
         specialRequirements: beo.specialRequirements ?? undefined,
         internalNotes: beo.internalNotes ?? undefined,
+        depositDueDate: beo.depositDueDate ?? undefined,
+        assignedRepId: beo.assignedRepId ?? undefined,
         status: 'confirmed',
       });
       setMessage(`BEO "${beo.eventName}" confirmed and synced to reservations.`);

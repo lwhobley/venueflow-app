@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { CrmTemplateService } from './crm-template.service';
 import { ExecutionAutopilotService } from '../operations/execution-autopilot.service';
 import { AuditService } from '../audit/audit.service';
+import { refreshTableStates } from '../floor/table-state';
 
 type Scope = VenueScopedRequest['venueScope'];
 
@@ -789,10 +790,18 @@ export class CrmController {
               where: { id: linkedRes.id },
               data: { status: 'cancelled', eventStatus: 'cancelled', deletedAt: now },
             });
+            // Releasing an assignment leaves TableState untouched, so refresh
+            // the tables this BEO was holding or the floor plan still shows
+            // them occupied with nothing left to release.
+            const heldTables = await tx.tableAssignment.findMany({
+              where: { venueId: scope.venueId, reservationId: linkedRes.id, releasedAt: null },
+              select: { tableId: true },
+            });
             await tx.tableAssignment.updateMany({
               where: { venueId: scope.venueId, reservationId: linkedRes.id, releasedAt: null },
               data: { releasedAt: now, releasedReason: 'cancelled' },
             });
+            await refreshTableStates(tx, scope.venueId, heldTables.map((t) => t.tableId));
           }
           await tx.eventExecutionWorkspace.updateMany({
             where: {
