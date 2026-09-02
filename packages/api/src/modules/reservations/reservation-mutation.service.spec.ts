@@ -25,6 +25,9 @@ describe('ReservationMutationService', () => {
       reservation: {
         create: vi.fn().mockResolvedValue(reservation),
       },
+      guest: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'guest-9' }),
+      },
     });
     const service = new ReservationMutationService(prisma as any);
 
@@ -52,8 +55,17 @@ describe('ReservationMutationService', () => {
         guestPhone: '555-1212',
         guestEmail: 'guest@example.com',
         durationMinutes: 90,
+        // The booking is filed under the recognised guest, not just their name.
+        guestId: 'guest-9',
       }),
     });
+    expect(prisma.guest.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        venueId: 'venue-1',
+        deletedAt: null,
+        OR: [{ email: 'guest@example.com' }, { phone: '5551212' }],
+      }),
+    }));
   });
 
   it('persists legacy table numbers as conflict-checked relational assignments', async () => {
