@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { assertWithinSharedRateLimit } from '../../common/rate-limit';
 import { AppController } from './app.controller';
@@ -17,6 +17,19 @@ describe('AppController invite preview', () => {
     await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'bad-code'))
       .rejects.toBeInstanceOf(NotFoundException);
     expect(assertWithinSharedRateLimit).toHaveBeenCalled();
+  });
+
+  it('rejects malformed or unbounded invite codes with BadRequestException', async () => {
+    const prisma = { invite: { findFirst: vi.fn() } };
+    const controller = new AppController(prisma as any, {} as any, {} as any);
+
+    await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, ''))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'abc'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.previewInvite({ ip: '127.0.0.1' } as any, 'a'.repeat(65)))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.invite.findFirst).not.toHaveBeenCalled();
   });
 
   it('returns only the team name for a valid public invite', async () => {

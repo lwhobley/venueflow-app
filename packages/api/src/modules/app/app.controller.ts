@@ -1058,6 +1058,10 @@ export class AppController {
   @Public()
   @Get('invite/:code')
   async previewInvite(@Req() request: Request, @Param('code') rawCode: string) {
+    const code = rawCode?.trim();
+    if (!code || code.length < 4 || code.length > 64) {
+      throw new BadRequestException('Invalid invite code format.');
+    }
     await assertWithinSharedRateLimit(
       this.prisma,
       'public-invite:global',
@@ -1070,7 +1074,7 @@ export class AppController {
       PUBLIC_INVITE_RATE_LIMIT_MAX,
       PUBLIC_INVITE_RATE_LIMIT_WINDOW_MS,
     );
-    const invite = await this.findRedeemableInvite({ codeOrToken: rawCode });
+    const invite = await this.findRedeemableInvite({ codeOrToken: code });
     if (!invite) throw new NotFoundException('That invite code is invalid, used, or expired.');
     const venue = await this.prisma.venue.findUnique({ where: { id: invite.venueId }, select: { name: true } });
     return {

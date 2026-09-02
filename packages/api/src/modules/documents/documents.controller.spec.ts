@@ -67,6 +67,16 @@ describe('DocumentsController', () => {
     expect(prisma.venueDocument.findFirst).toHaveBeenCalledWith({ where: { id: 'doc-other', venueId: 'venue-1' } });
   });
 
+  it('issues a 120-second presigned access link for an active venue document', async () => {
+    prisma.venueDocument.findFirst.mockResolvedValue({
+      id: 'doc-1', venueId: 'venue-1', s3Key: 'documents/venue-1/key', fileName: 'sop.pdf', mimeType: 'application/pdf',
+    });
+    storage.getPresignedUrl.mockResolvedValue('https://s3.example.com/presigned-sop.pdf');
+    const result = await controller.access(staffScope, 'doc-1');
+    expect(storage.getPresignedUrl).toHaveBeenCalledWith('documents/venue-1/key', 'sop.pdf', 'application/pdf');
+    expect(result).toEqual({ url: 'https://s3.example.com/presigned-sop.pdf', expiresInSeconds: 120 });
+  });
+
   it('lets managers delete a venue document through the durable cleanup outbox', async () => {
     prisma.venueDocument.findFirst.mockResolvedValue({ id: 'doc-1', s3Key: 'documents/venue-1/0123456789abcdef0123456789abcdef' });
     await expect(controller.remove(managerScope, 'doc-1')).resolves.toEqual({ ok: true });

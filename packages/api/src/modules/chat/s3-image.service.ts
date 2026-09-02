@@ -38,7 +38,7 @@ export class S3ImageService {
    * no auth at all once issued, so keep the window tight — it's only meant to
    * be followed immediately via the 302 redirect from the media-access route.
    */
-  async getPresignedUrl(key: string, expiresInSeconds = 300): Promise<string> {
+  async getPresignedUrl(key: string, expiresInSeconds = 120): Promise<string> {
     const { GetObjectCommand } = await import('@aws-sdk/client-s3');
     return getSignedUrl(
       this.s3,
